@@ -1,76 +1,94 @@
-import { useTournaments } from '@/hooks/useTournament'
+import { useState } from 'react'
+import { useTournaments, useTournament } from '@/hooks/useTournament'
 import Card from '@/components/ui/Card'
 import Badge from '@/components/ui/Badge'
-import Button from '@/components/ui/Button'
 import LoadingSpinner from '@/components/ui/LoadingSpinner'
+import CreateTournamentForm from '@/components/admin/CreateTournamentForm'
+import TournamentManager from '@/components/admin/TournamentManager'
 import { Plus, Settings, Archive } from 'lucide-react'
+
+type AdminTab = 'erstellen' | 'verwalten'
 
 export default function Admin() {
   const { data: tournaments, isLoading } = useTournaments()
+  const [activeTab, setActiveTab] = useState<AdminTab>('verwalten')
 
-  if (isLoading) return <LoadingSpinner />
-
-  const active = tournaments?.find(t =>
+  const activeTournament = tournaments?.find(t =>
     ['draft', 'registration', 'group_phase', 'bracket'].includes(t.status)
   )
   const archived = tournaments?.filter(t =>
     ['completed', 'archived'].includes(t.status)
   ) ?? []
 
+  // Fetch detail data for the active tournament
+  const { data: activeDetail } = useTournament(activeTournament?.id ?? 0)
+
+  if (isLoading) return <LoadingSpinner />
+
+  const teamCount = activeDetail?.teams.length ?? 0
+  const playerCount = activeDetail?.teams.reduce((sum, t) => sum + t.members.length, 0) ?? 0
+  const matchCount = activeDetail?.bracket_matches.length ?? 0
+
   return (
     <div className="space-y-8">
-      <div className="flex items-center justify-between">
+      {/* Header */}
+      <div>
         <h1 className="text-2xl font-bold text-foreground">Turnier-Verwaltung</h1>
-        <Button variant="primary">
-          <Plus size={16} />
-          Neues Turnier
-        </Button>
+        <p className="text-muted text-sm mt-1">Turniere erstellen, verwalten und abschliessen</p>
       </div>
 
-      {/* Aktives Turnier verwalten */}
-      <section>
-        <h2 className="text-lg font-semibold text-foreground mb-3 flex items-center gap-2">
-          <Settings size={18} className="text-primary" />
-          Aktives Turnier
-        </h2>
-        {active ? (
-          <Card className="p-5">
-            <div className="flex items-center justify-between mb-4">
-              <div>
-                <h3 className="font-bold text-foreground">{active.name}</h3>
-                <Badge status={active.status} />
-              </div>
-            </div>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-              <Card className="p-3 text-center">
-                <div className="text-2xl font-bold text-primary">{active.team_size}</div>
-                <div className="text-xs text-muted">Teamgroesse</div>
-              </Card>
-              <Card className="p-3 text-center">
-                <div className="text-2xl font-bold text-primary">—</div>
-                <div className="text-xs text-muted">Teams</div>
-              </Card>
-              <Card className="p-3 text-center">
-                <div className="text-2xl font-bold text-primary">—</div>
-                <div className="text-xs text-muted">Spieler</div>
-              </Card>
-              <Card className="p-3 text-center">
-                <div className="text-2xl font-bold text-primary">—</div>
-                <div className="text-xs text-muted">Matches</div>
-              </Card>
-            </div>
-            <div className="mt-4 flex gap-2">
-              <Button variant="secondary" size="sm">Einstellungen</Button>
-              <Button variant="secondary" size="sm">Teams verwalten</Button>
-              <Button variant="secondary" size="sm">Phase weiterschalten</Button>
-            </div>
-          </Card>
-        ) : (
-          <Card className="p-6 text-center">
-            <p className="text-muted">Kein aktives Turnier. Erstelle ein neues Turnier um zu starten.</p>
-          </Card>
-        )}
-      </section>
+      {/* Tabs */}
+      <div className="flex border-b border-border">
+        <button
+          onClick={() => setActiveTab('erstellen')}
+          className={`flex items-center gap-2 px-4 py-3 text-sm font-medium border-b-2 transition-colors ${
+            activeTab === 'erstellen'
+              ? 'border-primary text-primary'
+              : 'border-transparent text-muted hover:text-foreground'
+          }`}
+        >
+          <Plus size={16} />
+          Turnier erstellen
+        </button>
+        <button
+          onClick={() => setActiveTab('verwalten')}
+          className={`flex items-center gap-2 px-4 py-3 text-sm font-medium border-b-2 transition-colors ${
+            activeTab === 'verwalten'
+              ? 'border-primary text-primary'
+              : 'border-transparent text-muted hover:text-foreground'
+          }`}
+        >
+          <Settings size={16} />
+          Aktiv verwalten
+          {activeTournament && (
+            <span className="ml-1 w-2 h-2 rounded-full bg-green-400 inline-block" />
+          )}
+        </button>
+      </div>
+
+      {/* Tab Content */}
+      {activeTab === 'erstellen' && <CreateTournamentForm />}
+
+      {activeTab === 'verwalten' && (
+        <div className="space-y-6">
+          {activeTournament ? (
+            <TournamentManager
+              tournament={activeTournament}
+              teamCount={teamCount}
+              playerCount={playerCount}
+              matchCount={matchCount}
+            />
+          ) : (
+            <Card className="p-8 text-center">
+              <Settings size={32} className="mx-auto text-muted mb-3" />
+              <p className="text-muted">Kein aktives Turnier vorhanden.</p>
+              <p className="text-muted text-sm mt-1">
+                Erstelle ein neues Turnier im Tab &quot;Turnier erstellen&quot;.
+              </p>
+            </Card>
+          )}
+        </div>
+      )}
 
       {/* Archiv */}
       {archived.length > 0 && (

@@ -73,3 +73,26 @@ export interface BracketMatch {
   party_code: string | null
   scheduled_at: string | null
 }
+
+export interface TournamentCreate {
+  name: string
+  description?: string
+  team_size: number
+  bracket_format: BracketFormat
+  registration_start?: string
+  registration_end?: string
+}
+
+export interface TournamentUpdate {
+  name?: string
+  description?: string
+  status?: TournamentStatus
+  team_size?: number
+  bracket_format?: BracketFormat
+  registration_start?: string
+  registration_end?: string
+}
+
+export interface ManualResult {
+  winner_id: number
+}

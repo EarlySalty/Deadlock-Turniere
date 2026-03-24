@@ -179,6 +179,12 @@ class BracketMatch(BaseModel):
 
 # --- Match Result ---
 
+class TournamentDetail(Tournament):
+    teams: list[Team] = []
+    groups: list[Group] = []
+    bracket_matches: list[BracketMatch] = []
+
+
 class MatchResult(BaseModel):
     id: int
     bracket_match_id: Optional[int] = None

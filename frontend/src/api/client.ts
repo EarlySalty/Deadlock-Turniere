@@ -1,4 +1,4 @@
-import type { UserSession, Tournament, TournamentDetail, Team } from '@/types/tournament'
+import type { UserSession, Tournament, TournamentDetail, Team, TournamentCreate, TournamentUpdate, ManualResult } from '@/types/tournament'
 
 const API_BASE = '/api'
 
@@ -40,3 +40,28 @@ export const createTeam = (tournamentId: number, name: string) =>
   })
 export const joinTeam = (tournamentId: number, teamId: number) =>
   request<void>(`/tournaments/${tournamentId}/teams/${teamId}/join`, { method: 'POST' })
+
+// Admin
+export const createTournament = (data: TournamentCreate) =>
+  request<Tournament>('/admin/tournaments', { method: 'POST', body: JSON.stringify(data) })
+
+export const updateTournament = (id: number, data: TournamentUpdate) =>
+  request<Tournament>(`/admin/tournaments/${id}`, { method: 'PUT', body: JSON.stringify(data) })
+
+export const deleteTournament = (id: number) =>
+  request<void>(`/admin/tournaments/${id}`, { method: 'DELETE' })
+
+export const advanceTournament = (id: number) =>
+  request<Tournament>(`/admin/tournaments/${id}/advance`, { method: 'POST' })
+
+export const assignRandomTeams = (id: number) =>
+  request<{ teams_created: number }>(`/admin/tournaments/${id}/assign-random`, { method: 'POST' })
+
+export const submitMatchResult = (tournamentId: number, matchId: number, data: ManualResult) =>
+  request<void>(`/admin/tournaments/${tournamentId}/matches/${matchId}/result`, {
+    method: 'POST', body: JSON.stringify(data),
+  })
+
+// Solo Signup
+export const signupSolo = (tournamentId: number) =>
+  request<void>(`/tournaments/${tournamentId}/signup`, { method: 'POST' })

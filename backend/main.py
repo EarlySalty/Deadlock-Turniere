@@ -4,12 +4,16 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 from typing import AsyncIterator
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from auth.discord_oauth import router as auth_router
+from auth.middleware import get_current_user
 from config import settings
 from db import init_db
+from tournament.models import UserSession
+from tournament.routes import router as tournament_router
+from tournament.admin_routes import router as admin_router
 
 
 @asynccontextmanager
@@ -40,6 +44,15 @@ app.add_middleware(
 
 # --- Router ---
 app.include_router(auth_router)
+app.include_router(tournament_router)
+app.include_router(admin_router)
+
+
+# --- Auth: /api/me ---
+@app.get("/api/me", tags=["auth"])
+async def get_me(user: UserSession = Depends(get_current_user)) -> UserSession:
+    """Gibt die aktuelle User-Session zurueck."""
+    return user
 
 
 # --- Health ---
