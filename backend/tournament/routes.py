@@ -57,7 +57,8 @@ async def _load_groups_for_tournament(db, tournament_id: int) -> list[Group]:  #
     for g in group_rows:
         # Group Teams
         cursor = await db.execute(
-            "SELECT * FROM group_teams WHERE group_id = ?",
+            "SELECT gt.*, t.name as team_name FROM group_teams gt "
+            "JOIN teams t ON gt.team_id = t.id WHERE gt.group_id = ?",
             (g["id"],),
         )
         gt_rows = await cursor.fetchall()

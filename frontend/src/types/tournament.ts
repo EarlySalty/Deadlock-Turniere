@@ -1,6 +1,6 @@
 export type TournamentStatus = 'draft' | 'registration' | 'group_phase' | 'bracket' | 'completed' | 'archived'
 export type BracketFormat = 'single_elimination' | 'double_elimination'
-export type MatchStatus = 'pending' | 'checkin' | 'lobby_created' | 'in_progress' | 'completed' | 'forfeit'
+export type MatchStatus = 'pending' | 'checkin' | 'lobby_created' | 'in_progress' | 'completed' | 'forfeit' | 'cancelled'
 
 export interface UserSession {
   discord_id: string
@@ -47,10 +47,22 @@ export interface TeamMember {
   role: 'captain' | 'member'
 }
 
+export interface GroupMatch {
+  id: number
+  group_id: number
+  team1_id: number
+  team2_id: number
+  winner_id: number | null
+  status: MatchStatus
+  scheduled_at: string | null
+  played_at: string | null
+}
+
 export interface Group {
   id: number
   name: string
   teams: GroupTeam[]
+  matches: GroupMatch[]
 }
 
 export interface GroupTeam {
@@ -66,8 +78,8 @@ export interface BracketMatch {
   round: number
   position: number
   bracket_type: 'winners' | 'losers' | 'final'
-  team1: Team | null
-  team2: Team | null
+  team1_id: number | null
+  team2_id: number | null
   winner_id: number | null
   status: MatchStatus
   party_code: string | null

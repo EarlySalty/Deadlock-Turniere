@@ -4,6 +4,7 @@ import {
   createTournament, updateTournament, deleteTournament,
   advanceTournament, assignRandomTeams,
   createTeam, joinTeam, signupSolo,
+  generateGroups, generateBracket,
 } from '@/api/client'
 import type { TournamentCreate, TournamentUpdate } from '@/types/tournament'
 
@@ -84,6 +85,23 @@ export function useSignupSolo() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (tournamentId: number) => signupSolo(tournamentId),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['tournaments'] }),
+  })
+}
+
+export function useGenerateGroups() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ tournamentId, numGroups }: { tournamentId: number; numGroups?: number }) =>
+      generateGroups(tournamentId, numGroups),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['tournaments'] }),
+  })
+}
+
+export function useGenerateBracket() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (tournamentId: number) => generateBracket(tournamentId),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['tournaments'] }),
   })
 }

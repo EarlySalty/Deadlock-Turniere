@@ -20,8 +20,10 @@ class TournamentStatus(str, Enum):
 class MatchStatus(str, Enum):
     pending = "pending"
     checkin = "checkin"
-    live = "live"
+    lobby_created = "lobby_created"
+    in_progress = "in_progress"
     completed = "completed"
+    forfeit = "forfeit"
     cancelled = "cancelled"
 
 
@@ -133,6 +135,7 @@ class GroupTeam(BaseModel):
     id: int
     group_id: int
     team_id: int
+    team_name: str = ""
     wins: int = 0
     losses: int = 0
     points: int = 0

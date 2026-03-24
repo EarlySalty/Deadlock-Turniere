@@ -3,20 +3,24 @@ import type { FormEvent } from 'react'
 import Card from '@/components/ui/Card'
 import Button from '@/components/ui/Button'
 import { submitMatchResult } from '@/api/client'
-import type { BracketMatch } from '@/types/tournament'
+import type { BracketMatch, Team } from '@/types/tournament'
 import { AlertCircle, CheckCircle, Gavel } from 'lucide-react'
 
 interface ManualResultFormProps {
   tournamentId: number
   match: BracketMatch
+  teams: Team[]
   onSuccess: () => void
 }
 
-export default function ManualResultForm({ tournamentId, match, onSuccess }: ManualResultFormProps) {
+export default function ManualResultForm({ tournamentId, match, teams, onSuccess }: ManualResultFormProps) {
   const [winnerId, setWinnerId] = useState<number | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState(false)
+
+  const team1 = match.team1_id !== null ? teams.find(t => t.id === match.team1_id) : null
+  const team2 = match.team2_id !== null ? teams.find(t => t.id === match.team2_id) : null
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault()
@@ -49,30 +53,30 @@ export default function ManualResultForm({ tournamentId, match, onSuccess }: Man
 
       <form onSubmit={handleSubmit} className="space-y-3">
         <div className="flex flex-col gap-2">
-          {match.team1 && (
+          {team1 && (
             <label className="flex items-center gap-2 cursor-pointer">
               <input
                 type="radio"
                 name={`winner-${match.id}`}
-                value={match.team1.id}
-                checked={winnerId === match.team1.id}
-                onChange={() => setWinnerId(match.team1!.id)}
+                value={team1.id}
+                checked={winnerId === team1.id}
+                onChange={() => setWinnerId(team1.id)}
                 className="accent-primary"
               />
-              <span className="text-foreground text-sm">{match.team1.name}</span>
+              <span className="text-foreground text-sm">{team1.name}</span>
             </label>
           )}
-          {match.team2 && (
+          {team2 && (
             <label className="flex items-center gap-2 cursor-pointer">
               <input
                 type="radio"
                 name={`winner-${match.id}`}
-                value={match.team2.id}
-                checked={winnerId === match.team2.id}
-                onChange={() => setWinnerId(match.team2!.id)}
+                value={team2.id}
+                checked={winnerId === team2.id}
+                onChange={() => setWinnerId(team2.id)}
                 className="accent-primary"
               />
-              <span className="text-foreground text-sm">{match.team2.name}</span>
+              <span className="text-foreground text-sm">{team2.name}</span>
             </label>
           )}
         </div>

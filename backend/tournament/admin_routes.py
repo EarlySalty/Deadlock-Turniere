@@ -7,7 +7,14 @@ from fastapi import APIRouter, Depends, HTTPException, status
 
 from auth.permissions import require_admin, require_mod
 from db import get_db
-from tournament.engine import VALID_STATUS_TRANSITIONS, assign_random_teams
+from tournament.engine import (
+    VALID_STATUS_TRANSITIONS,
+    advance_bracket_winner,
+    assign_random_teams,
+    generate_bracket,
+    generate_group_matches,
+    generate_groups,
+)
 from tournament.models import (
     Tournament,
     TournamentCreate,
@@ -357,6 +364,10 @@ async def set_match_result(
                 }),
             )
             await db.commit()
+
+            # Winner in naechste Runde propagieren
+            await advance_bracket_winner(tournament_id, match_id, winner_id)
+
             return {"status": "ok", "match_type": "bracket", "match_id": match_id, "winner_id": winner_id}
 
         # Dann in group_matches suchen
@@ -423,3 +434,73 @@ async def set_match_result(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Match nicht gefunden",
         )
+
+
+# ---------------------------------------------------------------------------
+# POST /api/admin/tournaments/{id}/groups/generate — Gruppen generieren
+# ---------------------------------------------------------------------------
+
+@router.post("/tournaments/{tournament_id}/groups/generate", status_code=200)
+async def generate_groups_endpoint(
+    tournament_id: int,
+    body: dict | None = None,
+    user: UserSession = Depends(require_mod),
+) -> dict:
+    """Gruppen generieren mit Snake-Draft Seeding (Mod+)."""
+    num_groups = 4
+    if body and "num_groups" in body:
+        num_groups = int(body["num_groups"])
+        num_groups = max(2, min(8, num_groups))
+
+    try:
+        group_ids = await generate_groups(tournament_id, num_groups)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+    # Gruppen-Matches generieren
+    match_count = await generate_group_matches(tournament_id)
+
+    async with get_db() as db:
+        await _audit(
+            db,
+            "groups_generate",
+            user.discord_id,
+            json.dumps({
+                "tournament_id": tournament_id,
+                "groups": len(group_ids),
+                "matches": match_count,
+            }),
+        )
+        await db.commit()
+
+    return {"groups_created": len(group_ids), "matches_created": match_count}
+
+
+# ---------------------------------------------------------------------------
+# POST /api/admin/tournaments/{id}/bracket/generate — Bracket generieren
+# ---------------------------------------------------------------------------
+
+@router.post("/tournaments/{tournament_id}/bracket/generate", status_code=200)
+async def generate_bracket_endpoint(
+    tournament_id: int,
+    user: UserSession = Depends(require_mod),
+) -> dict:
+    """Bracket generieren aus Gruppen-Ergebnissen oder direkt aus Teams (Mod+)."""
+    try:
+        match_count = await generate_bracket(tournament_id)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+    async with get_db() as db:
+        await _audit(
+            db,
+            "bracket_generate",
+            user.discord_id,
+            json.dumps({
+                "tournament_id": tournament_id,
+                "matches": match_count,
+            }),
+        )
+        await db.commit()
+
+    return {"bracket_matches_created": match_count}

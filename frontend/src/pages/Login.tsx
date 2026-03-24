@@ -5,7 +5,7 @@ import LoginButton from '@/components/auth/LoginButton'
 import { Shield } from 'lucide-react'
 
 export default function Login() {
-  const { isLoggedIn, isLoading } = useAuth()
+  const { isLoggedIn } = useAuth()
 
   if (isLoggedIn) return <Navigate to="/" replace />
 

@@ -7,6 +7,9 @@ import Card from '@/components/ui/Card'
 import Badge from '@/components/ui/Badge'
 import Button from '@/components/ui/Button'
 import LoadingSpinner from '@/components/ui/LoadingSpinner'
+import GroupStandings from '@/components/groups/GroupStandings'
+import GroupMatchList from '@/components/groups/GroupMatchList'
+import BracketView from '@/components/bracket/BracketView'
 import { Trophy, Users, LayoutGrid, GitBranch, Plus, UserPlus, AlertCircle, Shield } from 'lucide-react'
 
 type Tab = 'uebersicht' | 'gruppen' | 'bracket' | 'teams'
@@ -294,17 +297,14 @@ export default function Tournament() {
         )}
 
         {activeTab === 'gruppen' && (
-          <Card className="p-6 text-center">
-            <LayoutGrid size={32} className="mx-auto text-muted mb-3" />
-            <p className="text-muted">Gruppenphase wird hier angezeigt</p>
-          </Card>
+          <div className="space-y-6">
+            <GroupStandings groups={tournament.groups} />
+            <GroupMatchList groups={tournament.groups} teams={tournament.teams} />
+          </div>
         )}
 
         {activeTab === 'bracket' && (
-          <Card className="p-6 text-center">
-            <GitBranch size={32} className="mx-auto text-muted mb-3" />
-            <p className="text-muted">Bracket-Ansicht wird hier angezeigt</p>
-          </Card>
+          <BracketView matches={tournament.bracket_matches} teams={tournament.teams} />
         )}
       </div>
     </div>

@@ -3,8 +3,10 @@ import type { UserSession, Tournament, TournamentDetail, Team, TournamentCreate,
 const API_BASE = '/api'
 
 export class ApiError extends Error {
-  constructor(public status: number, message: string) {
+  status: number
+  constructor(status: number, message: string) {
     super(message)
+    this.status = status
   }
 }
 
@@ -61,6 +63,19 @@ export const submitMatchResult = (tournamentId: number, matchId: number, data: M
   request<void>(`/admin/tournaments/${tournamentId}/matches/${matchId}/result`, {
     method: 'POST', body: JSON.stringify(data),
   })
+
+// Groups & Bracket Generation
+export const generateGroups = (tournamentId: number, numGroups: number = 4) =>
+  request<{ groups_created: number; matches_created: number }>(
+    `/admin/tournaments/${tournamentId}/groups/generate`,
+    { method: 'POST', body: JSON.stringify({ num_groups: numGroups }) }
+  )
+
+export const generateBracket = (tournamentId: number) =>
+  request<{ bracket_matches_created: number }>(
+    `/admin/tournaments/${tournamentId}/bracket/generate`,
+    { method: 'POST' }
+  )
 
 // Solo Signup
 export const signupSolo = (tournamentId: number) =>
