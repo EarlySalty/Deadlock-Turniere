@@ -16,6 +16,15 @@ export default function BracketMatch({ match, teams }: Props) {
   const isCompleted = match.status === 'completed' || match.status === 'forfeit'
   const isLive = match.status === 'in_progress' || match.status === 'lobby_created'
   const isPending = match.status === 'pending' || match.status === 'checkin'
+  const statusLabel = match.status === 'lobby_created'
+    ? 'Lobby erstellt'
+    : match.status === 'in_progress'
+      ? 'Läuft'
+      : match.status === 'checkin'
+        ? 'Check-in'
+        : isCompleted
+          ? 'Abgeschlossen'
+          : 'Ausstehend'
 
   const team1Name = getTeamName(match.team1_id, teams, isCompleted)
   const team2Name = getTeamName(match.team2_id, teams, isCompleted)
@@ -36,19 +45,19 @@ export default function BracketMatch({ match, teams }: Props) {
         {isPending && (
           <span className="flex items-center gap-1 text-[10px] text-muted">
             <Circle size={8} />
-            Ausstehend
+            {statusLabel}
           </span>
         )}
         {isLive && (
           <span className="flex items-center gap-1 text-[10px] text-success">
             <Loader2 size={8} className="animate-spin" />
-            Live
+            {statusLabel}
           </span>
         )}
         {isCompleted && (
           <span className="flex items-center gap-1 text-[10px] text-success">
             <CheckCircle2 size={8} />
-            Abgeschlossen
+            {statusLabel}
           </span>
         )}
         {match.party_code && (

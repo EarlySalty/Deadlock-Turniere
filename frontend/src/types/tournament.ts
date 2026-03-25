@@ -77,13 +77,18 @@ export interface BracketMatch {
   id: number
   round: number
   position: number
-  bracket_type: 'winners' | 'losers' | 'final'
+  bracket_type: 'winners' | 'losers' | 'grand_final'
   team1_id: number | null
   team2_id: number | null
   winner_id: number | null
   status: MatchStatus
+  steam_party_id: string | null
   party_code: string | null
+  deadlock_match_id: string | null
+  match_duration_s: number | null
+  match_stats: string | null
   scheduled_at: string | null
+  played_at: string | null
 }
 
 export interface TournamentCreate {
@@ -107,4 +112,36 @@ export interface TournamentUpdate {
 
 export interface ManualResult {
   winner_id: number
+}
+
+export interface LobbyCreateResult {
+  success: boolean
+  party_id: string
+  party_code: string | null
+  join_code: string | null
+}
+
+export interface MatchStartResult {
+  success: boolean
+  match_id: number | string | null
+}
+
+export interface MatchPlayerStats {
+  account_id: number
+  team: number
+  hero_id: number
+  kills: number
+  deaths: number
+  assists: number
+  net_worth: number
+  last_hits: number
+}
+
+export interface MatchFetchResult {
+  success: boolean
+  match_id: number | string
+  winner_id: number
+  winning_team: number
+  duration_s: number | null
+  players: MatchPlayerStats[]
 }

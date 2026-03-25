@@ -5,6 +5,7 @@ import Badge from '@/components/ui/Badge'
 import LoadingSpinner from '@/components/ui/LoadingSpinner'
 import CreateTournamentForm from '@/components/admin/CreateTournamentForm'
 import TournamentManager from '@/components/admin/TournamentManager'
+import MatchAdminPanel from '@/components/admin/MatchAdminPanel'
 import { Plus, Settings, Archive } from 'lucide-react'
 
 type AdminTab = 'erstellen' | 'verwalten'
@@ -21,7 +22,7 @@ export default function Admin() {
   ) ?? []
 
   // Fetch detail data for the active tournament
-  const { data: activeDetail } = useTournament(activeTournament?.id ?? 0)
+  const { data: activeDetail, refetch: refetchActiveDetail } = useTournament(activeTournament?.id ?? 0)
 
   if (isLoading) return <LoadingSpinner />
 
@@ -72,12 +73,31 @@ export default function Admin() {
       {activeTab === 'verwalten' && (
         <div className="space-y-6">
           {activeTournament ? (
-            <TournamentManager
-              tournament={activeTournament}
-              teamCount={teamCount}
-              playerCount={playerCount}
-              matchCount={matchCount}
-            />
+            <>
+              <TournamentManager
+                tournament={activeTournament}
+                teamCount={teamCount}
+                playerCount={playerCount}
+                matchCount={matchCount}
+              />
+
+              {activeDetail && activeTournament.status === 'bracket' && (
+                <section className="space-y-3">
+                  <div>
+                    <h2 className="text-lg font-semibold text-foreground">Steam Match-Steuerung</h2>
+                    <p className="text-sm text-muted mt-1">
+                      Lobbys erstellen, Party-Codes kopieren, Matches starten und Ergebnisse automatisch uebernehmen.
+                    </p>
+                  </div>
+                  <MatchAdminPanel
+                    tournamentId={activeTournament.id}
+                    matches={activeDetail.bracket_matches}
+                    teams={activeDetail.teams}
+                    onRefresh={() => void refetchActiveDetail()}
+                  />
+                </section>
+              )}
+            </>
           ) : (
             <Card className="p-8 text-center">
               <Settings size={32} className="mx-auto text-muted mb-3" />

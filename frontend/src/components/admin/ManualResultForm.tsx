@@ -13,11 +13,19 @@ interface ManualResultFormProps {
   onSuccess: () => void
 }
 
+function isTerminalMatch(match: BracketMatch): boolean {
+  return ['completed', 'forfeit', 'cancelled'].includes(match.status)
+}
+
 export default function ManualResultForm({ tournamentId, match, teams, onSuccess }: ManualResultFormProps) {
   const [winnerId, setWinnerId] = useState<number | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState(false)
+
+  if (isTerminalMatch(match)) {
+    return null
+  }
 
   const team1 = match.team1_id !== null ? teams.find(t => t.id === match.team1_id) : null
   const team2 = match.team2_id !== null ? teams.find(t => t.id === match.team2_id) : null
@@ -47,7 +55,7 @@ export default function ManualResultForm({ tournamentId, match, teams, onSuccess
       <div className="flex items-center gap-2 mb-3">
         <Gavel size={16} className="text-primary" />
         <h4 className="text-sm font-semibold text-foreground">
-          Ergebnis eintragen - Runde {match.round}, Spiel {match.position}
+          Manuelles Ergebnis
         </h4>
       </div>
 

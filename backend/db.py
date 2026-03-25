@@ -103,6 +103,8 @@ CREATE TABLE IF NOT EXISTS bracket_matches(
     steam_party_id TEXT,
     party_code TEXT,
     deadlock_match_id TEXT,
+    match_duration_s INTEGER,
+    match_stats TEXT,
     scheduled_at TEXT,
     played_at TEXT
 );
@@ -156,6 +158,7 @@ async def init_db() -> None:
         await db.execute("PRAGMA journal_mode=WAL;")
         await db.execute("PRAGMA foreign_keys=ON;")
         await db.executescript(_SCHEMA)
+        await _ensure_schema_upgrades(db)
         await db.commit()
 
 
@@ -169,3 +172,25 @@ async def get_db() -> AsyncIterator[aiosqlite.Connection]:
         yield db
     finally:
         await db.close()
+
+
+async def _ensure_schema_upgrades(db: aiosqlite.Connection) -> None:
+    """Ergaenzt Spalten in bestehenden Installationen idempotent."""
+    await _ensure_column(db, "bracket_matches", "match_duration_s", "INTEGER")
+    await _ensure_column(db, "bracket_matches", "match_stats", "TEXT")
+
+
+async def _ensure_column(
+    db: aiosqlite.Connection,
+    table_name: str,
+    column_name: str,
+    column_sql: str,
+) -> None:
+    cursor = await db.execute(f"PRAGMA table_info({table_name})")
+    rows = await cursor.fetchall()
+    existing_columns = {row[1] for row in rows}
+    if column_name in existing_columns:
+        return
+    await db.execute(
+        f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_sql}"
+    )

@@ -7,9 +7,16 @@ from fastapi import APIRouter, Depends, HTTPException, status
 
 from auth.permissions import require_admin, require_mod
 from db import get_db
+from match import manager as match_manager
+from match.result_processor import (
+    MatchNotFoundError,
+    MatchResultError,
+    MatchStateError,
+    SteamTaskError,
+    apply_bracket_match_result,
+)
 from tournament.engine import (
     VALID_STATUS_TRANSITIONS,
-    advance_bracket_winner,
     assign_random_teams,
     generate_bracket,
     generate_group_matches,
@@ -307,7 +314,7 @@ async def set_match_result(
 ) -> dict:
     """Manuelles Match-Ergebnis eintragen (Mod+)."""
     winner_id = body.get("winner_id")
-    if not winner_id or not isinstance(winner_id, int):
+    if winner_id is None or not isinstance(winner_id, int):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="winner_id (int) ist erforderlich",
@@ -333,42 +340,52 @@ async def set_match_result(
         bracket_match = await cursor.fetchone()
 
         if bracket_match:
-            # Bracket-Match: winner_id setzen
-            if winner_id not in (bracket_match["team1_id"], bracket_match["team2_id"]):
+            try:
+                result = await apply_bracket_match_result(
+                    tournament_id,
+                    match_id,
+                    winner_id=winner_id,
+                    source="manual",
+                )
+            except MatchNotFoundError as exc:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=str(exc),
+                ) from exc
+            except MatchStateError as exc:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="winner_id muss eines der beiden Teams im Match sein",
-                )
-
-            await db.execute(
-                "UPDATE bracket_matches SET winner_id = ?, status = 'completed', "
-                "played_at = datetime('now') WHERE id = ?",
-                (winner_id, match_id),
-            )
-
-            # Match-Result erstellen
-            await db.execute(
-                "INSERT INTO match_results (bracket_match_id, winning_team, source) "
-                "VALUES (?, ?, 'manual')",
-                (match_id, winner_id),
-            )
+                    detail=str(exc),
+                ) from exc
+            except MatchResultError as exc:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=str(exc),
+                ) from exc
 
             await _audit(
                 db,
                 "match_result_bracket",
                 user.discord_id,
-                json.dumps({
-                    "tournament_id": tournament_id,
-                    "match_id": match_id,
-                    "winner_id": winner_id,
-                }),
+                json.dumps(
+                    {
+                        "tournament_id": tournament_id,
+                        "match_id": match_id,
+                        "winner_id": result["winner_id"],
+                        "winning_team": result["winning_team"],
+                        "source": "manual",
+                    }
+                ),
             )
             await db.commit()
 
-            # Winner in naechste Runde propagieren
-            await advance_bracket_winner(tournament_id, match_id, winner_id)
-
-            return {"status": "ok", "match_type": "bracket", "match_id": match_id, "winner_id": winner_id}
+            return {
+                "status": "ok",
+                "match_type": "bracket",
+                "match_id": result["match_id"],
+                "winner_id": result["winner_id"],
+                "winning_team": result["winning_team"],
+            }
 
         # Dann in group_matches suchen
         cursor = await db.execute(
@@ -380,6 +397,11 @@ async def set_match_result(
         group_match = await cursor.fetchone()
 
         if group_match:
+            if group_match["status"] in {"completed", "cancelled", "forfeit"}:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Group-Match {match_id} kann aus Status {group_match['status']} nicht verarbeitet werden",
+                )
             if winner_id not in (group_match["team1_id"], group_match["team2_id"]):
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
@@ -434,6 +456,223 @@ async def set_match_result(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Match nicht gefunden",
         )
+
+
+@router.post("/tournaments/{tournament_id}/matches/{match_id}/create-lobby", status_code=200)
+async def create_match_lobby(
+    tournament_id: int,
+    match_id: int,
+    user: UserSession = Depends(require_mod),
+) -> dict:
+    """Erstellt eine Steam-Custom-Lobby fuer ein Bracket-Match."""
+    try:
+        result = await match_manager.create_lobby(tournament_id, match_id)
+    except MatchNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        ) from exc
+    except MatchStateError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+    except SteamTaskError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=str(exc),
+        ) from exc
+    except TimeoutError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+            detail="Steam Bot hat beim Erstellen der Lobby nicht rechtzeitig geantwortet",
+        ) from exc
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=str(exc),
+        ) from exc
+
+    async with get_db() as db:
+        await _audit(
+            db,
+            "match_create_lobby",
+            user.discord_id,
+            json.dumps(
+                {
+                    "tournament_id": tournament_id,
+                    "match_id": match_id,
+                    "party_id": result.get("party_id"),
+                    "party_code": result.get("party_code"),
+                    "join_code": result.get("join_code"),
+                }
+            ),
+        )
+        await db.commit()
+
+    return {
+        "success": True,
+        "party_id": result.get("party_id"),
+        "party_code": result.get("party_code"),
+        "join_code": result.get("join_code"),
+    }
+
+
+@router.post("/tournaments/{tournament_id}/matches/{match_id}/start", status_code=200)
+async def start_match_via_steam(
+    tournament_id: int,
+    match_id: int,
+    user: UserSession = Depends(require_mod),
+) -> dict:
+    """Startet ein Custom-Match ueber den Steam-Bot."""
+    try:
+        result = await match_manager.start_match(tournament_id, match_id)
+    except MatchNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        ) from exc
+    except MatchStateError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+    except SteamTaskError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=str(exc),
+        ) from exc
+    except TimeoutError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+            detail="Steam Bot hat beim Match-Start nicht rechtzeitig geantwortet",
+        ) from exc
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=str(exc),
+        ) from exc
+
+    async with get_db() as db:
+        await _audit(
+            db,
+            "match_start_steam",
+            user.discord_id,
+            json.dumps(
+                {
+                    "tournament_id": tournament_id,
+                    "match_id": match_id,
+                    "deadlock_match_id": result.get("match_id"),
+                }
+            ),
+        )
+        await db.commit()
+
+    return {
+        "success": True,
+        "match_id": result.get("match_id"),
+    }
+
+
+@router.post("/tournaments/{tournament_id}/matches/{match_id}/fetch-result", status_code=200)
+async def fetch_match_result_via_steam(
+    tournament_id: int,
+    match_id: int,
+    user: UserSession = Depends(require_mod),
+) -> dict:
+    """Laedt das Match-Ergebnis aus Deadlock und uebernimmt es ins Bracket."""
+    try:
+        result = await match_manager.fetch_match_result(tournament_id, match_id)
+    except MatchNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        ) from exc
+    except MatchStateError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+    except SteamTaskError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=str(exc),
+        ) from exc
+    except TimeoutError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+            detail="Steam Bot hat beim Abrufen des Match-Ergebnisses nicht rechtzeitig geantwortet",
+        ) from exc
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=str(exc),
+        ) from exc
+
+    async with get_db() as db:
+        await _audit(
+            db,
+            "match_fetch_result_steam",
+            user.discord_id,
+            json.dumps(
+                {
+                    "tournament_id": tournament_id,
+                    "match_id": match_id,
+                    "winner_id": result.get("winner_id"),
+                    "duration_s": result.get("duration_s"),
+                }
+            ),
+        )
+        await db.commit()
+
+    return result
+
+
+@router.post("/tournaments/{tournament_id}/matches/{match_id}/leave-lobby", status_code=200)
+async def leave_match_lobby(
+    tournament_id: int,
+    match_id: int,
+    user: UserSession = Depends(require_mod),
+) -> dict:
+    """Laesst den Steam-Bot die Match-Lobby verlassen."""
+    try:
+        result = await match_manager.leave_lobby(tournament_id, match_id)
+    except MatchNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        ) from exc
+    except MatchStateError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+    except SteamTaskError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=str(exc),
+        ) from exc
+    except TimeoutError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+            detail="Steam Bot hat beim Verlassen der Lobby nicht rechtzeitig geantwortet",
+        ) from exc
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=str(exc),
+        ) from exc
+
+    async with get_db() as db:
+        await _audit(
+            db,
+            "match_leave_lobby",
+            user.discord_id,
+            json.dumps({"tournament_id": tournament_id, "match_id": match_id}),
+        )
+        await db.commit()
+
+    return result
 
 
 # ---------------------------------------------------------------------------

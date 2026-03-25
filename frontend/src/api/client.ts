@@ -1,4 +1,15 @@
-import type { UserSession, Tournament, TournamentDetail, Team, TournamentCreate, TournamentUpdate, ManualResult } from '@/types/tournament'
+import type {
+  UserSession,
+  Tournament,
+  TournamentDetail,
+  Team,
+  TournamentCreate,
+  TournamentUpdate,
+  ManualResult,
+  LobbyCreateResult,
+  MatchStartResult,
+  MatchFetchResult,
+} from '@/types/tournament'
 
 const API_BASE = '/api'
 
@@ -62,6 +73,26 @@ export const assignRandomTeams = (id: number) =>
 export const submitMatchResult = (tournamentId: number, matchId: number, data: ManualResult) =>
   request<void>(`/admin/tournaments/${tournamentId}/matches/${matchId}/result`, {
     method: 'POST', body: JSON.stringify(data),
+  })
+
+export const createLobby = (tournamentId: number, matchId: number) =>
+  request<LobbyCreateResult>(`/admin/tournaments/${tournamentId}/matches/${matchId}/create-lobby`, {
+    method: 'POST',
+  })
+
+export const startMatch = (tournamentId: number, matchId: number) =>
+  request<MatchStartResult>(`/admin/tournaments/${tournamentId}/matches/${matchId}/start`, {
+    method: 'POST',
+  })
+
+export const fetchMatchResult = (tournamentId: number, matchId: number) =>
+  request<MatchFetchResult>(`/admin/tournaments/${tournamentId}/matches/${matchId}/fetch-result`, {
+    method: 'POST',
+  })
+
+export const leaveLobby = (tournamentId: number, matchId: number) =>
+  request<{ success: boolean }>(`/admin/tournaments/${tournamentId}/matches/${matchId}/leave-lobby`, {
+    method: 'POST',
   })
 
 // Groups & Bracket Generation

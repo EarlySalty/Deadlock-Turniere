@@ -176,6 +176,8 @@ class BracketMatch(BaseModel):
     steam_party_id: Optional[str] = None
     party_code: Optional[str] = None
     deadlock_match_id: Optional[str] = None
+    match_duration_s: Optional[int] = None
+    match_stats: Optional[str] = None
     scheduled_at: Optional[str] = None
     played_at: Optional[str] = None
 

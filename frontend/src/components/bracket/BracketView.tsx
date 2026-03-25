@@ -13,7 +13,7 @@ function getRoundLabel(round: number, maxRound: number): string {
   if (round === maxRound) return 'Finale'
   if (round === maxRound - 1) return 'Halbfinale'
   if (round === maxRound - 2) return 'Viertelfinale'
-  return `Runde ${round}`
+  return `Runde ${round + 1}`
 }
 
 export default function BracketView({ matches, teams }: Props) {

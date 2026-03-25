@@ -5,6 +5,7 @@ import {
   advanceTournament, assignRandomTeams,
   createTeam, joinTeam, signupSolo,
   generateGroups, generateBracket,
+  createLobby, startMatch, fetchMatchResult, leaveLobby,
 } from '@/api/client'
 import type { TournamentCreate, TournamentUpdate } from '@/types/tournament'
 
@@ -103,5 +104,53 @@ export function useGenerateBracket() {
   return useMutation({
     mutationFn: (tournamentId: number) => generateBracket(tournamentId),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['tournaments'] }),
+  })
+}
+
+export function useCreateLobby() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ tournamentId, matchId }: { tournamentId: number; matchId: number }) =>
+      createLobby(tournamentId, matchId),
+    onSuccess: (_data, vars) => {
+      qc.invalidateQueries({ queryKey: ['tournaments'] })
+      qc.invalidateQueries({ queryKey: ['tournaments', vars.tournamentId] })
+    },
+  })
+}
+
+export function useStartMatch() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ tournamentId, matchId }: { tournamentId: number; matchId: number }) =>
+      startMatch(tournamentId, matchId),
+    onSuccess: (_data, vars) => {
+      qc.invalidateQueries({ queryKey: ['tournaments'] })
+      qc.invalidateQueries({ queryKey: ['tournaments', vars.tournamentId] })
+    },
+  })
+}
+
+export function useFetchMatchResult() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ tournamentId, matchId }: { tournamentId: number; matchId: number }) =>
+      fetchMatchResult(tournamentId, matchId),
+    onSuccess: (_data, vars) => {
+      qc.invalidateQueries({ queryKey: ['tournaments'] })
+      qc.invalidateQueries({ queryKey: ['tournaments', vars.tournamentId] })
+    },
+  })
+}
+
+export function useLeaveLobby() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ tournamentId, matchId }: { tournamentId: number; matchId: number }) =>
+      leaveLobby(tournamentId, matchId),
+    onSuccess: (_data, vars) => {
+      qc.invalidateQueries({ queryKey: ['tournaments'] })
+      qc.invalidateQueries({ queryKey: ['tournaments', vars.tournamentId] })
+    },
   })
 }
