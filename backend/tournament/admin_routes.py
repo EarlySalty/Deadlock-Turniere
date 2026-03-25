@@ -23,15 +23,19 @@ from tournament.engine import (
     generate_groups,
 )
 from tournament.models import (
+    Team,
+    TeamMember,
     TournamentDetail,
     Tournament,
     TournamentCreate,
+    TournamentSignup,
     TournamentUpdate,
     UserSession,
 )
 from tournament.routes import (
     _load_bracket_matches,
     _load_groups_for_tournament,
+    _load_signups_for_tournament,
     _load_teams_for_tournament,
 )
 
@@ -48,6 +52,253 @@ async def _audit(db, action: str, user_id: str, details: str) -> None:  # noqa: 
         "INSERT INTO audit_log (action, user_id, details) VALUES (?, ?, ?)",
         (action, user_id, details),
     )
+
+
+ACTIVE_TOURNAMENT_STATUSES = ("draft", "registration", "group_phase", "bracket")
+
+
+async def _ensure_single_active_tournament(
+    db,
+    *,
+    ignore_tournament_id: int | None = None,
+) -> None:  # noqa: ANN001
+    """Stellt sicher, dass nur ein aktives Turnier existiert."""
+    query = (
+        "SELECT id, name, status FROM tournaments "
+        f"WHERE status IN ({', '.join('?' for _ in ACTIVE_TOURNAMENT_STATUSES)})"
+    )
+    params: list = list(ACTIVE_TOURNAMENT_STATUSES)
+    if ignore_tournament_id is not None:
+        query += " AND id != ?"
+        params.append(ignore_tournament_id)
+
+    cursor = await db.execute(query, params)
+    existing = await cursor.fetchone()
+    if existing:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"Es gibt bereits ein aktives Turnier: "
+                f"#{existing['id']} {existing['name']} ({existing['status']})"
+            ),
+        )
+
+
+async def _load_team_or_404(db, tournament_id: int, team_id: int):  # noqa: ANN001
+    cursor = await db.execute(
+        "SELECT * FROM teams WHERE id = ? AND tournament_id = ?",
+        (team_id, tournament_id),
+    )
+    team = await cursor.fetchone()
+    if not team:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Team nicht gefunden",
+        )
+    return team
+
+
+async def _load_tournament_or_404(db, tournament_id: int):  # noqa: ANN001
+    cursor = await db.execute(
+        "SELECT * FROM tournaments WHERE id = ?",
+        (tournament_id,),
+    )
+    tournament = await cursor.fetchone()
+    if not tournament:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Turnier nicht gefunden",
+        )
+    return tournament
+
+
+async def _count_team_members(db, team_id: int) -> int:  # noqa: ANN001
+    cursor = await db.execute(
+        "SELECT COUNT(*) AS cnt FROM team_members WHERE team_id = ?",
+        (team_id,),
+    )
+    row = await cursor.fetchone()
+    return int(row["cnt"])
+
+
+async def _ensure_team_has_capacity(db, team_id: int, team_size: int) -> None:  # noqa: ANN001
+    member_count = await _count_team_members(db, team_id)
+    if member_count >= team_size:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Team ist bereits voll",
+        )
+
+
+async def _reassign_or_clear_captain(db, team_id: int) -> None:  # noqa: ANN001
+    cursor = await db.execute(
+        "SELECT discord_id FROM team_members WHERE team_id = ? ORDER BY joined_at LIMIT 1",
+        (team_id,),
+    )
+    next_member = await cursor.fetchone()
+    next_captain = next_member["discord_id"] if next_member else ""
+
+    await db.execute(
+        "UPDATE team_members SET role = 'member' WHERE team_id = ?",
+        (team_id,),
+    )
+    if next_captain:
+        await db.execute(
+            "UPDATE team_members SET role = 'captain' WHERE team_id = ? AND discord_id = ?",
+            (team_id, next_captain),
+        )
+    await db.execute(
+        "UPDATE teams SET captain_discord_id = ? WHERE id = ?",
+        (next_captain, team_id),
+    )
+
+
+async def _upsert_signup_from_member(
+    db,
+    tournament_id: int,
+    member_row,
+) -> None:  # noqa: ANN001
+    cursor = await db.execute(
+        "SELECT id FROM tournament_signups WHERE tournament_id = ? AND discord_id = ?",
+        (tournament_id, member_row["discord_id"]),
+    )
+    existing = await cursor.fetchone()
+
+    if existing:
+        await db.execute(
+            "UPDATE tournament_signups SET steam_id = ?, rank = ?, rank_score = ?, team_id = NULL "
+            "WHERE id = ?",
+            (
+                member_row["steam_id"],
+                member_row["rank"],
+                member_row["rank_score"],
+                existing["id"],
+            ),
+        )
+        return
+
+    await db.execute(
+        "INSERT INTO tournament_signups (tournament_id, discord_id, steam_id, rank, rank_score, team_id) "
+        "VALUES (?, ?, ?, ?, ?, NULL)",
+        (
+            tournament_id,
+            member_row["discord_id"],
+            member_row["steam_id"],
+            member_row["rank"],
+            member_row["rank_score"],
+        ),
+    )
+
+
+async def _ensure_team_not_locked(db, team_id: int) -> None:  # noqa: ANN001
+    """Verhindert destruktive Team-Löschung bei bestehender Turnier-Historie."""
+    checks = [
+        ("group_teams", "team_id"),
+        ("group_matches", "team1_id"),
+        ("group_matches", "team2_id"),
+        ("group_matches", "winner_id"),
+        ("bracket_matches", "team1_id"),
+        ("bracket_matches", "team2_id"),
+        ("bracket_matches", "winner_id"),
+        ("match_results", "winning_team"),
+        ("checkins", "team_id"),
+    ]
+    for table_name, column_name in checks:
+        cursor = await db.execute(
+            f"SELECT 1 FROM {table_name} WHERE {column_name} = ? LIMIT 1",  # noqa: S608
+            (team_id,),
+        )
+        if await cursor.fetchone():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Team kann nicht gelöscht werden, weil es bereits in Turnierdaten verwendet wird",
+            )
+
+
+async def _load_team_detail(db, team_id: int):  # noqa: ANN001
+    cursor = await db.execute("SELECT * FROM teams WHERE id = ?", (team_id,))
+    team_row = await cursor.fetchone()
+    cursor = await db.execute(
+        "SELECT * FROM team_members WHERE team_id = ? ORDER BY joined_at",
+        (team_id,),
+    )
+    members = await cursor.fetchall()
+    return Team(
+        **dict(team_row),
+        members=[TeamMember(**dict(member)) for member in members],
+    )
+
+
+async def _delete_tournament_tree(db, tournament_id: int) -> None:  # noqa: ANN001
+    cursor = await db.execute(
+        "SELECT id FROM groups WHERE tournament_id = ?",
+        (tournament_id,),
+    )
+    group_ids = [row["id"] for row in await cursor.fetchall()]
+
+    if group_ids:
+        placeholders = ", ".join("?" for _ in group_ids)
+        await db.execute(
+            f"DELETE FROM match_results WHERE group_match_id IN ("  # noqa: S608
+            f"SELECT id FROM group_matches WHERE group_id IN ({placeholders}))",
+            group_ids,
+        )
+        await db.execute(
+            f"DELETE FROM checkins WHERE match_type = 'group' AND match_id IN ("  # noqa: S608
+            f"SELECT id FROM group_matches WHERE group_id IN ({placeholders}))",
+            group_ids,
+        )
+        await db.execute(
+            f"DELETE FROM group_matches WHERE group_id IN ({placeholders})",  # noqa: S608
+            group_ids,
+        )
+        await db.execute(
+            f"DELETE FROM group_teams WHERE group_id IN ({placeholders})",  # noqa: S608
+            group_ids,
+        )
+        await db.execute(
+            f"DELETE FROM groups WHERE id IN ({placeholders})",  # noqa: S608
+            group_ids,
+        )
+
+    await db.execute(
+        "DELETE FROM match_results WHERE bracket_match_id IN "
+        "(SELECT id FROM bracket_matches WHERE tournament_id = ?)",
+        (tournament_id,),
+    )
+    await db.execute(
+        "DELETE FROM checkins WHERE match_type = 'bracket' AND match_id IN "
+        "(SELECT id FROM bracket_matches WHERE tournament_id = ?)",
+        (tournament_id,),
+    )
+    await db.execute(
+        "DELETE FROM bracket_matches WHERE tournament_id = ?",
+        (tournament_id,),
+    )
+    await db.execute(
+        "DELETE FROM team_members WHERE team_id IN (SELECT id FROM teams WHERE tournament_id = ?)",
+        (tournament_id,),
+    )
+    await db.execute(
+        "DELETE FROM tournament_signups WHERE tournament_id = ?",
+        (tournament_id,),
+    )
+    await db.execute(
+        "DELETE FROM teams WHERE tournament_id = ?",
+        (tournament_id,),
+    )
+    await db.execute(
+        "DELETE FROM tournaments WHERE id = ?",
+        (tournament_id,),
+    )
+
+
+def _ensure_participant_management_allowed(tournament_status: str) -> None:
+    if tournament_status not in ACTIVE_TOURNAMENT_STATUSES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Teilnehmerverwaltung ist nur für aktive Turniere möglich",
+        )
 
 
 @router.get("/tournaments", response_model=list[Tournament])
@@ -85,12 +336,14 @@ async def get_tournament_admin(
         teams = await _load_teams_for_tournament(db, tournament_id)
         groups = await _load_groups_for_tournament(db, tournament_id)
         bracket_matches = await _load_bracket_matches(db, tournament_id)
+        signups = await _load_signups_for_tournament(db, tournament_id)
 
     return TournamentDetail(
         **tournament_data,
         teams=teams,
         groups=groups,
         bracket_matches=bracket_matches,
+        signups=signups,
     )
 
 
@@ -105,6 +358,7 @@ async def create_tournament(
 ) -> Tournament:
     """Neues Turnier erstellen (Mod+)."""
     async with get_db() as db:
+        await _ensure_single_active_tournament(db)
         cursor = await db.execute(
             "INSERT INTO tournaments "
             "(name, description, team_size, bracket_format, registration_start, "
@@ -174,6 +428,11 @@ async def update_tournament(
                     detail=f"Ungültiger Status-Übergang: {current_status} -> {body.status.value}. "
                     f"Erlaubt: {', '.join(allowed) if allowed else 'keine'}",
                 )
+            if body.status.value in ACTIVE_TOURNAMENT_STATUSES:
+                await _ensure_single_active_tournament(
+                    db,
+                    ignore_tournament_id=tournament_id,
+                )
 
         # Nur gesetzte Felder updaten
         updates: list[str] = []
@@ -225,30 +484,17 @@ async def delete_tournament(
     tournament_id: int,
     user: UserSession = Depends(require_admin),
 ) -> dict:
-    """Turnier löschen (Admin only). Nur im Draft-Status möglich."""
+    """Turnier löschen (Admin only). Nur Draft- oder abgeschlossene Turniere."""
     async with get_db() as db:
-        cursor = await db.execute(
-            "SELECT * FROM tournaments WHERE id = ?",
-            (tournament_id,),
-        )
-        existing = await cursor.fetchone()
-        if not existing:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Turnier nicht gefunden",
-            )
+        existing = await _load_tournament_or_404(db, tournament_id)
 
-        if existing["status"] != "draft":
+        if existing["status"] not in {"draft", "completed", "archived"}:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Nur Turniere im Draft-Status können gelöscht werden",
+                detail="Nur Draft-, abgeschlossene oder archivierte Turniere können gelöscht werden",
             )
 
-        # Kaskadierend löschen
-        await db.execute("DELETE FROM team_members WHERE team_id IN (SELECT id FROM teams WHERE tournament_id = ?)", (tournament_id,))
-        await db.execute("DELETE FROM tournament_signups WHERE tournament_id = ?", (tournament_id,))
-        await db.execute("DELETE FROM teams WHERE tournament_id = ?", (tournament_id,))
-        await db.execute("DELETE FROM tournaments WHERE id = ?", (tournament_id,))
+        await _delete_tournament_tree(db, tournament_id)
 
         await _audit(
             db,
@@ -292,6 +538,11 @@ async def advance_tournament(
             )
 
         next_status = allowed[0]
+        if next_status in ACTIVE_TOURNAMENT_STATUSES:
+            await _ensure_single_active_tournament(
+                db,
+                ignore_tournament_id=tournament_id,
+            )
 
         await db.execute(
             "UPDATE tournaments SET status = ?, updated_at = datetime('now') WHERE id = ?",
@@ -349,6 +600,433 @@ async def assign_random(
 
     teams_created = await assign_random_teams(tournament_id, tournament["team_size"])
     return {"status": "ok", "teams_created": teams_created}
+
+
+# ---------------------------------------------------------------------------
+# Team- und Teilnehmer-Verwaltung
+# ---------------------------------------------------------------------------
+
+
+@router.post("/tournaments/{tournament_id}/teams", response_model=Team, status_code=201)
+async def create_team_admin(
+    tournament_id: int,
+    body: dict,
+    user: UserSession = Depends(require_mod),
+) -> Team:
+    """Leeres Team für Admin-Verwaltung anlegen."""
+    name = (body.get("name") or "").strip()
+    if len(name) < 2 or len(name) > 32:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Team-Name muss zwischen 2 und 32 Zeichen lang sein",
+        )
+
+    async with get_db() as db:
+        tournament = await _load_tournament_or_404(db, tournament_id)
+        _ensure_participant_management_allowed(tournament["status"])
+        name_key = name.casefold()
+        cursor = await db.execute(
+            "SELECT id FROM teams WHERE tournament_id = ? AND name_key = ?",
+            (tournament_id, name_key),
+        )
+        if await cursor.fetchone():
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Ein Team mit diesem Namen existiert bereits",
+            )
+
+        cursor = await db.execute(
+            "INSERT INTO teams (tournament_id, name, name_key, captain_discord_id) VALUES (?, ?, ?, '')",
+            (tournament_id, name, name_key),
+        )
+        team_id = cursor.lastrowid
+        await _audit(
+            db,
+            "team_create_admin",
+            user.discord_id,
+            json.dumps({"tournament_id": tournament_id, "team_id": team_id, "name": name}),
+        )
+        await db.commit()
+        return await _load_team_detail(db, team_id)
+
+
+@router.put("/tournaments/{tournament_id}/teams/{team_id}", response_model=Team)
+async def rename_team_admin(
+    tournament_id: int,
+    team_id: int,
+    body: dict,
+    user: UserSession = Depends(require_mod),
+) -> Team:
+    """Team umbenennen."""
+    name = (body.get("name") or "").strip()
+    if len(name) < 2 or len(name) > 32:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Team-Name muss zwischen 2 und 32 Zeichen lang sein",
+        )
+
+    async with get_db() as db:
+        tournament = await _load_tournament_or_404(db, tournament_id)
+        _ensure_participant_management_allowed(tournament["status"])
+        await _load_team_or_404(db, tournament_id, team_id)
+        name_key = name.casefold()
+        cursor = await db.execute(
+            "SELECT id FROM teams WHERE tournament_id = ? AND name_key = ? AND id != ?",
+            (tournament_id, name_key, team_id),
+        )
+        if await cursor.fetchone():
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Ein Team mit diesem Namen existiert bereits",
+            )
+
+        await db.execute(
+            "UPDATE teams SET name = ?, name_key = ? WHERE id = ?",
+            (name, name_key, team_id),
+        )
+        await _audit(
+            db,
+            "team_rename_admin",
+            user.discord_id,
+            json.dumps({"tournament_id": tournament_id, "team_id": team_id, "name": name}),
+        )
+        await db.commit()
+        return await _load_team_detail(db, team_id)
+
+
+@router.delete("/tournaments/{tournament_id}/teams/{team_id}", status_code=200)
+async def delete_team_admin(
+    tournament_id: int,
+    team_id: int,
+    user: UserSession = Depends(require_mod),
+) -> dict:
+    """Team löschen, solange noch keine Turnier-Historie daran hängt."""
+    async with get_db() as db:
+        tournament = await _load_tournament_or_404(db, tournament_id)
+        _ensure_participant_management_allowed(tournament["status"])
+        team = await _load_team_or_404(db, tournament_id, team_id)
+        await _ensure_team_not_locked(db, team_id)
+
+        cursor = await db.execute(
+            "SELECT * FROM team_members WHERE team_id = ? ORDER BY joined_at",
+            (team_id,),
+        )
+        members = await cursor.fetchall()
+        for member in members:
+            await _upsert_signup_from_member(db, tournament_id, member)
+
+        await db.execute(
+            "UPDATE tournament_signups SET team_id = NULL WHERE tournament_id = ? AND team_id = ?",
+            (tournament_id, team_id),
+        )
+        await db.execute("DELETE FROM team_members WHERE team_id = ?", (team_id,))
+        await db.execute("DELETE FROM teams WHERE id = ?", (team_id,))
+
+        await _audit(
+            db,
+            "team_delete_admin",
+            user.discord_id,
+            json.dumps({"tournament_id": tournament_id, "team_id": team_id, "name": team["name"]}),
+        )
+        await db.commit()
+
+    return {"status": "gelöscht", "team_id": team_id}
+
+
+@router.put("/tournaments/{tournament_id}/teams/{team_id}/captain", response_model=Team)
+async def change_team_captain_admin(
+    tournament_id: int,
+    team_id: int,
+    body: dict,
+    user: UserSession = Depends(require_mod),
+) -> Team:
+    """Captain innerhalb eines Teams wechseln."""
+    discord_id = (body.get("discord_id") or "").strip()
+    if not discord_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="discord_id ist erforderlich",
+        )
+
+    async with get_db() as db:
+        tournament = await _load_tournament_or_404(db, tournament_id)
+        _ensure_participant_management_allowed(tournament["status"])
+        await _load_team_or_404(db, tournament_id, team_id)
+        cursor = await db.execute(
+            "SELECT 1 FROM team_members WHERE team_id = ? AND discord_id = ?",
+            (team_id, discord_id),
+        )
+        if not await cursor.fetchone():
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Mitglied nicht im Team gefunden",
+            )
+
+        await db.execute("UPDATE team_members SET role = 'member' WHERE team_id = ?", (team_id,))
+        await db.execute(
+            "UPDATE team_members SET role = 'captain' WHERE team_id = ? AND discord_id = ?",
+            (team_id, discord_id),
+        )
+        await db.execute(
+            "UPDATE teams SET captain_discord_id = ? WHERE id = ?",
+            (discord_id, team_id),
+        )
+        await _audit(
+            db,
+            "team_change_captain_admin",
+            user.discord_id,
+            json.dumps({"tournament_id": tournament_id, "team_id": team_id, "discord_id": discord_id}),
+        )
+        await db.commit()
+        return await _load_team_detail(db, team_id)
+
+
+@router.delete("/tournaments/{tournament_id}/teams/{team_id}/members/{discord_id}", response_model=Team)
+async def remove_team_member_admin(
+    tournament_id: int,
+    team_id: int,
+    discord_id: str,
+    user: UserSession = Depends(require_mod),
+) -> Team:
+    """Spieler aus Team entfernen und als Solo-Signup zurücklegen."""
+    async with get_db() as db:
+        tournament = await _load_tournament_or_404(db, tournament_id)
+        _ensure_participant_management_allowed(tournament["status"])
+        team = await _load_team_or_404(db, tournament_id, team_id)
+
+        cursor = await db.execute(
+            "SELECT * FROM team_members WHERE team_id = ? AND discord_id = ?",
+            (team_id, discord_id),
+        )
+        member = await cursor.fetchone()
+        if not member:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Mitglied nicht gefunden",
+            )
+
+        await _upsert_signup_from_member(db, tournament_id, member)
+        await db.execute(
+            "DELETE FROM team_members WHERE team_id = ? AND discord_id = ?",
+            (team_id, discord_id),
+        )
+        if team["captain_discord_id"] == discord_id:
+            await _reassign_or_clear_captain(db, team_id)
+
+        await _audit(
+            db,
+            "team_remove_member_admin",
+            user.discord_id,
+            json.dumps({"tournament_id": tournament_id, "team_id": team_id, "discord_id": discord_id}),
+        )
+        await db.commit()
+        return await _load_team_detail(db, team_id)
+
+
+@router.post("/tournaments/{tournament_id}/teams/{team_id}/members/move", response_model=Team)
+async def move_team_member_admin(
+    tournament_id: int,
+    team_id: int,
+    body: dict,
+    user: UserSession = Depends(require_mod),
+) -> Team:
+    """Spieler zwischen Teams verschieben."""
+    from_team_id = body.get("from_team_id")
+    discord_id = (body.get("discord_id") or "").strip()
+    if not isinstance(from_team_id, int) or not discord_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="from_team_id und discord_id sind erforderlich",
+        )
+    if from_team_id == team_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Quelle und Ziel dürfen nicht identisch sein",
+        )
+
+    async with get_db() as db:
+        tournament = await _load_tournament_or_404(db, tournament_id)
+        _ensure_participant_management_allowed(tournament["status"])
+        source_team = await _load_team_or_404(db, tournament_id, from_team_id)
+        target_team = await _load_team_or_404(db, tournament_id, team_id)
+        await _ensure_team_has_capacity(db, team_id, tournament["team_size"])
+
+        cursor = await db.execute(
+            "SELECT * FROM team_members WHERE team_id = ? AND discord_id = ?",
+            (from_team_id, discord_id),
+        )
+        member = await cursor.fetchone()
+        if not member:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Mitglied nicht im Quell-Team gefunden",
+            )
+
+        cursor = await db.execute(
+            "SELECT 1 FROM team_members WHERE team_id = ? AND discord_id = ?",
+            (team_id, discord_id),
+        )
+        if await cursor.fetchone():
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Spieler ist bereits im Ziel-Team",
+            )
+
+        target_member_count = await _count_team_members(db, team_id)
+        new_role = "captain" if target_member_count == 0 or not target_team["captain_discord_id"] else "member"
+        await db.execute(
+            "UPDATE team_members SET team_id = ?, role = ? WHERE team_id = ? AND discord_id = ?",
+            (team_id, new_role, from_team_id, discord_id),
+        )
+        await db.execute(
+            "UPDATE tournament_signups SET team_id = ? WHERE tournament_id = ? AND discord_id = ?",
+            (team_id, tournament_id, discord_id),
+        )
+
+        if new_role == "captain":
+            await db.execute(
+                "UPDATE teams SET captain_discord_id = ? WHERE id = ?",
+                (discord_id, team_id),
+            )
+
+        if source_team["captain_discord_id"] == discord_id:
+            await _reassign_or_clear_captain(db, from_team_id)
+
+        await _audit(
+            db,
+            "team_move_member_admin",
+            user.discord_id,
+            json.dumps(
+                {
+                    "tournament_id": tournament_id,
+                    "discord_id": discord_id,
+                    "from_team_id": from_team_id,
+                    "to_team_id": team_id,
+                }
+            ),
+        )
+        await db.commit()
+        return await _load_team_detail(db, team_id)
+
+
+@router.post("/tournaments/{tournament_id}/teams/{team_id}/signups/assign", response_model=Team)
+async def assign_signup_to_team_admin(
+    tournament_id: int,
+    team_id: int,
+    body: dict,
+    user: UserSession = Depends(require_mod),
+) -> Team:
+    """Solo-Signup einem Team zuweisen."""
+    signup_id = body.get("signup_id")
+    if not isinstance(signup_id, int):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="signup_id ist erforderlich",
+        )
+
+    async with get_db() as db:
+        tournament = await _load_tournament_or_404(db, tournament_id)
+        _ensure_participant_management_allowed(tournament["status"])
+        target_team = await _load_team_or_404(db, tournament_id, team_id)
+        await _ensure_team_has_capacity(db, team_id, tournament["team_size"])
+
+        cursor = await db.execute(
+            "SELECT * FROM tournament_signups WHERE id = ? AND tournament_id = ?",
+            (signup_id, tournament_id),
+        )
+        signup = await cursor.fetchone()
+        if not signup:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Signup nicht gefunden",
+            )
+        if signup["team_id"] is not None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Signup ist bereits einem Team zugewiesen",
+            )
+
+        cursor = await db.execute(
+            "SELECT 1 FROM team_members tm JOIN teams t ON tm.team_id = t.id "
+            "WHERE t.tournament_id = ? AND tm.discord_id = ?",
+            (tournament_id, signup["discord_id"]),
+        )
+        if await cursor.fetchone():
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Spieler ist bereits Mitglied in einem Team dieses Turniers",
+            )
+
+        target_member_count = await _count_team_members(db, team_id)
+        role = "captain" if target_member_count == 0 or not target_team["captain_discord_id"] else "member"
+        await db.execute(
+            "INSERT INTO team_members (team_id, discord_id, discord_name, steam_id, rank, rank_score, role) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (
+                team_id,
+                signup["discord_id"],
+                None,
+                signup["steam_id"],
+                signup["rank"],
+                signup["rank_score"],
+                role,
+            ),
+        )
+        await db.execute(
+            "UPDATE tournament_signups SET team_id = ? WHERE id = ?",
+            (team_id, signup_id),
+        )
+        if role == "captain":
+            await db.execute(
+                "UPDATE teams SET captain_discord_id = ? WHERE id = ?",
+                (signup["discord_id"], team_id),
+            )
+
+        await _audit(
+            db,
+            "team_assign_signup_admin",
+            user.discord_id,
+            json.dumps({"tournament_id": tournament_id, "team_id": team_id, "signup_id": signup_id}),
+        )
+        await db.commit()
+        return await _load_team_detail(db, team_id)
+
+
+@router.delete("/tournaments/{tournament_id}/signups/{signup_id}", response_model=TournamentSignup)
+async def delete_signup_admin(
+    tournament_id: int,
+    signup_id: int,
+    user: UserSession = Depends(require_mod),
+) -> TournamentSignup:
+    """Solo-Signup löschen."""
+    async with get_db() as db:
+        tournament = await _load_tournament_or_404(db, tournament_id)
+        _ensure_participant_management_allowed(tournament["status"])
+        cursor = await db.execute(
+            "SELECT * FROM tournament_signups WHERE id = ? AND tournament_id = ?",
+            (signup_id, tournament_id),
+        )
+        signup = await cursor.fetchone()
+        if not signup:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Signup nicht gefunden",
+            )
+        if signup["team_id"] is not None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Nur nicht zugewiesene Solo-Signups können gelöscht werden",
+            )
+
+        await db.execute("DELETE FROM tournament_signups WHERE id = ?", (signup_id,))
+        await _audit(
+            db,
+            "signup_delete_admin",
+            user.discord_id,
+            json.dumps({"tournament_id": tournament_id, "signup_id": signup_id, "discord_id": signup["discord_id"]}),
+        )
+        await db.commit()
+        return TournamentSignup(**dict(signup))
 
 
 # ---------------------------------------------------------------------------

@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react'
 import Card from '@/components/ui/Card'
 import Badge from '@/components/ui/Badge'
 import Button from '@/components/ui/Button'
@@ -5,9 +6,23 @@ import {
   useAdvanceTournament,
   useAssignRandomTeams,
   useDeleteTournament,
+  useGenerateBracket,
+  useGenerateGroups,
+  useUpdateTournament,
 } from '@/hooks/useTournament'
-import type { Tournament } from '@/types/tournament'
-import { Settings, Users, Shuffle, ArrowRight, Trash2, AlertCircle } from 'lucide-react'
+import type { Tournament, TournamentUpdate } from '@/types/tournament'
+import {
+  AlertCircle,
+  ArrowRight,
+  CalendarRange,
+  CheckCircle2,
+  GitBranch,
+  PencilLine,
+  Shuffle,
+  Trash2,
+  Trophy,
+  Users,
+} from 'lucide-react'
 
 interface TournamentManagerProps {
   tournament: Tournament
@@ -24,31 +39,119 @@ const STATUS_ACTIONS: Record<string, { label: string; confirmMsg: string }> = {
   completed: { label: 'Archivieren', confirmMsg: 'Turnier ins Archiv verschieben?' },
 }
 
+function toInputDateTime(value: string | null | undefined): string {
+  if (!value) return ''
+  return value.replace(' ', 'T').slice(0, 16)
+}
+
 export default function TournamentManager({
   tournament,
   teamCount,
   playerCount,
   matchCount,
 }: TournamentManagerProps) {
+  const updateMutation = useUpdateTournament()
   const advanceMutation = useAdvanceTournament()
   const assignMutation = useAssignRandomTeams()
   const deleteMutation = useDeleteTournament()
+  const generateGroupsMutation = useGenerateGroups()
+  const generateBracketMutation = useGenerateBracket()
+
+  const [form, setForm] = useState({
+    name: tournament.name,
+    description: tournament.description ?? '',
+    team_size: tournament.team_size,
+    bracket_format: tournament.bracket_format,
+    registration_start: toInputDateTime(tournament.registration_start),
+    registration_end: toInputDateTime(tournament.registration_end),
+    group_phase_start: toInputDateTime(tournament.group_phase_start),
+    bracket_start: toInputDateTime(tournament.bracket_start),
+  })
+  const [successMessage, setSuccessMessage] = useState('')
+
+  useEffect(() => {
+    setForm({
+      name: tournament.name,
+      description: tournament.description ?? '',
+      team_size: tournament.team_size,
+      bracket_format: tournament.bracket_format,
+      registration_start: toInputDateTime(tournament.registration_start),
+      registration_end: toInputDateTime(tournament.registration_end),
+      group_phase_start: toInputDateTime(tournament.group_phase_start),
+      bracket_start: toInputDateTime(tournament.bracket_start),
+    })
+    setSuccessMessage('')
+  }, [tournament])
 
   const action = STATUS_ACTIONS[tournament.status]
-  const isLoading = advanceMutation.isPending || assignMutation.isPending || deleteMutation.isPending
-  const error = advanceMutation.error || assignMutation.error || deleteMutation.error
+  const isLoading =
+    updateMutation.isPending ||
+    advanceMutation.isPending ||
+    assignMutation.isPending ||
+    deleteMutation.isPending ||
+    generateGroupsMutation.isPending ||
+    generateBracketMutation.isPending
+
+  const error =
+    updateMutation.error ||
+    advanceMutation.error ||
+    assignMutation.error ||
+    deleteMutation.error ||
+    generateGroupsMutation.error ||
+    generateBracketMutation.error
+
+  const handleChange = (
+    key: keyof typeof form,
+    value: string | number
+  ) => {
+    setForm((current) => ({ ...current, [key]: value }))
+  }
+
+  const handleSave = () => {
+    const payload: TournamentUpdate = {
+      name: form.name.trim(),
+      description: form.description.trim() || undefined,
+      team_size: form.team_size,
+      bracket_format: form.bracket_format,
+      registration_start: form.registration_start || undefined,
+      registration_end: form.registration_end || undefined,
+      group_phase_start: form.group_phase_start || undefined,
+      bracket_start: form.bracket_start || undefined,
+    }
+    updateMutation.mutate(
+      { id: tournament.id, data: payload },
+      { onSuccess: () => setSuccessMessage('Turnierdaten gespeichert.') }
+    )
+  }
 
   const handleAdvance = () => {
     if (!action) return
     if (window.confirm(action.confirmMsg)) {
-      advanceMutation.mutate(tournament.id)
+      advanceMutation.mutate(tournament.id, {
+        onSuccess: () => setSuccessMessage(`Status auf ${action.label} verarbeitet.`),
+      })
     }
   }
 
   const handleAssignRandom = () => {
     if (window.confirm('Solo-Spieler zufällig auf Teams verteilen?')) {
-      assignMutation.mutate(tournament.id)
+      assignMutation.mutate(tournament.id, {
+        onSuccess: () => setSuccessMessage('Solo-Anmeldungen wurden Teams zugewiesen.'),
+      })
     }
+  }
+
+  const handleGenerateGroups = () => {
+    generateGroupsMutation.mutate(
+      { tournamentId: tournament.id, numGroups: 4 },
+      { onSuccess: () => setSuccessMessage('Gruppen und Gruppen-Matches wurden generiert.') }
+    )
+  }
+
+  const handleGenerateBracket = () => {
+    generateBracketMutation.mutate(tournament.id, {
+      onSuccess: () => setSuccessMessage('Bracket wurde neu generiert.'),
+    })
   }
 
   const handleDelete = () => {
@@ -58,117 +161,225 @@ export default function TournamentManager({
   }
 
   return (
-    <Card className="p-6">
-      <div className="flex items-center justify-between mb-6">
-        <div className="flex items-center gap-3">
-          <Settings size={20} className="text-primary" />
-          <h2 className="text-lg font-semibold text-foreground">Aktives Turnier verwalten</h2>
+    <Card className="p-6 space-y-6">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+        <div className="space-y-2">
+          <div className="flex items-center gap-3">
+            <Trophy size={20} className="text-primary" />
+            <h2 className="text-lg font-semibold text-foreground">Aktives Turnier</h2>
+            <Badge status={tournament.status} />
+          </div>
+          <p className="text-sm text-muted">
+            Metadaten pflegen, Phasen steuern und Generierung sicher auslösen.
+          </p>
+        </div>
+
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <Card className="p-3 text-center">
+            <div className="text-2xl font-bold text-primary">{tournament.team_size}</div>
+            <div className="text-xs text-muted">Teamgröße</div>
+          </Card>
+          <Card className="p-3 text-center">
+            <div className="text-2xl font-bold text-primary">{teamCount}</div>
+            <div className="text-xs text-muted">Teams</div>
+          </Card>
+          <Card className="p-3 text-center">
+            <div className="text-2xl font-bold text-primary">{playerCount}</div>
+            <div className="text-xs text-muted">Spieler</div>
+          </Card>
+          <Card className="p-3 text-center">
+            <div className="text-2xl font-bold text-primary">{matchCount}</div>
+            <div className="text-xs text-muted">Matches</div>
+          </Card>
         </div>
       </div>
 
-      {/* Turnier-Info */}
-      <div className="flex items-center gap-3 mb-5">
-        <h3 className="text-xl font-bold text-foreground">{tournament.name}</h3>
-        <Badge status={tournament.status} />
+      <div className="grid gap-4 lg:grid-cols-2">
+        <div className="space-y-4">
+          <div>
+            <label htmlFor="admin-tournament-name" className="mb-1.5 block text-sm font-medium text-foreground">
+              Turniername
+            </label>
+            <input
+              id="admin-tournament-name"
+              type="text"
+              value={form.name}
+              onChange={(event) => handleChange('name', event.target.value)}
+              className="w-full rounded-lg border border-border bg-background px-3 py-2 text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
+            />
+          </div>
+
+          <div>
+            <label htmlFor="admin-tournament-description" className="mb-1.5 block text-sm font-medium text-foreground">
+              Beschreibung
+            </label>
+            <textarea
+              id="admin-tournament-description"
+              rows={4}
+              value={form.description}
+              onChange={(event) => handleChange('description', event.target.value)}
+              className="w-full rounded-lg border border-border bg-background px-3 py-2 text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
+            />
+          </div>
+        </div>
+
+        <div className="grid gap-4 sm:grid-cols-2">
+          <div>
+            <label htmlFor="admin-team-size" className="mb-1.5 block text-sm font-medium text-foreground">
+              Teamgröße
+            </label>
+            <select
+              id="admin-team-size"
+              value={form.team_size}
+              onChange={(event) => handleChange('team_size', Number(event.target.value))}
+              className="w-full rounded-lg border border-border bg-background px-3 py-2 text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
+            >
+              {[2, 3, 4, 5, 6].map((size) => (
+                <option key={size} value={size}>
+                  {size} Spieler
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label htmlFor="admin-bracket-format" className="mb-1.5 block text-sm font-medium text-foreground">
+              Bracket-Format
+            </label>
+            <select
+              id="admin-bracket-format"
+              value={form.bracket_format}
+              onChange={(event) => handleChange('bracket_format', event.target.value)}
+              className="w-full rounded-lg border border-border bg-background px-3 py-2 text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
+            >
+              <option value="single_elimination">Single Elimination</option>
+              <option value="double_elimination">Double Elimination</option>
+            </select>
+          </div>
+
+          <div>
+            <label htmlFor="admin-reg-start" className="mb-1.5 block text-sm font-medium text-foreground">
+              Anmeldung Start
+            </label>
+            <input
+              id="admin-reg-start"
+              type="datetime-local"
+              value={form.registration_start}
+              onChange={(event) => handleChange('registration_start', event.target.value)}
+              className="w-full rounded-lg border border-border bg-background px-3 py-2 text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
+            />
+          </div>
+
+          <div>
+            <label htmlFor="admin-reg-end" className="mb-1.5 block text-sm font-medium text-foreground">
+              Anmeldung Ende
+            </label>
+            <input
+              id="admin-reg-end"
+              type="datetime-local"
+              value={form.registration_end}
+              onChange={(event) => handleChange('registration_end', event.target.value)}
+              className="w-full rounded-lg border border-border bg-background px-3 py-2 text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
+            />
+          </div>
+
+          <div>
+            <label htmlFor="admin-group-start" className="mb-1.5 block text-sm font-medium text-foreground">
+              Gruppenphase Start
+            </label>
+            <input
+              id="admin-group-start"
+              type="datetime-local"
+              value={form.group_phase_start}
+              onChange={(event) => handleChange('group_phase_start', event.target.value)}
+              className="w-full rounded-lg border border-border bg-background px-3 py-2 text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
+            />
+          </div>
+
+          <div>
+            <label htmlFor="admin-bracket-start" className="mb-1.5 block text-sm font-medium text-foreground">
+              Bracket Start
+            </label>
+            <input
+              id="admin-bracket-start"
+              type="datetime-local"
+              value={form.bracket_start}
+              onChange={(event) => handleChange('bracket_start', event.target.value)}
+              className="w-full rounded-lg border border-border bg-background px-3 py-2 text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
+            />
+          </div>
+        </div>
       </div>
 
-      {tournament.description && (
-        <p className="text-muted text-sm mb-5">{tournament.description}</p>
-      )}
-
-      {/* Stats */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
-        <Card className="p-3 text-center">
-          <div className="text-2xl font-bold text-primary">{tournament.team_size}</div>
-          <div className="text-xs text-muted">Teamgröße</div>
-        </Card>
-        <Card className="p-3 text-center">
-          <div className="text-2xl font-bold text-primary">{teamCount}</div>
-          <div className="text-xs text-muted">Teams</div>
-        </Card>
-        <Card className="p-3 text-center">
-          <div className="text-2xl font-bold text-primary">{playerCount}</div>
-          <div className="text-xs text-muted">Spieler</div>
-        </Card>
-        <Card className="p-3 text-center">
-          <div className="text-2xl font-bold text-primary">{matchCount}</div>
-          <div className="text-xs text-muted">Matches</div>
-        </Card>
-      </div>
-
-      {/* Action Buttons */}
       <div className="flex flex-wrap gap-2">
+        <Button
+          variant="primary"
+          size="sm"
+          disabled={isLoading || !form.name.trim()}
+          onClick={handleSave}
+        >
+          <PencilLine size={14} />
+          {updateMutation.isPending ? 'Speichert...' : 'Änderungen speichern'}
+        </Button>
+
         {tournament.status === 'registration' && (
-          <Button
-            variant="secondary"
-            size="sm"
-            onClick={handleAssignRandom}
-            disabled={isLoading}
-          >
+          <Button variant="secondary" size="sm" disabled={isLoading} onClick={handleAssignRandom}>
             <Shuffle size={14} />
-            {assignMutation.isPending ? 'Wird zugewiesen...' : 'Solo-Spieler zuweisen'}
+            {assignMutation.isPending ? 'Weist zu...' : 'Solo-Spieler zuweisen'}
+          </Button>
+        )}
+
+        {tournament.status === 'group_phase' && (
+          <Button variant="secondary" size="sm" disabled={isLoading} onClick={handleGenerateGroups}>
+            <Users size={14} />
+            {generateGroupsMutation.isPending ? 'Generiert...' : 'Gruppen neu generieren'}
+          </Button>
+        )}
+
+        {tournament.status === 'bracket' && (
+          <Button variant="secondary" size="sm" disabled={isLoading} onClick={handleGenerateBracket}>
+            <GitBranch size={14} />
+            {generateBracketMutation.isPending ? 'Generiert...' : 'Bracket neu generieren'}
           </Button>
         )}
 
         {action && tournament.status !== 'archived' && (
-          <Button
-            variant="primary"
-            size="sm"
-            onClick={handleAdvance}
-            disabled={isLoading}
-          >
+          <Button variant="primary" size="sm" disabled={isLoading} onClick={handleAdvance}>
             <ArrowRight size={14} />
-            {advanceMutation.isPending ? 'Wird verarbeitet...' : action.label}
+            {advanceMutation.isPending ? 'Verarbeitet...' : action.label}
           </Button>
         )}
 
-        {tournament.status === 'draft' && (
-          <Button
-            variant="danger"
-            size="sm"
-            onClick={handleDelete}
-            disabled={isLoading}
-          >
+        {['draft', 'completed', 'archived'].includes(tournament.status) && (
+          <Button variant="danger" size="sm" disabled={isLoading} onClick={handleDelete}>
             <Trash2 size={14} />
-            {deleteMutation.isPending ? 'Wird gelöscht...' : 'Löschen'}
+            {deleteMutation.isPending ? 'Löscht...' : 'Turnier löschen'}
           </Button>
         )}
       </div>
 
-      {/* Assign-Success */}
-      {assignMutation.isSuccess && assignMutation.data && (
-        <div className="mt-4 text-green-400 text-sm bg-green-500/10 border border-green-500/20 rounded-lg p-3">
-          {assignMutation.data.teams_created} Teams wurden erstellt.
+      {successMessage && (
+        <div className="flex items-center gap-2 rounded-lg border border-green-500/20 bg-green-500/10 p-3 text-sm text-green-400">
+          <CheckCircle2 size={16} />
+          <span>{successMessage}</span>
         </div>
       )}
 
-      {/* Fehler */}
       {error && (
-        <div className="mt-4 flex items-center gap-2 text-red-400 text-sm bg-red-500/10 border border-red-500/20 rounded-lg p-3">
+        <div className="flex items-center gap-2 rounded-lg border border-red-500/20 bg-red-500/10 p-3 text-sm text-red-400">
           <AlertCircle size={16} />
           <span>{error instanceof Error ? error.message : 'Ein Fehler ist aufgetreten'}</span>
         </div>
       )}
 
-      {/* Meta-Info */}
-      <div className="mt-6 pt-4 border-t border-border text-xs text-muted flex flex-wrap gap-4">
+      <div className="flex flex-wrap gap-4 border-t border-border pt-4 text-xs text-muted">
         <span>
-          <Users size={12} className="inline mr-1" />
-          Format: {tournament.bracket_format === 'single_elimination' ? 'Single Elimination' : 'Double Elimination'}
+          <CalendarRange size={12} className="mr-1 inline" />
+          Erstellt: {new Date(tournament.created_at).toLocaleString('de-DE')}
         </span>
         <span>
-          Erstellt: {new Date(tournament.created_at).toLocaleDateString('de-DE')}
+          Zuletzt geändert: {new Date(tournament.updated_at).toLocaleString('de-DE')}
         </span>
-        {tournament.registration_start && (
-          <span>
-            Anmeldung ab: {new Date(tournament.registration_start).toLocaleString('de-DE')}
-          </span>
-        )}
-        {tournament.registration_end && (
-          <span>
-            Anmeldung bis: {new Date(tournament.registration_end).toLocaleString('de-DE')}
-          </span>
-        )}
       </div>
     </Card>
   )

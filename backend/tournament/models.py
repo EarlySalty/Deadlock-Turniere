@@ -84,6 +84,17 @@ class TournamentUpdate(BaseModel):
     bracket_start: Optional[str] = None
 
 
+class TournamentSignup(BaseModel):
+    id: int
+    tournament_id: int
+    discord_id: str
+    steam_id: Optional[str] = None
+    rank: Optional[str] = None
+    rank_score: int = 0
+    team_id: Optional[int] = None
+    signed_up_at: str
+
+
 class Tournament(BaseModel):
     id: int
     name: str
@@ -188,6 +199,7 @@ class TournamentDetail(Tournament):
     teams: list[Team] = []
     groups: list[Group] = []
     bracket_matches: list[BracketMatch] = []
+    signups: list[TournamentSignup] = []
 
 
 class MatchResult(BaseModel):

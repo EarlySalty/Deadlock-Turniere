@@ -17,6 +17,7 @@ from tournament.models import (
     TeamMember,
     Tournament,
     TournamentDetail,
+    TournamentSignup,
     UserSession,
 )
 
@@ -88,6 +89,16 @@ async def _load_bracket_matches(db, tournament_id: int) -> list[BracketMatch]:  
     return [BracketMatch(**dict(r)) for r in rows]
 
 
+async def _load_signups_for_tournament(db, tournament_id: int) -> list[TournamentSignup]:  # noqa: ANN001
+    """Lädt alle Solo-/Signup-Einträge eines Turniers."""
+    cursor = await db.execute(
+        "SELECT * FROM tournament_signups WHERE tournament_id = ? ORDER BY signed_up_at DESC",
+        (tournament_id,),
+    )
+    rows = await cursor.fetchall()
+    return [TournamentSignup(**dict(r)) for r in rows]
+
+
 # ---------------------------------------------------------------------------
 # GET /api/tournaments — Liste aller Turniere (public, nicht-draft)
 # ---------------------------------------------------------------------------
@@ -137,6 +148,7 @@ async def get_tournament(tournament_id: int) -> TournamentDetail:
         teams=teams,
         groups=groups,
         bracket_matches=bracket_matches,
+        signups=[],
     )
 
 

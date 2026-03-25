@@ -19,20 +19,26 @@ export interface Tournament {
   team_size: number
   registration_start: string | null
   registration_end: string | null
+  group_phase_start: string | null
+  bracket_start: string | null
   bracket_format: BracketFormat
+  created_by: string
   created_at: string
+  updated_at: string
 }
 
 export interface TournamentDetail extends Tournament {
   teams: Team[]
   groups: Group[]
   bracket_matches: BracketMatch[]
+  signups: TournamentSignup[]
 }
 
 export interface Team {
   id: number
   tournament_id: number
   name: string
+  name_key: string
   captain_discord_id: string
   members: TeamMember[]
   created_at: string
@@ -45,6 +51,18 @@ export interface TeamMember {
   rank: string | null
   rank_score: number
   role: 'captain' | 'member'
+  joined_at: string
+}
+
+export interface TournamentSignup {
+  id: number
+  tournament_id: number
+  discord_id: string
+  steam_id: string | null
+  rank: string | null
+  rank_score: number
+  team_id: number | null
+  signed_up_at: string
 }
 
 export interface GroupMatch {
@@ -108,6 +126,8 @@ export interface TournamentUpdate {
   bracket_format?: BracketFormat
   registration_start?: string
   registration_end?: string
+  group_phase_start?: string
+  bracket_start?: string
 }
 
 export interface ManualResult {
@@ -144,4 +164,9 @@ export interface MatchFetchResult {
   winning_team: number
   duration_s: number | null
   players: MatchPlayerStats[]
+}
+
+export interface TeamMoveRequest {
+  from_team_id: number
+  discord_id: string
 }

@@ -3,12 +3,14 @@ import type {
   Tournament,
   TournamentDetail,
   Team,
+  TournamentSignup,
   TournamentCreate,
   TournamentUpdate,
   ManualResult,
   LobbyCreateResult,
   MatchStartResult,
   MatchFetchResult,
+  TeamMoveRequest,
 } from '@/types/tournament'
 
 const API_BASE = '/api'
@@ -94,6 +96,51 @@ export const fetchMatchResult = (tournamentId: number, matchId: number) =>
 export const leaveLobby = (tournamentId: number, matchId: number) =>
   request<{ success: boolean }>(`/admin/tournaments/${tournamentId}/matches/${matchId}/leave-lobby`, {
     method: 'POST',
+  })
+
+export const createAdminTeam = (tournamentId: number, name: string) =>
+  request<Team>(`/admin/tournaments/${tournamentId}/teams`, {
+    method: 'POST',
+    body: JSON.stringify({ name }),
+  })
+
+export const renameAdminTeam = (tournamentId: number, teamId: number, name: string) =>
+  request<Team>(`/admin/tournaments/${tournamentId}/teams/${teamId}`, {
+    method: 'PUT',
+    body: JSON.stringify({ name }),
+  })
+
+export const deleteAdminTeam = (tournamentId: number, teamId: number) =>
+  request<{ status: string; team_id: number }>(`/admin/tournaments/${tournamentId}/teams/${teamId}`, {
+    method: 'DELETE',
+  })
+
+export const changeAdminCaptain = (tournamentId: number, teamId: number, discordId: string) =>
+  request<Team>(`/admin/tournaments/${tournamentId}/teams/${teamId}/captain`, {
+    method: 'PUT',
+    body: JSON.stringify({ discord_id: discordId }),
+  })
+
+export const removeAdminTeamMember = (tournamentId: number, teamId: number, discordId: string) =>
+  request<Team>(`/admin/tournaments/${tournamentId}/teams/${teamId}/members/${discordId}`, {
+    method: 'DELETE',
+  })
+
+export const moveAdminTeamMember = (tournamentId: number, targetTeamId: number, data: TeamMoveRequest) =>
+  request<Team>(`/admin/tournaments/${tournamentId}/teams/${targetTeamId}/members/move`, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  })
+
+export const assignSignupToAdminTeam = (tournamentId: number, teamId: number, signupId: number) =>
+  request<Team>(`/admin/tournaments/${tournamentId}/teams/${teamId}/signups/assign`, {
+    method: 'POST',
+    body: JSON.stringify({ signup_id: signupId }),
+  })
+
+export const deleteAdminSignup = (tournamentId: number, signupId: number) =>
+  request<TournamentSignup>(`/admin/tournaments/${tournamentId}/signups/${signupId}`, {
+    method: 'DELETE',
   })
 
 // Groups & Bracket Generation
