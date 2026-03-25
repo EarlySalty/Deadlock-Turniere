@@ -164,7 +164,7 @@ async def init_db() -> None:
 
 @contextlib.asynccontextmanager
 async def get_db() -> AsyncIterator[aiosqlite.Connection]:
-    """Async Context-Manager fuer DB-Verbindungen."""
+    """Async Context-Manager für DB-Verbindungen."""
     db = await aiosqlite.connect(str(settings.DATABASE_PATH))
     try:
         await db.execute("PRAGMA foreign_keys=ON;")
@@ -175,7 +175,7 @@ async def get_db() -> AsyncIterator[aiosqlite.Connection]:
 
 
 async def _ensure_schema_upgrades(db: aiosqlite.Connection) -> None:
-    """Ergaenzt Spalten in bestehenden Installationen idempotent."""
+    """Ergänzt Spalten in bestehenden Installationen idempotent."""
     await _ensure_column(db, "bracket_matches", "match_duration_s", "INTEGER")
     await _ensure_column(db, "bracket_matches", "match_stats", "TEXT")
 

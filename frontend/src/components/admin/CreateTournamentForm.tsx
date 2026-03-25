@@ -84,10 +84,10 @@ export default function CreateTournamentForm() {
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          {/* Teamgroesse */}
+          {/* Teamgröße */}
           <div>
             <label htmlFor="team-size" className="block text-sm font-medium text-foreground mb-1.5">
-              Teamgroesse
+              Teamgröße
             </label>
             <select
               id="team-size"

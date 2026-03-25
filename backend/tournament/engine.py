@@ -24,12 +24,12 @@ VALID_STATUS_TRANSITIONS: dict[str, list[str]] = {
 
 
 def get_valid_status_transitions() -> dict[str, list[str]]:
-    """Gibt die erlaubten Status-Uebergaenge zurueck."""
+    """Gibt die erlaubten Status-Übergänge zurück."""
     return VALID_STATUS_TRANSITIONS
 
 
 async def assign_random_teams(tournament_id: int, team_size: int) -> int:
-    """Verteilt Solo-Anmeldungen (ohne team_id) zufaellig auf neue Teams.
+    """Verteilt Solo-Anmeldungen (ohne team_id) zufällig auf neue Teams.
 
     Erstellt Teams mit generierten Namen (Team Alpha, Team Bravo, etc.).
     Returns: Anzahl erstellter Teams.
@@ -47,7 +47,7 @@ async def assign_random_teams(tournament_id: int, team_size: int) -> int:
         if not signups:
             return 0
 
-        # Zufaellig mischen
+        # Zufällig mischen
         signup_list = list(signups)
         random.shuffle(signup_list)
 
@@ -58,7 +58,7 @@ async def assign_random_teams(tournament_id: int, team_size: int) -> int:
         )
         existing_keys = {row["name_key"] for row in await cursor.fetchall()}
 
-        # Verfuegbare Team-Namen filtern
+        # Verfügbare Team-Namen filtern
         available_names = [
             n for n in TEAM_NAMES if f"team {n.lower()}" not in existing_keys
         ]
@@ -85,11 +85,11 @@ async def assign_random_teams(tournament_id: int, team_size: int) -> int:
             )
             team_id = cursor.lastrowid
 
-            # Mitglieder hinzufuegen
+            # Mitglieder hinzufügen
             for i, signup in enumerate(chunk):
                 role = "captain" if i == 0 else "member"
 
-                # Steam-Link laden fuer Rank-Score
+                # Steam-Link laden für Rank-Score
                 steam_data = await get_steam_link(signup["discord_id"])
                 steam_id = steam_data["steam_id"] if steam_data else signup["steam_id"]
                 rank = steam_data["rank"] if steam_data else signup["rank"]
@@ -101,7 +101,7 @@ async def assign_random_teams(tournament_id: int, team_size: int) -> int:
                     (team_id, signup["discord_id"], steam_id, rank, score, role),
                 )
 
-                # Signup mit Team verknuepfen
+                # Signup mit Team verknüpfen
                 await db.execute(
                     "UPDATE tournament_signups SET team_id = ? WHERE id = ?",
                     (team_id, signup["id"]),
@@ -141,7 +141,7 @@ async def _audit(db, action: str, user_id: str | None, details: str) -> None:  #
 
 
 async def generate_groups(tournament_id: int, num_groups: int = 4) -> list[int]:
-    """Generiert Gruppen fuer ein Turnier mit Seed-basierter Verteilung.
+    """Generiert Gruppen für ein Turnier mit Seed-basierter Verteilung.
 
     Snake-Draft Seeding: Teams nach Rank-Score sortiert, dann im Schlangen-Muster verteilt.
     z.B. bei 4 Gruppen und 16 Teams:
@@ -153,7 +153,7 @@ async def generate_groups(tournament_id: int, num_groups: int = 4) -> list[int]:
     Returns: Liste der erstellten Group IDs.
     """
     async with get_db() as db:
-        # Turnier pruefen
+        # Turnier prüfen
         cursor = await db.execute("SELECT * FROM tournaments WHERE id = ?", (tournament_id,))
         tournament = await cursor.fetchone()
         if not tournament:
@@ -164,9 +164,9 @@ async def generate_groups(tournament_id: int, num_groups: int = 4) -> list[int]:
         teams = await cursor.fetchall()
 
         if len(teams) < 2:
-            raise ValueError("Mindestens 2 Teams benoetigt")
+            raise ValueError("Mindestens 2 Teams benötigt")
 
-        # Teams nach Average Rank-Score sortieren (hoechster zuerst)
+        # Teams nach Average Rank-Score sortieren (höchster zuerst)
         team_scores = []
         for t in teams:
             cursor = await db.execute("SELECT rank_score FROM team_members WHERE team_id = ?", (t["id"],))
@@ -180,7 +180,7 @@ async def generate_groups(tournament_id: int, num_groups: int = 4) -> list[int]:
         actual_groups = min(num_groups, len(team_scores) // 2)
         actual_groups = max(2, actual_groups)
 
-        # Bestehende Gruppen loeschen (falls regeneriert)
+        # Bestehende Gruppen löschen (falls regeneriert)
         cursor = await db.execute("SELECT id FROM groups WHERE tournament_id = ?", (tournament_id,))
         old_groups = await cursor.fetchall()
         for g in old_groups:
@@ -217,7 +217,7 @@ async def generate_groups(tournament_id: int, num_groups: int = 4) -> list[int]:
 
 
 async def generate_group_matches(tournament_id: int) -> int:
-    """Generiert Round-Robin Matches fuer alle Gruppen eines Turniers.
+    """Generiert Round-Robin Matches für alle Gruppen eines Turniers.
 
     Jedes Team spielt einmal gegen jedes andere Team in seiner Gruppe.
     Returns: Anzahl generierter Matches.
@@ -230,7 +230,7 @@ async def generate_group_matches(tournament_id: int) -> int:
         for g in groups:
             group_id = g["id"]
 
-            # Bestehende Matches loeschen
+            # Bestehende Matches löschen
             await db.execute("DELETE FROM group_matches WHERE group_id = ?", (group_id,))
 
             # Teams in dieser Gruppe
@@ -260,12 +260,12 @@ async def generate_bracket(tournament_id: int, bracket_format: str = "single_eli
     """Generiert einen Elimination-Bracket aus den Gruppen-Ergebnissen.
 
     Seeding: Gruppensieger + Zweitplatzierte, sortiert nach Punkten.
-    Bracket: Macht-2 Aufstockung mit BYEs. Hoechster Seed trifft niedrigsten.
+    Bracket: Macht-2 Aufstockung mit BYEs. Höchster Seed trifft niedrigsten.
 
     Returns: Anzahl generierter Bracket-Matches.
     """
     async with get_db() as db:
-        # Bestehende Bracket-Matches loeschen
+        # Bestehende Bracket-Matches löschen
         await db.execute("DELETE FROM bracket_matches WHERE tournament_id = ?", (tournament_id,))
 
         # Gruppen-Standings laden (Top 2 pro Gruppe)
@@ -305,12 +305,12 @@ async def generate_bracket(tournament_id: int, bracket_format: str = "single_eli
             ]
 
         if len(qualified_teams) < 2:
-            raise ValueError("Mindestens 2 Teams fuer Bracket benoetigt")
+            raise ValueError("Mindestens 2 Teams für Bracket benötigt")
 
         # Sortieren: Gruppensieger zuerst, dann nach Punkten
         qualified_teams.sort(key=lambda x: (-x["points"], -x["wins"], x["seed"]))
 
-        # Bracket-Groesse auf naechste Zweierpotenz aufstocken
+        # Bracket-Größe auf nächste Zweierpotenz aufstocken
         num_teams = len(qualified_teams)
         bracket_size = 1
         while bracket_size < num_teams:
@@ -348,7 +348,7 @@ async def generate_bracket(tournament_id: int, bracket_format: str = "single_eli
             )
             match_count += 1
 
-        # Weitere Runden generieren (noch ohne Teams — werden durch Ergebnisse gefuellt)
+        # Weitere Runden generieren (noch ohne Teams — werden durch Ergebnisse gefüllt)
         matches_in_round = first_round_matches // 2
         for round_num in range(2, num_rounds + 1):
             for pos in range(matches_in_round):
@@ -361,7 +361,7 @@ async def generate_bracket(tournament_id: int, bracket_format: str = "single_eli
                 match_count += 1
             matches_in_round = max(1, matches_in_round // 2)
 
-        # BYE-Gewinner in naechste Runde propagieren
+        # BYE-Gewinner in nächste Runde propagieren
         await _propagate_byes(db, tournament_id)
 
         await db.commit()
@@ -370,7 +370,7 @@ async def generate_bracket(tournament_id: int, bracket_format: str = "single_eli
 
 
 async def _propagate_byes(db, tournament_id: int) -> None:  # noqa: ANN001
-    """Propagiert BYE-Gewinner automatisch in die naechste Runde."""
+    """Propagiert BYE-Gewinner automatisch in die nächste Runde."""
     cursor = await db.execute(
         "SELECT * FROM bracket_matches "
         "WHERE tournament_id = ? AND status = 'completed' AND winner_id IS NOT NULL "
@@ -384,11 +384,11 @@ async def _propagate_byes(db, tournament_id: int) -> None:  # noqa: ANN001
         position = match["position"]
         winner_id = match["winner_id"]
 
-        # Naechste Runde: position // 2
+        # Nächste Runde: position // 2
         next_round = round_num + 1
         next_position = position // 2
 
-        # Pruefen ob naechste Runde existiert
+        # Prüfen ob nächste Runde existiert
         cursor = await db.execute(
             "SELECT * FROM bracket_matches WHERE tournament_id = ? AND round = ? AND position = ?",
             (tournament_id, next_round, next_position),
@@ -411,7 +411,7 @@ async def _propagate_byes(db, tournament_id: int) -> None:  # noqa: ANN001
 
 
 async def advance_bracket_winner(tournament_id: int, match_id: int, winner_id: int) -> None:
-    """Nach einem Bracket-Match: Gewinner in die naechste Runde setzen."""
+    """Nach einem Bracket-Match: Gewinner in die nächste Runde setzen."""
     async with get_db() as db:
         cursor = await db.execute("SELECT * FROM bracket_matches WHERE id = ?", (match_id,))
         match = await cursor.fetchone()

@@ -357,7 +357,7 @@ Relevante Dateien:
 | `citadel_gcmessages_common.proto` | Shared Types (CSOCitadelParty, Enums, etc.) |
 | `steammessages.proto` | Basis-Types (SO Cache Messages) |
 
-Diese Dateien muessen heruntergeladen und in das Steam Bot Projekt eingebunden werden, damit `protobufjs` sie laden kann.
+Diese Dateien müssen heruntergeladen und in das Steam Bot Projekt eingebunden werden, damit `protobufjs` sie laden kann.
 
 ### 4.2 Message IDs (GC)
 
@@ -408,26 +408,26 @@ ECitadelGameMode:
 ECitadelRegionMode:
   k_ECitadelRegionMode_ROW      = 0   // Rest of World
   k_ECitadelRegionMode_Europe   = 1   // Europa
-  k_ECitadelRegionMode_SEAsia   = 2   // Suedostasien
-  k_ECitadelRegionMode_SAmerica = 3   // Suedamerika
+  k_ECitadelRegionMode_SEAsia   = 2   // Südostasien
+  k_ECitadelRegionMode_SAmerica = 3   // Südamerika
   k_ECitadelRegionMode_Russia   = 4   // Russland
   k_ECitadelRegionMode_Oceania  = 5   // Ozeanien
 ```
 
 ```
-EAction (PartyAction, fuer CMsgClientToGCPartyAction):
+EAction (PartyAction, für CMsgClientToGCPartyAction):
   k_eKickUser        = 0    // Spieler aus Lobby kicken
-  k_eSetPlayerType   = 1    // Spielertyp aendern
+  k_eSetPlayerType   = 1    // Spielertyp ändern
   k_eSetMemberTeam   = 2    // Spieler-Team setzen (0=Amber, 1=Sapphire)
   k_eSetPlayerSlot   = 3    // Spieler-Slot setzen (0-11=Spieler, 31=Spectator)
-  k_eShuffleLobby    = 4    // Teams zufaellig mischen
+  k_eShuffleLobby    = 4    // Teams zufällig mischen
 ```
 
-**Hinweis zu k_eSetPlayerSlot:** Der Wert des `action_id`-Feldes ist kontextabhaengig. In der aktuellen Protobuf-Definition (Stand: SteamDatabase) hat `k_eSetPlayerSlot` den enum-Wert `10`. Dies kann sich aendern — immer die aktuelle .proto-Datei pruefen.
+**Hinweis zu k_eSetPlayerSlot:** Der Wert des `action_id`-Feldes ist kontextabhängig. In der aktuellen Protobuf-Definition (Stand: SteamDatabase) hat `k_eSetPlayerSlot` den enum-Wert `10`. Dies kann sich ändern — immer die aktuelle .proto-Datei prüfen.
 
 ### 4.4 CSOCitadelParty Struktur (SO Cache)
 
-Das zentrale Datenobjekt das der GC fuer jede Party/Lobby im SO Cache haelt:
+Das zentrale Datenobjekt das der GC für jede Party/Lobby im SO Cache hält:
 
 ```protobuf
 message CSOCitadelParty {
@@ -436,7 +436,7 @@ message CSOCitadelParty {
   repeated Invite invites = 3;                               // Offene Einladungen
   optional string chat_name = 4;                             // Chat-Kanal-Name
   optional uint64 join_code = 6;                             // PARTY-CODE (das was Spieler eingeben)
-  optional ECitadelLobbyTeam team_preference = 7;            // Team-Praeferenz
+  optional ECitadelLobbyTeam team_preference = 7;            // Team-Präferenz
   optional ECitadelMatchMode match_mode = 9;                 // Match-Modus
   optional ECitadelGameMode game_mode = 10;                  // Spiel-Modus
   optional bool is_private_lobby = 16;                       // true bei Custom Lobbies
@@ -447,7 +447,7 @@ message CSOCitadelParty {
     optional ECitadelLobbyTeam team = 5;   // Team (Amber=0, Sapphire=1)
     optional uint32 player_slot = 6;       // Slot (0-11=Spieler, 31=Spectator)
     optional bool is_ready = 11;           // Ready-Status
-    optional uint32 hero_id = 17;          // Gewaehlter Held
+    optional uint32 hero_id = 17;          // Gewählter Held
   }
 
   message PrivateLobbySettings {
@@ -458,11 +458,11 @@ message CSOCitadelParty {
 }
 ```
 
-**Wichtige Felder fuer die Integration:**
-- `party_id` — Wird fuer ALLE nachfolgenden Operationen benoetigt
+**Wichtige Felder für die Integration:**
+- `party_id` — Wird für ALLE nachfolgenden Operationen benötigt
 - `join_code` — Der Code den Spieler im Deadlock-Client eingeben um der Lobby beizutreten
 - `members` — Zeigt wer in der Lobby ist, in welchem Team und Slot
-- `members[].is_ready` — Zeigt ob ein Spieler ready ist (relevant fuer Match-Start)
+- `members[].is_ready` — Zeigt ob ein Spieler ready ist (relevant für Match-Start)
 
 ---
 
@@ -475,12 +475,12 @@ message CSOCitadelParty {
 | Datei | Aktion | Beschreibung |
 |-------|--------|-------------|
 | `src/custom_lobby.js` | **NEU** | Komplettes Custom-Lobby-Modul |
-| `src/tasks.js` | **AENDERN** | Neue Task-Types im Switch registrieren |
-| `src/events.js` | **AENDERN** | GC Response Handler + SO Cache Handler |
+| `src/tasks.js` | **ÄNDERN** | Neue Task-Types im Switch registrieren |
+| `src/events.js` | **ÄNDERN** | GC Response Handler + SO Cache Handler |
 
 ### 5.2 custom_lobby.js — Modul-Struktur
 
-Folgt dem bestehenden Pattern im Bot: Export ist eine Funktion die `sharedCtx` empfaengt und ein Objekt mit Handler-Funktionen zurueckgibt.
+Folgt dem bestehenden Pattern im Bot: Export ist eine Funktion die `sharedCtx` empfängt und ein Objekt mit Handler-Funktionen zurückgibt.
 
 ```javascript
 // src/custom_lobby.js
@@ -496,7 +496,7 @@ module.exports = function customLobbyModule(sharedCtx) {
   const partyCache = new Map();
 
   // Pending Promises: Message-ID -> { resolve, reject, timeout }
-  // Damit wir auf GC-Responses warten koennen
+  // Damit wir auf GC-Responses warten können
   const pendingResponses = new Map();
 
   // ============================================================
@@ -538,7 +538,7 @@ module.exports = function customLobbyModule(sharedCtx) {
   }
 
   /**
-   * Wartet auf einen SO Cache Update der den join_code enthaelt.
+   * Wartet auf einen SO Cache Update der den join_code enthält.
    * @param {string} partyId - Die Party-ID
    * @param {number} timeoutMs - Timeout in ms
    * @returns {Promise<Object>} Das CSOCitadelParty Objekt mit join_code
@@ -562,7 +562,7 @@ module.exports = function customLobbyModule(sharedCtx) {
   }
 
   /**
-   * Formatiert einen join_code als XXX-XXX-XXX fuer die Anzeige.
+   * Formatiert einen join_code als XXX-XXX-XXX für die Anzeige.
    */
   function formatPartyCode(joinCode) {
     const str = String(joinCode);
@@ -672,8 +672,8 @@ module.exports = function customLobbyModule(sharedCtx) {
       return { success: false, error: `GC returned result=${response.result}` };
     }
 
-    // match_id kommt moeglicherweise asynchron ueber SO Cache
-    // Hier erstmal ohne match_id zurueckgeben, spaeter per GC_GET_MATCH_RESULT abfragen
+    // match_id kommt möglicherweise asynchron über SO Cache
+    // Hier erstmal ohne match_id zurückgeben, später per GC_GET_MATCH_RESULT abfragen
     return {
       success: true,
       match_id: response.match_id || null,
@@ -706,20 +706,20 @@ module.exports = function customLobbyModule(sharedCtx) {
       match_id: matchId,
     });
 
-    // Message-ID und Response-ID haengen von der konkreten Proto-Definition ab
+    // Message-ID und Response-ID hängen von der konkreten Proto-Definition ab
     // CMsgClientToGCGetMatchMetaData und Response
     const response = await sendAndWaitForResponse(
-      /* sendMsgId */ 9091, // Beispiel — exakte ID aus Proto pruefen
+      /* sendMsgId */ 9091, // Beispiel — exakte ID aus Proto prüfen
       encoded,
-      /* responseMsgId */ 9092, // Beispiel — exakte ID aus Proto pruefen
-      30000 // Laengerer Timeout, da GC den Match ggf. erst laden muss
+      /* responseMsgId */ 9092, // Beispiel — exakte ID aus Proto prüfen
+      30000 // Längerer Timeout, da GC den Match ggf. erst laden muss
     );
 
     if (!response || response.result !== 1) {
       return { success: false, error: 'Match result not available' };
     }
 
-    // Response parsen — Struktur haengt von der konkreten Proto ab
+    // Response parsen — Struktur hängt von der konkreten Proto ab
     const players = (response.players || []).map(p => ({
       account_id: p.account_id,
       team: p.team,
@@ -744,8 +744,8 @@ module.exports = function customLobbyModule(sharedCtx) {
   // Encoding-Funktionen (Protobuf)
   // ============================================================
 
-  // Diese Funktionen muessen die Proto-Definitionen laden und Messages encodieren.
-  // Konkretes Pattern haengt davon ab, wie protobufjs im Bot eingebunden ist.
+  // Diese Funktionen müssen die Proto-Definitionen laden und Messages encodieren.
+  // Konkretes Pattern hängt davon ab, wie protobufjs im Bot eingebunden ist.
   //
   // Beispiel mit protobufjs:
   //   const root = protobuf.loadSync('path/to/citadel_gcmessages_client.proto');
@@ -792,7 +792,7 @@ module.exports = function customLobbyModule(sharedCtx) {
 
   /**
    * Wird aufgerufen wenn eine GC Response-Message empfangen wird.
-   * Loest das entsprechende Promise in pendingResponses aus.
+   * Löst das entsprechende Promise in pendingResponses aus.
    */
   function handleGCResponse(msgId, decodedPayload) {
     const pending = pendingResponses.get(msgId);
@@ -841,7 +841,7 @@ module.exports = function customLobbyModule(sharedCtx) {
 Im bestehenden `processNextTask()` Switch-Block die neuen Task-Types registrieren:
 
 ```javascript
-// In der switch(task.type) Struktur hinzufuegen:
+// In der switch(task.type) Struktur hinzufügen:
 
 case 'GC_CREATE_CUSTOM_LOBBY':
   return await sharedCtx.customLobby.createCustomLobby(task);
@@ -871,7 +871,7 @@ sharedCtx.customLobby = customLobbyModule(sharedCtx);
 
 ### 5.4 events.js — SO Cache Handler und GC Response Routing
 
-In der bestehenden `receivedFromGC` Handler-Funktion muessen die neuen Response-Messages geroutet werden:
+In der bestehenden `receivedFromGC` Handler-Funktion müssen die neuen Response-Messages geroutet werden:
 
 ```javascript
 // Innerhalb des receivedFromGC Handlers:
@@ -896,7 +896,7 @@ switch (messageId) {
   // === SO Cache Updates ===
   case 24: // CMsgSOCacheSubscribed
   case 25: // CMsgSOSingleObject
-    // SO Cache Messages enthalten Type-IDs fuer verschiedene Objekte.
+    // SO Cache Messages enthalten Type-IDs für verschiedene Objekte.
     // CSOCitadelParty hat eine bestimmte Type-ID (aus Proto ablesen).
     // Wenn der Typ CSOCitadelParty ist:
     if (sharedCtx.customLobby) {
@@ -909,11 +909,11 @@ switch (messageId) {
 }
 ```
 
-**SO Cache Parsing:** Der GC sendet SO Cache Updates als `CMsgSOCacheSubscribed` (kompletter Cache) oder `CMsgSOSingleObject` (einzelnes Objekt). Jedes Objekt hat einen `type_id` der identifiziert um welchen Typ es sich handelt. Die `type_id` fuer `CSOCitadelParty` muss aus den Proto-Dateien abgelesen werden.
+**SO Cache Parsing:** Der GC sendet SO Cache Updates als `CMsgSOCacheSubscribed` (kompletter Cache) oder `CMsgSOSingleObject` (einzelnes Objekt). Jedes Objekt hat einen `type_id` der identifiziert um welchen Typ es sich handelt. Die `type_id` für `CSOCitadelParty` muss aus den Proto-Dateien abgelesen werden.
 
 ### 5.5 Protobuf Encoding/Decoding
 
-Zwei Ansaetze sind moeglich:
+Zwei Ansätze sind möglich:
 
 **Ansatz 1: protobufjs (empfohlen)**
 
@@ -991,7 +991,7 @@ client.on('receivedFromGC', (appId, msgType, payload) => {
   if (appId !== DEADLOCK_APP_ID) return;
 
   const messageId = msgType & ~PROTO_MASK;  // Mask entfernen
-  // messageId ist jetzt z.B. 9124 fuer PartyCreateResponse
+  // messageId ist jetzt z.B. 9124 für PartyCreateResponse
 
   // payload ist ein Buffer mit dem encoded Protobuf Response
   const decoded = ResponseType.decode(payload);
@@ -1006,10 +1006,10 @@ client.on('receivedFromGC', (appId, msgType, payload) => {
 
 | Datei | Aktion | Beschreibung |
 |-------|--------|-------------|
-| `backend/match/steam_bridge.py` | **AENDERN** | Task Queue Client (aktuell Stub) |
-| `backend/match/manager.py` | **AENDERN** | Match Lifecycle Management (aktuell Stub) |
-| `backend/tournament/admin_routes.py` | **AENDERN** | Neue Admin-API Endpoints |
-| `backend/config.py` | **AENDERN** | `STEAM_BRIDGE_DB_PATH` hinzufuegen |
+| `backend/match/steam_bridge.py` | **ÄNDERN** | Task Queue Client (aktuell Stub) |
+| `backend/match/manager.py` | **ÄNDERN** | Match Lifecycle Management (aktuell Stub) |
+| `backend/tournament/admin_routes.py` | **ÄNDERN** | Neue Admin-API Endpoints |
+| `backend/config.py` | **ÄNDERN** | `STEAM_BRIDGE_DB_PATH` hinzufügen |
 
 ### 6.2 config.py — Neue Einstellung
 
@@ -1023,7 +1023,7 @@ STEAM_BRIDGE_DB_PATH = r"C:\Users\Nani-Admin\Documents\Deadlock\service\deadlock
 ```python
 """
 Steam Bridge — Task Queue Client.
-Kommuniziert mit dem Steam Bot ueber die steam_tasks SQLite-Tabelle.
+Kommuniziert mit dem Steam Bot über die steam_tasks SQLite-Tabelle.
 """
 
 import asyncio
@@ -1092,7 +1092,7 @@ async def poll_task_result(task_id: int, timeout_s: int = 60, poll_interval_s: f
 
 async def get_task_status(task_id: int) -> dict | None:
     """
-    Gibt den aktuellen Status eines Tasks zurueck (ohne zu warten).
+    Gibt den aktuellen Status eines Tasks zurück (ohne zu warten).
     """
     async with aiosqlite.connect(STEAM_DB) as db:
         db.row_factory = aiosqlite.Row
@@ -1110,7 +1110,7 @@ async def get_task_status(task_id: int) -> dict | None:
 ```python
 """
 Match Manager — Steuert den Lifecycle von Custom Matches.
-Orchestriert die Kommunikation mit dem Steam Bot ueber steam_bridge.
+Orchestriert die Kommunikation mit dem Steam Bot über steam_bridge.
 """
 
 import json
@@ -1120,7 +1120,7 @@ from backend.database import get_db
 
 async def create_lobby(tournament_id: int, match_id: int, game_mode: int = 1, region_mode: int = 1) -> dict:
     """
-    Erstellt eine Custom Lobby fuer ein Bracket-Match.
+    Erstellt eine Custom Lobby für ein Bracket-Match.
 
     1. Schreibt GC_CREATE_CUSTOM_LOBBY Task
     2. Wartet auf Ergebnis (party_id + join_code)
@@ -1140,7 +1140,7 @@ async def create_lobby(tournament_id: int, match_id: int, game_mode: int = 1, re
         },
     )
 
-    # Auf Ergebnis warten (max 30s fuer Lobby-Erstellung)
+    # Auf Ergebnis warten (max 30s für Lobby-Erstellung)
     result = await steam_bridge.poll_task_result(task_id, timeout_s=30)
 
     if not result.get("success"):
@@ -1242,7 +1242,7 @@ async def fetch_match_result(match_id: int) -> dict:
     1. Liest deadlock_match_id aus bracket_matches
     2. Holt Ergebnis via GC_GET_MATCH_RESULT
     3. Bestimmt Gewinner-Team und updated bracket_matches
-    4. Triggert Bracket-Advancement (Gewinner in naechste Runde)
+    4. Triggert Bracket-Advancement (Gewinner in nächste Runde)
 
     Returns:
         Dict mit winning_team, duration, player stats
@@ -1278,14 +1278,14 @@ async def fetch_match_result(match_id: int) -> dict:
         )
         await db.commit()
 
-    # TODO: Bracket-Advancement triggern (Gewinner in naechste Runde setzen)
+    # TODO: Bracket-Advancement triggern (Gewinner in nächste Runde setzen)
     # await advance_bracket(match_id, winner_id)
 
     return result
 
 
 async def leave_lobby(match_id: int) -> dict:
-    """Bot verlaesst die Lobby (optional, nach Match-Start)."""
+    """Bot verlässt die Lobby (optional, nach Match-Start)."""
     party_id = await _get_party_id(match_id)
 
     task_id = await steam_bridge.create_task(
@@ -1314,7 +1314,7 @@ async def _get_party_id(match_id: int) -> str:
 ### 6.5 Neue Admin API Endpoints
 
 ```python
-# In admin_routes.py hinzufuegen:
+# In admin_routes.py hinzufügen:
 
 from backend.match import manager as match_manager
 from fastapi import HTTPException
@@ -1322,7 +1322,7 @@ from fastapi import HTTPException
 
 @router.post("/api/admin/tournaments/{tid}/matches/{mid}/create-lobby")
 async def create_lobby(tid: int, mid: int, user=Depends(require_mod)):
-    """Erstellt eine Custom Lobby fuer ein Bracket-Match."""
+    """Erstellt eine Custom Lobby für ein Bracket-Match."""
     try:
         result = await match_manager.create_lobby(tid, mid)
         return {"party_code": result["party_code_display"], "party_id": result["party_id"]}
@@ -1334,7 +1334,7 @@ async def create_lobby(tid: int, mid: int, user=Depends(require_mod)):
 
 @router.post("/api/admin/tournaments/{tid}/matches/{mid}/start")
 async def start_match(tid: int, mid: int, user=Depends(require_mod)):
-    """Startet das Custom Match (alle Spieler muessen in der Lobby sein)."""
+    """Startet das Custom Match (alle Spieler müssen in der Lobby sein)."""
     try:
         result = await match_manager.start_match(tid, mid)
         return {"success": True, "match_id": result.get("match_id")}
@@ -1358,7 +1358,7 @@ async def fetch_result(tid: int, mid: int, user=Depends(require_mod)):
 
 @router.post("/api/admin/tournaments/{tid}/matches/{mid}/leave-lobby")
 async def leave_lobby(tid: int, mid: int, user=Depends(require_mod)):
-    """Bot verlaesst die Lobby (optional, nach Match-Start)."""
+    """Bot verlässt die Lobby (optional, nach Match-Start)."""
     try:
         result = await match_manager.leave_lobby(mid)
         return result
@@ -1366,7 +1366,7 @@ async def leave_lobby(tid: int, mid: int, user=Depends(require_mod)):
         raise HTTPException(status_code=502, detail=str(e))
 ```
 
-### 6.6 bracket_matches Tabelle — Benoetigte Spalten
+### 6.6 bracket_matches Tabelle — Benötigte Spalten
 
 Die `bracket_matches` Tabelle muss um folgende Spalten erweitert werden (falls nicht vorhanden):
 
@@ -1384,7 +1384,7 @@ ALTER TABLE bracket_matches ADD COLUMN match_stats TEXT;          -- JSON mit Sp
 
 ### 7.1 Match-Admin Panel
 
-Im Admin-Bereich soll fuer jedes Bracket-Match ein Steuerungs-Panel angezeigt werden:
+Im Admin-Bereich soll für jedes Bracket-Match ein Steuerungs-Panel angezeigt werden:
 
 **Buttons und Aktionen:**
 
@@ -1393,13 +1393,13 @@ Im Admin-Bereich soll fuer jedes Bracket-Match ein Steuerungs-Panel angezeigt we
 | "Lobby erstellen" | `POST create-lobby` | `status = pending/checkin` | Erstellt Lobby, zeigt Party-Code |
 | "Match starten" | `POST start` | `status = lobby_created` | Startet Match (Bot -> Spectator -> Ready -> Start) |
 | "Ergebnis abrufen" | `POST fetch-result` | `status = in_progress` | Holt Ergebnis vom GC, updated Bracket |
-| "Lobby verlassen" | `POST leave-lobby` | `status = in_progress` | Bot verlaesst Lobby (optional) |
+| "Lobby verlassen" | `POST leave-lobby` | `status = in_progress` | Bot verlässt Lobby (optional) |
 | "Manuell eingeben" | Bestehender Endpoint | Jederzeit | Fallback: manuelles Ergebnis |
 
 **Party-Code Anzeige:**
 - Nach "Lobby erstellen" wird der Party-Code gross und gut lesbar angezeigt
 - Copy-to-Clipboard Button
-- Format: `XXX-XXX-XXX` (mit Bindestrichen fuer bessere Lesbarkeit)
+- Format: `XXX-XXX-XXX` (mit Bindestrichen für bessere Lesbarkeit)
 
 **Loading States:**
 - Waehrend GC-Kommunikation: Spinner + "Lobby wird erstellt..." / "Match wird gestartet..." etc.
@@ -1412,17 +1412,17 @@ Im `BracketMatch`-Component den Status visuell darstellen:
 | Status | Anzeige | Styling |
 |--------|---------|---------|
 | `pending` | "Ausstehend" | Grau |
-| `checkin` | "Check-in laeuft" | Gelb/Orange |
+| `checkin` | "Check-in läuft" | Gelb/Orange |
 | `lobby_created` | "Lobby erstellt" + Party-Code | Blau |
-| `in_progress` | "Laeuft" + pulsierender Indikator | Gruen pulsierend |
-| `completed` | Gewinner-Team hervorgehoben | Gruen |
+| `in_progress` | "Laeuft" + pulsierender Indikator | Grün pulsierend |
+| `completed` | Gewinner-Team hervorgehoben | Grün |
 | `forfeit` | "Aufgegeben" | Rot |
 | `cancelled` | "Abgesagt" | Grau durchgestrichen |
 
 ### 7.3 API-Calls (Frontend)
 
 ```typescript
-// In api/client.ts oder aehnlich:
+// In api/client.ts oder ähnlich:
 
 export async function createLobby(tournamentId: number, matchId: number) {
   const res = await fetch(`/api/admin/tournaments/${tournamentId}/matches/${matchId}/create-lobby`, {
@@ -1454,7 +1454,7 @@ export async function fetchMatchResult(tournamentId: number, matchId: number) {
 
 ---
 
-## 8. Vollstaendiger Custom Match Flow
+## 8. Vollständiger Custom Match Flow
 
 ```
 Schritt 1: Admin klickt "Lobby erstellen" im Match-Panel
@@ -1470,9 +1470,9 @@ Schritt 1: Admin klickt "Lobby erstellen" im Match-Panel
            -> Frontend: zeigt Party-Code gross an (z.B. "987-654-321")
 
 Schritt 2: Admin kopiert Party-Code und teilt ihn den Spielern mit
-           -> Spieler oeffnen Deadlock -> Play -> Custom Lobby -> Join with Code
+           -> Spieler öffnen Deadlock -> Play -> Custom Lobby -> Join with Code
            -> Spieler geben den Code ein und joinen die Lobby
-           -> Alle 12 Spieler (6v6) muessen in der Lobby sein
+           -> Alle 12 Spieler (6v6) müssen in der Lobby sein
 
 Schritt 3: Admin klickt "Match starten"
            -> Frontend: POST /api/admin/tournaments/1/matches/42/start
@@ -1492,12 +1492,12 @@ Schritt 5: Match endet -> Admin klickt "Ergebnis abrufen"
            -> Steam Bot: fragt GC nach Match-Ergebnis
            -> GC: liefert winning_team, duration, player stats
            -> Backend: bestimmt winner_id, updated bracket_matches
-           -> Backend: triggert Bracket-Advancement (Gewinner in naechste Runde)
+           -> Backend: triggert Bracket-Advancement (Gewinner in nächste Runde)
            -> Frontend: aktualisiert Bracket-Ansicht, Gewinner hervorgehoben
 
 Fallback:  Admin kann jederzeit manuell Ergebnis eingeben
            -> POST /api/admin/tournaments/1/matches/42/result (bestehender Endpoint)
-           -> Ueberschreibt GC-Ergebnis falls noetig
+           -> Ueberschreibt GC-Ergebnis falls nötig
 ```
 
 ---
@@ -1509,16 +1509,16 @@ Fallback:  Admin kann jederzeit manuell Ergebnis eingeben
 | Szenario | Verhalten |
 |----------|-----------|
 | GC antwortet nicht | Task bleibt `RUNNING`, Backend bekommt TimeoutError nach 30s |
-| GC gibt Fehler zurueck | Task wird `FAILED` mit error-Beschreibung |
-| **Loesung** | Admin bekommt Fehlermeldung, kann Retry oder manuelles Ergebnis nutzen |
+| GC gibt Fehler zurück | Task wird `FAILED` mit error-Beschreibung |
+| **Lösung** | Admin bekommt Fehlermeldung, kann Retry oder manuelles Ergebnis nutzen |
 
 ### 9.2 Steam Bot nicht eingeloggt
 
 | Szenario | Verhalten |
 |----------|-----------|
 | Bot offline | Task bleibt `PENDING` (niemand verarbeitet) |
-| Bot logged aus waehrend Task | Task bleibt `RUNNING` bis Timeout |
-| **Loesung** | Backend TimeoutError -> Admin informiert -> Bot neustarten -> Retry |
+| Bot logged aus während Task | Task bleibt `RUNNING` bis Timeout |
+| **Lösung** | Backend TimeoutError -> Admin informiert -> Bot neustarten -> Retry |
 
 ### 9.3 Lobby erstellt aber Match nicht gestartet
 
@@ -1527,15 +1527,15 @@ Fallback:  Admin kann jederzeit manuell Ergebnis eingeben
 | Spieler joinen nicht | Lobby bleibt offen, Admin kann warten |
 | Spieler verlassen Lobby | Admin muss ggf. neue Lobby erstellen |
 | Bot disconnected | Lobby kann weiterexistieren, aber Bot kann nicht starten |
-| **Loesung** | Timeout-Mechanismus implementieren, nach 15 Min Lobby als abgelaufen markieren |
+| **Lösung** | Timeout-Mechanismus implementieren, nach 15 Min Lobby als abgelaufen markieren |
 
 ### 9.4 Match-Ergebnis kommt nicht
 
 | Szenario | Verhalten |
 |----------|-----------|
 | GC hat kein Ergebnis | Task FAILED oder leeres Result |
-| Match laeuft noch | GC liefert kein Ergebnis (Match nicht abgeschlossen) |
-| **Loesung** | Admin nutzt manuellen Override ueber bestehenden Endpoint |
+| Match läuft noch | GC liefert kein Ergebnis (Match nicht abgeschlossen) |
+| **Lösung** | Admin nutzt manuellen Override über bestehenden Endpoint |
 
 ### 9.5 Rate Limiting
 
@@ -1546,14 +1546,14 @@ Fallback:  Admin kann jederzeit manuell Ergebnis eingeben
 | Retry-Limit | Max 3 Retries pro Task bevor permanent FAILED |
 | **Implementierung** | Im Steam Bot: Queue mit Delay, im Backend: Check auf laufende Tasks |
 
-### 9.6 Deadlock-Update / Protocol-Aenderung
+### 9.6 Deadlock-Update / Protocol-Änderung
 
 | Risiko | Massnahme |
 |--------|-----------|
-| Message-IDs aendern sich | Proto-Dateien aus SteamDatabase/Protobufs aktualisieren |
+| Message-IDs ändern sich | Proto-Dateien aus SteamDatabase/Protobufs aktualisieren |
 | Neue Pflichtfelder | Encoding-Funktionen anpassen |
-| SO Cache Struktur aendert sich | Parser aktualisieren |
-| **Monitoring** | SteamDatabase/Protobufs Watch auf GitHub fuer Deadlock-Updates |
+| SO Cache Struktur ändert sich | Parser aktualisieren |
+| **Monitoring** | SteamDatabase/Protobufs Watch auf GitHub für Deadlock-Updates |
 
 ---
 
@@ -1561,7 +1561,7 @@ Fallback:  Admin kann jederzeit manuell Ergebnis eingeben
 
 ### Phase A: Steam Bot (Node.js)
 
-| Schritt | Beschreibung | Abhaengigkeit |
+| Schritt | Beschreibung | Abhängigkeit |
 |---------|-------------|---------------|
 | A1 | Proto-Dateien herunterladen und in Bot-Projekt einbinden | Keine |
 | A2 | `custom_lobby.js` erstellen mit allen Task Handlern | A1 |
@@ -1571,7 +1571,7 @@ Fallback:  Admin kann jederzeit manuell Ergebnis eingeben
 
 ### Phase B: Tournament Backend (Python)
 
-| Schritt | Beschreibung | Abhaengigkeit |
+| Schritt | Beschreibung | Abhängigkeit |
 |---------|-------------|---------------|
 | B1 | `config.py` um `STEAM_BRIDGE_DB_PATH` erweitern | Keine |
 | B2 | `steam_bridge.py` implementieren (create_task, poll_task_result) | B1 |
@@ -1582,7 +1582,7 @@ Fallback:  Admin kann jederzeit manuell Ergebnis eingeben
 
 ### Phase C: Frontend (React)
 
-| Schritt | Beschreibung | Abhaengigkeit |
+| Schritt | Beschreibung | Abhängigkeit |
 |---------|-------------|---------------|
 | C1 | API-Client-Funktionen erstellen | B4 |
 | C2 | Match-Admin-Panel Component | C1 |
@@ -1605,7 +1605,7 @@ Fallback:  Admin kann jederzeit manuell Ergebnis eingeben
 
 ### 11.1 Manueller Test (Phase A — Steam Bot)
 
-Direkt in der SQLite-Datenbank einen Task erstellen und pruefen ob der Bot ihn verarbeitet:
+Direkt in der SQLite-Datenbank einen Task erstellen und prüfen ob der Bot ihn verarbeitet:
 
 ```sql
 -- In deadlock.sqlite3:
@@ -1624,7 +1624,7 @@ VALUES (
 2. GC antwortet mit party_id
 3. SO Cache liefert join_code
 4. Task status wechselt zu `DONE`
-5. `result` Spalte enthaelt JSON mit `party_id`, `join_code`, `party_code_display`
+5. `result` Spalte enthält JSON mit `party_id`, `join_code`, `party_code_display`
 
 **Verifikation:**
 ```sql
@@ -1652,23 +1652,23 @@ curl -X POST http://localhost:8900/api/admin/tournaments/1/matches/1/fetch-resul
 
 ### 11.3 End-to-End Test
 
-1. Turnier mit 2 Teams erstellen (ueber Admin-UI)
+1. Turnier mit 2 Teams erstellen (über Admin-UI)
 2. Bracket generieren lassen
 3. "Lobby erstellen" klicken -> Party-Code erscheint
 4. Mit mindestens 2 Spielern im Spiel der Lobby joinen (Code eingeben)
 5. "Match starten" klicken -> Match beginnt im Spiel
-6. Match spielen (oder `min_players` in PrivateLobbySettings auf 2 setzen fuer Schnelltest)
+6. Match spielen (oder `min_players` in PrivateLobbySettings auf 2 setzen für Schnelltest)
 7. "Ergebnis abrufen" klicken -> Bracket wird aktualisiert
-8. Gewinner rueckt automatisch in naechste Runde vor
+8. Gewinner rückt automatisch in nächste Runde vor
 
 ### 11.4 Edge-Case Tests
 
 | Test | Beschreibung | Erwartung |
 |------|-------------|-----------|
-| Bot offline | Task erstellen waehrend Bot aus ist | TimeoutError nach 30s |
+| Bot offline | Task erstellen während Bot aus ist | TimeoutError nach 30s |
 | Doppelte Lobby | "Lobby erstellen" zweimal klicken | Fehler oder zweite Lobby |
 | Match ohne Spieler starten | "Match starten" ohne Spieler in Lobby | GC-Fehler, FAILED Task |
-| Ergebnis zu frueh abrufen | "Ergebnis abrufen" waehrend Match laeuft | GC-Fehler oder leeres Result |
+| Ergebnis zu frueh abrufen | "Ergebnis abrufen" während Match läuft | GC-Fehler oder leeres Result |
 | Manueller Override | Nach GC-Ergebnis manuell anderes Ergebnis setzen | Manuelles Ergebnis ueberschreibt |
 
 ---

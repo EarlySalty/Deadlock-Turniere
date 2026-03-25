@@ -1,7 +1,7 @@
 """Deadlock Tournament Platform — Konfiguration.
 
 Liest Secrets aus dem Windows Credential Manager (keyring).
-Keine .env Datei noetig.
+Keine .env Datei nötig.
 """
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ def _get_keyring_value(service: str, key: str) -> str | None:
         import keyring
         return keyring.get_password(service, key)
     except Exception as e:
-        log.warning("Keyring-Fehler fuer %s/%s: %s", service, key, e)
+        log.warning("Keyring-Fehler für %s/%s: %s", service, key, e)
         return None
 
 
@@ -33,8 +33,8 @@ def _ensure_jwt_secret() -> str:
         log.info("Neuen JWT Secret im Keyring gespeichert")
         return new_secret
     except Exception:
-        # Fallback: zufaelliger Key (geht bei Restart verloren)
-        log.warning("Keyring nicht verfuegbar, nutze ephemeren JWT Secret")
+        # Fallback: zufälliger Key (geht bei Restart verloren)
+        log.warning("Keyring nicht verfügbar, nutze ephemeren JWT Secret")
         return secrets.token_hex(32)
 
 
@@ -48,7 +48,12 @@ class Settings:
 
     # --- Discord Guild & Rollen ---
     DISCORD_GUILD_ID: str = "1289721245281292288"
-    DISCORD_ADMIN_ROLE_IDS: str = ""  # Komma-separiert, spaeter setzen
+    DISCORD_ADMIN_ROLE_IDS: str = ",".join([
+        "1304169657124782100",
+        "1337518124647579661",
+        "1411000883155832852",
+        "1401891955931222110",
+    ])
     DISCORD_MOD_ROLE_IDS: str = "1474210107255554331"
 
     # --- JWT ---

@@ -1,4 +1,4 @@
-"""Steam Bridge — Task-Queue Zugriff fuer Deadlock Custom Matches."""
+"""Steam Bridge — Task-Queue Zugriff für Deadlock Custom Matches."""
 from __future__ import annotations
 
 import asyncio
@@ -34,7 +34,7 @@ async def create_task(task_type: str, payload: dict[str, Any]) -> int:
 
 
 async def get_task(task_id: int) -> dict[str, Any] | None:
-    """Laedt einen Task aus der Steam-Queue."""
+    """Lädt einen Task aus der Steam-Queue."""
     async with aiosqlite.connect(settings.STEAM_BRIDGE_DB_PATH) as db:
         await _fail_stale_running_tasks(db)
         db.row_factory = aiosqlite.Row
@@ -57,7 +57,7 @@ async def poll_task_result(
     timeout_s: float = 30,
     poll_interval_s: float = 0.5,
 ) -> dict[str, Any]:
-    """Wartet auf DONE/FAILED und liefert das decodierte Ergebnis zurueck."""
+    """Wartet auf DONE/FAILED und liefert das decodierte Ergebnis zurück."""
     deadline = time.monotonic() + timeout_s
 
     while time.monotonic() < deadline:
@@ -74,7 +74,7 @@ async def poll_task_result(
                 return json.loads(result_payload)
             except json.JSONDecodeError as exc:
                 raise RuntimeError(
-                    f"Steam task {task_id} hat ungueltiges Result-JSON"
+                    f"Steam task {task_id} hat ungültiges Result-JSON"
                 ) from exc
 
         if status == "FAILED":
@@ -97,7 +97,7 @@ async def has_active_task(
     match_id: int | None = None,
     party_id: str | None = None,
 ) -> bool:
-    """Prueft, ob bereits ein passender PENDING/RUNNING Task existiert."""
+    """Prüft, ob bereits ein passender PENDING/RUNNING Task existiert."""
     clauses = ["type = ?", "status IN ('PENDING', 'RUNNING')"]
     params: list[Any] = [task_type]
 
@@ -124,7 +124,7 @@ async def has_active_task(
 
 
 async def _fail_stale_running_tasks(db: aiosqlite.Connection) -> None:
-    """Markiert haengende RUNNING-Tasks als FAILED, damit sie nicht ewig blockieren."""
+    """Markiert hängende RUNNING-Tasks als FAILED, damit sie nicht ewig blockieren."""
     now = _now_ms()
     stale_before = now - STALE_RUNNING_TASK_TIMEOUT_MS
     await db.execute(

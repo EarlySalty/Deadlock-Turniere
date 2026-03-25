@@ -1,4 +1,4 @@
-"""Role-based Access Control — Dependencies fuer FastAPI-Routen."""
+"""Role-based Access Control — Dependencies für FastAPI-Routen."""
 from __future__ import annotations
 
 from fastapi import Depends, HTTPException, status

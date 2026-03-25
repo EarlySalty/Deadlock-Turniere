@@ -12,10 +12,10 @@ import GroupMatchList from '@/components/groups/GroupMatchList'
 import BracketView from '@/components/bracket/BracketView'
 import { Trophy, Users, LayoutGrid, GitBranch, Plus, UserPlus, AlertCircle, Shield } from 'lucide-react'
 
-type Tab = 'uebersicht' | 'gruppen' | 'bracket' | 'teams'
+type Tab = 'übersicht' | 'gruppen' | 'bracket' | 'teams'
 
 const TABS: { key: Tab; label: string; icon: typeof Trophy }[] = [
-  { key: 'uebersicht', label: 'Uebersicht', icon: Trophy },
+  { key: 'übersicht', label: 'Übersicht', icon: Trophy },
   { key: 'teams', label: 'Teams', icon: Users },
   { key: 'gruppen', label: 'Gruppen', icon: LayoutGrid },
   { key: 'bracket', label: 'Bracket', icon: GitBranch },
@@ -26,7 +26,7 @@ export default function Tournament() {
   const tournamentId = Number(id)
   const { data: tournament, isLoading } = useTournament(tournamentId)
   const { user, isLoggedIn } = useAuth()
-  const [activeTab, setActiveTab] = useState<Tab>('uebersicht')
+  const [activeTab, setActiveTab] = useState<Tab>('übersicht')
 
   // Team creation form state
   const [showCreateTeam, setShowCreateTeam] = useState(false)
@@ -122,7 +122,7 @@ export default function Tournament() {
 
       {/* Tab Content */}
       <div>
-        {activeTab === 'uebersicht' && (
+        {activeTab === 'übersicht' && (
           <Card className="p-6">
             <h2 className="text-lg font-semibold text-foreground mb-4">Turnier-Informationen</h2>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
@@ -130,7 +130,7 @@ export default function Tournament() {
                 <div>
                   <span className="text-muted">Anmeldung Start:</span>
                   <span className="ml-2 text-foreground">
-                    {new Date(tournament.registration_start).toLocaleDateString('de-DE', {
+                    {new Date(tournament.registration_start).toLocaleString('de-DE', {
                       day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit',
                     })}
                   </span>
@@ -140,7 +140,7 @@ export default function Tournament() {
                 <div>
                   <span className="text-muted">Anmeldung Ende:</span>
                   <span className="ml-2 text-foreground">
-                    {new Date(tournament.registration_end).toLocaleDateString('de-DE', {
+                    {new Date(tournament.registration_end).toLocaleString('de-DE', {
                       day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit',
                     })}
                   </span>

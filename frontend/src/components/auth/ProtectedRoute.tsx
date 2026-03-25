@@ -28,7 +28,7 @@ export default function ProtectedRoute({ children, requireMod, requireAdmin }: P
         <Card className="max-w-md text-center">
           <ShieldX size={48} className="mx-auto mb-4 text-danger" />
           <h2 className="text-xl font-bold mb-2">Kein Zugriff</h2>
-          <p className="text-muted">Du benoetigst Admin-Rechte fuer diesen Bereich.</p>
+          <p className="text-muted">Du benötigst Admin-Rechte für diesen Bereich.</p>
         </Card>
       </div>
     )
@@ -40,7 +40,7 @@ export default function ProtectedRoute({ children, requireMod, requireAdmin }: P
         <Card className="max-w-md text-center">
           <ShieldX size={48} className="mx-auto mb-4 text-danger" />
           <h2 className="text-xl font-bold mb-2">Kein Zugriff</h2>
-          <p className="text-muted">Du benoetigst Moderator-Rechte fuer diesen Bereich.</p>
+          <p className="text-muted">Du benötigst Moderator-Rechte für diesen Bereich.</p>
         </Card>
       </div>
     )

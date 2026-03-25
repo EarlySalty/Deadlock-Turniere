@@ -1,4 +1,4 @@
-"""Match Manager — Orchestriert Steam-Lobby-Workflow fuer Bracket-Matches."""
+"""Match Manager — Orchestriert Steam-Lobby-Workflow für Bracket-Matches."""
 from __future__ import annotations
 
 from typing import Any
@@ -28,7 +28,7 @@ async def create_lobby(
     game_mode: int = DEFAULT_GAME_MODE,
     region_mode: int = DEFAULT_REGION_MODE,
 ) -> dict[str, Any]:
-    """Erstellt eine Steam-Custom-Lobby fuer ein Bracket-Match."""
+    """Erstellt eine Steam-Custom-Lobby für ein Bracket-Match."""
     match = await _get_bracket_match(tournament_id, match_id)
     _require_match_ready_for_lobby(match)
     await _ensure_no_duplicate_lobby_request(match_id, match)
@@ -101,7 +101,7 @@ async def set_bot_ready(tournament_id: int, match_id: int) -> dict[str, Any]:
 
 
 async def start_match(tournament_id: int, match_id: int) -> dict[str, Any]:
-    """Startet ein Match ueber den Steam-Bot."""
+    """Startet ein Match über den Steam-Bot."""
     match = await _get_bracket_match(tournament_id, match_id)
     _require_match_ready_for_start(match)
 
@@ -142,7 +142,7 @@ async def start_match(tournament_id: int, match_id: int) -> dict[str, Any]:
 
 
 async def fetch_match_result(tournament_id: int, match_id: int) -> dict[str, Any]:
-    """Holt das Match-Ergebnis ueber die Steam-Bridge und uebernimmt es ins Bracket."""
+    """Holt das Match-Ergebnis über die Steam-Bridge und übernimmt es ins Bracket."""
     match = await _get_bracket_match(tournament_id, match_id)
     _require_match_ready_for_result_fetch(match)
 
@@ -169,7 +169,7 @@ async def fetch_match_result(tournament_id: int, match_id: int) -> dict[str, Any
     except (MatchNotFoundError, MatchStateError):
         raise
     except MatchResultError as exc:
-        raise SteamTaskError(f"Ungueltige Steam-Ergebnisdaten: {exc}") from exc
+        raise SteamTaskError(f"Ungültige Steam-Ergebnisdaten: {exc}") from exc
 
     normalized_result = dict(result)
     normalized_result.update(applied)
@@ -178,7 +178,7 @@ async def fetch_match_result(tournament_id: int, match_id: int) -> dict[str, Any
 
 
 async def leave_lobby(tournament_id: int, match_id: int) -> dict[str, Any]:
-    """Laesst den Bot die Lobby verlassen."""
+    """Lässt den Bot die Lobby verlassen."""
     match = await _get_bracket_match(tournament_id, match_id)
     _require_match_ready_for_leave(match)
     result = await _run_steam_task(
@@ -215,34 +215,34 @@ async def _get_party_id(tournament_id: int, match_id: int) -> str:
     match = await _get_bracket_match(tournament_id, match_id)
     party_id = match.get("steam_party_id")
     if not party_id:
-        raise MatchStateError(f"Fuer Match {match_id} ist keine Party-ID gespeichert")
+        raise MatchStateError(f"Für Match {match_id} ist keine Party-ID gespeichert")
     return str(party_id)
 
 
 def _require_match_ready_for_lobby(match: dict[str, Any]) -> None:
     if match["winner_id"] is not None or match["status"] not in VALID_LOBBY_STATUSES:
-        raise MatchStateError("Fuer dieses Match kann keine Lobby erstellt werden")
+        raise MatchStateError("Für dieses Match kann keine Lobby erstellt werden")
     if match["team1_id"] is None or match["team2_id"] is None:
-        raise MatchStateError("Beide Teams muessen gesetzt sein, bevor eine Lobby erstellt wird")
+        raise MatchStateError("Beide Teams müssen gesetzt sein, bevor eine Lobby erstellt wird")
     if match.get("steam_party_id"):
-        raise MatchStateError("Fuer dieses Match existiert bereits eine Lobby")
+        raise MatchStateError("Für dieses Match existiert bereits eine Lobby")
 
 
 def _require_match_ready_for_start(match: dict[str, Any]) -> None:
     if match["status"] not in VALID_START_STATUSES:
         raise MatchStateError("Ein Match kann nur aus dem Status 'lobby_created' gestartet werden")
     if not match.get("steam_party_id"):
-        raise MatchStateError("Fuer dieses Match existiert noch keine Lobby")
+        raise MatchStateError("Für dieses Match existiert noch keine Lobby")
     if match.get("deadlock_match_id"):
-        raise MatchStateError("Fuer dieses Match wurde bereits eine Deadlock-Match-ID gespeichert")
+        raise MatchStateError("Für dieses Match wurde bereits eine Deadlock-Match-ID gespeichert")
 
 
 def _require_match_ready_for_result_fetch(match: dict[str, Any]) -> None:
     if match["status"] not in VALID_RESULT_STATUSES:
-        raise MatchStateError("Match-Ergebnisse koennen nur aus laufenden Matches abgerufen werden")
+        raise MatchStateError("Match-Ergebnisse können nur aus laufenden Matches abgerufen werden")
     if not match.get("steam_party_id") and not match.get("deadlock_match_id"):
         raise MatchStateError(
-            "Fuer dieses Match ist weder eine Party-ID noch eine Deadlock-Match-ID gespeichert"
+            "Für dieses Match ist weder eine Party-ID noch eine Deadlock-Match-ID gespeichert"
         )
 
 
@@ -250,14 +250,14 @@ def _require_match_ready_for_leave(match: dict[str, Any]) -> None:
     if match["status"] not in VALID_LEAVE_STATUSES:
         raise MatchStateError("Die Lobby kann nur im Status 'lobby_created' oder 'in_progress' verlassen werden")
     if not match.get("steam_party_id"):
-        raise MatchStateError("Fuer dieses Match ist keine Party-ID gespeichert")
+        raise MatchStateError("Für dieses Match ist keine Party-ID gespeichert")
 
 
 async def _ensure_no_duplicate_lobby_request(match_id: int, match: dict[str, Any]) -> None:
     if match.get("steam_party_id"):
-        raise MatchStateError("Fuer dieses Match existiert bereits eine Lobby")
+        raise MatchStateError("Für dieses Match existiert bereits eine Lobby")
     if await steam_bridge.has_active_task("GC_CREATE_CUSTOM_LOBBY", match_id=match_id):
-        raise MatchStateError("Fuer dieses Match laeuft bereits eine Lobby-Erstellung")
+        raise MatchStateError("Für dieses Match läuft bereits eine Lobby-Erstellung")
 
 
 async def _run_steam_task(
@@ -276,7 +276,7 @@ async def _run_steam_task(
         raise SteamTaskError(f"{action} fehlgeschlagen: {exc}") from exc
 
     if not isinstance(result, dict):
-        raise SteamTaskError(f"{action} lieferte kein gueltiges Ergebnis")
+        raise SteamTaskError(f"{action} lieferte kein gültiges Ergebnis")
     if result.get("success") is False:
         raise SteamTaskError(f"{action} fehlgeschlagen: {result.get('error', 'unbekannter Fehler')}")
     return result

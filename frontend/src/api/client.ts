@@ -28,7 +28,6 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
     ...options,
   })
   if (res.status === 401) {
-    window.location.href = '/login'
     throw new ApiError(401, 'Nicht authentifiziert')
   }
   if (!res.ok) {
@@ -45,6 +44,8 @@ export const fetchMe = () => request<UserSession>('/me')
 // Tournaments
 export const fetchTournaments = () => request<Tournament[]>('/tournaments')
 export const fetchTournament = (id: number) => request<TournamentDetail>(`/tournaments/${id}`)
+export const fetchAdminTournaments = () => request<Tournament[]>('/admin/tournaments')
+export const fetchAdminTournament = (id: number) => request<TournamentDetail>(`/admin/tournaments/${id}`)
 
 // Teams
 export const createTeam = (tournamentId: number, name: string) =>

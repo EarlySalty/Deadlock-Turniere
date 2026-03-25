@@ -39,7 +39,7 @@ export default function Header() {
                 <div className="flex items-center gap-2">
                   {user.discord_avatar ? (
                     <img
-                      src={`https://cdn.discordapp.com/avatars/${user.discord_id}/${user.discord_avatar}.png?size=32`}
+                      src={user.discord_avatar}
                       alt={user.discord_name}
                       className="w-8 h-8 rounded-full"
                     />

@@ -23,10 +23,16 @@ from tournament.engine import (
     generate_groups,
 )
 from tournament.models import (
+    TournamentDetail,
     Tournament,
     TournamentCreate,
     TournamentUpdate,
     UserSession,
+)
+from tournament.routes import (
+    _load_bracket_matches,
+    _load_groups_for_tournament,
+    _load_teams_for_tournament,
 )
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
@@ -41,6 +47,50 @@ async def _audit(db, action: str, user_id: str, details: str) -> None:  # noqa: 
     await db.execute(
         "INSERT INTO audit_log (action, user_id, details) VALUES (?, ?, ?)",
         (action, user_id, details),
+    )
+
+
+@router.get("/tournaments", response_model=list[Tournament])
+async def list_tournaments_admin(
+    user: UserSession = Depends(require_mod),
+) -> list[Tournament]:
+    """Alle Turniere für Admin/Mods inklusive Drafts."""
+    async with get_db() as db:
+        cursor = await db.execute(
+            "SELECT * FROM tournaments ORDER BY created_at DESC"
+        )
+        rows = await cursor.fetchall()
+    return [Tournament(**dict(r)) for r in rows]
+
+
+@router.get("/tournaments/{tournament_id}", response_model=TournamentDetail)
+async def get_tournament_admin(
+    tournament_id: int,
+    user: UserSession = Depends(require_mod),
+) -> TournamentDetail:
+    """Turnier-Detail für Admin/Mods inklusive Drafts."""
+    async with get_db() as db:
+        cursor = await db.execute(
+            "SELECT * FROM tournaments WHERE id = ?",
+            (tournament_id,),
+        )
+        row = await cursor.fetchone()
+        if not row:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Turnier nicht gefunden",
+            )
+
+        tournament_data = dict(row)
+        teams = await _load_teams_for_tournament(db, tournament_id)
+        groups = await _load_groups_for_tournament(db, tournament_id)
+        bracket_matches = await _load_bracket_matches(db, tournament_id)
+
+    return TournamentDetail(
+        **tournament_data,
+        teams=teams,
+        groups=groups,
+        bracket_matches=bracket_matches,
     )
 
 
@@ -101,7 +151,7 @@ async def update_tournament(
     body: TournamentUpdate,
     user: UserSession = Depends(require_mod),
 ) -> Tournament:
-    """Turnier-Daten aktualisieren (Mod+). Status-Uebergaenge werden validiert."""
+    """Turnier-Daten aktualisieren (Mod+). Status-Übergänge werden validiert."""
     async with get_db() as db:
         cursor = await db.execute(
             "SELECT * FROM tournaments WHERE id = ?",
@@ -114,14 +164,14 @@ async def update_tournament(
                 detail="Turnier nicht gefunden",
             )
 
-        # Status-Uebergang validieren
+        # Status-Übergang validieren
         if body.status is not None and body.status.value != existing["status"]:
             current_status = existing["status"]
             allowed = VALID_STATUS_TRANSITIONS.get(current_status, [])
             if body.status.value not in allowed:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Ungueliger Status-Uebergang: {current_status} -> {body.status.value}. "
+                    detail=f"Ungültiger Status-Übergang: {current_status} -> {body.status.value}. "
                     f"Erlaubt: {', '.join(allowed) if allowed else 'keine'}",
                 )
 
@@ -138,7 +188,7 @@ async def update_tournament(
         if not updates:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Keine Aenderungen angegeben",
+                detail="Keine Änderungen angegeben",
             )
 
         updates.append("updated_at = datetime('now')")
@@ -167,7 +217,7 @@ async def update_tournament(
 
 
 # ---------------------------------------------------------------------------
-# DELETE /api/admin/tournaments/{id} — Turnier loeschen
+# DELETE /api/admin/tournaments/{id} — Turnier löschen
 # ---------------------------------------------------------------------------
 
 @router.delete("/tournaments/{tournament_id}", status_code=200)
@@ -175,7 +225,7 @@ async def delete_tournament(
     tournament_id: int,
     user: UserSession = Depends(require_admin),
 ) -> dict:
-    """Turnier loeschen (Admin only). Nur im Draft-Status moeglich."""
+    """Turnier löschen (Admin only). Nur im Draft-Status möglich."""
     async with get_db() as db:
         cursor = await db.execute(
             "SELECT * FROM tournaments WHERE id = ?",
@@ -191,10 +241,10 @@ async def delete_tournament(
         if existing["status"] != "draft":
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Nur Turniere im Draft-Status koennen geloescht werden",
+                detail="Nur Turniere im Draft-Status können gelöscht werden",
             )
 
-        # Kaskadierend loeschen
+        # Kaskadierend löschen
         await db.execute("DELETE FROM team_members WHERE team_id IN (SELECT id FROM teams WHERE tournament_id = ?)", (tournament_id,))
         await db.execute("DELETE FROM tournament_signups WHERE tournament_id = ?", (tournament_id,))
         await db.execute("DELETE FROM teams WHERE tournament_id = ?", (tournament_id,))
@@ -208,7 +258,7 @@ async def delete_tournament(
         )
         await db.commit()
 
-    return {"status": "geloescht", "tournament_id": tournament_id}
+    return {"status": "gelöscht", "tournament_id": tournament_id}
 
 
 # ---------------------------------------------------------------------------
@@ -220,7 +270,7 @@ async def advance_tournament(
     tournament_id: int,
     user: UserSession = Depends(require_mod),
 ) -> Tournament:
-    """Turnier zur naechsten Phase weiterschalten (Mod+)."""
+    """Turnier zur nächsten Phase weiterschalten (Mod+)."""
     async with get_db() as db:
         cursor = await db.execute(
             "SELECT * FROM tournaments WHERE id = ?",
@@ -238,7 +288,7 @@ async def advance_tournament(
         if not allowed:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Keine weitere Phase moeglich (aktuell: {current_status})",
+                detail=f"Keine weitere Phase möglich (aktuell: {current_status})",
             )
 
         next_status = allowed[0]
@@ -278,7 +328,7 @@ async def assign_random(
     tournament_id: int,
     user: UserSession = Depends(require_mod),
 ) -> dict:
-    """Solo-Anmeldungen zufaellig auf Teams verteilen (Mod+)."""
+    """Solo-Anmeldungen zufällig auf Teams verteilen (Mod+)."""
     async with get_db() as db:
         cursor = await db.execute(
             "SELECT * FROM tournaments WHERE id = ?",
@@ -294,7 +344,7 @@ async def assign_random(
         if tournament["status"] != "registration":
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Team-Zuweisung nur waehrend der Registration moeglich",
+                detail="Team-Zuweisung nur während der Registration möglich",
             )
 
     teams_created = await assign_random_teams(tournament_id, tournament["team_size"])
@@ -321,7 +371,7 @@ async def set_match_result(
         )
 
     async with get_db() as db:
-        # Turnier pruefen
+        # Turnier prüfen
         cursor = await db.execute(
             "SELECT * FROM tournaments WHERE id = ?",
             (tournament_id,),
@@ -464,7 +514,7 @@ async def create_match_lobby(
     match_id: int,
     user: UserSession = Depends(require_mod),
 ) -> dict:
-    """Erstellt eine Steam-Custom-Lobby fuer ein Bracket-Match."""
+    """Erstellt eine Steam-Custom-Lobby für ein Bracket-Match."""
     try:
         result = await match_manager.create_lobby(tournament_id, match_id)
     except MatchNotFoundError as exc:
@@ -524,7 +574,7 @@ async def start_match_via_steam(
     match_id: int,
     user: UserSession = Depends(require_mod),
 ) -> dict:
-    """Startet ein Custom-Match ueber den Steam-Bot."""
+    """Startet ein Custom-Match über den Steam-Bot."""
     try:
         result = await match_manager.start_match(tournament_id, match_id)
     except MatchNotFoundError as exc:
@@ -580,7 +630,7 @@ async def fetch_match_result_via_steam(
     match_id: int,
     user: UserSession = Depends(require_mod),
 ) -> dict:
-    """Laedt das Match-Ergebnis aus Deadlock und uebernimmt es ins Bracket."""
+    """Lädt das Match-Ergebnis aus Deadlock und übernimmt es ins Bracket."""
     try:
         result = await match_manager.fetch_match_result(tournament_id, match_id)
     except MatchNotFoundError as exc:
@@ -634,7 +684,7 @@ async def leave_match_lobby(
     match_id: int,
     user: UserSession = Depends(require_mod),
 ) -> dict:
-    """Laesst den Steam-Bot die Match-Lobby verlassen."""
+    """Lässt den Steam-Bot die Match-Lobby verlassen."""
     try:
         result = await match_manager.leave_lobby(tournament_id, match_id)
     except MatchNotFoundError as exc:

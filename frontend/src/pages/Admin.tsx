@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useTournaments, useTournament } from '@/hooks/useTournament'
+import { useAdminTournaments, useAdminTournament } from '@/hooks/useTournament'
 import Card from '@/components/ui/Card'
 import Badge from '@/components/ui/Badge'
 import LoadingSpinner from '@/components/ui/LoadingSpinner'
@@ -11,7 +11,7 @@ import { Plus, Settings, Archive } from 'lucide-react'
 type AdminTab = 'erstellen' | 'verwalten'
 
 export default function Admin() {
-  const { data: tournaments, isLoading } = useTournaments()
+  const { data: tournaments, isLoading } = useAdminTournaments()
   const [activeTab, setActiveTab] = useState<AdminTab>('verwalten')
 
   const activeTournament = tournaments?.find(t =>
@@ -22,7 +22,7 @@ export default function Admin() {
   ) ?? []
 
   // Fetch detail data for the active tournament
-  const { data: activeDetail, refetch: refetchActiveDetail } = useTournament(activeTournament?.id ?? 0)
+  const { data: activeDetail, refetch: refetchActiveDetail } = useAdminTournament(activeTournament?.id ?? 0)
 
   if (isLoading) return <LoadingSpinner />
 
@@ -86,7 +86,7 @@ export default function Admin() {
                   <div>
                     <h2 className="text-lg font-semibold text-foreground">Steam Match-Steuerung</h2>
                     <p className="text-sm text-muted mt-1">
-                      Lobbys erstellen, Party-Codes kopieren, Matches starten und Ergebnisse automatisch uebernehmen.
+                      Lobbys erstellen, Party-Codes kopieren, Matches starten und Ergebnisse automatisch übernehmen.
                     </p>
                   </div>
                   <MatchAdminPanel

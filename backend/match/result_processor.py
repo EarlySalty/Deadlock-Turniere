@@ -1,4 +1,4 @@
-"""Result Processor — Vereinheitlicht Bracket-Ergebnisse fuer manuell und automatisch."""
+"""Result Processor — Vereinheitlicht Bracket-Ergebnisse für manuell und automatisch."""
 from __future__ import annotations
 
 import json
@@ -9,7 +9,7 @@ from tournament.engine import advance_bracket_winner
 
 
 class MatchResultError(RuntimeError):
-    """Ein uebergebenes Bracket-Ergebnis ist fachlich ungueltig."""
+    """Ein übergebenes Bracket-Ergebnis ist fachlich ungültig."""
 
 
 class MatchNotFoundError(MatchResultError):
@@ -21,7 +21,7 @@ class MatchStateError(MatchResultError):
 
 
 class SteamTaskError(RuntimeError):
-    """Die Steam-/GC-Ergebnisdaten sind ungueltig oder unvollstaendig."""
+    """Die Steam-/GC-Ergebnisdaten sind ungültig oder unvollständig."""
 
 
 async def apply_bracket_match_result(
@@ -72,21 +72,21 @@ async def apply_bracket_match_result(
             elif winning_team_value == 1:
                 winner_id_value = team2_id
             else:
-                raise MatchResultError(f"Ungueltiger winning_team-Wert: {winning_team_value}")
+                raise MatchResultError(f"Ungültiger winning_team-Wert: {winning_team_value}")
         elif winning_team_value is None:
             winning_team_value = _resolve_winning_team(team1_id, team2_id, winner_id_value)
         else:
             if winning_team_value not in (0, 1):
-                raise MatchResultError(f"Ungueltiger winning_team-Wert: {winning_team_value}")
+                raise MatchResultError(f"Ungültiger winning_team-Wert: {winning_team_value}")
             expected_winning_team = _resolve_winning_team(team1_id, team2_id, winner_id_value)
             if winning_team_value != expected_winning_team:
                 raise MatchResultError(
-                    "winning_team passt nicht zum uebergebenen winner_id"
+                    "winning_team passt nicht zum übergebenen winner_id"
                 )
 
         if winner_id_value not in (team1_id, team2_id):
             raise MatchResultError(
-                f"winner_id {winner_id_value} gehoert nicht zu Match {match_id}"
+                f"winner_id {winner_id_value} gehört nicht zu Match {match_id}"
             )
 
         duration_value = _coerce_optional_int(duration_s, "duration_s")
@@ -150,7 +150,7 @@ def _resolve_winning_team(team1_id: int, team2_id: int, winner_id: int) -> int:
         return 0
     if winner_id == team2_id:
         return 1
-    raise MatchResultError(f"winner_id {winner_id} gehoert nicht zu diesem Match")
+    raise MatchResultError(f"winner_id {winner_id} gehört nicht zu diesem Match")
 
 
 def _resolve_player_stats(
@@ -163,7 +163,7 @@ def _resolve_player_stats(
         try:
             return json.dumps(players), players
         except TypeError as exc:
-            raise MatchResultError("players enthaelt nicht serialisierbare Daten") from exc
+            raise MatchResultError("players enthält nicht serialisierbare Daten") from exc
 
     if not existing_match_stats:
         return None, []
@@ -171,9 +171,9 @@ def _resolve_player_stats(
     try:
         decoded = json.loads(existing_match_stats)
     except json.JSONDecodeError as exc:
-        raise MatchResultError("match_stats enthaelt ungueltiges JSON") from exc
+        raise MatchResultError("match_stats enthält ungültiges JSON") from exc
 
     if not isinstance(decoded, list):
-        raise MatchResultError("match_stats enthaelt keine gueltige Spielerliste")
+        raise MatchResultError("match_stats enthält keine gültige Spielerliste")
 
     return existing_match_stats, decoded

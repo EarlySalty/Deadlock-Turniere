@@ -14,7 +14,7 @@ async def get_current_user(
     authorization: str | None = Header(None),
     session_token: str | None = Cookie(None),
 ) -> UserSession:
-    """Liest Session-Token aus Cookie oder Authorization Header und gibt UserSession zurueck."""
+    """Liest Session-Token aus Cookie oder Authorization Header und gibt UserSession zurück."""
     token: str | None = None
 
     # Token aus Authorization Header extrahieren
@@ -42,10 +42,10 @@ async def get_current_user(
     if not row:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Session ungueltig oder abgelaufen",
+            detail="Session ungültig oder abgelaufen",
         )
 
-    # Ablauf pruefen
+    # Ablauf prüfen
     expires_at = datetime.fromisoformat(row["expires_at"])
     if expires_at.tzinfo is None:
         expires_at = expires_at.replace(tzinfo=timezone.utc)

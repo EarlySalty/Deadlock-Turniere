@@ -6,13 +6,13 @@ $BackendDir = Join-Path $ProjectDir "backend"
 $VenvDir = Join-Path $ProjectDir "venv"
 $DataDir = Join-Path $BackendDir "data"
 
-# Data-Verzeichnis erstellen falls noetig
+# Data-Verzeichnis erstellen falls nötig
 if (-not (Test-Path $DataDir)) {
     New-Item -ItemType Directory -Path $DataDir -Force | Out-Null
     Write-Host "Data-Verzeichnis erstellt: $DataDir"
 }
 
-# Venv erstellen falls noetig
+# Venv erstellen falls nötig
 if (-not (Test-Path "$VenvDir\Scripts\activate.ps1")) {
     Write-Host "Erstelle Python Virtual Environment..."
     python -m venv $VenvDir

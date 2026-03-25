@@ -18,14 +18,14 @@ from tournament.admin_routes import router as admin_router
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    """Startup: DB initialisieren. Shutdown: Aufraemen."""
+    """Startup: DB initialisieren. Shutdown: Aufräumen."""
     await init_db()
     yield
 
 
 app = FastAPI(
     title="Deadlock Turniere",
-    description="Tournament Platform fuer die Deutsche Deadlock Community",
+    description="Tournament Platform für die Deutsche Deadlock Community",
     version="0.1.0",
     lifespan=lifespan,
 )
@@ -51,7 +51,7 @@ app.include_router(admin_router)
 # --- Auth: /api/me ---
 @app.get("/api/me", tags=["auth"])
 async def get_me(user: UserSession = Depends(get_current_user)) -> UserSession:
-    """Gibt die aktuelle User-Session zurueck."""
+    """Gibt die aktuelle User-Session zurück."""
     return user
 
 

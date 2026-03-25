@@ -1,4 +1,4 @@
-"""Oeffentliche und authentifizierte Tournament + Team Routes."""
+"""Öffentliche und authentifizierte Tournament + Team Routes."""
 from __future__ import annotations
 
 import json
@@ -28,7 +28,7 @@ router = APIRouter(prefix="/api", tags=["tournaments"])
 # ---------------------------------------------------------------------------
 
 async def _load_teams_for_tournament(db, tournament_id: int) -> list[Team]:  # noqa: ANN001
-    """Laedt alle Teams eines Turniers inkl. Members."""
+    """Lädt alle Teams eines Turniers inkl. Members."""
     cursor = await db.execute(
         "SELECT * FROM teams WHERE tournament_id = ?",
         (tournament_id,),
@@ -47,7 +47,7 @@ async def _load_teams_for_tournament(db, tournament_id: int) -> list[Team]:  # n
 
 
 async def _load_groups_for_tournament(db, tournament_id: int) -> list[Group]:  # noqa: ANN001
-    """Laedt alle Gruppen eines Turniers inkl. Teams und Matches."""
+    """Lädt alle Gruppen eines Turniers inkl. Teams und Matches."""
     cursor = await db.execute(
         "SELECT * FROM groups WHERE tournament_id = ? ORDER BY seeding_order",
         (tournament_id,),
@@ -79,7 +79,7 @@ async def _load_groups_for_tournament(db, tournament_id: int) -> list[Group]:  #
 
 
 async def _load_bracket_matches(db, tournament_id: int) -> list[BracketMatch]:  # noqa: ANN001
-    """Laedt alle Bracket-Matches eines Turniers."""
+    """Lädt alle Bracket-Matches eines Turniers."""
     cursor = await db.execute(
         "SELECT * FROM bracket_matches WHERE tournament_id = ? ORDER BY round, position",
         (tournament_id,),
@@ -94,7 +94,7 @@ async def _load_bracket_matches(db, tournament_id: int) -> list[BracketMatch]:  
 
 @router.get("/tournaments", response_model=list[Tournament])
 async def list_tournaments() -> list[Tournament]:
-    """Alle oeffentlichen Turniere (nicht im Draft-Status)."""
+    """Alle öffentlichen Turniere (nicht im Draft-Status)."""
     async with get_db() as db:
         cursor = await db.execute(
             "SELECT * FROM tournaments WHERE status != 'draft' ORDER BY created_at DESC"
@@ -117,6 +117,11 @@ async def get_tournament(tournament_id: int) -> TournamentDetail:
         )
         row = await cursor.fetchone()
         if not row:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Turnier nicht gefunden",
+            )
+        if row["status"] == "draft":
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Turnier nicht gefunden",
@@ -158,7 +163,7 @@ async def create_team(
     name_key = name.casefold()
 
     async with get_db() as db:
-        # Turnier pruefen
+        # Turnier prüfen
         cursor = await db.execute(
             "SELECT * FROM tournaments WHERE id = ?",
             (tournament_id,),
@@ -173,10 +178,10 @@ async def create_team(
         if tournament["status"] != "registration":
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Anmeldung ist nicht geoeffnet",
+                detail="Anmeldung ist nicht geöffnet",
             )
 
-        # Name-Einzigartigkeit pruefen (casefold)
+        # Name-Einzigartigkeit prüfen (casefold)
         cursor = await db.execute(
             "SELECT id FROM teams WHERE tournament_id = ? AND name_key = ?",
             (tournament_id, name_key),
@@ -187,7 +192,7 @@ async def create_team(
                 detail="Ein Team mit diesem Namen existiert bereits",
             )
 
-        # Pruefen ob User bereits in einem Team dieses Turniers ist
+        # Prüfen ob User bereits in einem Team dieses Turniers ist
         cursor = await db.execute(
             "SELECT tm.id FROM team_members tm "
             "JOIN teams t ON tm.team_id = t.id "
@@ -222,7 +227,7 @@ async def create_team(
         )
         await db.commit()
 
-        # Team zurueckladen
+        # Team zurückladen
         cursor = await db.execute("SELECT * FROM teams WHERE id = ?", (team_id,))
         team_row = await cursor.fetchone()
         cursor = await db.execute("SELECT * FROM team_members WHERE team_id = ?", (team_id,))
@@ -243,7 +248,7 @@ async def join_team(
 ) -> TeamMember:
     """Einem bestehenden Team beitreten."""
     async with get_db() as db:
-        # Turnier pruefen
+        # Turnier prüfen
         cursor = await db.execute(
             "SELECT * FROM tournaments WHERE id = ?",
             (tournament_id,),
@@ -257,10 +262,10 @@ async def join_team(
         if tournament["status"] != "registration":
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Anmeldung ist nicht geoeffnet",
+                detail="Anmeldung ist nicht geöffnet",
             )
 
-        # Team pruefen
+        # Team prüfen
         cursor = await db.execute(
             "SELECT * FROM teams WHERE id = ? AND tournament_id = ?",
             (team_id, tournament_id),
@@ -272,7 +277,7 @@ async def join_team(
                 detail="Team nicht gefunden",
             )
 
-        # Team-Groesse pruefen
+        # Team-Größe prüfen
         cursor = await db.execute(
             "SELECT COUNT(*) as cnt FROM team_members WHERE team_id = ?",
             (team_id,),
@@ -303,7 +308,7 @@ async def join_team(
         rank = steam_data["rank"] if steam_data else None
         score = steam_data["rank_score"] if steam_data else 0
 
-        # Mitglied hinzufuegen
+        # Mitglied hinzufügen
         cursor = await db.execute(
             "INSERT INTO team_members (team_id, discord_id, discord_name, steam_id, rank, rank_score, role) "
             "VALUES (?, ?, ?, ?, ?, ?, 'member')",
@@ -327,9 +332,9 @@ async def solo_signup(
     tournament_id: int,
     user: UserSession = Depends(require_auth),
 ) -> dict:
-    """Solo-Anmeldung — User wird spaeter zufaellig einem Team zugewiesen."""
+    """Solo-Anmeldung — User wird später zufällig einem Team zugewiesen."""
     async with get_db() as db:
-        # Turnier pruefen
+        # Turnier prüfen
         cursor = await db.execute(
             "SELECT * FROM tournaments WHERE id = ?",
             (tournament_id,),
@@ -343,7 +348,7 @@ async def solo_signup(
         if tournament["status"] != "registration":
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Anmeldung ist nicht geoeffnet",
+                detail="Anmeldung ist nicht geöffnet",
             )
 
         # Bereits angemeldet?
@@ -354,7 +359,7 @@ async def solo_signup(
         if await cursor.fetchone():
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
-                detail="Du bist bereits fuer dieses Turnier angemeldet",
+                detail="Du bist bereits für dieses Turnier angemeldet",
             )
 
         # Bereits in einem Team?

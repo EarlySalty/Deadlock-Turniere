@@ -46,13 +46,13 @@ export default function TournamentManager({
   }
 
   const handleAssignRandom = () => {
-    if (window.confirm('Solo-Spieler zufaellig auf Teams verteilen?')) {
+    if (window.confirm('Solo-Spieler zufällig auf Teams verteilen?')) {
       assignMutation.mutate(tournament.id)
     }
   }
 
   const handleDelete = () => {
-    if (window.confirm(`Turnier "${tournament.name}" unwiderruflich loeschen?`)) {
+    if (window.confirm(`Turnier "${tournament.name}" unwiderruflich löschen?`)) {
       deleteMutation.mutate(tournament.id)
     }
   }
@@ -80,7 +80,7 @@ export default function TournamentManager({
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
         <Card className="p-3 text-center">
           <div className="text-2xl font-bold text-primary">{tournament.team_size}</div>
-          <div className="text-xs text-muted">Teamgroesse</div>
+          <div className="text-xs text-muted">Teamgröße</div>
         </Card>
         <Card className="p-3 text-center">
           <div className="text-2xl font-bold text-primary">{teamCount}</div>
@@ -122,7 +122,7 @@ export default function TournamentManager({
           </Button>
         )}
 
-        {['draft', 'registration'].includes(tournament.status) && (
+        {tournament.status === 'draft' && (
           <Button
             variant="danger"
             size="sm"
@@ -130,7 +130,7 @@ export default function TournamentManager({
             disabled={isLoading}
           >
             <Trash2 size={14} />
-            {deleteMutation.isPending ? 'Wird geloescht...' : 'Loeschen'}
+            {deleteMutation.isPending ? 'Wird gelöscht...' : 'Löschen'}
           </Button>
         )}
       </div>

@@ -21,9 +21,9 @@ def _rank_score(rank_tier: int | None, subrank: int | None) -> int:
 
 
 async def get_steam_link(discord_id: str) -> Optional[dict]:
-    """Liest steam_id, Rank-Infos und berechnet rank_score fuer einen User.
+    """Liest steam_id, Rank-Infos und berechnet rank_score für einen User.
 
-    Gibt None zurueck wenn kein Link gefunden oder DB-Pfad nicht konfiguriert.
+    Gibt None zurück wenn kein Link gefunden oder DB-Pfad nicht konfiguriert.
     """
     if not settings.STEAM_BRIDGE_DB_PATH:
         return None

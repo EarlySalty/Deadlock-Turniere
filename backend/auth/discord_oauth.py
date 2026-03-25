@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 from urllib.parse import urlencode
 
 import httpx
-from fastapi import APIRouter, HTTPException, Request, Response, status
+from fastapi import APIRouter, Cookie, HTTPException, status
 from fastapi.responses import RedirectResponse
 
 from config import settings
@@ -24,6 +24,12 @@ SESSION_LIFETIME = timedelta(days=7)
 @router.get("/login")
 async def discord_login() -> RedirectResponse:
     """Redirect zu Discord authorize URL."""
+    if not settings.DISCORD_CLIENT_ID or not settings.DISCORD_CLIENT_SECRET:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Discord OAuth ist nicht konfiguriert",
+        )
+
     params = {
         "client_id": settings.DISCORD_CLIENT_ID,
         "redirect_uri": settings.DISCORD_REDIRECT_URI,
@@ -36,6 +42,12 @@ async def discord_login() -> RedirectResponse:
 @router.get("/callback")
 async def discord_callback(code: str | None = None, error: str | None = None) -> RedirectResponse:
     """Token-Exchange, User-Info laden, Session erstellen, Redirect zum Frontend."""
+    if not settings.DISCORD_CLIENT_ID or not settings.DISCORD_CLIENT_SECRET:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Discord OAuth ist nicht konfiguriert",
+        )
+
     if error or not code:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -129,14 +141,14 @@ async def discord_callback(code: str | None = None, error: str | None = None) ->
 
 @router.get("/logout")
 async def discord_logout(
-    response: Response,
-    session_token: str | None = None,
-) -> dict[str, str]:
-    """Session loeschen und Cookie entfernen."""
+    session_token: str | None = Cookie(None),
+) -> RedirectResponse:
+    """Session löschen und Cookie entfernen."""
     if session_token:
         async with get_db() as db:
             await db.execute("DELETE FROM sessions WHERE token = ?", (session_token,))
             await db.commit()
 
+    response = RedirectResponse(url=settings.FRONTEND_URL, status_code=status.HTTP_302_FOUND)
     response.delete_cookie(key="session_token", path="/")
-    return {"status": "logged_out"}
+    return response
