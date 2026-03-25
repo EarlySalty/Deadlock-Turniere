@@ -1,32 +1,64 @@
+"""Deadlock Tournament Platform — Konfiguration.
+
+Liest Secrets aus dem Windows Credential Manager (keyring).
+Keine .env Datei noetig.
+"""
 from __future__ import annotations
 
+import logging
 import secrets
-from pathlib import Path
 
-from pydantic_settings import BaseSettings
+log = logging.getLogger(__name__)
 
 
-class Settings(BaseSettings):
-    """Zentrale Konfiguration — alle Werte kommen aus Environment-Variablen."""
+def _get_keyring_value(service: str, key: str) -> str | None:
+    """Liest einen Wert aus dem Windows Credential Manager."""
+    try:
+        import keyring
+        return keyring.get_password(service, key)
+    except Exception as e:
+        log.warning("Keyring-Fehler fuer %s/%s: %s", service, key, e)
+        return None
+
+
+def _ensure_jwt_secret() -> str:
+    """Holt oder erstellt den JWT Secret im Keyring."""
+    try:
+        import keyring
+        existing = keyring.get_password("DeadlockTurniere", "JWT_SECRET")
+        if existing:
+            return existing
+        new_secret = secrets.token_hex(32)
+        keyring.set_password("DeadlockTurniere", "JWT_SECRET", new_secret)
+        log.info("Neuen JWT Secret im Keyring gespeichert")
+        return new_secret
+    except Exception:
+        # Fallback: zufaelliger Key (geht bei Restart verloren)
+        log.warning("Keyring nicht verfuegbar, nutze ephemeren JWT Secret")
+        return secrets.token_hex(32)
+
+
+class Settings:
+    """Zentrale Konfiguration — Secrets aus Windows Keyring, Rest als Defaults."""
+
+    # --- Discord OAuth (aus DeadlockBot Keyring) ---
+    DISCORD_CLIENT_ID: str = _get_keyring_value("DeadlockBot", "DISCORD_OAUTH_CLIENT_ID") or ""
+    DISCORD_CLIENT_SECRET: str = _get_keyring_value("DeadlockBot", "DISCORD_OAUTH_CLIENT_SECRET") or ""
+    DISCORD_REDIRECT_URI: str = "https://turnier.earlysalty.com/auth/discord/callback"
+
+    # --- Discord Guild & Rollen ---
+    DISCORD_GUILD_ID: str = "1289721245281292288"
+    DISCORD_ADMIN_ROLE_IDS: str = ""  # Komma-separiert, spaeter setzen
+    DISCORD_MOD_ROLE_IDS: str = "1474210107255554331"
+
+    # --- JWT ---
+    JWT_SECRET: str = _ensure_jwt_secret()
 
     # --- Datenbank ---
     DATABASE_PATH: str = "data/tournament.db"
 
-    # --- Discord OAuth ---
-    DISCORD_CLIENT_ID: str = ""
-    DISCORD_CLIENT_SECRET: str = ""
-    DISCORD_REDIRECT_URI: str = "https://turnier.earlysalty.com/auth/discord/callback"
-
-    # --- Discord Guild / Rollen ---
-    DISCORD_GUILD_ID: str = ""
-    DISCORD_ADMIN_ROLE_IDS: str = ""  # Komma-separiert
-    DISCORD_MOD_ROLE_IDS: str = ""    # Komma-separiert
-
-    # --- JWT ---
-    JWT_SECRET: str = ""
-
     # --- Steam Bridge (read-only Zugriff auf Discord Bot DB) ---
-    STEAM_BRIDGE_DB_PATH: str = ""
+    STEAM_BRIDGE_DB_PATH: str = r"C:\Users\Nani-Admin\Documents\Deadlock\service\deadlock.sqlite3"
 
     # --- Server ---
     BACKEND_PORT: int = 8900
@@ -35,16 +67,10 @@ class Settings(BaseSettings):
     # --- Notifications ---
     DISCORD_WEBHOOK_URL: str = ""
 
-    model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
-
     # --- Helfer ---
-
     @property
     def jwt_secret_key(self) -> str:
-        """Gibt JWT_SECRET zurueck oder generiert einen zufaelligen Key."""
-        if self.JWT_SECRET:
-            return self.JWT_SECRET
-        return secrets.token_hex(32)
+        return self.JWT_SECRET
 
     @property
     def admin_role_ids(self) -> set[str]:
@@ -60,3 +86,9 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+# Startup-Log
+if settings.DISCORD_CLIENT_ID:
+    log.info("Discord OAuth Client ID geladen: %s...", settings.DISCORD_CLIENT_ID[:6])
+else:
+    log.warning("DISCORD_OAUTH_CLIENT_ID nicht im Keyring gefunden!")
