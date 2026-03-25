@@ -1,0 +1,31 @@
+[Unit]
+Description=Deadlock Turniere Backend
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=deadlock
+Group=deadlock
+WorkingDirectory=/opt/deadlock-turniere/backend
+Environment=BACKEND_PORT=8900
+Environment=FRONTEND_URL=https://turnier.earlysalty.com
+Environment=DATABASE_PATH=/opt/deadlock-turniere/backend/data/tournament.db
+
+# Option A: read credential files through systemd credentials.
+LoadCredential=DISCORD_CLIENT_ID:/etc/deadlock-turniere/secrets/discord_client_id
+LoadCredential=DISCORD_CLIENT_SECRET:/etc/deadlock-turniere/secrets/discord_client_secret
+LoadCredential=JWT_SECRET:/etc/deadlock-turniere/secrets/jwt_secret
+
+# Option B: if Vault Agent renders files, use *_FILE variables instead.
+# Environment=DISCORD_CLIENT_ID_FILE=/run/deadlock-turniere-secrets/DISCORD_CLIENT_ID
+# Environment=DISCORD_CLIENT_SECRET_FILE=/run/deadlock-turniere-secrets/DISCORD_CLIENT_SECRET
+# Environment=JWT_SECRET_FILE=/run/deadlock-turniere-secrets/JWT_SECRET
+# Environment=STEAM_BRIDGE_DB_PATH_FILE=/run/deadlock-turniere-secrets/STEAM_BRIDGE_DB_PATH
+
+ExecStart=/opt/deadlock-turniere/venv/bin/python -m uvicorn main:app --host 127.0.0.1 --port 8900
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
