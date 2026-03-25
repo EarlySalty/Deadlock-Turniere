@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import Card from '@/components/ui/Card'
 import Button from '@/components/ui/Button'
 import {
@@ -58,15 +58,6 @@ export default function ParticipantManager({
   const [moveTargets, setMoveTargets] = useState<Record<string, string>>({})
   const [signupTargets, setSignupTargets] = useState<Record<number, string>>({})
   const [feedback, setFeedback] = useState('')
-
-  useEffect(() => {
-    setRenameValues(
-      teams.reduce<Record<number, string>>((acc, team) => {
-        acc[team.id] = team.name
-        return acc
-      }, {})
-    )
-  }, [teams])
 
   const pendingSignups = useMemo(
     () => signups.filter((signup) => signup.team_id === null),

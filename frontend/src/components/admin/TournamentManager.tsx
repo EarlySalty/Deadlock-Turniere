@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import Card from '@/components/ui/Card'
 import Badge from '@/components/ui/Badge'
 import Button from '@/components/ui/Button'
+import DateTimeInput from '@/components/ui/DateTimeInput'
 import {
   useAdvanceTournament,
   useAssignRandomTeams,
@@ -68,20 +69,6 @@ export default function TournamentManager({
     bracket_start: toInputDateTime(tournament.bracket_start),
   })
   const [successMessage, setSuccessMessage] = useState('')
-
-  useEffect(() => {
-    setForm({
-      name: tournament.name,
-      description: tournament.description ?? '',
-      team_size: tournament.team_size,
-      bracket_format: tournament.bracket_format,
-      registration_start: toInputDateTime(tournament.registration_start),
-      registration_end: toInputDateTime(tournament.registration_end),
-      group_phase_start: toInputDateTime(tournament.group_phase_start),
-      bracket_start: toInputDateTime(tournament.bracket_start),
-    })
-    setSuccessMessage('')
-  }, [tournament])
 
   const action = STATUS_ACTIONS[tournament.status]
   const isLoading =
@@ -261,9 +248,8 @@ export default function TournamentManager({
             <label htmlFor="admin-reg-start" className="mb-1.5 block text-sm font-medium text-foreground">
               Anmeldung Start
             </label>
-            <input
+            <DateTimeInput
               id="admin-reg-start"
-              type="datetime-local"
               value={form.registration_start}
               onChange={(event) => handleChange('registration_start', event.target.value)}
               className="w-full rounded-lg border border-border bg-background px-3 py-2 text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
@@ -274,9 +260,8 @@ export default function TournamentManager({
             <label htmlFor="admin-reg-end" className="mb-1.5 block text-sm font-medium text-foreground">
               Anmeldung Ende
             </label>
-            <input
+            <DateTimeInput
               id="admin-reg-end"
-              type="datetime-local"
               value={form.registration_end}
               onChange={(event) => handleChange('registration_end', event.target.value)}
               className="w-full rounded-lg border border-border bg-background px-3 py-2 text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
@@ -287,9 +272,8 @@ export default function TournamentManager({
             <label htmlFor="admin-group-start" className="mb-1.5 block text-sm font-medium text-foreground">
               Gruppenphase Start
             </label>
-            <input
+            <DateTimeInput
               id="admin-group-start"
-              type="datetime-local"
               value={form.group_phase_start}
               onChange={(event) => handleChange('group_phase_start', event.target.value)}
               className="w-full rounded-lg border border-border bg-background px-3 py-2 text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
@@ -300,9 +284,8 @@ export default function TournamentManager({
             <label htmlFor="admin-bracket-start" className="mb-1.5 block text-sm font-medium text-foreground">
               Bracket Start
             </label>
-            <input
+            <DateTimeInput
               id="admin-bracket-start"
-              type="datetime-local"
               value={form.bracket_start}
               onChange={(event) => handleChange('bracket_start', event.target.value)}
               className="w-full rounded-lg border border-border bg-background px-3 py-2 text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"

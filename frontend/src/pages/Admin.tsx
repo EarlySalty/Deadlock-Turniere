@@ -92,6 +92,7 @@ export default function Admin() {
           {activeTournament && activeDetail ? (
             <>
               <TournamentManager
+                key={`${activeDetail.id}-${activeDetail.updated_at}`}
                 tournament={activeDetail}
                 teamCount={teamCount}
                 playerCount={playerCount}

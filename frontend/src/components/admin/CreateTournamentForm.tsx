@@ -2,6 +2,7 @@ import { useState } from 'react'
 import type { FormEvent } from 'react'
 import Card from '@/components/ui/Card'
 import Button from '@/components/ui/Button'
+import DateTimeInput from '@/components/ui/DateTimeInput'
 import { useCreateTournament } from '@/hooks/useTournament'
 import type { BracketFormat } from '@/types/tournament'
 import { Trophy, AlertCircle, CheckCircle } from 'lucide-react'
@@ -126,9 +127,8 @@ export default function CreateTournamentForm() {
             <label htmlFor="reg-start" className="block text-sm font-medium text-foreground mb-1.5">
               Anmeldung Start
             </label>
-            <input
+            <DateTimeInput
               id="reg-start"
-              type="datetime-local"
               value={regStart}
               onChange={(e) => setRegStart(e.target.value)}
               className="w-full bg-background border border-border rounded-lg px-3 py-2 text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
@@ -140,9 +140,8 @@ export default function CreateTournamentForm() {
             <label htmlFor="reg-end" className="block text-sm font-medium text-foreground mb-1.5">
               Anmeldung Ende
             </label>
-            <input
+            <DateTimeInput
               id="reg-end"
-              type="datetime-local"
               value={regEnd}
               onChange={(e) => setRegEnd(e.target.value)}
               className="w-full bg-background border border-border rounded-lg px-3 py-2 text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
