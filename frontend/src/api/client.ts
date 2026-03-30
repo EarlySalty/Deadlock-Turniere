@@ -159,3 +159,15 @@ export const generateBracket = (tournamentId: number) =>
 // Solo Signup
 export const signupSolo = (tournamentId: number) =>
   request<void>(`/tournaments/${tournamentId}/signup`, { method: 'POST' })
+
+export const withdrawSolo = (tournamentId: number) =>
+  request<void>(`/tournaments/${tournamentId}/signup`, { method: 'DELETE' })
+
+export const kickMember = (tournamentId: number, teamId: number, discordId: string) =>
+  request<void>(`/tournaments/${tournamentId}/teams/${teamId}/members/${discordId}`, { method: 'DELETE' })
+
+export const inviteSoloPlayer = (tournamentId: number, teamId: number, discordId: string) =>
+  request<void>(`/tournaments/${tournamentId}/teams/${teamId}/invite/${discordId}`, { method: 'POST' })
+
+export const leaveTeam = (tournamentId: number, teamId: number) =>
+  request<void>(`/tournaments/${tournamentId}/teams/${teamId}/leave`, { method: 'DELETE' })

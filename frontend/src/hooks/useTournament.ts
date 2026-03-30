@@ -4,6 +4,7 @@ import {
   createTournament, updateTournament, deleteTournament,
   advanceTournament, assignRandomTeams,
   createTeam, joinTeam, signupSolo,
+  withdrawSolo, kickMember, inviteSoloPlayer, leaveTeam,
   generateGroups, generateBracket,
   createLobby, startMatch, fetchMatchResult, leaveLobby,
   createAdminTeam, renameAdminTeam, deleteAdminTeam,
@@ -278,6 +279,48 @@ export function useDeleteAdminSignup() {
       deleteAdminSignup(tournamentId, signupId),
     onSuccess: (_data, vars) => {
       invalidateTournamentCaches(qc, vars.tournamentId)
+    },
+  })
+}
+
+export function useWithdrawSolo(tournamentId: number) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: () => withdrawSolo(tournamentId),
+    onSuccess: () => {
+      invalidateTournamentCaches(qc, tournamentId)
+    },
+  })
+}
+
+export function useKickMember(tournamentId: number) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ teamId, discordId }: { teamId: number; discordId: string }) =>
+      kickMember(tournamentId, teamId, discordId),
+    onSuccess: () => {
+      invalidateTournamentCaches(qc, tournamentId)
+    },
+  })
+}
+
+export function useInviteSoloPlayer(tournamentId: number) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ teamId, discordId }: { teamId: number; discordId: string }) =>
+      inviteSoloPlayer(tournamentId, teamId, discordId),
+    onSuccess: () => {
+      invalidateTournamentCaches(qc, tournamentId)
+    },
+  })
+}
+
+export function useLeaveTeam(tournamentId: number) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ teamId }: { teamId: number }) => leaveTeam(tournamentId, teamId),
+    onSuccess: () => {
+      invalidateTournamentCaches(qc, tournamentId)
     },
   })
 }

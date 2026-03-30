@@ -58,6 +58,7 @@ export interface TournamentSignup {
   id: number
   tournament_id: number
   discord_id: string
+  discord_name: string | null
   steam_id: string | null
   rank: string | null
   rank_score: number
