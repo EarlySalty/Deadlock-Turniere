@@ -21,6 +21,9 @@ export default function Header() {
               <Link to="/" className="text-sm text-muted hover:text-foreground transition-colors">
                 Startseite
               </Link>
+              <Link to="/hilfe" className="text-sm text-muted hover:text-foreground transition-colors">
+                Hilfe
+              </Link>
             </nav>
           </div>
 

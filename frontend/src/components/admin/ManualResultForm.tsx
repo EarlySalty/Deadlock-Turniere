@@ -2,7 +2,7 @@ import { useState } from 'react'
 import type { FormEvent } from 'react'
 import Card from '@/components/ui/Card'
 import Button from '@/components/ui/Button'
-import { submitMatchResult } from '@/api/client'
+import { useSubmitMatchResult } from '@/hooks/useTournament'
 import type { BracketMatch, Team } from '@/types/tournament'
 import { AlertCircle, CheckCircle, Gavel } from 'lucide-react'
 
@@ -11,19 +11,27 @@ interface ManualResultFormProps {
   match: BracketMatch
   teams: Team[]
   onSuccess: () => void
+  allowOverride?: boolean
 }
 
 function isTerminalMatch(match: BracketMatch): boolean {
   return ['completed', 'forfeit', 'cancelled'].includes(match.status)
 }
 
-export default function ManualResultForm({ tournamentId, match, teams, onSuccess }: ManualResultFormProps) {
+export default function ManualResultForm({
+  tournamentId,
+  match,
+  teams,
+  onSuccess,
+  allowOverride = false,
+}: ManualResultFormProps) {
+  const submitResultMutation = useSubmitMatchResult()
   const [winnerId, setWinnerId] = useState<number | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState(false)
 
-  if (isTerminalMatch(match)) {
+  if (isTerminalMatch(match) && !allowOverride) {
     return null
   }
 
@@ -39,7 +47,12 @@ export default function ManualResultForm({ tournamentId, match, teams, onSuccess
     setSuccess(false)
 
     try {
-      await submitMatchResult(tournamentId, match.id, { winner_id: winnerId })
+      await submitResultMutation.mutateAsync({
+        tournamentId,
+        matchId: match.id,
+        data: { winner_id: winnerId },
+        force: allowOverride && isTerminalMatch(match),
+      })
       setSuccess(true)
       setWinnerId(null)
       onSuccess()
@@ -55,7 +68,7 @@ export default function ManualResultForm({ tournamentId, match, teams, onSuccess
       <div className="flex items-center gap-2 mb-3">
         <Gavel size={16} className="text-primary" />
         <h4 className="text-sm font-semibold text-foreground">
-          Manuelles Ergebnis
+          {allowOverride && isTerminalMatch(match) ? 'Ergebnis korrigieren' : 'Manuelles Ergebnis'}
         </h4>
       </div>
 

@@ -4,6 +4,7 @@ import { useParams } from 'react-router-dom'
 import {
   useTournament, useCreateTeam, useJoinTeam, useSignupSolo,
   useWithdrawSolo, useKickMember, useInviteSoloPlayer, useLeaveTeam,
+  useCheckin, useCheckinStatus,
 } from '@/hooks/useTournament'
 import { useAuth } from '@/hooks/useAuth'
 import Card from '@/components/ui/Card'
@@ -13,22 +14,104 @@ import LoadingSpinner from '@/components/ui/LoadingSpinner'
 import GroupStandings from '@/components/groups/GroupStandings'
 import GroupMatchList from '@/components/groups/GroupMatchList'
 import BracketView from '@/components/bracket/BracketView'
-import { Trophy, Users, LayoutGrid, GitBranch, Plus, UserPlus, AlertCircle, Shield, X, Info, ChevronDown, ChevronUp } from 'lucide-react'
+import { Trophy, Users, LayoutGrid, GitBranch, Plus, UserPlus, AlertCircle, Shield, X, Info, ChevronDown, ChevronUp, ScrollText, CheckCircle2, ClipboardCheck } from 'lucide-react'
 import type { Team } from '@/types/tournament'
+import type { GroupMatch, BracketMatch } from '@/types/tournament'
 
-type Tab = 'übersicht' | 'gruppen' | 'bracket' | 'teams'
+type Tab = 'übersicht' | 'gruppen' | 'bracket' | 'teams' | 'ergebnisse'
 
-const TABS: { key: Tab; label: string; icon: typeof Trophy }[] = [
+const ALL_TABS: { key: Tab; label: string; icon: typeof Trophy }[] = [
   { key: 'übersicht', label: 'Übersicht', icon: Trophy },
   { key: 'teams', label: 'Teams', icon: Users },
   { key: 'gruppen', label: 'Gruppen', icon: LayoutGrid },
   { key: 'bracket', label: 'Bracket', icon: GitBranch },
+  { key: 'ergebnisse', label: 'Ergebnisse', icon: ScrollText },
 ]
+
+interface ResultEntry {
+  id: string
+  title: string
+  winnerName: string
+  loserName: string
+  playedAt: string | null
+  sortTime: number
+}
+
+function getTeamName(teamId: number | null, teams: Team[]): string {
+  if (teamId === null) return 'Freilos'
+  return teams.find((team) => team.id === teamId)?.name ?? `Team #${teamId}`
+}
+
+function getSortTime(value: string | null, fallback: number): number {
+  if (!value) return Number.MAX_SAFE_INTEGER - fallback
+  const parsed = new Date(value).getTime()
+  return Number.isNaN(parsed) ? Number.MAX_SAFE_INTEGER - fallback : parsed
+}
+
+function isCompletedMatch(status: string): boolean {
+  return status === 'completed' || status === 'forfeit'
+}
+
+function getBracketRoundLabel(round: number, maxRound: number): string {
+  if (maxRound <= 1) return 'Finale'
+  if (round === maxRound) return 'Finale'
+  if (round === maxRound - 1) return 'Halbfinale'
+  if (round === maxRound - 2) return 'Viertelfinale'
+  return `Runde ${round}`
+}
+
+function buildGroupResultEntries(groups: { name: string; matches: GroupMatch[] }[], teams: Team[]): ResultEntry[] {
+  return groups.flatMap((group) => {
+    const completedMatches = group.matches
+      .filter((match) => isCompletedMatch(match.status) && match.winner_id !== null)
+      .sort((left, right) => getSortTime(left.played_at, left.id) - getSortTime(right.played_at, right.id))
+
+    return completedMatches.map((match, index) => {
+      const winnerName = getTeamName(match.winner_id, teams)
+      const loserId = match.winner_id === match.team1_id ? match.team2_id : match.team1_id
+
+      return {
+        id: `group-${match.id}`,
+        title: `${group.name} • Runde ${index + 1}`,
+        winnerName,
+        loserName: getTeamName(loserId, teams),
+        playedAt: match.played_at,
+        sortTime: getSortTime(match.played_at, match.id),
+      }
+    })
+  })
+}
+
+function buildBracketResultEntries(matches: BracketMatch[], teams: Team[]): ResultEntry[] {
+  const maxRound = matches.reduce((highest, match) => Math.max(highest, match.round), 0)
+
+  return matches
+    .filter((match) => (
+      isCompletedMatch(match.status)
+      && match.winner_id !== null
+      && match.team1_id !== null
+      && match.team2_id !== null
+    ))
+    .map((match) => {
+      const winnerName = getTeamName(match.winner_id, teams)
+      const loserId = match.winner_id === match.team1_id ? match.team2_id : match.team1_id
+
+      return {
+        id: `bracket-${match.id}`,
+        title: `Bracket • ${getBracketRoundLabel(match.round, maxRound)}`,
+        winnerName,
+        loserName: getTeamName(loserId, teams),
+        playedAt: match.played_at,
+        sortTime: getSortTime(match.played_at, match.id),
+      }
+    })
+}
 
 export default function Tournament() {
   const { id } = useParams<{ id: string }>()
   const tournamentId = Number(id)
   const { data: tournament, isLoading } = useTournament(tournamentId)
+  const { data: checkinStatus } = useCheckinStatus(tournamentId)
   const { user, isLoggedIn } = useAuth()
   const [activeTab, setActiveTab] = useState<Tab>('übersicht')
 
@@ -52,6 +135,7 @@ export default function Tournament() {
   const kickMemberMutation = useKickMember(tournamentId)
   const inviteSoloPlayerMutation = useInviteSoloPlayer(tournamentId)
   const leaveTeamMutation = useLeaveTeam(tournamentId)
+  const checkinMutation = useCheckin(tournamentId)
 
   // Auto-clear success message after 3 seconds
   useEffect(() => {
@@ -59,6 +143,25 @@ export default function Tournament() {
     const timer = setTimeout(() => setSuccessMsg(null), 3000)
     return () => clearTimeout(timer)
   }, [successMsg])
+
+  const showResultsTab = tournament
+    ? ['group_phase', 'bracket', 'completed', 'archived'].includes(tournament.status)
+    : false
+  const availableTabs = ALL_TABS.filter((tab) => showResultsTab || tab.key !== 'ergebnisse')
+  const resultEntries = tournament
+    ? [
+        ...buildGroupResultEntries(tournament.groups, tournament.teams),
+        ...buildBracketResultEntries(tournament.bracket_matches, tournament.teams),
+      ].sort((left, right) => left.sortTime - right.sortTime || left.id.localeCompare(right.id))
+    : []
+
+  useEffect(() => {
+    if (!tournament) return
+    const allowedTabs = ALL_TABS.filter((tab) => showResultsTab || tab.key !== 'ergebnisse')
+    if (!allowedTabs.some((tab) => tab.key === activeTab)) {
+      setActiveTab('übersicht')
+    }
+  }, [activeTab, showResultsTab, tournament])
 
   if (isLoading) return <LoadingSpinner />
   if (!tournament) {
@@ -70,6 +173,7 @@ export default function Tournament() {
   }
 
   const isRegistration = tournament.status === 'registration'
+  const isCheckinPhase = tournament.status === 'checkin'
 
   // Check if user is already in a team
   const userTeam = user
@@ -82,6 +186,9 @@ export default function Tournament() {
   const userSoloSignup = user
     ? tournament.signups.find(s => s.discord_id === user.discord_id && s.team_id === null)
     : null
+  const userSignup = user
+    ? tournament.signups.find(s => s.discord_id === user.discord_id)
+    : null
 
   // Open solo signups (no team assigned)
   const openSoloSignups = tournament.signups.filter(s => s.team_id === null)
@@ -89,6 +196,9 @@ export default function Tournament() {
   const isUserCaptain = userTeam != null && userTeam.captain_discord_id === user?.discord_id
   const teamIsFull = userTeam != null && userTeam.members.length >= tournament.team_size
   const isAdmin = user?.is_admin === true
+  const checkedInIds = new Set(checkinStatus?.checked_in_discord_ids ?? [])
+  const isUserRegistered = Boolean(userTeam || userSignup)
+  const hasCheckedIn = Boolean(user && checkedInIds.has(user.discord_id))
 
   const mutationError =
     createTeamMutation.error ||
@@ -97,7 +207,8 @@ export default function Tournament() {
     withdrawSoloMutation.error ||
     kickMemberMutation.error ||
     inviteSoloPlayerMutation.error ||
-    leaveTeamMutation.error
+    leaveTeamMutation.error ||
+    checkinMutation.error
 
   const isMutating =
     createTeamMutation.isPending ||
@@ -106,7 +217,8 @@ export default function Tournament() {
     withdrawSoloMutation.isPending ||
     kickMemberMutation.isPending ||
     inviteSoloPlayerMutation.isPending ||
-    leaveTeamMutation.isPending
+    leaveTeamMutation.isPending ||
+    checkinMutation.isPending
 
   const handleCreateTeam = (e: FormEvent) => {
     e.preventDefault()
@@ -154,6 +266,18 @@ export default function Tournament() {
     inviteSoloPlayerMutation.mutate({ teamId, discordId })
   }
 
+  const handleCheckin = () => {
+    checkinMutation.mutate(undefined, {
+      onSuccess: (result) => {
+        setSuccessMsg(
+          result.already_checked_in
+            ? 'Du warst bereits eingecheckt.'
+            : 'Check-in bestätigt. Du bist für den Turnierstart markiert.'
+        )
+      },
+    })
+  }
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -179,9 +303,47 @@ export default function Tournament() {
         </div>
       )}
 
+      {isCheckinPhase && (
+        <Card className="p-5 border-amber-500/20 bg-amber-500/5">
+          <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+            <div className="space-y-2">
+              <div className="flex items-center gap-2 text-amber-300">
+                <ClipboardCheck size={18} />
+                <span className="text-sm font-semibold uppercase tracking-wide">Check-in aktiv</span>
+              </div>
+              <p className="text-sm text-foreground">
+                {checkinStatus?.total_checked_in ?? checkedInIds.size} von {checkinStatus?.total_registered ?? tournament.signups.length} Spielern sind eingecheckt.
+              </p>
+              {hasCheckedIn && (
+                <div className="inline-flex items-center gap-2 rounded-full bg-green-500/15 px-3 py-1 text-sm text-green-400">
+                  <CheckCircle2 size={14} />
+                  Check-in bestätigt
+                </div>
+              )}
+            </div>
+
+            {isLoggedIn && isUserRegistered ? (
+              <Button
+                variant="primary"
+                size="sm"
+                disabled={hasCheckedIn || checkinMutation.isPending}
+                onClick={handleCheckin}
+              >
+                <ClipboardCheck size={14} />
+                {hasCheckedIn ? 'Eingecheckt' : checkinMutation.isPending ? 'Checkt ein...' : 'Jetzt einchecken'}
+              </Button>
+            ) : (
+              <p className="text-sm text-muted">
+                Nur angemeldete Spieler können sich einchecken.
+              </p>
+            )}
+          </div>
+        </Card>
+      )}
+
       {/* Tabs */}
       <div className="flex border-b border-border">
-        {TABS.map(tab => {
+        {availableTabs.map(tab => {
           const Icon = tab.icon
           return (
             <button
@@ -519,6 +681,54 @@ export default function Tournament() {
 
         {activeTab === 'bracket' && (
           <BracketView matches={tournament.bracket_matches} teams={tournament.teams} />
+        )}
+
+        {activeTab === 'ergebnisse' && (
+          <div className="space-y-4">
+            {resultEntries.length === 0 ? (
+              <Card className="p-6 text-center">
+                <ScrollText size={32} className="mx-auto mb-3 text-muted" />
+                <p className="text-muted">Noch keine abgeschlossenen Ergebnisse vorhanden</p>
+              </Card>
+            ) : (
+              <>
+                <div>
+                  <h2 className="text-lg font-semibold text-foreground">Ergebnisübersicht</h2>
+                  <p className="mt-1 text-sm text-muted">
+                    Alle abgeschlossenen Gruppen- und Bracket-Matches in zeitlicher Reihenfolge.
+                  </p>
+                </div>
+
+                <div className="space-y-3">
+                  {resultEntries.map((entry) => (
+                    <Card key={entry.id} className="p-4">
+                      <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                        <div>
+                          <p className="text-xs uppercase tracking-wide text-primary">{entry.title}</p>
+                          <p className="mt-1 text-sm text-foreground">
+                            <span className="font-semibold text-green-400">{entry.winnerName}</span>
+                            {' '}besiegt{' '}
+                            <span className="text-muted">{entry.loserName}</span>
+                          </p>
+                        </div>
+                        <div className="text-sm text-muted">
+                          {entry.playedAt
+                            ? new Date(entry.playedAt).toLocaleString('de-DE', {
+                                day: '2-digit',
+                                month: '2-digit',
+                                year: 'numeric',
+                                hour: '2-digit',
+                                minute: '2-digit',
+                              })
+                            : 'Zeitpunkt nicht verfügbar'}
+                        </div>
+                      </div>
+                    </Card>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
         )}
       </div>
 

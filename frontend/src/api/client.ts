@@ -10,6 +10,8 @@ import type {
   LobbyCreateResult,
   MatchStartResult,
   MatchFetchResult,
+  CheckinStatus,
+  FinalizeCheckinResult,
   TeamMoveRequest,
 } from '@/types/tournament'
 
@@ -70,13 +72,36 @@ export const deleteTournament = (id: number) =>
 export const advanceTournament = (id: number) =>
   request<Tournament>(`/admin/tournaments/${id}/advance`, { method: 'POST' })
 
+export const openCheckin = (id: number) =>
+  request<Tournament>(`/admin/tournaments/${id}/open-checkin`, { method: 'POST' })
+
+export const finalizeCheckin = (
+  id: number,
+  confirm: boolean,
+  allowedTeamIds: number[] = [],
+  snapshotToken?: string,
+) => request<FinalizeCheckinResult>(
+  `/admin/tournaments/${id}/finalize-checkin${confirm ? '?confirm=true' : ''}`,
+  {
+    method: 'POST',
+    body: JSON.stringify({ allowed_team_ids: allowedTeamIds, snapshot_token: snapshotToken }),
+  }
+)
+
 export const assignRandomTeams = (id: number) =>
   request<{ teams_created: number }>(`/admin/tournaments/${id}/assign-random`, { method: 'POST' })
 
-export const submitMatchResult = (tournamentId: number, matchId: number, data: ManualResult) =>
-  request<void>(`/admin/tournaments/${tournamentId}/matches/${matchId}/result`, {
+export const submitMatchResult = (
+  tournamentId: number,
+  matchId: number,
+  data: ManualResult,
+  options?: { force?: boolean },
+) => {
+  const query = options?.force ? '?force=true' : ''
+  return request<void>(`/admin/tournaments/${tournamentId}/matches/${matchId}/result${query}`, {
     method: 'POST', body: JSON.stringify(data),
   })
+}
 
 export const createLobby = (tournamentId: number, matchId: number) =>
   request<LobbyCreateResult>(`/admin/tournaments/${tournamentId}/matches/${matchId}/create-lobby`, {
@@ -138,6 +163,17 @@ export const assignSignupToAdminTeam = (tournamentId: number, teamId: number, si
     body: JSON.stringify({ signup_id: signupId }),
   })
 
+export const addTeamMember = (
+  tournamentId: number,
+  teamId: number,
+  discordId: string,
+  discordName: string,
+) =>
+  request<Team>(`/admin/tournaments/${tournamentId}/teams/${teamId}/add-member`, {
+    method: 'POST',
+    body: JSON.stringify({ discord_id: discordId, discord_name: discordName }),
+  })
+
 export const deleteAdminSignup = (tournamentId: number, signupId: number) =>
   request<TournamentSignup>(`/admin/tournaments/${tournamentId}/signups/${signupId}`, {
     method: 'DELETE',
@@ -159,6 +195,12 @@ export const generateBracket = (tournamentId: number) =>
 // Solo Signup
 export const signupSolo = (tournamentId: number) =>
   request<void>(`/tournaments/${tournamentId}/signup`, { method: 'POST' })
+
+export const checkinPlayer = (tournamentId: number) =>
+  request<{ checked_in: boolean; already_checked_in: boolean }>(`/tournaments/${tournamentId}/checkin`, { method: 'POST' })
+
+export const getCheckinStatus = (tournamentId: number) =>
+  request<CheckinStatus>(`/tournaments/${tournamentId}/checkin-status`)
 
 export const withdrawSolo = (tournamentId: number) =>
   request<void>(`/tournaments/${tournamentId}/signup`, { method: 'DELETE' })

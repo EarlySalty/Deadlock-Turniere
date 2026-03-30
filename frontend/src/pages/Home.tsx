@@ -11,7 +11,7 @@ export default function Home() {
   if (isLoading) return <LoadingSpinner />
 
   const active = tournaments?.find(t =>
-    ['registration', 'group_phase', 'bracket'].includes(t.status)
+    ['draft', 'registration', 'checkin', 'group_phase', 'bracket'].includes(t.status)
   )
   const archived = tournaments?.filter(t =>
     ['completed', 'archived'].includes(t.status)

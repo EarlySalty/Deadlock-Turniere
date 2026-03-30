@@ -33,12 +33,14 @@ async def apply_bracket_match_result(
     duration_s: int | None,
     players: list[dict[str, Any]] | None,
     source: str = "automatic",
+    force: bool = False,
 ) -> dict[str, Any]:
     """Persistiert ein Bracket-Ergebnis und propagiert den Gewinner."""
     async with get_db() as db:
         cursor = await db.execute(
             """
-            SELECT id, team1_id, team2_id, status, match_duration_s, match_stats
+            SELECT id, round, position, team1_id, team2_id, winner_id, status,
+                   source_match1_id, source_match2_id, match_duration_s, match_stats
             FROM bracket_matches
             WHERE id = ? AND tournament_id = ?
             """,
@@ -48,7 +50,7 @@ async def apply_bracket_match_result(
         if not match:
             raise MatchNotFoundError(f"Bracket-Match {match_id} nicht gefunden")
 
-        if match["status"] in {"completed", "cancelled", "forfeit"}:
+        if match["status"] in {"completed", "cancelled", "forfeit"} and not force:
             raise MatchStateError(
                 f"Bracket-Match {match_id} kann aus Status {match['status']} nicht verarbeitet werden"
             )
@@ -89,6 +91,13 @@ async def apply_bracket_match_result(
                 f"winner_id {winner_id_value} gehört nicht zu Match {match_id}"
             )
 
+        if (
+            force
+            and match["winner_id"] is not None
+            and int(match["winner_id"]) != winner_id_value
+        ):
+            await _reset_bracket_downstream(db, tournament_id, dict(match))
+
         duration_value = _coerce_optional_int(duration_s, "duration_s")
         if duration_value is None:
             duration_value = match["match_duration_s"]
@@ -98,6 +107,10 @@ async def apply_bracket_match_result(
             match["match_stats"],
         )
 
+        await db.execute(
+            "DELETE FROM match_results WHERE bracket_match_id = ?",
+            (match_id,),
+        )
         await db.execute(
             """
             UPDATE bracket_matches
@@ -134,6 +147,78 @@ async def apply_bracket_match_result(
         "duration_s": duration_value,
         "players": return_players,
     }
+
+
+async def _reset_bracket_downstream(
+    db,
+    tournament_id: int,
+    match: dict[str, Any],
+) -> None:  # noqa: ANN001
+    next_match = await _load_next_bracket_match(db, tournament_id, match)
+    if not next_match:
+        return
+
+    await _reset_bracket_downstream(db, tournament_id, dict(next_match))
+
+    slot_column = _resolve_next_slot(match, dict(next_match))
+    await db.execute(
+        f"""
+        UPDATE bracket_matches
+        SET {slot_column} = NULL,
+            winner_id = NULL,
+            status = 'pending',
+            steam_party_id = NULL,
+            party_code = NULL,
+            deadlock_match_id = NULL,
+            match_duration_s = NULL,
+            match_stats = NULL,
+            played_at = NULL
+        WHERE id = ?
+        """,
+        (next_match["id"],),
+    )
+    await db.execute(
+        "DELETE FROM match_results WHERE bracket_match_id = ?",
+        (next_match["id"],),
+    )
+
+
+async def _load_next_bracket_match(
+    db,
+    tournament_id: int,
+    match: dict[str, Any],
+):  # noqa: ANN001
+    cursor = await db.execute(
+        """
+        SELECT id, round, position, source_match1_id, source_match2_id
+        FROM bracket_matches
+        WHERE tournament_id = ? AND (source_match1_id = ? OR source_match2_id = ?)
+        LIMIT 1
+        """,
+        (tournament_id, match["id"], match["id"]),
+    )
+    next_match = await cursor.fetchone()
+    if next_match:
+        return next_match
+
+    cursor = await db.execute(
+        """
+        SELECT id, round, position, source_match1_id, source_match2_id
+        FROM bracket_matches
+        WHERE tournament_id = ? AND round = ? AND position = ?
+        LIMIT 1
+        """,
+        (tournament_id, int(match["round"]) + 1, int(match["position"]) // 2),
+    )
+    return await cursor.fetchone()
+
+
+def _resolve_next_slot(match: dict[str, Any], next_match: dict[str, Any]) -> str:
+    if next_match.get("source_match1_id") == match["id"]:
+        return "team1_id"
+    if next_match.get("source_match2_id") == match["id"]:
+        return "team2_id"
+    return "team1_id" if int(match["position"]) % 2 == 0 else "team2_id"
 
 
 def _coerce_optional_int(value: int | None, field_name: str) -> int | None:

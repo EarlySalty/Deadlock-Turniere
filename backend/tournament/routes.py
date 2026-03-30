@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 
 from auth.permissions import require_auth
 from db import get_db
-from steam.reader import get_steam_link
+from rank_reader import get_player_rank_profile
 from tournament.models import (
     BracketMatch,
     Group,
@@ -29,6 +29,28 @@ router = APIRouter(prefix="/api", tags=["tournaments"])
 # Helpers
 # ---------------------------------------------------------------------------
 
+async def _enrich_rank_data(row: dict) -> dict:  # noqa: ANN001
+    """Ergänzt Rangdaten mit Discord-first und DB-Fallback."""
+    profile = await get_player_rank_profile(str(row["discord_id"]))
+    if not profile:
+        return row
+
+    enriched = dict(row)
+    if profile.get("steam_id"):
+        enriched["steam_id"] = profile.get("steam_id")
+    if profile.get("rank"):
+        enriched["rank"] = profile.get("rank")
+    if profile.get("rank_score") is not None:
+        enriched["rank_score"] = profile.get("rank_score") or 0
+    return enriched
+
+
+async def _audit(db, action: str, user_id: str | None, details: str) -> None:  # noqa: ANN001
+    await db.execute(
+        "INSERT INTO audit_log (action, user_id, details) VALUES (?, ?, ?)",
+        (action, user_id, details),
+    )
+
 async def _load_teams_for_tournament(db, tournament_id: int) -> list[Team]:  # noqa: ANN001
     """Lädt alle Teams eines Turniers inkl. Members."""
     cursor = await db.execute(
@@ -39,11 +61,22 @@ async def _load_teams_for_tournament(db, tournament_id: int) -> list[Team]:  # n
     teams: list[Team] = []
     for t in team_rows:
         cursor = await db.execute(
-            "SELECT * FROM team_members WHERE team_id = ?",
+            "SELECT tm.id, tm.team_id, tm.discord_id, "
+            "COALESCE(NULLIF(tm.discord_name, ''), NULLIF(s.discord_name, '')) AS discord_name, "
+            "tm.steam_id, tm.rank, tm.rank_score, tm.role, tm.joined_at "
+            "FROM team_members tm "
+            "LEFT JOIN ("
+            "    SELECT discord_id, MAX(discord_name) AS discord_name "
+            "    FROM sessions "
+            "    WHERE discord_name IS NOT NULL AND discord_name != '' "
+            "    GROUP BY discord_id"
+            ") s ON s.discord_id = tm.discord_id "
+            "WHERE tm.team_id = ? "
+            "ORDER BY tm.joined_at",
             (t["id"],),
         )
         member_rows = await cursor.fetchall()
-        members = [TeamMember(**dict(m)) for m in member_rows]
+        members = [TeamMember(**await _enrich_rank_data(dict(m))) for m in member_rows]
         teams.append(Team(**{**dict(t), "members": members}))
     return teams
 
@@ -93,11 +126,75 @@ async def _load_bracket_matches(db, tournament_id: int) -> list[BracketMatch]:  
 async def _load_signups_for_tournament(db, tournament_id: int) -> list[TournamentSignup]:  # noqa: ANN001
     """Lädt alle Solo-/Signup-Einträge eines Turniers."""
     cursor = await db.execute(
-        "SELECT * FROM tournament_signups WHERE tournament_id = ? ORDER BY signed_up_at DESC",
+        "SELECT ts.id, ts.tournament_id, ts.discord_id, "
+        "COALESCE(NULLIF(ts.discord_name, ''), NULLIF(s.discord_name, ''), NULLIF(tm.discord_name, '')) AS discord_name, "
+        "ts.steam_id, ts.rank, ts.rank_score, ts.team_id, ts.signed_up_at "
+        "FROM tournament_signups ts "
+        "LEFT JOIN ("
+        "    SELECT discord_id, MAX(discord_name) AS discord_name "
+        "    FROM sessions "
+        "    WHERE discord_name IS NOT NULL AND discord_name != '' "
+        "    GROUP BY discord_id"
+        ") s ON s.discord_id = ts.discord_id "
+        "LEFT JOIN ("
+        "    SELECT discord_id, MAX(discord_name) AS discord_name "
+        "    FROM team_members "
+        "    WHERE discord_name IS NOT NULL AND discord_name != '' "
+        "    GROUP BY discord_id"
+        ") tm ON tm.discord_id = ts.discord_id "
+        "WHERE ts.tournament_id = ? "
+        "ORDER BY ts.signed_up_at DESC",
         (tournament_id,),
     )
     rows = await cursor.fetchall()
-    return [TournamentSignup(**dict(r)) for r in rows]
+    return [TournamentSignup(**await _enrich_rank_data(dict(r))) for r in rows]
+
+
+async def _upsert_signup(
+    db,
+    tournament_id: int,
+    *,
+    discord_id: str,
+    discord_name: str | None,
+    steam_id: str | None,
+    rank: str | None,
+    rank_score: int,
+    team_id: int | None,
+) -> None:  # noqa: ANN001
+    cursor = await db.execute(
+        "SELECT id FROM tournament_signups WHERE tournament_id = ? AND discord_id = ?",
+        (tournament_id, discord_id),
+    )
+    existing = await cursor.fetchone()
+    if existing:
+        await db.execute(
+            "UPDATE tournament_signups SET discord_name = ?, steam_id = ?, rank = ?, "
+            "rank_score = ?, team_id = ? WHERE id = ?",
+            (
+                discord_name,
+                steam_id,
+                rank,
+                rank_score,
+                team_id,
+                existing["id"],
+            ),
+        )
+        return
+
+    await db.execute(
+        "INSERT INTO tournament_signups "
+        "(tournament_id, discord_id, discord_name, steam_id, rank, rank_score, team_id) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (
+            tournament_id,
+            discord_id,
+            discord_name,
+            steam_id,
+            rank,
+            rank_score,
+            team_id,
+        ),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -228,10 +325,10 @@ async def create_team(
         team_id = cursor.lastrowid
 
         # Steam-Link laden
-        steam_data = await get_steam_link(user.discord_id)
-        steam_id = steam_data["steam_id"] if steam_data else None
-        rank = steam_data["rank"] if steam_data else None
-        score = steam_data["rank_score"] if steam_data else 0
+        rank_data = await get_player_rank_profile(user.discord_id)
+        steam_id = rank_data.get("steam_id") if rank_data else None
+        rank = rank_data.get("rank") if rank_data else None
+        score = rank_data.get("rank_score", 0) if rank_data else 0
 
         # Captain als erstes Mitglied
         await db.execute(
@@ -239,13 +336,38 @@ async def create_team(
             "VALUES (?, ?, ?, ?, ?, ?, 'captain')",
             (team_id, user.discord_id, user.discord_name, steam_id, rank, score),
         )
+        await _upsert_signup(
+            db,
+            tournament_id,
+            discord_id=user.discord_id,
+            discord_name=user.discord_name,
+            steam_id=steam_id,
+            rank=rank,
+            rank_score=score,
+            team_id=team_id,
+        )
         await db.commit()
 
         # Team zurückladen
         cursor = await db.execute("SELECT * FROM teams WHERE id = ?", (team_id,))
         team_row = await cursor.fetchone()
-        cursor = await db.execute("SELECT * FROM team_members WHERE team_id = ?", (team_id,))
-        members = [TeamMember(**dict(m)) for m in await cursor.fetchall()]
+        cursor = await db.execute(
+            "SELECT tm.id, tm.team_id, tm.discord_id, "
+            "COALESCE(NULLIF(tm.discord_name, ''), NULLIF(s.discord_name, '')) AS discord_name, "
+            "tm.steam_id, tm.rank, tm.rank_score, tm.role, tm.joined_at "
+            "FROM team_members tm "
+            "LEFT JOIN ("
+            "    SELECT discord_id, MAX(discord_name) AS discord_name "
+            "    FROM sessions "
+            "    WHERE discord_name IS NOT NULL AND discord_name != '' "
+            "    GROUP BY discord_id"
+            ") s ON s.discord_id = tm.discord_id "
+            "WHERE tm.team_id = ? "
+            "ORDER BY tm.joined_at",
+            (team_id,),
+        )
+        member_rows = await cursor.fetchall()
+        members = [TeamMember(**await _enrich_rank_data(dict(m))) for m in member_rows]
 
     return Team(**{**dict(team_row), "members": members})
 
@@ -354,10 +476,17 @@ async def join_team(
                     )
                 elif old_captain_member:
                     await db.execute(
-                        "INSERT INTO tournament_signups (tournament_id, discord_id, steam_id, rank, rank_score, team_id) "
-                        "VALUES (?, ?, ?, ?, ?, NULL)",
-                        (tournament_id, user.discord_id, old_captain_member["steam_id"],
-                         old_captain_member["rank"], old_captain_member["rank_score"]),
+                        "INSERT INTO tournament_signups "
+                        "(tournament_id, discord_id, discord_name, steam_id, rank, rank_score, team_id) "
+                        "VALUES (?, ?, ?, ?, ?, ?, NULL)",
+                        (
+                            tournament_id,
+                            user.discord_id,
+                            old_captain_member["discord_name"],
+                            old_captain_member["steam_id"],
+                            old_captain_member["rank"],
+                            old_captain_member["rank_score"],
+                        ),
                     )
             else:
                 # Normales Verlassen
@@ -376,10 +505,10 @@ async def join_team(
                     )
 
         # Steam-Link laden
-        steam_data = await get_steam_link(user.discord_id)
-        steam_id = steam_data["steam_id"] if steam_data else None
-        rank = steam_data["rank"] if steam_data else None
-        score = steam_data["rank_score"] if steam_data else 0
+        rank_data = await get_player_rank_profile(user.discord_id)
+        steam_id = rank_data.get("steam_id") if rank_data else None
+        rank = rank_data.get("rank") if rank_data else None
+        score = rank_data.get("rank_score", 0) if rank_data else 0
 
         # Mitglied hinzufügen
         cursor = await db.execute(
@@ -388,16 +517,16 @@ async def join_team(
             (team_id, user.discord_id, user.discord_name, steam_id, rank, score),
         )
 
-        # tournament_signups team_id aktualisieren falls vorhanden
-        cursor2 = await db.execute(
-            "SELECT id FROM tournament_signups WHERE tournament_id = ? AND discord_id = ?",
-            (tournament_id, user.discord_id),
+        await _upsert_signup(
+            db,
+            tournament_id,
+            discord_id=user.discord_id,
+            discord_name=user.discord_name,
+            steam_id=steam_id,
+            rank=rank,
+            rank_score=score,
+            team_id=team_id,
         )
-        if await cursor2.fetchone():
-            await db.execute(
-                "UPDATE tournament_signups SET team_id = ? WHERE tournament_id = ? AND discord_id = ?",
-                (team_id, tournament_id, user.discord_id),
-            )
 
         await db.commit()
 
@@ -461,10 +590,10 @@ async def solo_signup(
             )
 
         # Steam-Link laden
-        steam_data = await get_steam_link(user.discord_id)
-        steam_id = steam_data["steam_id"] if steam_data else None
-        rank = steam_data["rank"] if steam_data else None
-        score = steam_data["rank_score"] if steam_data else 0
+        rank_data = await get_player_rank_profile(user.discord_id)
+        steam_id = rank_data.get("steam_id") if rank_data else None
+        rank = rank_data.get("rank") if rank_data else None
+        score = rank_data.get("rank_score", 0) if rank_data else 0
 
         await db.execute(
             "INSERT INTO tournament_signups (tournament_id, discord_id, discord_name, steam_id, rank, rank_score) "
@@ -528,6 +657,137 @@ async def cancel_solo_signup(
         await db.commit()
 
     return {"status": "abgemeldet", "tournament_id": tournament_id}
+
+
+# ---------------------------------------------------------------------------
+# POST /api/tournaments/{tournament_id}/checkin — Spieler-Check-in
+# ---------------------------------------------------------------------------
+
+@router.post("/tournaments/{tournament_id}/checkin", status_code=200)
+async def checkin_player(
+    tournament_id: int,
+    user: UserSession = Depends(require_auth),
+) -> dict:
+    """Checkt den aktuellen Spieler für das Turnier ein."""
+    async with get_db() as db:
+        cursor = await db.execute(
+            "SELECT * FROM tournaments WHERE id = ?",
+            (tournament_id,),
+        )
+        tournament = await cursor.fetchone()
+        if not tournament:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Turnier nicht gefunden",
+            )
+        if tournament["status"] != "checkin":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Check-in ist aktuell nicht geöffnet",
+            )
+
+        cursor = await db.execute(
+            "SELECT * FROM tournament_signups WHERE tournament_id = ? AND discord_id = ?",
+            (tournament_id, user.discord_id),
+        )
+        signup = await cursor.fetchone()
+
+        if not signup:
+            cursor = await db.execute(
+                "SELECT tm.discord_name, tm.steam_id, tm.rank, tm.rank_score, tm.team_id "
+                "FROM team_members tm "
+                "JOIN teams t ON t.id = tm.team_id "
+                "WHERE t.tournament_id = ? AND tm.discord_id = ?",
+                (tournament_id, user.discord_id),
+            )
+            membership = await cursor.fetchone()
+            if not membership:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Du bist für dieses Turnier nicht angemeldet",
+                )
+            await _upsert_signup(
+                db,
+                tournament_id,
+                discord_id=user.discord_id,
+                discord_name=user.discord_name or membership["discord_name"],
+                steam_id=membership["steam_id"],
+                rank=membership["rank"],
+                rank_score=membership["rank_score"] or 0,
+                team_id=membership["team_id"],
+            )
+
+        cursor = await db.execute(
+            "SELECT checked_in_at FROM tournament_checkins WHERE tournament_id = ? AND discord_id = ?",
+            (tournament_id, user.discord_id),
+        )
+        existing_checkin = await cursor.fetchone()
+        already_checked_in = existing_checkin is not None
+        if not already_checked_in:
+            await db.execute(
+                "INSERT INTO tournament_checkins (tournament_id, discord_id) VALUES (?, ?)",
+                (tournament_id, user.discord_id),
+            )
+        await _audit(
+            db,
+            "tournament_checkin",
+            user.discord_id,
+            json.dumps(
+                {
+                    "tournament_id": tournament_id,
+                    "discord_id": user.discord_id,
+                    "already_checked_in": already_checked_in,
+                }
+            ),
+        )
+        await db.commit()
+
+    return {"checked_in": True, "already_checked_in": already_checked_in}
+
+
+# ---------------------------------------------------------------------------
+# GET /api/tournaments/{tournament_id}/checkin-status — Statusübersicht
+# ---------------------------------------------------------------------------
+
+@router.get("/tournaments/{tournament_id}/checkin-status", status_code=200)
+async def get_checkin_status(tournament_id: int) -> dict:
+    """Gibt den aktuellen Check-in-Stand zurück."""
+    async with get_db() as db:
+        cursor = await db.execute(
+            "SELECT id FROM tournaments WHERE id = ?",
+            (tournament_id,),
+        )
+        if not await cursor.fetchone():
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Turnier nicht gefunden",
+            )
+
+        cursor = await db.execute(
+            "SELECT discord_id FROM tournament_signups WHERE tournament_id = ?",
+            (tournament_id,),
+        )
+        registered_ids = {row["discord_id"] for row in await cursor.fetchall()}
+
+        cursor = await db.execute(
+            "SELECT tm.discord_id FROM team_members tm "
+            "JOIN teams t ON t.id = tm.team_id WHERE t.tournament_id = ?",
+            (tournament_id,),
+        )
+        registered_ids.update(row["discord_id"] for row in await cursor.fetchall())
+
+        cursor = await db.execute(
+            "SELECT discord_id FROM tournament_checkins "
+            "WHERE tournament_id = ? ORDER BY checked_in_at, id",
+            (tournament_id,),
+        )
+        checked_in_ids = [row["discord_id"] for row in await cursor.fetchall()]
+
+    return {
+        "total_registered": len(registered_ids),
+        "total_checked_in": len(checked_in_ids),
+        "checked_in_discord_ids": checked_in_ids,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -620,9 +880,17 @@ async def kick_team_member(
             )
         else:
             await db.execute(
-                "INSERT INTO tournament_signups (tournament_id, discord_id, steam_id, rank, rank_score, team_id) "
-                "VALUES (?, ?, ?, ?, ?, NULL)",
-                (tournament_id, discord_id, member["steam_id"], member["rank"], member["rank_score"]),
+                "INSERT INTO tournament_signups "
+                "(tournament_id, discord_id, discord_name, steam_id, rank, rank_score, team_id) "
+                "VALUES (?, ?, ?, ?, ?, ?, NULL)",
+                (
+                    tournament_id,
+                    discord_id,
+                    member["discord_name"],
+                    member["steam_id"],
+                    member["rank"],
+                    member["rank_score"],
+                ),
             )
 
         await db.commit()
@@ -734,10 +1002,15 @@ async def invite_to_team(
             (team_id, target_discord_id, discord_name, solo_signup["steam_id"], solo_signup["rank"], solo_signup["rank_score"]),
         )
 
-        # tournament_signups: team_id setzen
-        await db.execute(
-            "UPDATE tournament_signups SET team_id = ? WHERE tournament_id = ? AND discord_id = ?",
-            (team_id, tournament_id, target_discord_id),
+        await _upsert_signup(
+            db,
+            tournament_id,
+            discord_id=target_discord_id,
+            discord_name=discord_name,
+            steam_id=solo_signup["steam_id"],
+            rank=solo_signup["rank"],
+            rank_score=solo_signup["rank_score"] or 0,
+            team_id=team_id,
         )
 
         await db.commit()
@@ -845,9 +1118,17 @@ async def leave_team(
             else:
                 # Kein Eintrag — Captain hat das Team direkt erstellt, neuen Solo-Eintrag anlegen
                 await db.execute(
-                    "INSERT INTO tournament_signups (tournament_id, discord_id, steam_id, rank, rank_score, team_id) "
-                    "VALUES (?, ?, ?, ?, ?, NULL)",
-                    (tournament_id, user.discord_id, captain_steam_id, captain_rank, captain_rank_score),
+                    "INSERT INTO tournament_signups "
+                    "(tournament_id, discord_id, discord_name, steam_id, rank, rank_score, team_id) "
+                    "VALUES (?, ?, ?, ?, ?, ?, NULL)",
+                    (
+                        tournament_id,
+                        user.discord_id,
+                        user.discord_name,
+                        captain_steam_id,
+                        captain_rank,
+                        captain_rank_score,
+                    ),
                 )
 
             await db.commit()
@@ -872,9 +1153,17 @@ async def leave_team(
             )
         else:
             await db.execute(
-                "INSERT INTO tournament_signups (tournament_id, discord_id, steam_id, rank, rank_score, team_id) "
-                "VALUES (?, ?, ?, ?, ?, NULL)",
-                (tournament_id, user.discord_id, member["steam_id"], member["rank"], member["rank_score"]),
+                "INSERT INTO tournament_signups "
+                "(tournament_id, discord_id, discord_name, steam_id, rank, rank_score, team_id) "
+                "VALUES (?, ?, ?, ?, ?, ?, NULL)",
+                (
+                    tournament_id,
+                    user.discord_id,
+                    member["discord_name"],
+                    member["steam_id"],
+                    member["rank"],
+                    member["rank_score"],
+                ),
             )
 
         await db.commit()

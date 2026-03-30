@@ -9,6 +9,7 @@ import {
   useDeleteTournament,
   useGenerateBracket,
   useGenerateGroups,
+  useOpenCheckin,
   useUpdateTournament,
 } from '@/hooks/useTournament'
 import type { Tournament, TournamentUpdate } from '@/types/tournament'
@@ -34,7 +35,6 @@ interface TournamentManagerProps {
 
 const STATUS_ACTIONS: Record<string, { label: string; confirmMsg: string }> = {
   draft: { label: 'Anmeldung starten', confirmMsg: 'Turnier-Anmeldung wirklich starten?' },
-  registration: { label: 'Zur Gruppenphase', confirmMsg: 'Anmeldung beenden und Gruppenphase starten?' },
   group_phase: { label: 'Zum Bracket', confirmMsg: 'Gruppenphase beenden und Bracket starten?' },
   bracket: { label: 'Turnier abschliessen', confirmMsg: 'Turnier wirklich abschliessen?' },
   completed: { label: 'Archivieren', confirmMsg: 'Turnier ins Archiv verschieben?' },
@@ -51,8 +51,10 @@ export default function TournamentManager({
   playerCount,
   matchCount,
 }: TournamentManagerProps) {
-  const updateMutation = useUpdateTournament()
+  const detailsUpdateMutation = useUpdateTournament()
+  const scheduleUpdateMutation = useUpdateTournament()
   const advanceMutation = useAdvanceTournament()
+  const openCheckinMutation = useOpenCheckin(tournament.id)
   const assignMutation = useAssignRandomTeams()
   const deleteMutation = useDeleteTournament()
   const generateGroupsMutation = useGenerateGroups()
@@ -68,20 +70,28 @@ export default function TournamentManager({
     group_phase_start: toInputDateTime(tournament.group_phase_start),
     bracket_start: toInputDateTime(tournament.bracket_start),
   })
+  const [scheduleForm, setScheduleForm] = useState({
+    registration_end: toInputDateTime(tournament.registration_end),
+    group_phase_start: toInputDateTime(tournament.group_phase_start),
+  })
   const [successMessage, setSuccessMessage] = useState('')
+  const [scheduleSuccessMessage, setScheduleSuccessMessage] = useState('')
 
   const action = STATUS_ACTIONS[tournament.status]
   const isLoading =
-    updateMutation.isPending ||
+    detailsUpdateMutation.isPending ||
+    scheduleUpdateMutation.isPending ||
     advanceMutation.isPending ||
+    openCheckinMutation.isPending ||
     assignMutation.isPending ||
     deleteMutation.isPending ||
     generateGroupsMutation.isPending ||
     generateBracketMutation.isPending
 
   const error =
-    updateMutation.error ||
+    detailsUpdateMutation.error ||
     advanceMutation.error ||
+    openCheckinMutation.error ||
     assignMutation.error ||
     deleteMutation.error ||
     generateGroupsMutation.error ||
@@ -105,9 +115,40 @@ export default function TournamentManager({
       group_phase_start: form.group_phase_start || undefined,
       bracket_start: form.bracket_start || undefined,
     }
-    updateMutation.mutate(
+    detailsUpdateMutation.mutate(
       { id: tournament.id, data: payload },
       { onSuccess: () => setSuccessMessage('Turnierdaten gespeichert.') }
+    )
+  }
+
+  const handleScheduleChange = (
+    key: keyof typeof scheduleForm,
+    value: string,
+  ) => {
+    setScheduleSuccessMessage('')
+    setScheduleForm((current) => ({ ...current, [key]: value }))
+  }
+
+  const handleSaveSchedule = () => {
+    setScheduleSuccessMessage('')
+    scheduleUpdateMutation.mutate(
+      {
+        id: tournament.id,
+        data: {
+          registration_end: scheduleForm.registration_end || undefined,
+          group_phase_start: scheduleForm.group_phase_start || undefined,
+        },
+      },
+      {
+        onSuccess: () => {
+          setForm((current) => ({
+            ...current,
+            registration_end: scheduleForm.registration_end,
+            group_phase_start: scheduleForm.group_phase_start,
+          }))
+          setScheduleSuccessMessage('Zeitplan aktualisiert.')
+        },
+      },
     )
   }
 
@@ -124,6 +165,14 @@ export default function TournamentManager({
     if (window.confirm('Solo-Spieler zufällig auf Teams verteilen?')) {
       assignMutation.mutate(tournament.id, {
         onSuccess: () => setSuccessMessage('Solo-Anmeldungen wurden Teams zugewiesen.'),
+      })
+    }
+  }
+
+  const handleOpenCheckin = () => {
+    if (window.confirm('Check-in jetzt öffnen?')) {
+      openCheckinMutation.mutate(undefined, {
+        onSuccess: () => setSuccessMessage('Check-in wurde geöffnet.'),
       })
     }
   }
@@ -153,7 +202,7 @@ export default function TournamentManager({
         <div className="space-y-2">
           <div className="flex items-center gap-3">
             <Trophy size={20} className="text-primary" />
-            <h2 className="text-lg font-semibold text-foreground">Aktives Turnier</h2>
+            <h2 className="text-lg font-semibold text-foreground">Turnier-Verwaltung</h2>
             <Badge status={tournament.status} />
           </div>
           <p className="text-sm text-muted">
@@ -294,6 +343,73 @@ export default function TournamentManager({
         </div>
       </div>
 
+      {['registration', 'checkin', 'group_phase'].includes(tournament.status) && (
+        <div className="rounded-xl border border-primary/20 bg-primary/5 p-5 space-y-4">
+          <div>
+            <h3 className="text-base font-semibold text-foreground">Zeitplan anpassen</h3>
+            <p className="mt-1 text-sm text-muted">
+              Anmeldung verlängern oder den Start der Gruppenphase direkt verschieben.
+            </p>
+          </div>
+
+          <div className="grid gap-4 md:grid-cols-2">
+            <div>
+              <label htmlFor="quick-registration-end" className="mb-1.5 block text-sm font-medium text-foreground">
+                Anmeldung Ende
+              </label>
+              <DateTimeInput
+                id="quick-registration-end"
+                value={scheduleForm.registration_end}
+                onChange={(event) => handleScheduleChange('registration_end', event.target.value)}
+                className="w-full rounded-lg border border-border bg-background px-3 py-2 text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
+              />
+            </div>
+
+            <div>
+              <label htmlFor="quick-group-start" className="mb-1.5 block text-sm font-medium text-foreground">
+                Gruppenphase Start
+              </label>
+              <DateTimeInput
+                id="quick-group-start"
+                value={scheduleForm.group_phase_start}
+                onChange={(event) => handleScheduleChange('group_phase_start', event.target.value)}
+                className="w-full rounded-lg border border-border bg-background px-3 py-2 text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
+              />
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-3">
+            <Button
+              variant="primary"
+              size="sm"
+              disabled={isLoading}
+              onClick={handleSaveSchedule}
+            >
+              <CalendarRange size={14} />
+              {scheduleUpdateMutation.isPending ? 'Speichert...' : 'Zeitplan speichern'}
+            </Button>
+
+            {scheduleSuccessMessage && (
+              <div className="flex items-center gap-2 rounded-lg border border-green-500/20 bg-green-500/10 px-3 py-2 text-sm text-green-400">
+                <CheckCircle2 size={16} />
+                <span>{scheduleSuccessMessage}</span>
+              </div>
+            )}
+
+            {scheduleUpdateMutation.error && (
+              <div className="flex items-center gap-2 rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-2 text-sm text-red-400">
+                <AlertCircle size={16} />
+                <span>
+                  {scheduleUpdateMutation.error instanceof Error
+                    ? scheduleUpdateMutation.error.message
+                    : 'Zeitplan konnte nicht aktualisiert werden'}
+                </span>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       <div className="flex flex-wrap gap-2">
         <Button
           variant="primary"
@@ -302,7 +418,7 @@ export default function TournamentManager({
           onClick={handleSave}
         >
           <PencilLine size={14} />
-          {updateMutation.isPending ? 'Speichert...' : 'Änderungen speichern'}
+          {detailsUpdateMutation.isPending ? 'Speichert...' : 'Änderungen speichern'}
         </Button>
 
         {tournament.status === 'registration' && (
@@ -323,6 +439,13 @@ export default function TournamentManager({
           <Button variant="secondary" size="sm" disabled={isLoading} onClick={handleGenerateBracket}>
             <GitBranch size={14} />
             {generateBracketMutation.isPending ? 'Generiert...' : 'Bracket neu generieren'}
+          </Button>
+        )}
+
+        {tournament.status === 'registration' && (
+          <Button variant="primary" size="sm" disabled={isLoading} onClick={handleOpenCheckin}>
+            <ArrowRight size={14} />
+            {openCheckinMutation.isPending ? 'Öffnet...' : 'Check-in öffnen'}
           </Button>
         )}
 

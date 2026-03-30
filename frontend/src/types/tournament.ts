@@ -1,4 +1,4 @@
-export type TournamentStatus = 'draft' | 'registration' | 'group_phase' | 'bracket' | 'completed' | 'archived'
+export type TournamentStatus = 'draft' | 'registration' | 'checkin' | 'group_phase' | 'bracket' | 'completed' | 'archived'
 export type BracketFormat = 'single_elimination' | 'double_elimination'
 export type MatchStatus = 'pending' | 'checkin' | 'lobby_created' | 'in_progress' | 'completed' | 'forfeit' | 'cancelled'
 
@@ -64,6 +64,44 @@ export interface TournamentSignup {
   rank_score: number
   team_id: number | null
   signed_up_at: string
+}
+
+export interface CheckinStatus {
+  total_registered: number
+  total_checked_in: number
+  checked_in_discord_ids: string[]
+}
+
+export interface FinalizeCheckinWarning {
+  team_id: number
+  team_name: string
+  current: number
+  required: number
+}
+
+export interface FinalizeCheckinPlayerChange {
+  team_id: number | null
+  team_name: string
+  discord_id: string
+  discord_name: string | null
+  source?: 'solo_pool' | 'new_team'
+}
+
+export interface FinalizeCheckinResult {
+  warnings: FinalizeCheckinWarning[]
+  removed_players: FinalizeCheckinPlayerChange[]
+  added_players: FinalizeCheckinPlayerChange[]
+  created_teams: { team_id: number | null; team_name: string }[]
+  deleted_team_ids: number[]
+  remaining_solo_players: {
+    discord_id: string
+    discord_name: string | null
+  }[]
+  dry_run: boolean
+  snapshot_token: string
+  groups_created?: number
+  matches_created?: number
+  advanced_to_group_phase?: boolean
 }
 
 export interface GroupMatch {

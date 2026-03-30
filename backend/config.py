@@ -9,6 +9,7 @@ import logging
 import os
 import secrets
 from pathlib import Path
+from urllib.parse import urlsplit
 
 log = logging.getLogger(__name__)
 
@@ -94,6 +95,32 @@ def _get_string(
     return default
 
 
+def _get_first_string(
+    names: list[str],
+    *,
+    default: str = "",
+    keyring_service: str | None = None,
+    keyring_keys: list[str] | None = None,
+) -> str:
+    """Resolve the first non-empty value from multiple aliases."""
+    for name in names:
+        file_value = _get_file_backed_value(name)
+        if file_value is not None:
+            return file_value
+
+        env_value = os.getenv(name, "").strip()
+        if env_value:
+            return env_value
+
+    if keyring_service and keyring_keys:
+        for keyring_key in keyring_keys:
+            keyring_value = _get_keyring_value(keyring_service, keyring_key)
+            if keyring_value is not None:
+                return keyring_value
+
+    return default
+
+
 def _get_int(name: str, *, default: int) -> int:
     raw = _get_string(name, default="")
     if not raw:
@@ -103,6 +130,28 @@ def _get_int(name: str, *, default: int) -> int:
     except ValueError:
         log.warning("Invalid integer for %s=%r, using default %s", name, raw, default)
         return default
+
+
+def _get_hostname(value: str) -> str | None:
+    """Extract a normalized hostname from a URL or host string."""
+    candidate = value.strip()
+    if not candidate:
+        return None
+
+    if "://" in candidate:
+        parsed = urlsplit(candidate)
+        hostname = parsed.hostname
+    else:
+        hostname = candidate
+        if hostname.startswith("[") and hostname.endswith("]"):
+            hostname = hostname[1:-1]
+        if ":" in hostname and hostname.count(":") == 1:
+            hostname = hostname.split(":", 1)[0]
+
+    if not hostname:
+        return None
+
+    return hostname.strip().lower() or None
 
 
 def _ensure_jwt_secret() -> str:
@@ -141,6 +190,11 @@ class Settings:
         keyring_service="DeadlockBot",
         keyring_key="DISCORD_OAUTH_CLIENT_SECRET",
     )
+    DISCORD_BOT_TOKEN: str = _get_first_string(
+        ["DISCORD_BOT_TOKEN", "DISCORD_TOKEN", "BOT_TOKEN"],
+        keyring_service="DeadlockBot",
+        keyring_keys=["DISCORD_BOT_TOKEN", "DISCORD_TOKEN", "BOT_TOKEN"],
+    )
     DISCORD_REDIRECT_URI: str = _get_string(
         "DISCORD_REDIRECT_URI",
         default="https://turnier.earlysalty.com/auth/discord/callback",
@@ -174,7 +228,9 @@ class Settings:
     )
 
     # --- Server ---
+    BACKEND_HOST: str = _get_string("BACKEND_HOST", default="127.0.0.1")
     BACKEND_PORT: int = _get_int("BACKEND_PORT", default=8900)
+    BACKEND_ALLOWED_HOSTS: str = _get_string("BACKEND_ALLOWED_HOSTS", default="")
     FRONTEND_URL: str = _get_string(
         "FRONTEND_URL",
         default="https://turnier.earlysalty.com",
@@ -198,6 +254,38 @@ class Settings:
         if not self.DISCORD_MOD_ROLE_IDS:
             return set()
         return {role.strip() for role in self.DISCORD_MOD_ROLE_IDS.split(",") if role.strip()}
+
+    @property
+    def cors_allowed_origins(self) -> list[str]:
+        origins = {
+            "http://localhost:5173",
+        }
+        frontend_url = self.FRONTEND_URL.rstrip("/")
+        if frontend_url:
+            origins.add(frontend_url)
+        return sorted(origins)
+
+    @property
+    def allowed_hosts(self) -> list[str]:
+        hosts = {"127.0.0.1", "localhost", "::1"}
+
+        for candidate in (
+            self.FRONTEND_URL,
+            self.DISCORD_REDIRECT_URI,
+            self.BACKEND_HOST,
+        ):
+            hostname = _get_hostname(candidate)
+            if hostname:
+                hosts.add(hostname)
+
+        extra_hosts = [
+            host.strip().lower()
+            for host in self.BACKEND_ALLOWED_HOSTS.split(",")
+            if host.strip()
+        ]
+        hosts.update(extra_hosts)
+
+        return sorted(hosts)
 
 
 settings = Settings()

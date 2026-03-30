@@ -26,6 +26,7 @@ interface MatchAdminPanelProps {
   matches: BracketMatch[]
   teams: Team[]
   onRefresh?: () => void
+  allowManualOverride?: boolean
 }
 
 type ActionKey = 'create' | 'start' | 'result' | 'leave'
@@ -84,6 +85,7 @@ export default function MatchAdminPanel({
   matches,
   teams,
   onRefresh,
+  allowManualOverride = false,
 }: MatchAdminPanelProps) {
   const createLobbyMutation = useCreateLobby()
   const startMatchMutation = useStartMatch()
@@ -339,6 +341,16 @@ export default function MatchAdminPanel({
                 match={match}
                 teams={teams}
                 onSuccess={handleRefresh}
+              />
+            )}
+
+            {isTerminalMatch(match) && allowManualOverride && (
+              <ManualResultForm
+                tournamentId={tournamentId}
+                match={match}
+                teams={teams}
+                onSuccess={handleRefresh}
+                allowOverride
               />
             )}
           </Card>

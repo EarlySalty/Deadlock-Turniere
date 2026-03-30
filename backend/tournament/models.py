@@ -11,6 +11,7 @@ from pydantic import BaseModel
 class TournamentStatus(str, Enum):
     draft = "draft"
     registration = "registration"
+    checkin = "checkin"
     group_phase = "group_phase"
     bracket = "bracket"
     completed = "completed"

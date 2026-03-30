@@ -23,6 +23,8 @@ def _rank_score(rank_tier: int | None, subrank: int | None) -> int:
 async def get_steam_link(discord_id: str) -> Optional[dict]:
     """Liest steam_id, Rank-Infos und berechnet rank_score für einen User.
 
+    Bevorzugt den als primary markierten Account.
+    Fällt andernfalls auf den bestverfügbaren Account mit Rangdaten zurück.
     Gibt None zurück wenn kein Link gefunden oder DB-Pfad nicht konfiguriert.
     """
     if not settings.STEAM_BRIDGE_DB_PATH:
@@ -35,9 +37,14 @@ async def get_steam_link(discord_id: str) -> Optional[dict]:
         ) as db:
             db.row_factory = aiosqlite.Row
             cursor = await db.execute(
-                "SELECT steam_id, deadlock_rank, deadlock_rank_name, deadlock_subrank "
+                "SELECT steam_id, deadlock_rank, deadlock_rank_name, deadlock_subrank, primary_account "
                 "FROM steam_links "
-                "WHERE user_id = ? AND primary_account = 1 "
+                "WHERE user_id = ? "
+                "ORDER BY "
+                "primary_account DESC, "
+                "CASE WHEN deadlock_rank IS NULL THEN 1 ELSE 0 END ASC, "
+                "deadlock_rank DESC, "
+                "deadlock_subrank DESC "
                 "LIMIT 1",
                 (discord_id,),
             )

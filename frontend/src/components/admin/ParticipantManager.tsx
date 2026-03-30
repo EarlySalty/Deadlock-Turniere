@@ -1,7 +1,9 @@
 import { useMemo, useState } from 'react'
 import Card from '@/components/ui/Card'
 import Button from '@/components/ui/Button'
+import { useAuth } from '@/hooks/useAuth'
 import {
+  useAddMember,
   useAssignSignupToAdminTeam,
   useChangeAdminCaptain,
   useCreateAdminTeam,
@@ -11,7 +13,7 @@ import {
   useRemoveAdminTeamMember,
   useRenameAdminTeam,
 } from '@/hooks/useTournament'
-import type { Team, TeamMember, TournamentSignup } from '@/types/tournament'
+import type { Team, TeamMember, TournamentSignup, TournamentStatus } from '@/types/tournament'
 import {
   AlertCircle,
   ArrowRightLeft,
@@ -25,6 +27,7 @@ import {
 
 interface ParticipantManagerProps {
   tournamentId: number
+  tournamentStatus: TournamentStatus
   teamSize: number
   teams: Team[]
   signups: TournamentSignup[]
@@ -34,16 +37,24 @@ function playerLabel(member: Pick<TeamMember, 'discord_id' | 'discord_name'>): s
   return member.discord_name ?? member.discord_id
 }
 
-function signupLabel(signup: TournamentSignup): string {
-  return signup.discord_id
+function captainLabel(team: Team): string {
+  const captain = team.members.find((member) => member.discord_id === team.captain_discord_id)
+  return captain ? playerLabel(captain) : team.captain_discord_id || 'noch keiner gesetzt'
+}
+
+function signupName(signup: TournamentSignup): string {
+  return signup.discord_name?.trim() || signup.discord_id
 }
 
 export default function ParticipantManager({
   tournamentId,
+  tournamentStatus,
   teamSize,
   teams,
   signups,
 }: ParticipantManagerProps) {
+  const { user } = useAuth()
+  const addMemberMutation = useAddMember(tournamentId)
   const createTeamMutation = useCreateAdminTeam()
   const renameTeamMutation = useRenameAdminTeam()
   const deleteTeamMutation = useDeleteAdminTeam()
@@ -57,14 +68,19 @@ export default function ParticipantManager({
   const [renameValues, setRenameValues] = useState<Record<number, string>>({})
   const [moveTargets, setMoveTargets] = useState<Record<string, string>>({})
   const [signupTargets, setSignupTargets] = useState<Record<number, string>>({})
+  const [replacementTeam, setReplacementTeam] = useState<Team | null>(null)
+  const [replacementDiscordId, setReplacementDiscordId] = useState('')
+  const [replacementDiscordName, setReplacementDiscordName] = useState('')
   const [feedback, setFeedback] = useState('')
 
   const pendingSignups = useMemo(
     () => signups.filter((signup) => signup.team_id === null),
     [signups]
   )
+  const canAddReplacementPlayers = user?.is_admin === true
 
   const error =
+    addMemberMutation.error ||
     createTeamMutation.error ||
     renameTeamMutation.error ||
     deleteTeamMutation.error ||
@@ -75,6 +91,7 @@ export default function ParticipantManager({
     deleteSignupMutation.error
 
   const isBusy =
+    addMemberMutation.isPending ||
     createTeamMutation.isPending ||
     renameTeamMutation.isPending ||
     deleteTeamMutation.isPending ||
@@ -170,6 +187,25 @@ export default function ParticipantManager({
     )
   }
 
+  const handleAddReplacement = () => {
+    if (!replacementTeam || !replacementDiscordId.trim() || !replacementDiscordName.trim()) return
+    addMemberMutation.mutate(
+      {
+        teamId: replacementTeam.id,
+        discordId: replacementDiscordId.trim(),
+        discordName: replacementDiscordName.trim(),
+      },
+      {
+        onSuccess: () => {
+          setFeedback('Ersatzspieler wurde hinzugefügt.')
+          setReplacementTeam(null)
+          setReplacementDiscordId('')
+          setReplacementDiscordName('')
+        },
+      }
+    )
+  }
+
   return (
     <div className="space-y-6">
       <Card className="p-6 space-y-4">
@@ -180,6 +216,11 @@ export default function ParticipantManager({
         <p className="text-sm text-muted">
           Teams erstellen, Spieler verschieben, Captains setzen und offene Solo-Anmeldungen zuweisen.
         </p>
+        {canAddReplacementPlayers && ['group_phase', 'bracket'].includes(tournamentStatus) && (
+          <p className="text-sm text-muted">
+            Ersatzspieler werden direkt über die jeweilige Teamkarte hinzugefügt.
+          </p>
+        )}
 
         <div className="flex flex-col gap-2 sm:flex-row">
           <input
@@ -225,7 +266,8 @@ export default function ParticipantManager({
               <div key={signup.id} className="rounded-xl border border-border bg-background/60 p-4">
                 <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
                   <div className="space-y-1">
-                    <div className="font-medium text-foreground">{signupLabel(signup)}</div>
+                    <div className="font-medium text-foreground">{signupName(signup)}</div>
+                    <div className="text-xs text-muted">{signup.discord_id}</div>
                     <div className="text-xs text-muted">
                       {signup.rank ? `${signup.rank} · Score ${signup.rank_score}` : `Score ${signup.rank_score}`}
                     </div>
@@ -259,7 +301,7 @@ export default function ParticipantManager({
                       variant="ghost"
                       size="sm"
                       disabled={isBusy}
-                      onClick={() => handleDeleteSignup(signup.id, signupLabel(signup))}
+                      onClick={() => handleDeleteSignup(signup.id, signupName(signup))}
                     >
                       <Trash2 size={14} />
                       Entfernen
@@ -306,8 +348,22 @@ export default function ParticipantManager({
 
               <div className="flex flex-wrap items-center gap-3 text-sm text-muted">
                 <span>{team.members.length}/{teamSize} Mitglieder</span>
-                <span>Captain: {team.captain_discord_id || 'noch keiner gesetzt'}</span>
+                <span>Captain: {captainLabel(team)}</span>
               </div>
+
+              {canAddReplacementPlayers && ['group_phase', 'bracket'].includes(tournamentStatus) && (
+                <div>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    disabled={isBusy || team.members.length >= teamSize}
+                    onClick={() => setReplacementTeam(team)}
+                  >
+                    <UserPlus size={14} />
+                    Spieler ersetzen
+                  </Button>
+                </div>
+              )}
 
               {team.members.length > 0 && (
                 <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
@@ -346,6 +402,7 @@ export default function ParticipantManager({
                         <div className="flex items-start justify-between gap-3">
                           <div>
                             <div className="font-medium text-foreground">{playerLabel(member)}</div>
+                            <div className="text-xs text-muted">{member.discord_id}</div>
                             <div className="text-xs text-muted">
                               {member.role === 'captain' ? 'Captain' : 'Mitglied'}
                               {member.rank ? ` · ${member.rank}` : ''}
@@ -400,6 +457,57 @@ export default function ParticipantManager({
           </Card>
         ))}
       </div>
+
+      {replacementTeam && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4">
+          <div className="w-full max-w-md rounded-xl border border-border bg-card p-6 shadow-xl">
+            <h3 className="text-lg font-semibold text-foreground">Ersatzspieler für {replacementTeam.name}</h3>
+            <p className="mt-1 text-sm text-muted">
+              Fügt einen Discord-User direkt zum Team hinzu. Falls das Team voll ist, entferne zuerst ein Mitglied.
+            </p>
+
+            <div className="mt-4 space-y-3">
+              <input
+                type="text"
+                value={replacementDiscordId}
+                onChange={(event) => setReplacementDiscordId(event.target.value)}
+                placeholder="Discord ID"
+                className="w-full rounded-lg border border-border bg-background px-3 py-2 text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
+              />
+              <input
+                type="text"
+                value={replacementDiscordName}
+                onChange={(event) => setReplacementDiscordName(event.target.value)}
+                placeholder="Discord Name"
+                className="w-full rounded-lg border border-border bg-background px-3 py-2 text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
+              />
+            </div>
+
+            <div className="mt-5 flex justify-end gap-2">
+              <Button
+                variant="ghost"
+                size="sm"
+                disabled={isBusy}
+                onClick={() => {
+                  setReplacementTeam(null)
+                  setReplacementDiscordId('')
+                  setReplacementDiscordName('')
+                }}
+              >
+                Abbrechen
+              </Button>
+              <Button
+                variant="primary"
+                size="sm"
+                disabled={isBusy || !replacementDiscordId.trim() || !replacementDiscordName.trim()}
+                onClick={handleAddReplacement}
+              >
+                {addMemberMutation.isPending ? 'Fügt hinzu...' : 'Ersatzspieler hinzufügen'}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

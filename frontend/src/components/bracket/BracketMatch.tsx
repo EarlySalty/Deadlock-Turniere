@@ -33,6 +33,7 @@ export default function BracketMatch({ match, teams }: Props) {
 
   const team1Won = match.winner_id !== null && match.team1_id !== null && match.winner_id === match.team1_id
   const team2Won = match.winner_id !== null && match.team2_id !== null && match.winner_id === match.team2_id
+  const hasWinner = match.winner_id !== null
 
   return (
     <motion.div
@@ -74,8 +75,8 @@ export default function BracketMatch({ match, teams }: Props) {
           team1IsBye
             ? 'text-muted italic'
             : team1Won
-              ? 'font-semibold text-primary bg-primary/5'
-              : isCompleted && !team1Won
+              ? 'font-bold text-green-400 bg-green-500/10'
+              : hasWinner
                 ? 'text-muted'
                 : 'text-foreground'
         }`}
@@ -92,8 +93,8 @@ export default function BracketMatch({ match, teams }: Props) {
           team2IsBye
             ? 'text-muted italic'
             : team2Won
-              ? 'font-semibold text-primary bg-primary/5'
-              : isCompleted && !team2Won
+              ? 'font-bold text-green-400 bg-green-500/10'
+              : hasWinner
                 ? 'text-muted'
                 : 'text-foreground'
         }`}

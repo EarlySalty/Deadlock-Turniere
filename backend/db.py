@@ -98,6 +98,8 @@ CREATE TABLE IF NOT EXISTS bracket_matches(
     bracket_type TEXT NOT NULL DEFAULT 'winners',
     team1_id INTEGER REFERENCES teams(id),
     team2_id INTEGER REFERENCES teams(id),
+    source_match1_id INTEGER REFERENCES bracket_matches(id),
+    source_match2_id INTEGER REFERENCES bracket_matches(id),
     winner_id INTEGER REFERENCES teams(id),
     status TEXT NOT NULL DEFAULT 'pending',
     steam_party_id TEXT,
@@ -129,6 +131,21 @@ CREATE TABLE IF NOT EXISTS checkins(
     checked_in_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+CREATE TABLE IF NOT EXISTS tournament_checkins(
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tournament_id INTEGER NOT NULL REFERENCES tournaments(id) ON DELETE CASCADE,
+    discord_id TEXT NOT NULL,
+    checked_in_at TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(tournament_id, discord_id)
+);
+
+CREATE TRIGGER IF NOT EXISTS cleanup_tournament_checkins_after_tournament_delete
+AFTER DELETE ON tournaments
+FOR EACH ROW
+BEGIN
+    DELETE FROM tournament_checkins WHERE tournament_id = OLD.id;
+END;
+
 CREATE TABLE IF NOT EXISTS sessions(
     token TEXT PRIMARY KEY,
     discord_id TEXT NOT NULL,
@@ -145,6 +162,17 @@ CREATE TABLE IF NOT EXISTS audit_log(
     user_id TEXT,
     details TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS rank_cache(
+    discord_id TEXT PRIMARY KEY,
+    source TEXT NOT NULL,
+    steam_id TEXT,
+    rank TEXT,
+    rank_tier INTEGER,
+    subrank INTEGER,
+    rank_score INTEGER,
+    cached_at INTEGER NOT NULL DEFAULT (strftime('%s','now'))
 );
 """
 
@@ -178,6 +206,8 @@ async def _ensure_schema_upgrades(db: aiosqlite.Connection) -> None:
     """Ergänzt Spalten in bestehenden Installationen idempotent."""
     await _ensure_column(db, "bracket_matches", "match_duration_s", "INTEGER")
     await _ensure_column(db, "bracket_matches", "match_stats", "TEXT")
+    await _ensure_column(db, "bracket_matches", "source_match1_id", "INTEGER")
+    await _ensure_column(db, "bracket_matches", "source_match2_id", "INTEGER")
     await _ensure_column(db, "tournament_signups", "discord_name", "TEXT")
 
 

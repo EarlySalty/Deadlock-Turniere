@@ -2,16 +2,16 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   fetchTournaments, fetchTournament, fetchAdminTournaments, fetchAdminTournament,
   createTournament, updateTournament, deleteTournament,
-  advanceTournament, assignRandomTeams,
-  createTeam, joinTeam, signupSolo,
+  advanceTournament, assignRandomTeams, openCheckin, finalizeCheckin,
+  createTeam, joinTeam, signupSolo, checkinPlayer, getCheckinStatus,
   withdrawSolo, kickMember, inviteSoloPlayer, leaveTeam,
   generateGroups, generateBracket,
-  createLobby, startMatch, fetchMatchResult, leaveLobby,
+  createLobby, startMatch, fetchMatchResult, leaveLobby, submitMatchResult,
   createAdminTeam, renameAdminTeam, deleteAdminTeam,
   changeAdminCaptain, removeAdminTeamMember, moveAdminTeamMember,
-  assignSignupToAdminTeam, deleteAdminSignup,
+  assignSignupToAdminTeam, deleteAdminSignup, addTeamMember,
 } from '@/api/client'
-import type { TeamMoveRequest, TournamentCreate, TournamentUpdate } from '@/types/tournament'
+import type { ManualResult, TeamMoveRequest, TournamentCreate, TournamentUpdate } from '@/types/tournament'
 
 function invalidateTournamentCaches(qc: ReturnType<typeof useQueryClient>, tournamentId?: number) {
   qc.invalidateQueries({ queryKey: ['tournaments'] })
@@ -19,6 +19,7 @@ function invalidateTournamentCaches(qc: ReturnType<typeof useQueryClient>, tourn
   if (typeof tournamentId === 'number') {
     qc.invalidateQueries({ queryKey: ['tournaments', tournamentId] })
     qc.invalidateQueries({ queryKey: ['admin', 'tournaments', tournamentId] })
+    qc.invalidateQueries({ queryKey: ['tournaments', tournamentId, 'checkin-status'] })
   }
 }
 
@@ -94,6 +95,39 @@ export function useAdvanceTournament() {
   })
 }
 
+export function useOpenCheckin(tournamentId: number) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: () => openCheckin(tournamentId),
+    onSuccess: () => {
+      invalidateTournamentCaches(qc, tournamentId)
+    },
+  })
+}
+
+export function useFinalizeCheckin(tournamentId: number) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({
+      confirm,
+      allowedTeamIds,
+      snapshotToken,
+    }: {
+      confirm?: boolean
+      allowedTeamIds?: number[]
+      snapshotToken?: string
+    }) => finalizeCheckin(
+      tournamentId,
+      Boolean(confirm),
+      allowedTeamIds ?? [],
+      snapshotToken
+    ),
+    onSuccess: () => {
+      invalidateTournamentCaches(qc, tournamentId)
+    },
+  })
+}
+
 export function useAssignRandomTeams() {
   const qc = useQueryClient()
   return useMutation({
@@ -127,6 +161,25 @@ export function useSignupSolo() {
   return useMutation({
     mutationFn: (tournamentId: number) => signupSolo(tournamentId),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['tournaments'] }),
+  })
+}
+
+export function useCheckinStatus(tournamentId: number) {
+  return useQuery({
+    queryKey: ['tournaments', tournamentId, 'checkin-status'],
+    queryFn: () => getCheckinStatus(tournamentId),
+    enabled: tournamentId > 0,
+    refetchInterval: 10_000,
+  })
+}
+
+export function useCheckin(tournamentId: number) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: () => checkinPlayer(tournamentId),
+    onSuccess: () => {
+      invalidateTournamentCaches(qc, tournamentId)
+    },
   })
 }
 
@@ -189,6 +242,26 @@ export function useLeaveLobby() {
   return useMutation({
     mutationFn: ({ tournamentId, matchId }: { tournamentId: number; matchId: number }) =>
       leaveLobby(tournamentId, matchId),
+    onSuccess: (_data, vars) => {
+      invalidateTournamentCaches(qc, vars.tournamentId)
+    },
+  })
+}
+
+export function useSubmitMatchResult() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({
+      tournamentId,
+      matchId,
+      data,
+      force,
+    }: {
+      tournamentId: number
+      matchId: number
+      data: ManualResult
+      force?: boolean
+    }) => submitMatchResult(tournamentId, matchId, data, { force }),
     onSuccess: (_data, vars) => {
       invalidateTournamentCaches(qc, vars.tournamentId)
     },
@@ -279,6 +352,24 @@ export function useDeleteAdminSignup() {
       deleteAdminSignup(tournamentId, signupId),
     onSuccess: (_data, vars) => {
       invalidateTournamentCaches(qc, vars.tournamentId)
+    },
+  })
+}
+
+export function useAddMember(tournamentId: number) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({
+      teamId,
+      discordId,
+      discordName,
+    }: {
+      teamId: number
+      discordId: string
+      discordName: string
+    }) => addTeamMember(tournamentId, teamId, discordId, discordName),
+    onSuccess: () => {
+      invalidateTournamentCaches(qc, tournamentId)
     },
   })
 }

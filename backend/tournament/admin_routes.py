@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from auth.permissions import require_admin, require_mod
 from db import get_db
@@ -16,8 +16,10 @@ from match.result_processor import (
     apply_bracket_match_result,
 )
 from tournament.engine import (
+    CheckinSnapshotMismatchError,
     VALID_STATUS_TRANSITIONS,
     assign_random_teams,
+    finalize_checkin,
     generate_bracket,
     generate_group_matches,
     generate_groups,
@@ -33,11 +35,13 @@ from tournament.models import (
     UserSession,
 )
 from tournament.routes import (
+    _enrich_rank_data,
     _load_bracket_matches,
     _load_groups_for_tournament,
     _load_signups_for_tournament,
     _load_teams_for_tournament,
 )
+from tournament.scheduler import advance_tournament_status
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 
@@ -54,7 +58,7 @@ async def _audit(db, action: str, user_id: str, details: str) -> None:  # noqa: 
     )
 
 
-ACTIVE_TOURNAMENT_STATUSES = ("draft", "registration", "group_phase", "bracket")
+ACTIVE_TOURNAMENT_STATUSES = ("draft", "registration", "checkin", "group_phase", "bracket")
 
 
 async def _ensure_single_active_tournament(
@@ -166,9 +170,10 @@ async def _upsert_signup_from_member(
 
     if existing:
         await db.execute(
-            "UPDATE tournament_signups SET steam_id = ?, rank = ?, rank_score = ?, team_id = NULL "
+            "UPDATE tournament_signups SET discord_name = ?, steam_id = ?, rank = ?, rank_score = ?, team_id = NULL "
             "WHERE id = ?",
             (
+                member_row["discord_name"],
                 member_row["steam_id"],
                 member_row["rank"],
                 member_row["rank_score"],
@@ -178,14 +183,63 @@ async def _upsert_signup_from_member(
         return
 
     await db.execute(
-        "INSERT INTO tournament_signups (tournament_id, discord_id, steam_id, rank, rank_score, team_id) "
-        "VALUES (?, ?, ?, ?, ?, NULL)",
+        "INSERT INTO tournament_signups "
+        "(tournament_id, discord_id, discord_name, steam_id, rank, rank_score, team_id) "
+        "VALUES (?, ?, ?, ?, ?, ?, NULL)",
         (
             tournament_id,
             member_row["discord_id"],
+            member_row["discord_name"],
             member_row["steam_id"],
             member_row["rank"],
             member_row["rank_score"],
+        ),
+    )
+
+
+async def _upsert_signup_for_team(
+    db,
+    tournament_id: int,
+    *,
+    discord_id: str,
+    discord_name: str | None,
+    steam_id: str | None,
+    rank: str | None,
+    rank_score: int,
+    team_id: int,
+) -> None:  # noqa: ANN001
+    cursor = await db.execute(
+        "SELECT id FROM tournament_signups WHERE tournament_id = ? AND discord_id = ?",
+        (tournament_id, discord_id),
+    )
+    existing = await cursor.fetchone()
+    if existing:
+        await db.execute(
+            "UPDATE tournament_signups SET discord_name = ?, steam_id = ?, rank = ?, "
+            "rank_score = ?, team_id = ? WHERE id = ?",
+            (
+                discord_name,
+                steam_id,
+                rank,
+                rank_score,
+                team_id,
+                existing["id"],
+            ),
+        )
+        return
+
+    await db.execute(
+        "INSERT INTO tournament_signups "
+        "(tournament_id, discord_id, discord_name, steam_id, rank, rank_score, team_id) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (
+            tournament_id,
+            discord_id,
+            discord_name,
+            steam_id,
+            rank,
+            rank_score,
+            team_id,
         ),
     )
 
@@ -219,13 +273,24 @@ async def _load_team_detail(db, team_id: int):  # noqa: ANN001
     cursor = await db.execute("SELECT * FROM teams WHERE id = ?", (team_id,))
     team_row = await cursor.fetchone()
     cursor = await db.execute(
-        "SELECT * FROM team_members WHERE team_id = ? ORDER BY joined_at",
+        "SELECT tm.id, tm.team_id, tm.discord_id, "
+        "COALESCE(NULLIF(tm.discord_name, ''), NULLIF(s.discord_name, '')) AS discord_name, "
+        "tm.steam_id, tm.rank, tm.rank_score, tm.role, tm.joined_at "
+        "FROM team_members tm "
+        "LEFT JOIN ("
+        "    SELECT discord_id, MAX(discord_name) AS discord_name "
+        "    FROM sessions "
+        "    WHERE discord_name IS NOT NULL AND discord_name != '' "
+        "    GROUP BY discord_id"
+        ") s ON s.discord_id = tm.discord_id "
+        "WHERE tm.team_id = ? "
+        "ORDER BY tm.joined_at",
         (team_id,),
     )
     members = await cursor.fetchall()
     return Team(
         **dict(team_row),
-        members=[TeamMember(**dict(member)) for member in members],
+        members=[TeamMember(**await _enrich_rank_data(dict(member))) for member in members],
     )
 
 
@@ -277,6 +342,10 @@ async def _delete_tournament_tree(db, tournament_id: int) -> None:  # noqa: ANN0
     )
     await db.execute(
         "DELETE FROM team_members WHERE team_id IN (SELECT id FROM teams WHERE tournament_id = ?)",
+        (tournament_id,),
+    )
+    await db.execute(
+        "DELETE FROM tournament_checkins WHERE tournament_id = ?",
         (tournament_id,),
     )
     await db.execute(
@@ -428,6 +497,16 @@ async def update_tournament(
                     detail=f"Ungültiger Status-Übergang: {current_status} -> {body.status.value}. "
                     f"Erlaubt: {', '.join(allowed) if allowed else 'keine'}",
                 )
+            if current_status == "registration" and body.status.value == "checkin":
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Check-in bitte über den dedizierten Endpoint öffnen",
+                )
+            if current_status == "checkin" and body.status.value == "group_phase":
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Check-in bitte über finalize-checkin abschließen",
+                )
             if body.status.value in ACTIVE_TOURNAMENT_STATUSES:
                 await _ensure_single_active_tournament(
                     db,
@@ -508,6 +587,114 @@ async def delete_tournament(
 
 
 # ---------------------------------------------------------------------------
+# POST /api/admin/tournaments/{id}/open-checkin — Check-in öffnen
+# ---------------------------------------------------------------------------
+
+@router.post("/tournaments/{tournament_id}/open-checkin", response_model=Tournament)
+async def open_checkin(
+    tournament_id: int,
+    user: UserSession = Depends(require_mod),
+) -> Tournament:
+    """Öffnet die Check-in-Phase manuell."""
+    async with get_db() as db:
+        existing = await _load_tournament_or_404(db, tournament_id)
+        if existing["status"] != "registration":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Check-in kann nur aus der Registration geöffnet werden",
+            )
+        cursor = await db.execute(
+            "SELECT COUNT(*) AS cnt FROM teams WHERE tournament_id = ?",
+            (tournament_id,),
+        )
+        team_count_row = await cursor.fetchone()
+        if int(team_count_row["cnt"]) == 0:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Check-in kann erst geöffnet werden, wenn mindestens ein Team existiert",
+            )
+
+    try:
+        await advance_tournament_status(
+            tournament_id,
+            current_status="registration",
+            next_status="checkin",
+            source="manual",
+            actor_id=user.discord_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(exc),
+        ) from exc
+
+    async with get_db() as db:
+        cursor = await db.execute(
+            "SELECT * FROM tournaments WHERE id = ?",
+            (tournament_id,),
+        )
+        row = await cursor.fetchone()
+
+    return Tournament(**dict(row))
+
+
+# ---------------------------------------------------------------------------
+# POST /api/admin/tournaments/{id}/finalize-checkin — Check-in abschließen
+# ---------------------------------------------------------------------------
+
+@router.post("/tournaments/{tournament_id}/finalize-checkin", status_code=200)
+async def finalize_checkin_endpoint(
+    tournament_id: int,
+    body: dict | None = None,
+    confirm: bool = Query(False),
+    user: UserSession = Depends(require_mod),
+) -> dict:
+    """Bereinigt Teams anhand der Check-ins und startet optional die Gruppenphase."""
+    allowed_team_ids = set()
+    snapshot_token = None
+    if body and isinstance(body.get("allowed_team_ids"), list):
+        allowed_team_ids = {
+            int(team_id)
+            for team_id in body["allowed_team_ids"]
+            if isinstance(team_id, int) or (isinstance(team_id, str) and team_id.isdigit())
+        }
+    if body and isinstance(body.get("snapshot_token"), str):
+        snapshot_token = body["snapshot_token"].strip() or None
+
+    try:
+        result = await finalize_checkin(
+            tournament_id,
+            confirm=confirm,
+            allowed_team_ids=allowed_team_ids,
+            actor_id=user.discord_id,
+            expected_snapshot_token=snapshot_token,
+            advance_to_group_phase=confirm,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+    except CheckinSnapshotMismatchError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(exc),
+        ) from exc
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(exc),
+        ) from exc
+
+    return result
+
+
+# ---------------------------------------------------------------------------
 # POST /api/admin/tournaments/{id}/advance — Phase weiterschalten
 # ---------------------------------------------------------------------------
 
@@ -530,6 +717,16 @@ async def advance_tournament(
             )
 
         current_status = existing["status"]
+        if current_status == "registration":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Check-in bitte über open-checkin öffnen",
+            )
+        if current_status == "checkin":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Check-in bitte über finalize-checkin abschließen",
+            )
         allowed = VALID_STATUS_TRANSITIONS.get(current_status, [])
         if not allowed:
             raise HTTPException(
@@ -544,23 +741,26 @@ async def advance_tournament(
                 ignore_tournament_id=tournament_id,
             )
 
-        await db.execute(
-            "UPDATE tournaments SET status = ?, updated_at = datetime('now') WHERE id = ?",
-            (next_status, tournament_id),
+    try:
+        await advance_tournament_status(
+            tournament_id,
+            current_status=current_status,
+            next_status=next_status,
+            source="manual",
+            actor_id=user.discord_id,
         )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(exc),
+        ) from exc
 
-        await _audit(
-            db,
-            "tournament_advance",
-            user.discord_id,
-            json.dumps({
-                "tournament_id": tournament_id,
-                "from": current_status,
-                "to": next_status,
-            }),
-        )
-        await db.commit()
-
+    async with get_db() as db:
         cursor = await db.execute(
             "SELECT * FROM tournaments WHERE id = ?",
             (tournament_id,),
@@ -965,7 +1165,7 @@ async def assign_signup_to_team_admin(
             (
                 team_id,
                 signup["discord_id"],
-                None,
+                signup["discord_name"],
                 signup["steam_id"],
                 signup["rank"],
                 signup["rank_score"],
@@ -987,6 +1187,110 @@ async def assign_signup_to_team_admin(
             "team_assign_signup_admin",
             user.discord_id,
             json.dumps({"tournament_id": tournament_id, "team_id": team_id, "signup_id": signup_id}),
+        )
+        await db.commit()
+        return await _load_team_detail(db, team_id)
+
+
+@router.post("/tournaments/{tournament_id}/teams/{team_id}/add-member", response_model=Team)
+async def add_team_member_admin(
+    tournament_id: int,
+    team_id: int,
+    body: dict,
+    user: UserSession = Depends(require_admin),
+) -> Team:
+    """Fügt einen Ersatzspieler direkt einem Team hinzu."""
+    discord_id = (body.get("discord_id") or "").strip()
+    discord_name = (body.get("discord_name") or "").strip()
+    if not discord_id or not discord_name:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="discord_id und discord_name sind erforderlich",
+        )
+
+    async with get_db() as db:
+        tournament = await _load_tournament_or_404(db, tournament_id)
+        if tournament["status"] not in {"group_phase", "bracket"}:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Ersatzspieler können erst ab der Gruppenphase hinzugefügt werden",
+            )
+
+        target_team = await _load_team_or_404(db, tournament_id, team_id)
+        await _ensure_team_has_capacity(db, team_id, tournament["team_size"])
+
+        cursor = await db.execute(
+            "SELECT 1 FROM team_members tm JOIN teams t ON tm.team_id = t.id "
+            "WHERE t.tournament_id = ? AND tm.discord_id = ?",
+            (tournament_id, discord_id),
+        )
+        if await cursor.fetchone():
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Spieler ist bereits Mitglied in einem Team dieses Turniers",
+            )
+
+        cursor = await db.execute(
+            "SELECT discord_name, steam_id, rank, rank_score, team_id "
+            "FROM tournament_signups WHERE tournament_id = ? AND discord_id = ?",
+            (tournament_id, discord_id),
+        )
+        existing_signup = await cursor.fetchone()
+        if existing_signup and existing_signup["team_id"] not in (None, team_id):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Spieler ist bereits einem anderen Team zugeordnet",
+            )
+
+        target_member_count = await _count_team_members(db, team_id)
+        role = "captain" if target_member_count == 0 or not target_team["captain_discord_id"] else "member"
+        steam_id = existing_signup["steam_id"] if existing_signup else None
+        rank = existing_signup["rank"] if existing_signup else None
+        rank_score = int(existing_signup["rank_score"] or 0) if existing_signup else 0
+        effective_name = discord_name or (
+            existing_signup["discord_name"] if existing_signup else discord_id
+        )
+
+        await db.execute(
+            "INSERT INTO team_members (team_id, discord_id, discord_name, steam_id, rank, rank_score, role) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (
+                team_id,
+                discord_id,
+                effective_name,
+                steam_id,
+                rank,
+                rank_score,
+                role,
+            ),
+        )
+        await _upsert_signup_for_team(
+            db,
+            tournament_id,
+            discord_id=discord_id,
+            discord_name=effective_name,
+            steam_id=steam_id,
+            rank=rank,
+            rank_score=rank_score,
+            team_id=team_id,
+        )
+        if role == "captain":
+            await db.execute(
+                "UPDATE teams SET captain_discord_id = ? WHERE id = ?",
+                (discord_id, team_id),
+            )
+
+        await _audit(
+            db,
+            "team_add_member_admin",
+            user.discord_id,
+            json.dumps(
+                {
+                    "tournament_id": tournament_id,
+                    "team_id": team_id,
+                    "discord_id": discord_id,
+                }
+            ),
         )
         await db.commit()
         return await _load_team_detail(db, team_id)
@@ -1038,6 +1342,7 @@ async def set_match_result(
     tournament_id: int,
     match_id: int,
     body: dict,
+    force: bool = Query(False),
     user: UserSession = Depends(require_mod),
 ) -> dict:
     """Manuelles Match-Ergebnis eintragen (Mod+)."""
@@ -1074,6 +1379,7 @@ async def set_match_result(
                     match_id,
                     winner_id=winner_id,
                     source="manual",
+                    force=force,
                 )
             except MatchNotFoundError as exc:
                 raise HTTPException(

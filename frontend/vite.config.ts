@@ -25,7 +25,10 @@ export default defineConfig({
     },
   },
   server: {
+    host: 'localhost',
     port: 5173,
+    strictPort: true,
+    allowedHosts: ['localhost', '.localhost'],
     proxy: {
       '/api': {
         target: 'http://localhost:8900',
@@ -36,5 +39,10 @@ export default defineConfig({
         changeOrigin: true,
       },
     },
+  },
+  preview: {
+    host: 'localhost',
+    strictPort: true,
+    allowedHosts: ['localhost', '.localhost'],
   },
 })

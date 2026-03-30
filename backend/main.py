@@ -1,17 +1,21 @@
 """Deadlock Tournament Platform — FastAPI Backend."""
 from __future__ import annotations
 
+import asyncio
+import contextlib
 from contextlib import asynccontextmanager
 from typing import AsyncIterator
 
 from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from auth.discord_oauth import router as auth_router
 from auth.middleware import get_current_user
 from config import settings
 from db import init_db
 from tournament.models import UserSession
+from tournament.scheduler import start_scheduler
 from tournament.routes import router as tournament_router
 from tournament.admin_routes import router as admin_router
 
@@ -20,7 +24,13 @@ from tournament.admin_routes import router as admin_router
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Startup: DB initialisieren. Shutdown: Aufräumen."""
     await init_db()
-    yield
+    scheduler_task = asyncio.create_task(start_scheduler(app))
+    try:
+        yield
+    finally:
+        scheduler_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await scheduler_task
 
 
 app = FastAPI(
@@ -33,14 +43,12 @@ app = FastAPI(
 # --- CORS ---
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "https://turnier.earlysalty.com",
-        "http://localhost:5173",
-    ],
+    allow_origins=settings.cors_allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.add_middleware(TrustedHostMiddleware, allowed_hosts=settings.allowed_hosts)
 
 # --- Router ---
 app.include_router(auth_router)
@@ -67,7 +75,7 @@ if __name__ == "__main__":
 
     uvicorn.run(
         "main:app",
-        host="0.0.0.0",
+        host=settings.BACKEND_HOST,
         port=settings.BACKEND_PORT,
         reload=True,
     )

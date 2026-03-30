@@ -4,6 +4,7 @@ import Home from '@/pages/Home'
 import Tournament from '@/pages/Tournament'
 import Login from '@/pages/Login'
 import Admin from '@/pages/Admin'
+import Hilfe from '@/pages/Hilfe'
 import ProtectedRoute from '@/components/auth/ProtectedRoute'
 
 export default function App() {
@@ -12,6 +13,7 @@ export default function App() {
       <Route element={<Layout />}>
         <Route index element={<Home />} />
         <Route path="turnier/:id" element={<Tournament />} />
+        <Route path="hilfe" element={<Hilfe />} />
         <Route path="login" element={<Login />} />
         <Route path="admin" element={
           <ProtectedRoute requireMod>
