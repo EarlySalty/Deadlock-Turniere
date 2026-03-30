@@ -178,6 +178,7 @@ async def _ensure_schema_upgrades(db: aiosqlite.Connection) -> None:
     """Ergänzt Spalten in bestehenden Installationen idempotent."""
     await _ensure_column(db, "bracket_matches", "match_duration_s", "INTEGER")
     await _ensure_column(db, "bracket_matches", "match_stats", "TEXT")
+    await _ensure_column(db, "tournament_signups", "discord_name", "TEXT")
 
 
 async def _ensure_column(

@@ -88,6 +88,7 @@ class TournamentSignup(BaseModel):
     id: int
     tournament_id: int
     discord_id: str
+    discord_name: Optional[str] = None
     steam_id: Optional[str] = None
     rank: Optional[str] = None
     rank_score: int = 0

@@ -466,9 +466,9 @@ async def solo_signup(
         score = steam_data["rank_score"] if steam_data else 0
 
         await db.execute(
-            "INSERT INTO tournament_signups (tournament_id, discord_id, steam_id, rank, rank_score) "
-            "VALUES (?, ?, ?, ?, ?)",
-            (tournament_id, user.discord_id, steam_id, rank, score),
+            "INSERT INTO tournament_signups (tournament_id, discord_id, discord_name, steam_id, rank, rank_score) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (tournament_id, user.discord_id, user.discord_name, steam_id, rank, score),
         )
         await db.commit()
 

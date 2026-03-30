@@ -88,6 +88,7 @@ export default function Tournament() {
 
   const isUserCaptain = userTeam != null && userTeam.captain_discord_id === user?.discord_id
   const teamIsFull = userTeam != null && userTeam.members.length >= tournament.team_size
+  const isAdmin = user?.is_admin === true
 
   const mutationError =
     createTeamMutation.error ||
@@ -378,9 +379,7 @@ export default function Tournament() {
                       {m.role === 'captain' && (
                         <span className="text-xs text-primary font-medium">Captain</span>
                       )}
-                      {m.rank && (
-                        <span className="text-xs text-muted">{m.rank}</span>
-                      )}
+                      <span className="text-xs text-muted">{m.rank || "—"}</span>
                       {/* Captain: kick button for non-captain members */}
                       {isUserCaptain && isRegistration && m.discord_id !== user?.discord_id && (
                         <button
@@ -416,7 +415,7 @@ export default function Tournament() {
                             <div key={signup.discord_id} className="flex items-center justify-between gap-2">
                               <div>
                                 <p className="text-sm font-medium text-foreground">{signup.discord_name || signup.discord_id}</p>
-                                <p className="text-xs text-muted">{signup.discord_id}</p>
+                                {isAdmin && <p className="text-xs text-muted-foreground">{signup.discord_id}</p>}
                               </div>
                               <Button
                                 variant="secondary"
@@ -454,7 +453,7 @@ export default function Tournament() {
                   {openSoloSignups.map(signup => (
                     <div key={signup.discord_id} className="text-sm">
                       <p className="font-semibold text-foreground">{signup.discord_name || signup.discord_id}</p>
-                      <p className="text-xs text-muted">{signup.discord_id}</p>
+                      {isAdmin && <p className="text-xs text-muted-foreground">{signup.discord_id}</p>}
                     </div>
                   ))}
                 </div>
@@ -481,9 +480,7 @@ export default function Tournament() {
                             {m.role === 'captain' && (
                               <span className="ml-1 text-primary">(C)</span>
                             )}
-                            {m.rank && (
-                              <span className="ml-1 opacity-60">[{m.rank}]</span>
-                            )}
+                            <span className="ml-1 opacity-60">[{m.rank || "—"}]</span>
                           </span>
                         ))}
                       </div>
