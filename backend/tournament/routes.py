@@ -143,13 +143,14 @@ async def get_tournament(tournament_id: int) -> TournamentDetail:
         teams = await _load_teams_for_tournament(db, tournament_id)
         groups = await _load_groups_for_tournament(db, tournament_id)
         bracket_matches = await _load_bracket_matches(db, tournament_id)
+        signups = await _load_signups_for_tournament(db, tournament_id)
 
     return TournamentDetail(
         **tournament_data,
         teams=teams,
         groups=groups,
         bracket_matches=bracket_matches,
-        signups=[],
+        signups=signups,
     )
 
 
