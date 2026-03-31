@@ -38,6 +38,9 @@ app = FastAPI(
     description="Tournament Platform für die Deutsche Deadlock Community",
     version="0.1.0",
     lifespan=lifespan,
+    docs_url=settings.docs_url,
+    redoc_url=settings.redoc_url,
+    openapi_url=settings.openapi_url,
 )
 
 # --- CORS ---

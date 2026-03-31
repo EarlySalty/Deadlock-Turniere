@@ -132,6 +132,21 @@ def _get_int(name: str, *, default: int) -> int:
         return default
 
 
+def _get_bool(name: str, *, default: bool) -> bool:
+    raw = _get_string(name, default="")
+    if not raw:
+        return default
+
+    normalized = raw.strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+
+    log.warning("Invalid boolean for %s=%r, using default %s", name, raw, default)
+    return default
+
+
 def _get_hostname(value: str) -> str | None:
     """Extract a normalized hostname from a URL or host string."""
     candidate = value.strip()
@@ -231,6 +246,7 @@ class Settings:
     BACKEND_HOST: str = _get_string("BACKEND_HOST", default="127.0.0.1")
     BACKEND_PORT: int = _get_int("BACKEND_PORT", default=8900)
     BACKEND_ALLOWED_HOSTS: str = _get_string("BACKEND_ALLOWED_HOSTS", default="")
+    EXPOSE_API_DOCS: bool = _get_bool("EXPOSE_API_DOCS", default=False)
     FRONTEND_URL: str = _get_string(
         "FRONTEND_URL",
         default="https://turnier.earlysalty.com",
@@ -286,6 +302,18 @@ class Settings:
         hosts.update(extra_hosts)
 
         return sorted(hosts)
+
+    @property
+    def docs_url(self) -> str | None:
+        return "/docs" if self.EXPOSE_API_DOCS else None
+
+    @property
+    def redoc_url(self) -> str | None:
+        return "/redoc" if self.EXPOSE_API_DOCS else None
+
+    @property
+    def openapi_url(self) -> str | None:
+        return "/openapi.json" if self.EXPOSE_API_DOCS else None
 
 
 settings = Settings()
