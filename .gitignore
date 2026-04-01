@@ -28,3 +28,4 @@ backend/data/*.db
 backend/data/*.db-wal
 backend/data/*.db-shm
 ops/logs/*
+scripts/run_turniere_backend.sh
