@@ -33,7 +33,7 @@ export default function Home() {
             <Calendar size={20} className="text-primary" />
             Aktives Turnier
           </h2>
-          <Link to={`/turnier/${active.id}`}>
+          <Link to={`/${active.id}`}>
             <Card hoverable className="p-6">
               <div className="flex items-center justify-between">
                 <div>
@@ -71,7 +71,7 @@ export default function Home() {
           </h2>
           <div className="grid gap-3">
             {archived.map(t => (
-              <Link key={t.id} to={`/turnier/${t.id}`}>
+              <Link key={t.id} to={`/${t.id}`}>
                 <Card hoverable className="p-4">
                   <div className="flex items-center justify-between">
                     <div>

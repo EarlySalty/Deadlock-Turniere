@@ -1,7 +1,7 @@
 export default function LoginButton({ className = '' }: { className?: string }) {
   return (
     <a
-      href="/auth/discord/login"
+      href="/turnier/auth/discord/login"
       className={`inline-flex items-center gap-2 rounded-lg bg-[#5865F2] px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-[#4752C4] ${className}`}
     >
       <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">

@@ -15,7 +15,7 @@ import type {
   TeamMoveRequest,
 } from '@/types/tournament'
 
-const API_BASE = '/api'
+const API_BASE = '/turnier/api'
 
 export class ApiError extends Error {
   status: number

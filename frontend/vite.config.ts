@@ -10,7 +10,7 @@ export default defineConfig({
       '@': path.resolve(__dirname, './src'),
     },
   },
-  base: '/',
+  base: '/turnier/',
   build: {
     outDir: 'dist',
     emptyOutDir: true,
@@ -30,11 +30,11 @@ export default defineConfig({
     strictPort: true,
     allowedHosts: ['localhost', '.localhost'],
     proxy: {
-      '/api': {
+      '/turnier/api': {
         target: 'http://localhost:8900',
         changeOrigin: true,
       },
-      '/auth': {
+      '/turnier/auth': {
         target: 'http://localhost:8900',
         changeOrigin: true,
       },
