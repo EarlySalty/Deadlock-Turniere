@@ -16,10 +16,18 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 
 class SettingsSecurityTests(unittest.TestCase):
+    def test_discord_oauth_delegates_to_deadlock_bots_by_default(self) -> None:
+        configured = Settings()
+
+        self.assertEqual(
+            configured.DISCORD_OAUTH_INTERNAL_API_BASE_URL,
+            "http://127.0.0.1:8766",
+        )
+
     def test_allowed_hosts_cover_local_and_frontend_hosts(self) -> None:
         configured = Settings()
 
-        self.assertIn("turnier.earlysalty.com", configured.allowed_hosts)
+        self.assertIn("turnier.deutsche-deadlock-community.de", configured.allowed_hosts)
         self.assertIn("localhost", configured.allowed_hosts)
         self.assertIn("127.0.0.1", configured.allowed_hosts)
         self.assertIn("::1", configured.allowed_hosts)
@@ -78,7 +86,7 @@ class AppSecurityTests(unittest.TestCase):
         self.assertEqual(response.text, "Invalid host header")
 
     def test_common_probe_paths_return_not_found_without_sensitive_content(self) -> None:
-        client = TestClient(app, base_url="https://turnier.earlysalty.com")
+        client = TestClient(app, base_url="https://turnier.deutsche-deadlock-community.de")
         probe_paths = (
             "/wp-login.php",
             "/xmlrpc.php",
@@ -102,7 +110,7 @@ class AppSecurityTests(unittest.TestCase):
                 self.assertNotIn("[core]", body)
 
     def test_api_docs_endpoints_are_not_public_by_default(self) -> None:
-        client = TestClient(app, base_url="https://turnier.earlysalty.com")
+        client = TestClient(app, base_url="https://turnier.deutsche-deadlock-community.de")
 
         for path in ("/docs", "/redoc", "/openapi.json"):
             with self.subTest(path=path):

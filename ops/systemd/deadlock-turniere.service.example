@@ -9,17 +9,16 @@ User=deadlock
 Group=deadlock
 WorkingDirectory=/opt/deadlock-turniere/backend
 Environment=BACKEND_PORT=8900
-Environment=FRONTEND_URL=https://turnier.earlysalty.com
+Environment=FRONTEND_URL=https://deutsche-deadlock-community.de/turnier
 Environment=DATABASE_PATH=/opt/deadlock-turniere/backend/data/tournament.db
+Environment=DISCORD_OAUTH_INTERNAL_API_BASE_URL=http://127.0.0.1:8766
 
 # Option A: read credential files through systemd credentials.
-LoadCredential=DISCORD_CLIENT_ID:/etc/deadlock-turniere/secrets/discord_client_id
-LoadCredential=DISCORD_CLIENT_SECRET:/etc/deadlock-turniere/secrets/discord_client_secret
+LoadCredential=TURNIER_INTERNAL_API_TOKEN:/etc/deadlock-turniere/secrets/turnier_internal_api_token
 LoadCredential=JWT_SECRET:/etc/deadlock-turniere/secrets/jwt_secret
 
 # Option B: if Vault Agent renders files, use *_FILE variables instead.
-# Environment=DISCORD_CLIENT_ID_FILE=/run/deadlock-turniere-secrets/DISCORD_CLIENT_ID
-# Environment=DISCORD_CLIENT_SECRET_FILE=/run/deadlock-turniere-secrets/DISCORD_CLIENT_SECRET
+# Environment=TURNIER_INTERNAL_API_TOKEN_FILE=/run/deadlock-turniere-secrets/TURNIER_INTERNAL_API_TOKEN
 # Environment=JWT_SECRET_FILE=/run/deadlock-turniere-secrets/JWT_SECRET
 # Environment=STEAM_BRIDGE_DB_PATH_FILE=/run/deadlock-turniere-secrets/STEAM_BRIDGE_DB_PATH
 

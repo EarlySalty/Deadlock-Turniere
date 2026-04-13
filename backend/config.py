@@ -194,16 +194,19 @@ def _ensure_jwt_secret() -> str:
 class Settings:
     """Central application settings with Linux-friendly secret loading."""
 
-    # --- Discord OAuth ---
-    DISCORD_CLIENT_ID: str = _get_string(
-        "DISCORD_CLIENT_ID",
-        keyring_service="DeadlockBot",
-        keyring_key="DISCORD_OAUTH_CLIENT_ID",
+    # --- Discord OAuth delegation via Deadlock-Bots ---
+    DISCORD_OAUTH_INTERNAL_API_BASE_URL: str = _get_string(
+        "DISCORD_OAUTH_INTERNAL_API_BASE_URL",
+        default="http://127.0.0.1:8766",
     )
-    DISCORD_CLIENT_SECRET: str = _get_string(
-        "DISCORD_CLIENT_SECRET",
-        keyring_service="DeadlockBot",
-        keyring_key="DISCORD_OAUTH_CLIENT_SECRET",
+    DISCORD_OAUTH_INTERNAL_API_TOKEN: str = _get_first_string(
+        [
+            "TURNIER_INTERNAL_API_TOKEN",
+            "MASTER_BROKER_TOKEN",
+            "MAIN_BOT_INTERNAL_TOKEN",
+            "TWITCH_INTERNAL_API_TOKEN",
+        ],
+        default="",
     )
     DISCORD_BOT_TOKEN: str = _get_first_string(
         ["DISCORD_BOT_TOKEN", "DISCORD_TOKEN", "BOT_TOKEN"],
@@ -212,7 +215,7 @@ class Settings:
     )
     DISCORD_REDIRECT_URI: str = _get_string(
         "DISCORD_REDIRECT_URI",
-        default="https://turnier.earlysalty.com/auth/discord/callback",
+        default="https://deutsche-deadlock-community.de/turnier/auth/discord/callback",
     )
 
     # --- Discord guild and roles ---
@@ -249,7 +252,7 @@ class Settings:
     EXPOSE_API_DOCS: bool = _get_bool("EXPOSE_API_DOCS", default=False)
     FRONTEND_URL: str = _get_string(
         "FRONTEND_URL",
-        default="https://turnier.earlysalty.com",
+        default="https://deutsche-deadlock-community.de/turnier",
     )
 
     # --- Notifications ---
@@ -318,7 +321,16 @@ class Settings:
 
 settings = Settings()
 
-if settings.DISCORD_CLIENT_ID:
-    log.info("Discord OAuth client id loaded: %s...", settings.DISCORD_CLIENT_ID[:6])
+if settings.DISCORD_OAUTH_INTERNAL_API_BASE_URL:
+    log.info(
+        "Discord OAuth delegated to Deadlock-Bots via %s",
+        settings.DISCORD_OAUTH_INTERNAL_API_BASE_URL,
+    )
 else:
-    log.warning("DISCORD_CLIENT_ID is not configured")
+    log.warning("DISCORD_OAUTH_INTERNAL_API_BASE_URL is not configured")
+
+if not settings.DISCORD_OAUTH_INTERNAL_API_TOKEN:
+    log.warning(
+        "Discord OAuth internal API token is not configured "
+        "(TURNIER_INTERNAL_API_TOKEN/MASTER_BROKER_TOKEN/MAIN_BOT_INTERNAL_TOKEN/TWITCH_INTERNAL_API_TOKEN)"
+    )
