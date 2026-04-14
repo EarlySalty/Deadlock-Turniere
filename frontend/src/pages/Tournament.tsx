@@ -18,18 +18,19 @@ import GroupMatchList from '@/components/groups/GroupMatchList'
 import BracketView from '@/components/bracket/BracketView'
 import {
   Trophy, Users, LayoutGrid, GitBranch, Plus, UserPlus, AlertCircle, Shield, X, Info,
-  ChevronDown, ChevronUp, ScrollText, CheckCircle2, ClipboardCheck, Mail, UserCheck,
+  ChevronDown, ChevronUp, ScrollText, CheckCircle2, ClipboardCheck, Mail, UserCheck, BarChart2,
 } from 'lucide-react'
 import type { TeamPublic, BracketMatch, GroupMatch } from '@/types/tournament'
 import { ApiError } from '@/api/client'
 
-type Tab = 'übersicht' | 'gruppen' | 'bracket' | 'teams' | 'ergebnisse'
+type Tab = 'übersicht' | 'gruppen' | 'bracket' | 'teams' | 'ergebnisse' | 'rangliste'
 
 const ALL_TABS: { key: Tab; label: string; icon: typeof Trophy }[] = [
   { key: 'übersicht', label: 'Übersicht', icon: Trophy },
   { key: 'teams', label: 'Teams', icon: Users },
   { key: 'gruppen', label: 'Gruppen', icon: LayoutGrid },
   { key: 'bracket', label: 'Bracket', icon: GitBranch },
+  { key: 'rangliste', label: 'Rangliste', icon: BarChart2 },
   { key: 'ergebnisse', label: 'Ergebnisse', icon: ScrollText },
 ]
 
@@ -45,6 +46,54 @@ interface ResultEntry {
 function getTeamName(teamId: number | null, teams: TeamPublic[]): string {
   if (teamId === null) return 'Freilos'
   return teams.find((team) => team.id === teamId)?.name ?? `Team #${teamId}`
+}
+
+interface BracketRankEntry {
+  position: number
+  teamId: number
+  teamName: string
+  label: string
+}
+
+function deriveBracketPlacements(matches: BracketMatch[], teams: TeamPublic[]): BracketRankEntry[] {
+  const completed = matches.filter(
+    (m) => m.bracket_type === 'winners'
+      && (m.status === 'completed' || m.status === 'forfeit')
+      && m.winner_id !== null,
+  )
+  if (completed.length === 0) return []
+
+  const maxRound = Math.max(...completed.map((m) => m.round))
+  const entries: BracketRankEntry[] = []
+
+  for (const match of completed) {
+    const distance = maxRound - match.round
+    const winnerId = match.winner_id!
+    const loserId = match.team1_id === winnerId ? match.team2_id : match.team1_id
+
+    if (distance === 0) {
+      entries.push({ position: 1, teamId: winnerId, teamName: getTeamName(winnerId, teams), label: '1. Platz' })
+      if (loserId !== null) {
+        entries.push({ position: 2, teamId: loserId, teamName: getTeamName(loserId, teams), label: '2. Platz' })
+      }
+    } else {
+      const startPos = Math.pow(2, distance) + 1
+      const label = distance === 1 ? '3./4. Platz' : distance === 2 ? '5.–8. Platz' : '9.+ Platz'
+      if (loserId !== null) {
+        entries.push({ position: startPos, teamId: loserId, teamName: getTeamName(loserId, teams), label })
+      }
+    }
+  }
+
+  const seen = new Map<number, BracketRankEntry>()
+  for (const entry of entries) {
+    const existing = seen.get(entry.teamId)
+    if (!existing || entry.position < existing.position) {
+      seen.set(entry.teamId, entry)
+    }
+  }
+
+  return Array.from(seen.values()).sort((a, b) => a.position - b.position)
 }
 
 function getSortTime(value: string | null, fallback: number): number {
@@ -122,7 +171,7 @@ export default function Tournament() {
   const tournamentId = Number(id)
   const { data: tournament, isLoading } = useTournament(tournamentId)
   const { data: checkinStatus } = useCheckinStatus(tournamentId)
-  const { user, isLoggedIn } = useAuth()
+  const { isLoggedIn } = useAuth()
   const [activeTab, setActiveTab] = useState<Tab>('übersicht')
   const [showCreateTeam, setShowCreateTeam] = useState(false)
   const [teamName, setTeamName] = useState('')
@@ -156,11 +205,15 @@ export default function Tournament() {
   const showResultsTab = tournament
     ? ['group_phase', 'bracket', 'completed', 'archived'].includes(tournament.status)
     : false
-  const availableTabs = ALL_TABS.filter((tab) => showResultsTab || tab.key !== 'ergebnisse')
+  const availableTabs = ALL_TABS.filter(
+    (tab) => showResultsTab || (tab.key !== 'ergebnisse' && tab.key !== 'rangliste')
+  )
 
   useEffect(() => {
     if (!tournament) return
-    const allowedTabs = ALL_TABS.filter((tab) => showResultsTab || tab.key !== 'ergebnisse')
+    const allowedTabs = ALL_TABS.filter(
+      (tab) => showResultsTab || (tab.key !== 'ergebnisse' && tab.key !== 'rangliste')
+    )
     if (!allowedTabs.some((tab) => tab.key === activeTab)) {
       setActiveTab('übersicht')
     }
@@ -783,6 +836,106 @@ export default function Tournament() {
         {activeTab === 'bracket' && (
           <BracketView matches={tournament.bracket_matches} teams={tournament.teams} />
         )}
+
+        {activeTab === 'rangliste' && (() => {
+          const bracketEntries = deriveBracketPlacements(tournament.bracket_matches, tournament.teams)
+          const hasGroups = tournament.groups.length > 0
+
+          if (bracketEntries.length === 0 && !hasGroups) {
+            return (
+              <Card className="p-8 text-center">
+                <BarChart2 size={36} className="mx-auto text-muted mb-3" />
+                <p className="text-muted">Noch keine Rangliste verfügbar.</p>
+                <p className="text-xs text-muted mt-1">Platzierungen werden nach Start der Gruppenphase berechnet.</p>
+              </Card>
+            )
+          }
+
+          return (
+            <div className="space-y-6">
+              {bracketEntries.length > 0 && (
+                <div>
+                  <h2 className="text-lg font-semibold text-foreground mb-3">Abschluss-Platzierungen</h2>
+                  <Card className="overflow-hidden">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="border-b border-border bg-background/50">
+                          <th className="px-4 py-3 text-left font-medium text-muted w-12">#</th>
+                          <th className="px-4 py-3 text-left font-medium text-muted">Team</th>
+                          <th className="px-4 py-3 text-left font-medium text-muted hidden sm:table-cell">Ergebnis</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {bracketEntries.map((entry) => (
+                          <tr
+                            key={entry.teamId}
+                            className={`border-b border-border/50 last:border-0 transition-colors ${
+                              entry.position <= 3 ? 'bg-primary/5' : ''
+                            }`}
+                          >
+                            <td className="px-4 py-3">
+                              <div className="flex items-center justify-center">
+                                {entry.position === 1
+                                  ? <Trophy size={16} className="text-yellow-400" />
+                                  : entry.position === 2
+                                    ? <Trophy size={16} className="text-slate-300" />
+                                    : <span className="text-sm font-bold text-muted">{entry.position}</span>}
+                              </div>
+                            </td>
+                            <td className="px-4 py-3 font-medium text-foreground">{entry.teamName}</td>
+                            <td className="px-4 py-3 hidden sm:table-cell">
+                              <span className="text-xs px-2 py-0.5 rounded-full bg-primary/15 text-primary font-medium">
+                                {entry.label}
+                              </span>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </Card>
+                </div>
+              )}
+
+              {hasGroups && bracketEntries.length === 0 && (
+                <div>
+                  <h2 className="text-lg font-semibold text-foreground mb-1">Gruppenrangliste</h2>
+                  <p className="text-sm text-muted mb-3">Alle Teams sortiert nach Gruppenphase-Punkten.</p>
+                  <Card className="overflow-hidden">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="border-b border-border bg-background/50">
+                          <th className="px-4 py-3 text-left font-medium text-muted w-12">#</th>
+                          <th className="px-4 py-3 text-left font-medium text-muted">Team</th>
+                          <th className="px-4 py-3 text-center font-medium text-muted">S</th>
+                          <th className="px-4 py-3 text-center font-medium text-muted">N</th>
+                          <th className="px-4 py-3 text-right font-medium text-muted">Pkt</th>
+                          <th className="px-4 py-3 text-left font-medium text-muted hidden sm:table-cell">Gruppe</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {tournament.groups
+                          .flatMap((g) => g.teams.map((t) => ({ ...t, groupName: g.name })))
+                          .sort((a, b) => b.points !== a.points ? b.points - a.points : b.wins - a.wins)
+                          .map((team, idx) => (
+                            <tr key={`${team.team_id}-${team.groupName}`} className="border-b border-border/50 last:border-0 hover:bg-background/40 transition-colors">
+                              <td className="px-4 py-3 text-sm font-bold text-muted">{idx + 1}</td>
+                              <td className="px-4 py-3 font-medium text-foreground">{team.team_name}</td>
+                              <td className="px-4 py-3 text-center text-muted">{team.wins}</td>
+                              <td className="px-4 py-3 text-center text-muted">{team.losses}</td>
+                              <td className="px-4 py-3 text-right font-bold text-foreground">{team.points}</td>
+                              <td className="px-4 py-3 hidden sm:table-cell">
+                                <span className="text-xs px-2 py-0.5 rounded-full bg-border/50 text-muted">{team.groupName}</span>
+                              </td>
+                            </tr>
+                          ))}
+                      </tbody>
+                    </table>
+                  </Card>
+                </div>
+              )}
+            </div>
+          )
+        })()}
 
         {activeTab === 'ergebnisse' && (
           <div className="space-y-4">

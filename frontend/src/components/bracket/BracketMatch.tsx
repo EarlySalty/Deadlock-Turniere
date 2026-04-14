@@ -1,13 +1,13 @@
 import { motion } from 'framer-motion'
 import { CheckCircle2, Circle, Loader2, Key } from 'lucide-react'
-import type { BracketMatch as BracketMatchType, Team } from '@/types/tournament'
+import type { BracketMatch as BracketMatchType, TeamPublic } from '@/types/tournament'
 
 interface Props {
   match: BracketMatchType
-  teams: Team[]
+  teams: TeamPublic[]
 }
 
-function getTeamName(teamId: number | null, teams: Team[], isCompleted: boolean): string {
+function getTeamName(teamId: number | null, teams: TeamPublic[], isCompleted: boolean): string {
   if (teamId === null) return isCompleted ? 'Freilos' : 'TBD'
   return teams.find(t => t.id === teamId)?.name ?? 'Unbekannt'
 }

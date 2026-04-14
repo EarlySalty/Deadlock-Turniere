@@ -2,11 +2,11 @@ import { motion } from 'framer-motion'
 import { GitBranch } from 'lucide-react'
 import Card from '@/components/ui/Card'
 import BracketMatch from './BracketMatch'
-import type { BracketMatch as BracketMatchType, Team } from '@/types/tournament'
+import type { BracketMatch as BracketMatchType, TeamPublic } from '@/types/tournament'
 
 interface Props {
   matches: BracketMatchType[]
-  teams: Team[]
+  teams: TeamPublic[]
 }
 
 function getRoundLabel(round: number, maxRound: number): string {

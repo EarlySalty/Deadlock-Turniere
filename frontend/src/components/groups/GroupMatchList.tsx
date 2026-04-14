@@ -1,14 +1,14 @@
 import { motion } from 'framer-motion'
 import { Swords, Clock, CheckCircle2 } from 'lucide-react'
 import Card from '@/components/ui/Card'
-import type { Group, Team } from '@/types/tournament'
+import type { Group, TeamPublic } from '@/types/tournament'
 
 interface Props {
   groups: Group[]
-  teams: Team[]
+  teams: TeamPublic[]
 }
 
-function getTeamName(teamId: number, teams: Team[], groupTeams: Group['teams']): string {
+function getTeamName(teamId: number, teams: TeamPublic[], groupTeams: Group['teams']): string {
   const groupTeam = groupTeams.find(t => t.team_id === teamId)
   if (groupTeam) return groupTeam.team_name
   const team = teams.find(t => t.id === teamId)
