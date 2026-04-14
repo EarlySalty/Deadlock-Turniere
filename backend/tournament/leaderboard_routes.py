@@ -14,9 +14,9 @@ async def get_leaderboard() -> list[LeaderboardEntry]:
     """Globale Rangliste aller Spieler nach Punkte."""
     async with get_db() as db:
         cursor = await db.execute(
-            "SELECT pp.discord_id, pp.total_points, pp.tournaments_played, "
+            "SELECT pp.total_points, pp.tournaments_played, "
             "pp.matches_played, pp.matches_won, pp.best_placement, "
-            "COALESCE(NULLIF(s.discord_name, ''), pp.discord_id) AS discord_name, "
+            "COALESCE(NULLIF(s.discord_name, ''), NULL) AS discord_name, "
             "rc.rank "
             "FROM player_points pp "
             "LEFT JOIN (SELECT discord_id, MAX(discord_name) AS discord_name FROM sessions "
@@ -29,7 +29,7 @@ async def get_leaderboard() -> list[LeaderboardEntry]:
     return [
         LeaderboardEntry(
             rank_position=index + 1,
-            discord_name=row["discord_name"] or row["discord_id"],
+            discord_name=row["discord_name"] or "Unbekannt",
             rank=row["rank"],
             total_points=row["total_points"],
             tournaments_played=row["tournaments_played"],

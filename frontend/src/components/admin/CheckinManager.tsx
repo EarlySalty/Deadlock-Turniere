@@ -40,7 +40,7 @@ export default function CheckinManager({
   const [allowedTeams, setAllowedTeams] = useState<Record<number, boolean>>({})
   const [feedback, setFeedback] = useState('')
 
-  const checkedInIds = new Set(checkinStatus?.checked_in_discord_ids ?? [])
+  const checkedInNames = new Set(checkinStatus?.checked_in_names ?? [])
 
   const participants = useMemo(() => {
     const rows = new Map<string, ParticipantRow>()
@@ -67,13 +67,13 @@ export default function CheckinManager({
     }
 
     return Array.from(rows.values()).sort((left, right) => {
-      const leftMissing = checkedInIds.has(left.discord_id) ? 1 : 0
-      const rightMissing = checkedInIds.has(right.discord_id) ? 1 : 0
+      const leftMissing = checkedInNames.has(left.discord_name?.trim() || 'Unbekannt') ? 1 : 0
+      const rightMissing = checkedInNames.has(right.discord_name?.trim() || 'Unbekannt') ? 1 : 0
       if (leftMissing !== rightMissing) return rightMissing - leftMissing
       if (left.team_name !== right.team_name) return left.team_name.localeCompare(right.team_name)
       return participantName(left).localeCompare(participantName(right))
     })
-  }, [checkedInIds, signups, teams])
+  }, [checkedInNames, signups, teams])
 
   const error = finalizeMutation.error
   const isBusy = finalizeMutation.isPending
@@ -132,7 +132,7 @@ export default function CheckinManager({
           <div className="rounded-xl border border-border bg-background/60 p-4">
             <div className="text-sm text-muted">Eingecheckt</div>
             <div className="mt-1 text-2xl font-semibold text-green-400">
-              {checkinStatus?.total_checked_in ?? checkedInIds.size}
+              {checkinStatus?.total_checked_in ?? checkedInNames.size}
             </div>
           </div>
           <div className="rounded-xl border border-border bg-background/60 p-4">
@@ -180,7 +180,7 @@ export default function CheckinManager({
               </thead>
               <tbody>
                 {participants.map((row) => {
-                  const checkedIn = checkedInIds.has(row.discord_id)
+                  const checkedIn = checkedInNames.has(row.discord_name?.trim() || 'Unbekannt')
                   return (
                     <tr key={row.discord_id} className="border-b border-border/60">
                       <td className="px-3 py-2 text-foreground">{participantName(row)}</td>

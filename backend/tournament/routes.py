@@ -709,6 +709,16 @@ async def join_team(
 ) -> TeamMember:
     """Einem bestehenden Team beitreten."""
     async with get_db() as db:
+        cursor = await db.execute(
+            "SELECT discord_id FROM user_consents WHERE discord_id = ?",
+            (user.discord_id,),
+        )
+        if not await cursor.fetchone():
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="CONSENT_REQUIRED",
+            )
+
         # Turnier prüfen
         cursor = await db.execute(
             "SELECT * FROM tournaments WHERE id = ?",
@@ -1580,16 +1590,30 @@ async def get_checkin_status(tournament_id: int) -> dict:
         registered_ids.update(row["discord_id"] for row in await cursor.fetchall())
 
         cursor = await db.execute(
-            "SELECT discord_id FROM tournament_checkins "
-            "WHERE tournament_id = ? ORDER BY checked_in_at, id",
+            "SELECT COALESCE("
+            "NULLIF(ts.discord_name, ''), "
+            "NULLIF(s.discord_name, ''), "
+            "NULLIF(tm.discord_name, ''), "
+            "'Unbekannt'"
+            ") AS discord_name "
+            "FROM tournament_checkins tc "
+            "LEFT JOIN tournament_signups ts "
+            "ON ts.tournament_id = tc.tournament_id AND ts.discord_id = tc.discord_id "
+            "LEFT JOIN (SELECT discord_id, MAX(discord_name) AS discord_name FROM sessions "
+            "WHERE discord_name IS NOT NULL AND discord_name != '' GROUP BY discord_id) s "
+            "ON s.discord_id = tc.discord_id "
+            "LEFT JOIN (SELECT discord_id, MAX(discord_name) AS discord_name FROM team_members "
+            "WHERE discord_name IS NOT NULL AND discord_name != '' GROUP BY discord_id) tm "
+            "ON tm.discord_id = tc.discord_id "
+            "WHERE tc.tournament_id = ? ORDER BY tc.checked_in_at, tc.id",
             (tournament_id,),
         )
-        checked_in_ids = [row["discord_id"] for row in await cursor.fetchall()]
+        checked_in_names = [row["discord_name"] for row in await cursor.fetchall()]
 
     return {
         "total_registered": len(registered_ids),
-        "total_checked_in": len(checked_in_ids),
-        "checked_in_discord_ids": checked_in_ids,
+        "total_checked_in": len(checked_in_names),
+        "checked_in_names": checked_in_names,
     }
 
 
