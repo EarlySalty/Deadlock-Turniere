@@ -213,9 +213,9 @@ class Settings:
         keyring_service="DeadlockBot",
         keyring_keys=["DISCORD_BOT_TOKEN", "DISCORD_TOKEN", "BOT_TOKEN"],
     )
-    DISCORD_REDIRECT_URI: str = _get_string(
-        "DISCORD_REDIRECT_URI",
-        default="https://deutsche-deadlock-community.de/turnier/auth/discord/callback",
+    TURNIER_PUBLIC_URL: str = _get_string(
+        "TURNIER_PUBLIC_URL",
+        default="https://deutsche-deadlock-community.de/turnier",
     )
 
     # --- Discord guild and roles ---
@@ -290,7 +290,7 @@ class Settings:
 
         for candidate in (
             self.FRONTEND_URL,
-            self.DISCORD_REDIRECT_URI,
+            self.TURNIER_PUBLIC_URL,
             self.BACKEND_HOST,
         ):
             hostname = _get_hostname(candidate)

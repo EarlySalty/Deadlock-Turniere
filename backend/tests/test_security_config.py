@@ -35,7 +35,7 @@ class SettingsSecurityTests(unittest.TestCase):
     def test_allowed_hosts_merge_custom_hosts(self) -> None:
         configured = Settings()
         configured.FRONTEND_URL = "https://frontend.example.org/"
-        configured.DISCORD_REDIRECT_URI = "https://auth.example.org/callback"
+        configured.TURNIER_PUBLIC_URL = "https://auth.example.org/turnier"
         configured.BACKEND_HOST = "127.0.0.1"
         configured.BACKEND_ALLOWED_HOSTS = "api.example.org,*.example.net"
 

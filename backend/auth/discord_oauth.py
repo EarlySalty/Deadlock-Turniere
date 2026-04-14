@@ -14,8 +14,8 @@ from db import get_db
 router = APIRouter(prefix="/auth/discord", tags=["auth"])
 
 INTERNAL_TOKEN_HEADER = "X-Internal-Token"
-AUTHORIZE_URL_PATH = "/internal/turnier/v1/discord/authorize-url"
-SESSION_PATH = "/internal/turnier/v1/discord/session"
+INITIATE_PATH = "/internal/v1/discord/initiate"
+CONSUME_RESULT_PATH = "/internal/v1/discord/consume-result"
 INTERNAL_API_TIMEOUT = httpx.Timeout(20.0, connect=5.0)
 SESSION_LIFETIME = timedelta(days=7)
 
@@ -83,11 +83,14 @@ async def _post_internal_api(path: str, payload: dict[str, str]) -> dict:
 @router.get("/login")
 async def discord_login() -> RedirectResponse:
     """Redirect to the centralized Discord OAuth service on Deadlock-Bots."""
+    complete_url = f"{settings.TURNIER_PUBLIC_URL.rstrip('/')}/auth/discord/complete"
     data = await _post_internal_api(
-        AUTHORIZE_URL_PATH,
+        INITIATE_PATH,
         {
-            "redirect_uri": settings.DISCORD_REDIRECT_URI,
             "scope": "identify guilds.members.read",
+            "redirect_after": complete_url,
+            "requesting_service": "turnier",
+            "metadata": {"guild_id": settings.DISCORD_GUILD_ID},
         },
     )
     authorize_url = str(data.get("authorize_url") or "").strip()
@@ -99,21 +102,19 @@ async def discord_login() -> RedirectResponse:
     return RedirectResponse(url=authorize_url)
 
 
-@router.get("/callback")
-async def discord_callback(code: str | None = None, error: str | None = None) -> RedirectResponse:
-    """Exchange the Discord code through Deadlock-Bots and create a local session."""
-    if error or not code:
+@router.get("/complete")
+async def discord_complete(state_id: str | None = None) -> RedirectResponse:
+    """Consume the shared OAuth result through Deadlock-Bots and create a local session."""
+    if not state_id:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Discord OAuth Fehler: {error or 'Kein Code erhalten'}",
+            detail="Fehlender state_id",
         )
 
     data = await _post_internal_api(
-        SESSION_PATH,
+        CONSUME_RESULT_PATH,
         {
-            "code": code,
-            "redirect_uri": settings.DISCORD_REDIRECT_URI,
-            "guild_id": settings.DISCORD_GUILD_ID,
+            "state_id": state_id,
         },
     )
 
