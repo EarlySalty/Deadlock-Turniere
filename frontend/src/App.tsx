@@ -5,6 +5,8 @@ import Tournament from '@/pages/Tournament'
 import Login from '@/pages/Login'
 import Admin from '@/pages/Admin'
 import Hilfe from '@/pages/Hilfe'
+import Leaderboard from '@/pages/Leaderboard'
+import PlayerProfile from '@/pages/PlayerProfile'
 import ProtectedRoute from '@/components/auth/ProtectedRoute'
 
 export default function App() {
@@ -15,6 +17,13 @@ export default function App() {
         <Route path=":id" element={<Tournament />} />
         <Route path="hilfe" element={<Hilfe />} />
         <Route path="login" element={<Login />} />
+        <Route path="rangliste" element={<Leaderboard />} />
+        <Route path="spieler/:username" element={<PlayerProfile />} />
+        <Route path="profil" element={
+          <ProtectedRoute>
+            <PlayerProfile />
+          </ProtectedRoute>
+        } />
         <Route path="admin" element={
           <ProtectedRoute requireMod>
             <Admin />

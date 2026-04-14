@@ -174,6 +174,53 @@ CREATE TABLE IF NOT EXISTS rank_cache(
     rank_score INTEGER,
     cached_at INTEGER NOT NULL DEFAULT (strftime('%s','now'))
 );
+
+CREATE TABLE IF NOT EXISTS user_consents (
+  discord_id TEXT PRIMARY KEY,
+  consented_at TEXT NOT NULL,
+  consent_version INTEGER NOT NULL DEFAULT 1
+);
+
+CREATE TABLE IF NOT EXISTS user_profiles (
+  discord_id TEXT PRIMARY KEY,
+  bio TEXT CHECK(LENGTH(bio) <= 1000),
+  invite_auto_accept INTEGER NOT NULL DEFAULT 0,
+  notify_discord_dm INTEGER NOT NULL DEFAULT 1,
+  notify_browser INTEGER NOT NULL DEFAULT 0,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS team_applications (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  team_id INTEGER NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+  discord_id TEXT NOT NULL,
+  discord_name TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending',
+  created_at TEXT NOT NULL,
+  UNIQUE(team_id, discord_id)
+);
+
+CREATE TABLE IF NOT EXISTS player_points (
+  discord_id TEXT PRIMARY KEY,
+  total_points INTEGER NOT NULL DEFAULT 0,
+  tournaments_played INTEGER NOT NULL DEFAULT 0,
+  matches_played INTEGER NOT NULL DEFAULT 0,
+  matches_won INTEGER NOT NULL DEFAULT 0,
+  best_placement INTEGER,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS team_invitations (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  tournament_id INTEGER NOT NULL REFERENCES tournaments(id) ON DELETE CASCADE,
+  team_id INTEGER NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+  discord_id TEXT NOT NULL,
+  signup_id INTEGER REFERENCES tournament_signups(id),
+  status TEXT NOT NULL DEFAULT 'pending',
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  expires_at TEXT,
+  UNIQUE(team_id, discord_id)
+);
 """
 
 
@@ -209,6 +256,15 @@ async def _ensure_schema_upgrades(db: aiosqlite.Connection) -> None:
     await _ensure_column(db, "bracket_matches", "source_match1_id", "INTEGER")
     await _ensure_column(db, "bracket_matches", "source_match2_id", "INTEGER")
     await _ensure_column(db, "tournament_signups", "discord_name", "TEXT")
+    await _ensure_column(
+        db, "teams", "recruitment_status", "TEXT NOT NULL DEFAULT 'open'"
+    )
+    await _ensure_column(
+        db, "tournaments", "invite_mode", "TEXT NOT NULL DEFAULT 'always'"
+    )
+    await _ensure_column(db, "tournaments", "invite_window_start", "TEXT")
+    await _ensure_column(db, "tournaments", "invite_window_end", "TEXT")
+    await _ensure_column(db, "tournament_signups", "invited_by_team_id", "INTEGER")
 
 
 async def _ensure_column(

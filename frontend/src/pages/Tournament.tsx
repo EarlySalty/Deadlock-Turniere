@@ -1,22 +1,27 @@
 import { useState, useEffect } from 'react'
 import type { FormEvent } from 'react'
-import { useParams } from 'react-router-dom'
+import { useParams, Link } from 'react-router-dom'
 import {
-  useTournament, useCreateTeam, useJoinTeam, useSignupSolo,
-  useWithdrawSolo, useKickMember, useInviteSoloPlayer, useLeaveTeam,
-  useCheckin, useCheckinStatus,
+  useTournament, useMyTournamentStatus, useCreateTeam, useJoinTeam, useSignupSolo,
+  useWithdrawSolo, useLeaveTeam, useInviteBySignup, useCheckin, useCheckinStatus,
+  useMyInvitations, useAcceptInvitation, useRejectInvitation, useApplyToTeam,
+  useConsent,
 } from '@/hooks/useTournament'
 import { useAuth } from '@/hooks/useAuth'
 import Card from '@/components/ui/Card'
 import Badge from '@/components/ui/Badge'
 import Button from '@/components/ui/Button'
 import LoadingSpinner from '@/components/ui/LoadingSpinner'
+import ConsentModal from '@/components/ConsentModal'
 import GroupStandings from '@/components/groups/GroupStandings'
 import GroupMatchList from '@/components/groups/GroupMatchList'
 import BracketView from '@/components/bracket/BracketView'
-import { Trophy, Users, LayoutGrid, GitBranch, Plus, UserPlus, AlertCircle, Shield, X, Info, ChevronDown, ChevronUp, ScrollText, CheckCircle2, ClipboardCheck } from 'lucide-react'
-import type { Team } from '@/types/tournament'
-import type { GroupMatch, BracketMatch } from '@/types/tournament'
+import {
+  Trophy, Users, LayoutGrid, GitBranch, Plus, UserPlus, AlertCircle, Shield, X, Info,
+  ChevronDown, ChevronUp, ScrollText, CheckCircle2, ClipboardCheck, Mail, UserCheck,
+} from 'lucide-react'
+import type { TeamPublic, BracketMatch, GroupMatch } from '@/types/tournament'
+import { ApiError } from '@/api/client'
 
 type Tab = 'übersicht' | 'gruppen' | 'bracket' | 'teams' | 'ergebnisse'
 
@@ -37,7 +42,7 @@ interface ResultEntry {
   sortTime: number
 }
 
-function getTeamName(teamId: number | null, teams: Team[]): string {
+function getTeamName(teamId: number | null, teams: TeamPublic[]): string {
   if (teamId === null) return 'Freilos'
   return teams.find((team) => team.id === teamId)?.name ?? `Team #${teamId}`
 }
@@ -60,16 +65,17 @@ function getBracketRoundLabel(round: number, maxRound: number): string {
   return `Runde ${round}`
 }
 
-function buildGroupResultEntries(groups: { name: string; matches: GroupMatch[] }[], teams: Team[]): ResultEntry[] {
+function buildGroupResultEntries(
+  groups: { name: string; matches: GroupMatch[] }[],
+  teams: TeamPublic[],
+): ResultEntry[] {
   return groups.flatMap((group) => {
     const completedMatches = group.matches
       .filter((match) => isCompletedMatch(match.status) && match.winner_id !== null)
       .sort((left, right) => getSortTime(left.played_at, left.id) - getSortTime(right.played_at, right.id))
-
     return completedMatches.map((match, index) => {
       const winnerName = getTeamName(match.winner_id, teams)
       const loserId = match.winner_id === match.team1_id ? match.team2_id : match.team1_id
-
       return {
         id: `group-${match.id}`,
         title: `${group.name} • Runde ${index + 1}`,
@@ -82,9 +88,8 @@ function buildGroupResultEntries(groups: { name: string; matches: GroupMatch[] }
   })
 }
 
-function buildBracketResultEntries(matches: BracketMatch[], teams: Team[]): ResultEntry[] {
+function buildBracketResultEntries(matches: BracketMatch[], teams: TeamPublic[]): ResultEntry[] {
   const maxRound = matches.reduce((highest, match) => Math.max(highest, match.round), 0)
-
   return matches
     .filter((match) => (
       isCompletedMatch(match.status)
@@ -95,7 +100,6 @@ function buildBracketResultEntries(matches: BracketMatch[], teams: Team[]): Resu
     .map((match) => {
       const winnerName = getTeamName(match.winner_id, teams)
       const loserId = match.winner_id === match.team1_id ? match.team2_id : match.team1_id
-
       return {
         id: `bracket-${match.id}`,
         title: `Bracket • ${getBracketRoundLabel(match.round, maxRound)}`,
@@ -107,6 +111,12 @@ function buildBracketResultEntries(matches: BracketMatch[], teams: Team[]): Resu
     })
 }
 
+function recruitingLabel(status: string) {
+  if (status === 'application') return { text: 'Bewerbung', color: 'text-amber-400 bg-amber-500/15 border-amber-500/30' }
+  if (status === 'closed') return { text: 'Geschlossen', color: 'text-muted bg-border/30 border-border' }
+  return { text: 'Offen', color: 'text-green-400 bg-green-500/15 border-green-500/30' }
+}
+
 export default function Tournament() {
   const { id } = useParams<{ id: string }>()
   const tournamentId = Number(id)
@@ -114,30 +124,29 @@ export default function Tournament() {
   const { data: checkinStatus } = useCheckinStatus(tournamentId)
   const { user, isLoggedIn } = useAuth()
   const [activeTab, setActiveTab] = useState<Tab>('übersicht')
-
-  // Team creation form state
   const [showCreateTeam, setShowCreateTeam] = useState(false)
   const [teamName, setTeamName] = useState('')
-
-  // Success message state
   const [successMsg, setSuccessMsg] = useState<string | null>(null)
+  const [showSoloTable, setShowSoloTable] = useState(false)
+  const [pendingAction, setPendingAction] = useState<(() => void) | null>(null)
+  const [showConsentModal, setShowConsentModal] = useState(false)
+  const [pendingJoinTeam, setPendingJoinTeam] = useState<TeamPublic | null>(null)
 
-  // Solo invite section toggle
-  const [showSoloInvite, setShowSoloInvite] = useState(false)
-
-  // Confirmation for joining a team when already in one
-  const [pendingJoinTeam, setPendingJoinTeam] = useState<Team | null>(null)
+  const { data: myStatus } = useMyTournamentStatus(tournamentId, isLoggedIn)
+  const { data: myInvitations } = useMyInvitations(tournamentId, isLoggedIn && !myStatus?.team_id)
+  const { data: consent } = useConsent()
 
   const createTeamMutation = useCreateTeam()
   const joinTeamMutation = useJoinTeam()
   const signupSoloMutation = useSignupSolo()
   const withdrawSoloMutation = useWithdrawSolo(tournamentId)
-  const kickMemberMutation = useKickMember(tournamentId)
-  const inviteSoloPlayerMutation = useInviteSoloPlayer(tournamentId)
+  const inviteBySignupMutation = useInviteBySignup(tournamentId)
   const leaveTeamMutation = useLeaveTeam(tournamentId)
   const checkinMutation = useCheckin(tournamentId)
+  const acceptInviteMutation = useAcceptInvitation(tournamentId)
+  const rejectInviteMutation = useRejectInvitation(tournamentId)
+  const applyMutation = useApplyToTeam(tournamentId)
 
-  // Auto-clear success message after 3 seconds
   useEffect(() => {
     if (!successMsg) return
     const timer = setTimeout(() => setSuccessMsg(null), 3000)
@@ -148,12 +157,6 @@ export default function Tournament() {
     ? ['group_phase', 'bracket', 'completed', 'archived'].includes(tournament.status)
     : false
   const availableTabs = ALL_TABS.filter((tab) => showResultsTab || tab.key !== 'ergebnisse')
-  const resultEntries = tournament
-    ? [
-        ...buildGroupResultEntries(tournament.groups, tournament.teams),
-        ...buildBracketResultEntries(tournament.bracket_matches, tournament.teams),
-      ].sort((left, right) => left.sortTime - right.sortTime || left.id.localeCompare(right.id))
-    : []
 
   useEffect(() => {
     if (!tournament) return
@@ -175,95 +178,121 @@ export default function Tournament() {
   const isRegistration = tournament.status === 'registration'
   const isCheckinPhase = tournament.status === 'checkin'
 
-  // Check if user is already in a team
-  const userTeam = user
-    ? tournament.teams.find(t =>
-        t.members.some(m => m.discord_id === user.discord_id)
-      )
+  // User state from status endpoint (no discord_id scanning needed)
+  const userTeam = myStatus?.team_id != null
+    ? tournament.teams.find((t) => t.id === myStatus.team_id) ?? null
     : null
-
-  // Check if user has a solo signup (signup with no team)
-  const userSoloSignup = user
-    ? tournament.signups.find(s => s.discord_id === user.discord_id && s.team_id === null)
-    : null
-  const userSignup = user
-    ? tournament.signups.find(s => s.discord_id === user.discord_id)
-    : null
-
-  // Open solo signups (no team assigned)
-  const openSoloSignups = tournament.signups.filter(s => s.team_id === null)
-
-  const isUserCaptain = userTeam != null && userTeam.captain_discord_id === user?.discord_id
+  const userSignupId = myStatus?.signup_id ?? null
+  const userHasSoloSignup = userSignupId !== null && !myStatus?.team_id
+  const isUserCaptain = myStatus?.is_captain ?? false
   const teamIsFull = userTeam != null && userTeam.members.length >= tournament.team_size
-  const isAdmin = user?.is_admin === true
-  const checkedInIds = new Set(checkinStatus?.checked_in_discord_ids ?? [])
-  const isUserRegistered = Boolean(userTeam || userSignup)
-  const hasCheckedIn = Boolean(user && checkedInIds.has(user.discord_id))
+  const isUserRegistered = Boolean(userTeam || userHasSoloSignup)
+  const hasCheckedIn = myStatus?.is_checked_in ?? false
+
+  // Invite window check
+  const canInvite = (() => {
+    if (!isUserCaptain || !userTeam || teamIsFull) return false
+    const mode = tournament.invite_mode
+    if (mode === 'never') return false
+    if (mode === 'always') return true
+    if (mode === 'window') {
+      const now = Date.now()
+      const start = tournament.invite_window_start ? new Date(tournament.invite_window_start).getTime() : null
+      const end = tournament.invite_window_end ? new Date(tournament.invite_window_end).getTime() : null
+      return (!start || now >= start) && (!end || now <= end)
+    }
+    return false
+  })()
+
+  const openSoloSignups = tournament.signups.filter((s) => s.team_id === null)
+  const resultEntries = tournament
+    ? [
+        ...buildGroupResultEntries(tournament.groups, tournament.teams),
+        ...buildBracketResultEntries(tournament.bracket_matches, tournament.teams),
+      ].sort((left, right) => left.sortTime - right.sortTime || left.id.localeCompare(right.id))
+    : []
 
   const mutationError =
     createTeamMutation.error ||
     joinTeamMutation.error ||
     signupSoloMutation.error ||
     withdrawSoloMutation.error ||
-    kickMemberMutation.error ||
-    inviteSoloPlayerMutation.error ||
+    inviteBySignupMutation.error ||
     leaveTeamMutation.error ||
-    checkinMutation.error
+    applyMutation.error
 
   const isMutating =
     createTeamMutation.isPending ||
     joinTeamMutation.isPending ||
     signupSoloMutation.isPending ||
     withdrawSoloMutation.isPending ||
-    kickMemberMutation.isPending ||
-    inviteSoloPlayerMutation.isPending ||
+    inviteBySignupMutation.isPending ||
     leaveTeamMutation.isPending ||
-    checkinMutation.isPending
+    checkinMutation.isPending ||
+    acceptInviteMutation.isPending ||
+    rejectInviteMutation.isPending ||
+    applyMutation.isPending
+
+  // Consent-aware action wrapper
+  const withConsent = (action: () => void) => {
+    if (!isLoggedIn) return
+    if (consent?.has_consent) {
+      action()
+    } else {
+      setPendingAction(() => action)
+      setShowConsentModal(true)
+    }
+  }
+
+  const handleConsentError = (error: unknown) => {
+    if (error instanceof ApiError && error.message === 'CONSENT_REQUIRED') {
+      setPendingAction(null)
+      setShowConsentModal(true)
+    }
+  }
 
   const handleCreateTeam = (e: FormEvent) => {
     e.preventDefault()
     if (!teamName.trim()) return
-    createTeamMutation.mutate(
-      { tournamentId, name: teamName.trim() },
-      {
-        onSuccess: () => {
-          setTeamName('')
-          setShowCreateTeam(false)
-        },
-      }
-    )
-  }
-
-  const handleJoinTeam = (team: (typeof tournament.teams)[number]) => {
-    if (userTeam) {
-      setPendingJoinTeam(team)
-    } else {
-      joinTeamMutation.mutate({ tournamentId, teamId: team.id })
-    }
-  }
-
-  const handleSignupSolo = () => {
-    signupSoloMutation.mutate(tournamentId, {
-      onSuccess: () => {
-        setSuccessMsg('Du bist jetzt als Solo-Spieler eingetragen!')
-      },
+    withConsent(() => {
+      createTeamMutation.mutate(
+        { tournamentId, name: teamName.trim() },
+        {
+          onSuccess: () => { setTeamName(''); setShowCreateTeam(false) },
+          onError: handleConsentError,
+        }
+      )
     })
   }
 
-  const handleWithdrawSolo = () => {
-    withdrawSoloMutation.mutate()
+  const handleJoinTeam = (team: TeamPublic) => {
+    withConsent(() => {
+      if (userTeam) {
+        setPendingJoinTeam(team)
+      } else {
+        joinTeamMutation.mutate({ tournamentId, teamId: team.id }, { onError: handleConsentError })
+      }
+    })
   }
 
-  const handleKickMember = (teamId: number, discordId: string) => {
-    kickMemberMutation.mutate({ teamId, discordId })
+  const handleSignupSolo = () => {
+    withConsent(() => {
+      signupSoloMutation.mutate(tournamentId, {
+        onSuccess: () => setSuccessMsg('Du bist jetzt als Solo-Spieler eingetragen!'),
+        onError: handleConsentError,
+      })
+    })
   }
 
-  const handleLeaveTeam = (teamId: number) => {
-    leaveTeamMutation.mutate({ teamId })
-  }
+  const handleWithdrawSolo = () => withdrawSoloMutation.mutate()
+  const handleLeaveTeam = (teamId: number) => leaveTeamMutation.mutate({ teamId })
 
-  const handleInviteSolo = (teamId: number, discordId: string) => {
-    inviteSoloPlayerMutation.mutate({ teamId, discordId })
+  const handleInviteBySignup = (teamId: number, signupId: number) => {
+    inviteBySignupMutation.mutate({ teamId, signupId }, {
+      onSuccess: (result) => {
+        setSuccessMsg(result.status === 'auto_accepted' ? 'Spieler wurde direkt aufgenommen!' : 'Einladung gesendet.')
+      },
+    })
   }
 
   const handleCheckin = () => {
@@ -278,8 +307,31 @@ export default function Tournament() {
     })
   }
 
+  const handleApply = (teamId: number) => {
+    withConsent(() => {
+      applyMutation.mutate(teamId, {
+        onSuccess: () => setSuccessMsg('Bewerbung wurde gesendet.'),
+        onError: handleConsentError,
+      })
+    })
+  }
+
   return (
     <div className="space-y-6">
+      {/* Consent Modal */}
+      {showConsentModal && (
+        <ConsentModal
+          onAccepted={() => {
+            setShowConsentModal(false)
+            if (pendingAction) {
+              pendingAction()
+              setPendingAction(null)
+            }
+          }}
+          onDismiss={() => { setShowConsentModal(false); setPendingAction(null) }}
+        />
+      )}
+
       {/* Header */}
       <div>
         <div className="flex items-center gap-3 mb-2">
@@ -296,13 +348,35 @@ export default function Tournament() {
         </div>
       </div>
 
-      {/* Success message banner */}
+      {/* Success message */}
       {successMsg && (
         <div className="flex items-center gap-2 text-green-400 text-sm bg-green-500/10 border border-green-500/20 rounded-lg p-3">
           <span>{successMsg}</span>
         </div>
       )}
 
+      {/* Pick-Window-Hinweis */}
+      {isRegistration && tournament.invite_mode === 'window' && (
+        <Card className="p-3 border-amber-500/20 bg-amber-500/5 text-sm text-amber-300">
+          {tournament.invite_window_start && tournament.invite_window_end ? (
+            <span>
+              Einladungen möglich:{' '}
+              {new Date(tournament.invite_window_start).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
+              {' '}–{' '}
+              {new Date(tournament.invite_window_end).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
+            </span>
+          ) : (
+            <span>Pick-Fenster aktiv — Einladungen nur in einem bestimmten Zeitraum erlaubt.</span>
+          )}
+        </Card>
+      )}
+      {isRegistration && tournament.invite_mode === 'never' && (
+        <Card className="p-3 border-border/30 bg-background/40 text-sm text-muted">
+          Teams werden beim Turnier-Start automatisch zusammengestellt.
+        </Card>
+      )}
+
+      {/* Checkin Banner */}
       {isCheckinPhase && (
         <Card className="p-5 border-amber-500/20 bg-amber-500/5">
           <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
@@ -312,7 +386,7 @@ export default function Tournament() {
                 <span className="text-sm font-semibold uppercase tracking-wide">Check-in aktiv</span>
               </div>
               <p className="text-sm text-foreground">
-                {checkinStatus?.total_checked_in ?? checkedInIds.size} von {checkinStatus?.total_registered ?? tournament.signups.length} Spielern sind eingecheckt.
+                {checkinStatus?.total_checked_in ?? 0} von {checkinStatus?.total_registered ?? tournament.signups.length} Spielern sind eingecheckt.
               </p>
               {hasCheckedIn && (
                 <div className="inline-flex items-center gap-2 rounded-full bg-green-500/15 px-3 py-1 text-sm text-green-400">
@@ -321,7 +395,6 @@ export default function Tournament() {
                 </div>
               )}
             </div>
-
             {isLoggedIn && isUserRegistered ? (
               <Button
                 variant="primary"
@@ -333,17 +406,59 @@ export default function Tournament() {
                 {hasCheckedIn ? 'Eingecheckt' : checkinMutation.isPending ? 'Checkt ein...' : 'Jetzt einchecken'}
               </Button>
             ) : (
-              <p className="text-sm text-muted">
-                Nur angemeldete Spieler können sich einchecken.
-              </p>
+              <p className="text-sm text-muted">Nur angemeldete Spieler können sich einchecken.</p>
             )}
+          </div>
+        </Card>
+      )}
+
+      {/* Offene Einladungen */}
+      {isLoggedIn && !myStatus?.team_id && myInvitations && myInvitations.length > 0 && (
+        <Card className="p-4 border-primary/20 bg-primary/5">
+          <div className="flex items-center gap-2 mb-3">
+            <Mail size={16} className="text-primary" />
+            <h3 className="text-sm font-semibold text-foreground">Offene Einladungen</h3>
+          </div>
+          <div className="space-y-2">
+            {myInvitations.map((invite) => (
+              <div key={invite.id} className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-sm font-medium text-foreground">{invite.team_name ?? `Team #${invite.team_id}`}</p>
+                  {invite.expires_at && (
+                    <p className="text-xs text-muted">
+                      Läuft ab: {new Date(invite.expires_at).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                    </p>
+                  )}
+                </div>
+                <div className="flex gap-2">
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    disabled={isMutating}
+                    onClick={() => acceptInviteMutation.mutate(invite.id, { onSuccess: () => setSuccessMsg('Team beigetreten!') })}
+                  >
+                    <UserCheck size={13} />
+                    Annehmen
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    disabled={isMutating}
+                    onClick={() => rejectInviteMutation.mutate(invite.id)}
+                  >
+                    <X size={13} />
+                    Ablehnen
+                  </Button>
+                </div>
+              </div>
+            ))}
           </div>
         </Card>
       )}
 
       {/* Tabs */}
       <div className="flex border-b border-border">
-        {availableTabs.map(tab => {
+        {availableTabs.map((tab) => {
           const Icon = tab.icon
           return (
             <button
@@ -358,10 +473,7 @@ export default function Tournament() {
               <Icon size={16} />
               {tab.label}
               {tab.key === 'gruppen' && (
-                <span
-                  className="relative group"
-                  title="Teams spielen in Gruppen gegeneinander (Round-Robin). Die besten 2 jeder Gruppe kommen weiter ins Bracket."
-                >
+                <span className="relative group" title="Teams spielen in Gruppen gegeneinander (Round-Robin). Die besten 2 jeder Gruppe kommen weiter ins Bracket.">
                   <Info size={13} className="text-muted hover:text-foreground transition-colors" />
                   <span className="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-64 rounded-lg bg-card border border-border px-3 py-2 text-xs text-foreground opacity-0 group-hover:opacity-100 transition-opacity z-10 shadow-lg">
                     Teams spielen in Gruppen gegeneinander (Round-Robin). Die besten 2 jeder Gruppe kommen weiter ins Bracket.
@@ -369,10 +481,7 @@ export default function Tournament() {
                 </span>
               )}
               {tab.key === 'bracket' && (
-                <span
-                  className="relative group"
-                  title="K.O.-Runde: Wer verliert, scheidet aus. Wer gewinnt, kommt eine Runde weiter bis zum Finale."
-                >
+                <span className="relative group" title="K.O.-Runde: Wer verliert, scheidet aus. Wer gewinnt, kommt eine Runde weiter bis zum Finale.">
                   <Info size={13} className="text-muted hover:text-foreground transition-colors" />
                   <span className="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-56 rounded-lg bg-card border border-border px-3 py-2 text-xs text-foreground opacity-0 group-hover:opacity-100 transition-opacity z-10 shadow-lg">
                     K.O.-Runde: Wer verliert, scheidet aus. Wer gewinnt, kommt eine Runde weiter bis zum Finale.
@@ -394,9 +503,7 @@ export default function Tournament() {
                 <div>
                   <span className="text-muted">Anmeldung Start:</span>
                   <span className="ml-2 text-foreground">
-                    {new Date(tournament.registration_start).toLocaleString('de-DE', {
-                      day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit',
-                    })}
+                    {new Date(tournament.registration_start).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
                   </span>
                 </div>
               )}
@@ -404,9 +511,7 @@ export default function Tournament() {
                 <div>
                   <span className="text-muted">Anmeldung Ende:</span>
                   <span className="ml-2 text-foreground">
-                    {new Date(tournament.registration_end).toLocaleString('de-DE', {
-                      day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit',
-                    })}
+                    {new Date(tournament.registration_end).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
                   </span>
                 </div>
               )}
@@ -416,43 +521,26 @@ export default function Tournament() {
 
         {activeTab === 'teams' && (
           <div className="space-y-4">
-            {/* Registration Actions — only when no team AND no solo signup */}
-            {isRegistration && isLoggedIn && !userTeam && !userSoloSignup && (
+            {/* Registration Actions */}
+            {isRegistration && isLoggedIn && !userTeam && !userHasSoloSignup && (
               <Card className="p-4">
                 <h3 className="text-sm font-semibold text-foreground mb-3">Anmeldung</h3>
-
-                {/* Error */}
                 {mutationError && (
                   <div className="flex items-center gap-2 text-red-400 text-sm bg-red-500/10 border border-red-500/20 rounded-lg p-3 mb-3">
                     <AlertCircle size={16} />
-                    <span>
-                      {mutationError instanceof Error ? mutationError.message : 'Ein Fehler ist aufgetreten'}
-                    </span>
+                    <span>{mutationError instanceof Error ? mutationError.message : 'Ein Fehler ist aufgetreten'}</span>
                   </div>
                 )}
-
                 <div className="flex flex-wrap gap-2">
-                  <Button
-                    variant="primary"
-                    size="sm"
-                    onClick={() => setShowCreateTeam(!showCreateTeam)}
-                    disabled={isMutating}
-                  >
+                  <Button variant="primary" size="sm" onClick={() => setShowCreateTeam(!showCreateTeam)} disabled={isMutating}>
                     <Plus size={14} />
                     Team erstellen
                   </Button>
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    onClick={handleSignupSolo}
-                    disabled={isMutating}
-                  >
+                  <Button variant="secondary" size="sm" onClick={handleSignupSolo} disabled={isMutating}>
                     <UserPlus size={14} />
                     {signupSoloMutation.isPending ? 'Wird angemeldet...' : 'Solo anmelden'}
                   </Button>
                 </div>
-
-                {/* Team-Create Form */}
                 {showCreateTeam && (
                   <form onSubmit={handleCreateTeam} className="mt-3 flex gap-2">
                     <input
@@ -463,20 +551,10 @@ export default function Tournament() {
                       required
                       className="flex-1 bg-background border border-border rounded-lg px-3 py-2 text-sm text-foreground placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-primary/50"
                     />
-                    <Button
-                      type="submit"
-                      variant="primary"
-                      size="sm"
-                      disabled={createTeamMutation.isPending || !teamName.trim()}
-                    >
+                    <Button type="submit" variant="primary" size="sm" disabled={createTeamMutation.isPending || !teamName.trim()}>
                       {createTeamMutation.isPending ? 'Erstellt...' : 'Erstellen'}
                     </Button>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => { setShowCreateTeam(false); setTeamName('') }}
-                    >
+                    <Button type="button" variant="ghost" size="sm" onClick={() => { setShowCreateTeam(false); setTeamName('') }}>
                       Abbrechen
                     </Button>
                   </form>
@@ -484,35 +562,28 @@ export default function Tournament() {
               </Card>
             )}
 
-            {/* Solo signup status + opt-out */}
-            {isRegistration && isLoggedIn && userSoloSignup && !userTeam && (
+            {/* Solo signup status */}
+            {isRegistration && isLoggedIn && userHasSoloSignup && !userTeam && (
               <Card className="p-4">
                 {mutationError && (
                   <div className="flex items-center gap-2 text-red-400 text-sm bg-red-500/10 border border-red-500/20 rounded-lg p-3 mb-3">
                     <AlertCircle size={16} />
-                    <span>
-                      {mutationError instanceof Error ? mutationError.message : 'Ein Fehler ist aufgetreten'}
-                    </span>
+                    <span>{mutationError instanceof Error ? mutationError.message : 'Fehler'}</span>
                   </div>
                 )}
                 <div className="flex items-center gap-3 flex-wrap">
                   <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-medium bg-green-600 text-white">
                     ✓ Solo eingetragen
                   </span>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={handleWithdrawSolo}
-                    disabled={isMutating}
-                    className="text-red-400 border border-red-500/40 hover:bg-red-500/10"
-                  >
+                  <Button variant="ghost" size="sm" onClick={handleWithdrawSolo} disabled={isMutating}
+                    className="text-red-400 border border-red-500/40 hover:bg-red-500/10">
                     {withdrawSoloMutation.isPending ? 'Wird ausgetragen...' : 'Austragen'}
                   </Button>
                 </div>
               </Card>
             )}
 
-            {/* User's current team info */}
+            {/* User's current team */}
             {userTeam && (
               <Card className="p-4 border-primary/30">
                 <div className="flex items-center justify-between mb-2">
@@ -521,148 +592,178 @@ export default function Tournament() {
                     <span className="text-sm font-semibold text-primary">Dein Team</span>
                   </div>
                   {isRegistration && (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => handleLeaveTeam(userTeam.id)}
+                    <Button variant="ghost" size="sm" onClick={() => handleLeaveTeam(userTeam.id)}
                       disabled={isMutating || (isUserCaptain && userTeam.members.length > 1)}
                       title={isUserCaptain && userTeam.members.length > 1 ? 'Übergib zuerst die Captain-Rolle' : undefined}
-                      className="text-red-400 border border-red-500/40 hover:bg-red-500/10"
-                    >
+                      className="text-red-400 border border-red-500/40 hover:bg-red-500/10">
                       {leaveTeamMutation.isPending ? 'Verlasse...' : 'Team verlassen'}
                     </Button>
                   )}
                 </div>
                 <h3 className="font-medium text-foreground">{userTeam.name}</h3>
                 <div className="mt-2 space-y-1">
-                  {userTeam.members.map(m => (
-                    <div key={m.discord_id} className="flex items-center gap-2 text-sm">
-                      <span className="text-foreground flex-1">{m.discord_name ?? m.discord_id}</span>
-                      {m.role === 'captain' && (
-                        <span className="text-xs text-primary font-medium">Captain</span>
-                      )}
-                      <span className="text-xs text-muted">{m.rank || "—"}</span>
-                      {/* Captain: kick button for non-captain members */}
-                      {isUserCaptain && isRegistration && m.discord_id !== user?.discord_id && (
-                        <button
-                          onClick={() => handleKickMember(userTeam.id, m.discord_id)}
-                          disabled={isMutating}
-                          title="Mitglied entfernen"
-                          className="ml-1 text-red-400 hover:text-red-300 disabled:opacity-50 transition-colors"
-                        >
-                          <X size={14} />
-                        </button>
-                      )}
+                  {userTeam.members.map((m, i) => (
+                    <div key={i} className="flex items-center gap-2 text-sm">
+                      <span className="text-foreground flex-1">{m.discord_name ?? '—'}</span>
+                      {m.role === 'captain' && <span className="text-xs text-primary font-medium">Captain</span>}
+                      <span className="text-xs text-muted">{m.rank ?? '—'}</span>
                     </div>
                   ))}
                 </div>
 
-                {/* Captain: invite solo players */}
-                {isUserCaptain && isRegistration && !teamIsFull && (
+                {/* Captain: Solo-Spieler einladen */}
+                {isUserCaptain && isRegistration && canInvite && openSoloSignups.length > 0 && (
                   <div className="mt-4 border-t border-border pt-3">
                     <button
                       className="flex items-center gap-1.5 text-sm font-medium text-foreground hover:text-primary transition-colors"
-                      onClick={() => setShowSoloInvite(v => !v)}
+                      onClick={() => setShowSoloTable((v) => !v)}
                     >
                       <UserPlus size={14} />
                       Solo-Spieler einladen
-                      {showSoloInvite ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                      {showSoloTable ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
                     </button>
-                    {showSoloInvite && (
-                      <div className="mt-2 space-y-2">
-                        {openSoloSignups.length === 0 ? (
-                          <p className="text-sm text-muted">Keine offenen Solo-Anmeldungen</p>
-                        ) : (
-                          openSoloSignups.map(signup => (
-                            <div key={signup.discord_id} className="flex items-center justify-between gap-2">
-                              <div>
-                                <p className="text-sm font-medium text-foreground">{signup.discord_name || signup.discord_id}</p>
-                                {isAdmin && <p className="text-xs text-muted-foreground">{signup.discord_id}</p>}
-                              </div>
-                              <Button
-                                variant="secondary"
-                                size="sm"
-                                onClick={() => handleInviteSolo(userTeam.id, signup.discord_id)}
-                                disabled={isMutating}
-                              >
-                                {inviteSoloPlayerMutation.isPending ? 'Eingeladen...' : 'Einladen'}
-                              </Button>
-                            </div>
-                          ))
-                        )}
+                    {showSoloTable && (
+                      <div className="mt-3 overflow-x-auto">
+                        <table className="w-full text-sm">
+                          <thead>
+                            <tr className="text-left text-xs text-muted border-b border-border">
+                              <th className="pb-2 pr-4">Name</th>
+                              <th className="pb-2 pr-4">Rang</th>
+                              <th className="pb-2 text-right">Aktion</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {openSoloSignups.map((signup) => (
+                              <tr key={signup.id} className="border-b border-border/50 last:border-0">
+                                <td className="py-2 pr-4 font-medium text-foreground">{signup.discord_name ?? '—'}</td>
+                                <td className="py-2 pr-4 text-muted text-xs">
+                                  {signup.rank
+                                    ? `${signup.rank} · ${signup.rank_score}`
+                                    : `Score ${signup.rank_score}`}
+                                </td>
+                                <td className="py-2 text-right">
+                                  <Button
+                                    variant="secondary"
+                                    size="sm"
+                                    disabled={isMutating}
+                                    onClick={() => handleInviteBySignup(userTeam.id, signup.id)}
+                                  >
+                                    {inviteBySignupMutation.isPending ? 'Eingeladen...' : 'Einladen'}
+                                  </Button>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
                       </div>
                     )}
                   </div>
                 )}
+                {isUserCaptain && isRegistration && !canInvite && tournament.invite_mode !== 'always' && (
+                  <p className="mt-3 text-xs text-muted pt-2 border-t border-border">
+                    {tournament.invite_mode === 'never'
+                      ? 'Einladungen sind für dieses Turnier deaktiviert.'
+                      : 'Das Einladungs-Fenster ist aktuell nicht geöffnet.'}
+                  </p>
+                )}
               </Card>
             )}
 
-            {/* Error shown outside of registration card context */}
+            {/* Error outside registration context */}
             {mutationError && !isRegistration && (
               <div className="flex items-center gap-2 text-red-400 text-sm bg-red-500/10 border border-red-500/20 rounded-lg p-3">
                 <AlertCircle size={16} />
-                <span>
-                  {mutationError instanceof Error ? mutationError.message : 'Ein Fehler ist aufgetreten'}
-                </span>
+                <span>{mutationError instanceof Error ? mutationError.message : 'Ein Fehler ist aufgetreten'}</span>
               </div>
             )}
 
-            {/* Open solo signups list */}
-            {openSoloSignups.length > 0 && (
+            {/* Solo Signups Table (wenn kein Team aktiv) */}
+            {openSoloSignups.length > 0 && !isUserCaptain && (
               <Card className="p-4">
                 <h3 className="text-sm font-semibold text-foreground mb-3">Offene Solo-Anmeldungen</h3>
-                <div className="space-y-2">
-                  {openSoloSignups.map(signup => (
-                    <div key={signup.discord_id} className="text-sm">
-                      <p className="font-semibold text-foreground">{signup.discord_name || signup.discord_id}</p>
-                      {isAdmin && <p className="text-xs text-muted-foreground">{signup.discord_id}</p>}
-                    </div>
-                  ))}
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="text-left text-xs text-muted border-b border-border">
+                        <th className="pb-2 pr-4">Name</th>
+                        <th className="pb-2 pr-4 hidden sm:table-cell">Rang</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {openSoloSignups.map((signup) => (
+                        <tr key={signup.id} className="border-b border-border/50 last:border-0">
+                          <td className="py-2 pr-4 font-medium text-foreground">
+                            <Link to={`/spieler/${encodeURIComponent(signup.discord_name ?? '')}`}
+                              className="hover:text-primary transition-colors">
+                              {signup.discord_name ?? '—'}
+                            </Link>
+                          </td>
+                          <td className="py-2 pr-4 text-muted text-xs hidden sm:table-cell">
+                            {signup.rank ?? '—'}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
               </Card>
             )}
 
             {/* Team List */}
             <div className="grid gap-3">
-              {tournament.teams.length > 0 ? tournament.teams.map(team => (
-                <Card key={team.id} className="p-4">
-                  <div className="flex items-center justify-between">
-                    <div className="flex-1">
-                      <div className="flex items-center gap-2">
-                        <h3 className="font-medium text-foreground">{team.name}</h3>
-                        <span className="text-sm text-muted">
-                          {team.members.length}/{tournament.team_size} Mitglieder
-                        </span>
-                      </div>
-                      {/* Members */}
-                      <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1">
-                        {team.members.map(m => (
-                          <span key={m.discord_id} className="text-xs text-muted">
-                            {m.discord_name ?? m.discord_id}
-                            {m.role === 'captain' && (
-                              <span className="ml-1 text-primary">(C)</span>
-                            )}
-                            <span className="ml-1 opacity-60">[{m.rank || "—"}]</span>
+              {tournament.teams.length > 0 ? tournament.teams.map((team) => {
+                const recruiting = recruitingLabel(team.recruitment_status)
+                const isCaptainTeam = userTeam?.id === team.id
+                const isFull = team.members.length >= tournament.team_size
+                const showJoin = isRegistration && isLoggedIn && !isCaptainTeam && team.recruitment_status === 'open' && !isFull
+                const showApply = isRegistration && isLoggedIn && !isCaptainTeam && team.recruitment_status === 'application' && !isFull && !userTeam
+                return (
+                  <Card key={team.id} className={`p-4 ${isCaptainTeam ? 'border-primary/30' : ''}`}>
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <h3 className="font-medium text-foreground">{team.name}</h3>
+                          <span className="text-sm text-muted">{team.members.length}/{tournament.team_size}</span>
+                          <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${recruiting.color}`}>
+                            {recruiting.text}
                           </span>
-                        ))}
+                          {team.has_pending_applications && isUserCaptain && isCaptainTeam && (
+                            <span className="text-xs px-2 py-0.5 rounded-full border border-amber-500/30 bg-amber-500/10 text-amber-400 font-medium">
+                              Neue Bewerbungen
+                            </span>
+                          )}
+                        </div>
+                        <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1">
+                          {team.members.map((m, i) => (
+                            <span key={i} className="text-xs text-muted">
+                              <Link to={`/spieler/${encodeURIComponent(m.discord_name ?? '')}`}
+                                className="hover:text-primary transition-colors">
+                                {m.discord_name ?? '—'}
+                              </Link>
+                              {m.role === 'captain' && <span className="ml-1 text-primary">(C)</span>}
+                              <span className="ml-1 opacity-60">[{m.rank ?? '—'}]</span>
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                      <div className="flex gap-2 flex-shrink-0">
+                        {showJoin && (
+                          <Button variant="secondary" size="sm" onClick={() => handleJoinTeam(team)} disabled={isMutating}>
+                            <UserPlus size={14} />
+                            Beitreten
+                          </Button>
+                        )}
+                        {showApply && (
+                          <Button variant="ghost" size="sm" onClick={() => handleApply(team.id)} disabled={isMutating}
+                            className="border border-amber-500/40 text-amber-400 hover:bg-amber-500/10">
+                            Bewerben
+                          </Button>
+                        )}
                       </div>
                     </div>
-
-                    {/* Join Button — visible when no team OR in a different team */}
-                    {isRegistration && isLoggedIn && (!userTeam || userTeam.id !== team.id) && team.members.length < tournament.team_size && (
-                      <Button
-                        variant="secondary"
-                        size="sm"
-                        onClick={() => handleJoinTeam(team)}
-                        disabled={isMutating}
-                      >
-                        <UserPlus size={14} />
-                        Beitreten
-                      </Button>
-                    )}
-                  </div>
-                </Card>
-              )) : (
+                  </Card>
+                )
+              }) : (
                 <Card className="text-center py-8">
                   <Users size={32} className="mx-auto text-muted mb-3" />
                   <p className="text-muted">Noch keine Teams angemeldet</p>
@@ -694,11 +795,8 @@ export default function Tournament() {
               <>
                 <div>
                   <h2 className="text-lg font-semibold text-foreground">Ergebnisübersicht</h2>
-                  <p className="mt-1 text-sm text-muted">
-                    Alle abgeschlossenen Gruppen- und Bracket-Matches in zeitlicher Reihenfolge.
-                  </p>
+                  <p className="mt-1 text-sm text-muted">Alle abgeschlossenen Gruppen- und Bracket-Matches in zeitlicher Reihenfolge.</p>
                 </div>
-
                 <div className="space-y-3">
                   {resultEntries.map((entry) => (
                     <Card key={entry.id} className="p-4">
@@ -713,13 +811,7 @@ export default function Tournament() {
                         </div>
                         <div className="text-sm text-muted">
                           {entry.playedAt
-                            ? new Date(entry.playedAt).toLocaleString('de-DE', {
-                                day: '2-digit',
-                                month: '2-digit',
-                                year: 'numeric',
-                                hour: '2-digit',
-                                minute: '2-digit',
-                              })
+                            ? new Date(entry.playedAt).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })
                             : 'Zeitpunkt nicht verfügbar'}
                         </div>
                       </div>
@@ -732,36 +824,19 @@ export default function Tournament() {
         )}
       </div>
 
-      {/* Confirmation Modal — Team wechseln */}
+      {/* Confirmation Modal – Team wechseln */}
       {pendingJoinTeam && userTeam && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
           <div className="bg-card border border-border rounded-xl p-6 max-w-sm w-full mx-4 shadow-xl">
             <h3 className="text-base font-semibold text-foreground mb-3">Team wechseln?</h3>
             <p className="text-sm text-muted mb-5">
               Du bist bereits in Team <span className="text-foreground font-medium">"{userTeam.name}"</span>.
-              Wenn du <span className="text-foreground font-medium">"{pendingJoinTeam.name}"</span> beitrittst,
-              verlässt du dein aktuelles Team automatisch.
+              Wenn du <span className="text-foreground font-medium">"{pendingJoinTeam.name}"</span> beitrittst, verlässt du dein aktuelles Team automatisch.
             </p>
             <div className="flex gap-2 justify-end">
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => setPendingJoinTeam(null)}
-                disabled={joinTeamMutation.isPending}
-              >
-                Abbrechen
-              </Button>
-              <Button
-                variant="primary"
-                size="sm"
-                onClick={() => {
-                  joinTeamMutation.mutate(
-                    { tournamentId, teamId: pendingJoinTeam.id },
-                    { onSettled: () => setPendingJoinTeam(null) }
-                  )
-                }}
-                disabled={joinTeamMutation.isPending}
-              >
+              <Button variant="ghost" size="sm" onClick={() => setPendingJoinTeam(null)} disabled={joinTeamMutation.isPending}>Abbrechen</Button>
+              <Button variant="primary" size="sm" disabled={joinTeamMutation.isPending}
+                onClick={() => joinTeamMutation.mutate({ tournamentId, teamId: pendingJoinTeam.id }, { onSettled: () => setPendingJoinTeam(null) })}>
                 {joinTeamMutation.isPending ? 'Wechsle...' : 'Team wechseln'}
               </Button>
             </div>

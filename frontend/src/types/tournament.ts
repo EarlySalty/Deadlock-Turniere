@@ -1,6 +1,10 @@
 export type TournamentStatus = 'draft' | 'registration' | 'checkin' | 'group_phase' | 'bracket' | 'completed' | 'archived'
 export type BracketFormat = 'single_elimination' | 'double_elimination'
 export type MatchStatus = 'pending' | 'checkin' | 'lobby_created' | 'in_progress' | 'completed' | 'forfeit' | 'cancelled'
+export type RecruitmentStatus = 'open' | 'application' | 'closed'
+export type InviteMode = 'always' | 'window' | 'never'
+export type InvitationStatus = 'pending' | 'accepted' | 'rejected' | 'expired'
+export type ApplicationStatus = 'pending' | 'accepted' | 'rejected'
 
 export interface UserSession {
   discord_id: string
@@ -10,6 +14,8 @@ export interface UserSession {
   is_admin: boolean
   is_mod: boolean
 }
+
+// --- Tournament (base, used in lists and admin) ---
 
 export interface Tournament {
   id: number
@@ -22,16 +28,26 @@ export interface Tournament {
   group_phase_start: string | null
   bracket_start: string | null
   bracket_format: BracketFormat
+  invite_mode: InviteMode
+  invite_window_start: string | null
+  invite_window_end: string | null
   created_by: string
   created_at: string
   updated_at: string
 }
 
-export interface TournamentDetail extends Tournament {
-  teams: Team[]
-  groups: Group[]
-  bracket_matches: BracketMatch[]
-  signups: TournamentSignup[]
+// --- Admin types (with discord_id) ---
+
+export interface TeamMember {
+  id?: number
+  team_id?: number
+  discord_id: string
+  discord_name: string | null
+  steam_id: string | null
+  rank: string | null
+  rank_score: number
+  role: 'captain' | 'member'
+  joined_at: string
 }
 
 export interface Team {
@@ -42,16 +58,8 @@ export interface Team {
   captain_discord_id: string
   members: TeamMember[]
   created_at: string
-}
-
-export interface TeamMember {
-  discord_id: string
-  discord_name: string | null
-  steam_id: string | null
-  rank: string | null
-  rank_score: number
-  role: 'captain' | 'member'
-  joined_at: string
+  recruitment_status: RecruitmentStatus
+  has_pending_applications: boolean
 }
 
 export interface TournamentSignup {
@@ -66,10 +74,69 @@ export interface TournamentSignup {
   signed_up_at: string
 }
 
+export interface TournamentDetail extends Tournament {
+  teams: Team[]
+  groups: Group[]
+  bracket_matches: BracketMatch[]
+  signups: TournamentSignup[]
+}
+
+// --- Public types (no discord_id, for /api/tournaments/{id}) ---
+
+export interface TeamMemberPublic {
+  id?: number
+  team_id?: number
+  discord_name: string | null
+  steam_id: string | null
+  rank: string | null
+  rank_score: number
+  role: 'captain' | 'member'
+  joined_at: string
+}
+
+export interface TeamPublic {
+  id: number
+  tournament_id: number
+  name: string
+  name_key: string
+  members: TeamMemberPublic[]
+  created_at: string
+  recruitment_status: RecruitmentStatus
+  has_pending_applications: boolean
+}
+
+export interface TournamentSignupPublic {
+  id: number
+  tournament_id: number
+  discord_name: string | null
+  rank: string | null
+  rank_score: number
+  team_id: number | null
+  signed_up_at: string
+}
+
+export interface TournamentDetailPublic extends Tournament {
+  teams: TeamPublic[]
+  groups: Group[]
+  bracket_matches: BracketMatch[]
+  signups: TournamentSignupPublic[]
+}
+
+// --- User-specific tournament status (from /api/tournaments/{id}/me) ---
+
+export interface MyTournamentStatus {
+  team_id: number | null
+  signup_id: number | null
+  is_captain: boolean
+  is_checked_in: boolean
+}
+
+// --- Checkin ---
+
 export interface CheckinStatus {
   total_registered: number
   total_checked_in: number
-  checked_in_discord_ids: string[]
+  checked_in_names: string[]
 }
 
 export interface FinalizeCheckinWarning {
@@ -103,6 +170,8 @@ export interface FinalizeCheckinResult {
   matches_created?: number
   advanced_to_group_phase?: boolean
 }
+
+// --- Group & Bracket ---
 
 export interface GroupMatch {
   id: number
@@ -148,6 +217,8 @@ export interface BracketMatch {
   played_at: string | null
 }
 
+// --- Create/Update ---
+
 export interface TournamentCreate {
   name: string
   description?: string
@@ -155,6 +226,9 @@ export interface TournamentCreate {
   bracket_format: BracketFormat
   registration_start?: string
   registration_end?: string
+  invite_mode?: InviteMode
+  invite_window_start?: string
+  invite_window_end?: string
 }
 
 export interface TournamentUpdate {
@@ -167,6 +241,9 @@ export interface TournamentUpdate {
   registration_end?: string
   group_phase_start?: string
   bracket_start?: string
+  invite_mode?: InviteMode
+  invite_window_start?: string
+  invite_window_end?: string
 }
 
 export interface ManualResult {
@@ -208,4 +285,87 @@ export interface MatchFetchResult {
 export interface TeamMoveRequest {
   from_team_id: number
   discord_id: string
+}
+
+// --- Consent ---
+
+export interface ConsentStatus {
+  has_consent: boolean
+  consented_at: string | null
+  consent_version: number | null
+}
+
+// --- User Profile ---
+
+export interface UserProfile {
+  discord_id: string
+  bio: string | null
+  invite_auto_accept: boolean
+  notify_discord_dm: boolean
+  notify_browser: boolean
+  updated_at: string | null
+}
+
+export interface UserProfileUpdate {
+  bio?: string
+  invite_auto_accept?: boolean
+  notify_discord_dm?: boolean
+  notify_browser?: boolean
+}
+
+// --- Team Applications ---
+
+export interface TeamApplication {
+  id: number
+  team_id: number
+  discord_name: string
+  status: ApplicationStatus
+  created_at: string
+}
+
+// --- Team Invitations ---
+
+export interface TeamInvitation {
+  id: number
+  tournament_id: number
+  team_id: number
+  team_name: string | null
+  status: InvitationStatus
+  created_at: string
+  expires_at: string | null
+}
+
+// --- Leaderboard ---
+
+export interface LeaderboardEntry {
+  rank_position: number
+  discord_name: string
+  rank: string | null
+  total_points: number
+  tournaments_played: number
+  matches_played: number
+  matches_won: number
+  best_placement: number | null
+}
+
+// --- Player Profile ---
+
+export interface TournamentHistoryEntry {
+  tournament_name: string
+  placement: number | null
+  team_name: string | null
+}
+
+export interface PlayerProfile {
+  discord_name: string
+  discord_avatar: string | null
+  bio: string | null
+  rank: string | null
+  rank_score: number
+  tournaments_played: number
+  matches_played: number
+  matches_won: number
+  best_placement: number | null
+  total_points: number
+  tournament_history: TournamentHistoryEntry[]
 }

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import re
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
@@ -14,11 +15,18 @@ from tournament.models import (
     Group,
     GroupMatch,
     GroupTeam,
+    InviteMode,
+    RecruitmentStatus,
     Team,
+    TeamApplication,
+    TeamInvitation,
     TeamMember,
+    TeamMemberPublic,
+    TeamPublic,
     Tournament,
-    TournamentDetail,
+    TournamentDetailPublic,
     TournamentSignup,
+    TournamentSignupPublic,
     UserSession,
 )
 
@@ -51,6 +59,23 @@ async def _audit(db, action: str, user_id: str | None, details: str) -> None:  #
         (action, user_id, details),
     )
 
+
+def _parse_timestamp(value: str | None) -> datetime | None:
+    """Parst Zeitstempel robust für UTC-Vergleiche."""
+    if not value:
+        return None
+
+    normalized = value.strip().replace("Z", "+00:00")
+    try:
+        parsed = datetime.fromisoformat(normalized)
+    except ValueError:
+        return None
+
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
 async def _load_teams_for_tournament(db, tournament_id: int) -> list[Team]:  # noqa: ANN001
     """Lädt alle Teams eines Turniers inkl. Members."""
     cursor = await db.execute(
@@ -78,6 +103,43 @@ async def _load_teams_for_tournament(db, tournament_id: int) -> list[Team]:  # n
         member_rows = await cursor.fetchall()
         members = [TeamMember(**await _enrich_rank_data(dict(m))) for m in member_rows]
         teams.append(Team(**{**dict(t), "members": members}))
+    return teams
+
+
+async def _load_teams_public(db, tournament_id: int) -> list[TeamPublic]:  # noqa: ANN001
+    """Lädt Teams ohne captain_discord_id/discord_id in Members."""
+    cursor = await db.execute(
+        "SELECT * FROM teams WHERE tournament_id = ?",
+        (tournament_id,),
+    )
+    team_rows = await cursor.fetchall()
+    teams: list[TeamPublic] = []
+    for t in team_rows:
+        cursor = await db.execute(
+            "SELECT tm.id, tm.team_id, "
+            "COALESCE(NULLIF(tm.discord_name, ''), NULLIF(s.discord_name, '')) AS discord_name, "
+            "tm.steam_id, tm.rank, tm.rank_score, tm.role, tm.joined_at "
+            "FROM team_members tm "
+            "LEFT JOIN (SELECT discord_id, MAX(discord_name) AS discord_name FROM sessions "
+            "WHERE discord_name IS NOT NULL AND discord_name != '' GROUP BY discord_id) s "
+            "ON s.discord_id = tm.discord_id WHERE tm.team_id = ? ORDER BY tm.joined_at",
+            (t["id"],),
+        )
+        member_rows = await cursor.fetchall()
+        members = [TeamMemberPublic(**dict(m)) for m in member_rows]
+        cursor2 = await db.execute(
+            "SELECT COUNT(*) FROM team_applications WHERE team_id = ? AND status = 'pending'",
+            (t["id"],),
+        )
+        app_count = (await cursor2.fetchone())[0]
+        teams.append(TeamPublic(**{
+            **dict(t),
+            "members": members,
+            "has_pending_applications": (
+                t["recruitment_status"] == RecruitmentStatus.application.value
+                and app_count > 0
+            ),
+        }))
     return teams
 
 
@@ -150,6 +212,26 @@ async def _load_signups_for_tournament(db, tournament_id: int) -> list[Tournamen
     return [TournamentSignup(**await _enrich_rank_data(dict(r))) for r in rows]
 
 
+async def _load_signups_public(db, tournament_id: int) -> list[TournamentSignupPublic]:  # noqa: ANN001
+    """Lädt Signups ohne discord_id."""
+    cursor = await db.execute(
+        "SELECT ts.id, ts.tournament_id, "
+        "COALESCE(NULLIF(ts.discord_name, ''), NULLIF(s.discord_name, ''), NULLIF(tm.discord_name, '')) AS discord_name, "
+        "ts.steam_id, ts.rank, ts.rank_score, ts.team_id, ts.signed_up_at "
+        "FROM tournament_signups ts "
+        "LEFT JOIN (SELECT discord_id, MAX(discord_name) AS discord_name FROM sessions "
+        "WHERE discord_name IS NOT NULL AND discord_name != '' GROUP BY discord_id) s "
+        "ON s.discord_id = ts.discord_id "
+        "LEFT JOIN (SELECT discord_id, MAX(discord_name) AS discord_name FROM team_members "
+        "WHERE discord_name IS NOT NULL AND discord_name != '' GROUP BY discord_id) tm "
+        "ON tm.discord_id = ts.discord_id "
+        "WHERE ts.tournament_id = ? ORDER BY ts.signed_up_at DESC",
+        (tournament_id,),
+    )
+    rows = await cursor.fetchall()
+    return [TournamentSignupPublic(**dict(r)) for r in rows]
+
+
 async def _upsert_signup(
     db,
     tournament_id: int,
@@ -197,6 +279,206 @@ async def _upsert_signup(
     )
 
 
+async def _load_tournament_or_404(db, tournament_id: int):  # noqa: ANN001
+    cursor = await db.execute(
+        "SELECT * FROM tournaments WHERE id = ?",
+        (tournament_id,),
+    )
+    tournament = await cursor.fetchone()
+    if not tournament:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Turnier nicht gefunden",
+        )
+    return tournament
+
+
+async def _load_team_or_404(db, tournament_id: int, team_id: int):  # noqa: ANN001
+    cursor = await db.execute(
+        "SELECT * FROM teams WHERE id = ? AND tournament_id = ?",
+        (team_id, tournament_id),
+    )
+    team = await cursor.fetchone()
+    if not team:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Team nicht gefunden",
+        )
+    return team
+
+
+def _ensure_registration_open(tournament) -> None:  # noqa: ANN001
+    if tournament["status"] != "registration":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Anmeldung ist nicht geöffnet",
+        )
+
+
+def _is_mod_user(user: UserSession) -> bool:
+    return user.is_mod or user.is_admin
+
+
+def _ensure_captain(user: UserSession, team) -> None:  # noqa: ANN001
+    if user.discord_id != team["captain_discord_id"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Nur der Captain darf diese Aktion ausführen",
+        )
+
+
+def _ensure_captain_or_mod(user: UserSession, team) -> None:  # noqa: ANN001
+    if user.discord_id == team["captain_discord_id"] or _is_mod_user(user):
+        return
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Nur Captain oder Mod dürfen diese Aktion ausführen",
+    )
+
+
+def _ensure_invites_enabled(tournament) -> str | None:  # noqa: ANN001
+    mode = tournament["invite_mode"] or InviteMode.always.value
+    if mode == InviteMode.never.value:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Einladungen sind für dieses Turnier deaktiviert",
+        )
+
+    if mode == InviteMode.window.value:
+        now = datetime.now(timezone.utc)
+        start = _parse_timestamp(tournament["invite_window_start"])
+        end = _parse_timestamp(tournament["invite_window_end"])
+        if start is None or end is None or now < start or now > end:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Einladungen sind aktuell nicht erlaubt",
+            )
+        return tournament["invite_window_end"]
+
+    return None
+
+
+async def _count_team_members(db, team_id: int) -> int:  # noqa: ANN001
+    cursor = await db.execute(
+        "SELECT COUNT(*) AS cnt FROM team_members WHERE team_id = ?",
+        (team_id,),
+    )
+    row = await cursor.fetchone()
+    return int(row["cnt"])
+
+
+async def _ensure_team_has_capacity(db, team_id: int, team_size: int) -> None:  # noqa: ANN001
+    if await _count_team_members(db, team_id) >= team_size:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Team ist bereits voll",
+        )
+
+
+async def _ensure_user_not_in_tournament_team(db, tournament_id: int, discord_id: str) -> None:  # noqa: ANN001
+    cursor = await db.execute(
+        "SELECT tm.id FROM team_members tm "
+        "JOIN teams t ON tm.team_id = t.id "
+        "WHERE t.tournament_id = ? AND tm.discord_id = ?",
+        (tournament_id, discord_id),
+    )
+    if await cursor.fetchone():
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Spieler ist bereits in einem Team",
+        )
+
+
+async def _resolve_discord_name(
+    db,
+    discord_id: str,
+    *,
+    preferred_name: str | None = None,
+) -> str:  # noqa: ANN001
+    if preferred_name:
+        stripped = preferred_name.strip()
+        if stripped:
+            return stripped
+
+    cursor = await db.execute(
+        "SELECT discord_name FROM sessions "
+        "WHERE discord_id = ? AND discord_name IS NOT NULL AND discord_name != '' "
+        "ORDER BY id DESC LIMIT 1",
+        (discord_id,),
+    )
+    row = await cursor.fetchone()
+    if row and row["discord_name"]:
+        return row["discord_name"]
+
+    cursor = await db.execute(
+        "SELECT discord_name FROM team_members "
+        "WHERE discord_id = ? AND discord_name IS NOT NULL AND discord_name != '' "
+        "ORDER BY joined_at DESC LIMIT 1",
+        (discord_id,),
+    )
+    row = await cursor.fetchone()
+    if row and row["discord_name"]:
+        return row["discord_name"]
+
+    return discord_id
+
+
+async def _add_user_to_team(
+    db,
+    tournament_id: int,
+    team_id: int,
+    *,
+    discord_id: str,
+    discord_name: str | None,
+    steam_id: str | None,
+    rank: str | None,
+    rank_score: int,
+) -> None:  # noqa: ANN001
+    resolved_name = await _resolve_discord_name(
+        db,
+        discord_id,
+        preferred_name=discord_name,
+    )
+    await db.execute(
+        "INSERT INTO team_members (team_id, discord_id, discord_name, steam_id, rank, rank_score, role) "
+        "VALUES (?, ?, ?, ?, ?, ?, 'member')",
+        (team_id, discord_id, resolved_name, steam_id, rank, rank_score),
+    )
+    await _upsert_signup(
+        db,
+        tournament_id,
+        discord_id=discord_id,
+        discord_name=resolved_name,
+        steam_id=steam_id,
+        rank=rank,
+        rank_score=rank_score,
+        team_id=team_id,
+    )
+
+
+async def _load_team_response(db, team_id: int) -> Team:  # noqa: ANN001
+    cursor = await db.execute("SELECT * FROM teams WHERE id = ?", (team_id,))
+    team_row = await cursor.fetchone()
+    cursor = await db.execute(
+        "SELECT tm.id, tm.team_id, tm.discord_id, "
+        "COALESCE(NULLIF(tm.discord_name, ''), NULLIF(s.discord_name, '')) AS discord_name, "
+        "tm.steam_id, tm.rank, tm.rank_score, tm.role, tm.joined_at "
+        "FROM team_members tm "
+        "LEFT JOIN ("
+        "    SELECT discord_id, MAX(discord_name) AS discord_name "
+        "    FROM sessions "
+        "    WHERE discord_name IS NOT NULL AND discord_name != '' "
+        "    GROUP BY discord_id"
+        ") s ON s.discord_id = tm.discord_id "
+        "WHERE tm.team_id = ? "
+        "ORDER BY tm.joined_at",
+        (team_id,),
+    )
+    member_rows = await cursor.fetchall()
+    members = [TeamMember(**await _enrich_rank_data(dict(m))) for m in member_rows]
+    return Team(**{**dict(team_row), "members": members})
+
+
 # ---------------------------------------------------------------------------
 # GET /api/tournaments — Liste aller Turniere (public, nicht-draft)
 # ---------------------------------------------------------------------------
@@ -216,8 +498,8 @@ async def list_tournaments() -> list[Tournament]:
 # GET /api/tournaments/{id} — Turnier Detail
 # ---------------------------------------------------------------------------
 
-@router.get("/tournaments/{tournament_id}", response_model=TournamentDetail)
-async def get_tournament(tournament_id: int) -> TournamentDetail:
+@router.get("/tournaments/{tournament_id}", response_model=TournamentDetailPublic)
+async def get_tournament(tournament_id: int) -> TournamentDetailPublic:
     """Turnier-Detail mit Teams, Gruppen und Bracket."""
     async with get_db() as db:
         cursor = await db.execute(
@@ -237,18 +519,70 @@ async def get_tournament(tournament_id: int) -> TournamentDetail:
             )
 
         tournament_data = dict(row)
-        teams = await _load_teams_for_tournament(db, tournament_id)
+        teams = await _load_teams_public(db, tournament_id)
         groups = await _load_groups_for_tournament(db, tournament_id)
         bracket_matches = await _load_bracket_matches(db, tournament_id)
-        signups = await _load_signups_for_tournament(db, tournament_id)
+        signups = await _load_signups_public(db, tournament_id)
 
-    return TournamentDetail(
+    return TournamentDetailPublic(
         **tournament_data,
         teams=teams,
         groups=groups,
         bracket_matches=bracket_matches,
         signups=signups,
     )
+
+
+# ---------------------------------------------------------------------------
+# GET /api/tournaments/{tournament_id}/me — Eigener Status im Turnier
+# ---------------------------------------------------------------------------
+
+@router.get("/tournaments/{tournament_id}/me")
+async def get_my_tournament_status(
+    tournament_id: int,
+    user: UserSession = Depends(require_auth),
+) -> dict:
+    """Gibt den eigenen Anmeldestatus im Turnier zurück (kein discord_id im Public-Response)."""
+    async with get_db() as db:
+        # Team-Mitgliedschaft prüfen
+        cursor = await db.execute(
+            "SELECT tm.team_id, t.captain_discord_id "
+            "FROM team_members tm "
+            "JOIN teams t ON tm.team_id = t.id "
+            "WHERE t.tournament_id = ? AND tm.discord_id = ?",
+            (tournament_id, user.discord_id),
+        )
+        member_row = await cursor.fetchone()
+
+        # Solo-Signup prüfen (nur wenn nicht in Team)
+        cursor2 = await db.execute(
+            "SELECT id FROM tournament_signups "
+            "WHERE tournament_id = ? AND discord_id = ? AND (team_id IS NULL OR team_id = 0)",
+            (tournament_id, user.discord_id),
+        )
+        signup_row = await cursor2.fetchone()
+
+        # Check-in prüfen
+        cursor3 = await db.execute(
+            "SELECT id FROM tournament_checkins "
+            "WHERE tournament_id = ? AND discord_id = ?",
+            (tournament_id, user.discord_id),
+        )
+        checkin_row = await cursor3.fetchone()
+
+    team_id = member_row["team_id"] if member_row else None
+    is_captain = (
+        member_row is not None
+        and member_row["captain_discord_id"] == user.discord_id
+    )
+    signup_id = signup_row["id"] if signup_row else None
+
+    return {
+        "team_id": team_id,
+        "signup_id": signup_id,
+        "is_captain": is_captain,
+        "is_checked_in": checkin_row is not None,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -274,6 +608,16 @@ async def create_team(
     name_key = name.casefold()
 
     async with get_db() as db:
+        cursor = await db.execute(
+            "SELECT discord_id FROM user_consents WHERE discord_id = ?",
+            (user.discord_id,),
+        )
+        if not await cursor.fetchone():
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="CONSENT_REQUIRED",
+            )
+
         # Turnier prüfen
         cursor = await db.execute(
             "SELECT * FROM tournaments WHERE id = ?",
@@ -348,28 +692,9 @@ async def create_team(
         )
         await db.commit()
 
-        # Team zurückladen
-        cursor = await db.execute("SELECT * FROM teams WHERE id = ?", (team_id,))
-        team_row = await cursor.fetchone()
-        cursor = await db.execute(
-            "SELECT tm.id, tm.team_id, tm.discord_id, "
-            "COALESCE(NULLIF(tm.discord_name, ''), NULLIF(s.discord_name, '')) AS discord_name, "
-            "tm.steam_id, tm.rank, tm.rank_score, tm.role, tm.joined_at "
-            "FROM team_members tm "
-            "LEFT JOIN ("
-            "    SELECT discord_id, MAX(discord_name) AS discord_name "
-            "    FROM sessions "
-            "    WHERE discord_name IS NOT NULL AND discord_name != '' "
-            "    GROUP BY discord_id"
-            ") s ON s.discord_id = tm.discord_id "
-            "WHERE tm.team_id = ? "
-            "ORDER BY tm.joined_at",
-            (team_id,),
-        )
-        member_rows = await cursor.fetchall()
-        members = [TeamMember(**await _enrich_rank_data(dict(m))) for m in member_rows]
+        team = await _load_team_response(db, team_id)
 
-    return Team(**{**dict(team_row), "members": members})
+    return team
 
 
 # ---------------------------------------------------------------------------
@@ -548,6 +873,16 @@ async def solo_signup(
 ) -> dict:
     """Solo-Anmeldung — User wird später zufällig einem Team zugewiesen."""
     async with get_db() as db:
+        cursor = await db.execute(
+            "SELECT discord_id FROM user_consents WHERE discord_id = ?",
+            (user.discord_id,),
+        )
+        if not await cursor.fetchone():
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="CONSENT_REQUIRED",
+            )
+
         # Turnier prüfen
         cursor = await db.execute(
             "SELECT * FROM tournaments WHERE id = ?",
@@ -603,6 +938,474 @@ async def solo_signup(
         await db.commit()
 
     return {"status": "angemeldet", "tournament_id": tournament_id}
+
+
+# ---------------------------------------------------------------------------
+# PATCH /api/tournaments/{tournament_id}/teams/{team_id}/recruiting
+# ---------------------------------------------------------------------------
+
+@router.patch("/tournaments/{tournament_id}/teams/{team_id}/recruiting", response_model=Team, status_code=200)
+async def update_team_recruiting(
+    tournament_id: int,
+    team_id: int,
+    body: dict,
+    user: UserSession = Depends(require_auth),
+) -> Team:
+    """Setzt den Recruiting-Status eines Teams."""
+    raw_status = body.get("recruitment_status")
+    try:
+        recruitment_status = RecruitmentStatus(raw_status)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Ungültiger Recruiting-Status",
+        ) from exc
+
+    async with get_db() as db:
+        tournament = await _load_tournament_or_404(db, tournament_id)
+        _ensure_registration_open(tournament)
+        team = await _load_team_or_404(db, tournament_id, team_id)
+        _ensure_captain_or_mod(user, team)
+
+        await db.execute(
+            "UPDATE teams SET recruitment_status = ? WHERE id = ?",
+            (recruitment_status.value, team_id),
+        )
+        await db.commit()
+        return await _load_team_response(db, team_id)
+
+
+# ---------------------------------------------------------------------------
+# POST /api/tournaments/{tournament_id}/teams/{team_id}/invite-by-signup/{signup_id}
+# ---------------------------------------------------------------------------
+
+@router.post("/tournaments/{tournament_id}/teams/{team_id}/invite-by-signup/{signup_id}", status_code=200)
+async def invite_to_team_by_signup(
+    tournament_id: int,
+    team_id: int,
+    signup_id: int,
+    user: UserSession = Depends(require_auth),
+) -> dict:
+    """Captain lädt einen Solo-Signup über signup_id ein."""
+    async with get_db() as db:
+        tournament = await _load_tournament_or_404(db, tournament_id)
+        _ensure_registration_open(tournament)
+        team = await _load_team_or_404(db, tournament_id, team_id)
+        _ensure_captain(user, team)
+        await _ensure_team_has_capacity(db, team_id, tournament["team_size"])
+
+        cursor = await db.execute(
+            "SELECT * FROM tournament_signups WHERE id = ? AND tournament_id = ?",
+            (signup_id, tournament_id),
+        )
+        signup = await cursor.fetchone()
+        if not signup:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Signup nicht gefunden",
+            )
+        if signup["team_id"] is not None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Spieler ist bereits einem Team zugeordnet",
+            )
+
+        await _ensure_user_not_in_tournament_team(db, tournament_id, signup["discord_id"])
+        expires_at = _ensure_invites_enabled(tournament)
+
+        cursor = await db.execute(
+            "SELECT invite_auto_accept FROM user_profiles WHERE discord_id = ?",
+            (signup["discord_id"],),
+        )
+        profile = await cursor.fetchone()
+        auto_accept = bool(profile["invite_auto_accept"]) if profile else False
+
+        cursor = await db.execute(
+            "SELECT * FROM team_invitations WHERE team_id = ? AND discord_id = ?",
+            (team_id, signup["discord_id"]),
+        )
+        existing_invitation = await cursor.fetchone()
+
+        target_status = "accepted" if auto_accept else "pending"
+        if existing_invitation and existing_invitation["status"] == "pending" and not auto_accept:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Für diesen Spieler existiert bereits eine offene Einladung",
+            )
+
+        if existing_invitation:
+            await db.execute(
+                "UPDATE team_invitations SET tournament_id = ?, signup_id = ?, status = ?, "
+                "created_at = datetime('now'), expires_at = ? WHERE id = ?",
+                (tournament_id, signup_id, target_status, expires_at, existing_invitation["id"]),
+            )
+            invite_id = existing_invitation["id"]
+        else:
+            cursor = await db.execute(
+                "INSERT INTO team_invitations (tournament_id, team_id, discord_id, signup_id, status, expires_at) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (tournament_id, team_id, signup["discord_id"], signup_id, target_status, expires_at),
+            )
+            invite_id = cursor.lastrowid
+
+        if auto_accept:
+            await _add_user_to_team(
+                db,
+                tournament_id,
+                team_id,
+                discord_id=signup["discord_id"],
+                discord_name=signup["discord_name"],
+                steam_id=signup["steam_id"],
+                rank=signup["rank"],
+                rank_score=signup["rank_score"] or 0,
+            )
+            await db.execute(
+                "UPDATE team_invitations SET status = 'accepted' WHERE id = ?",
+                (invite_id,),
+            )
+            await db.commit()
+            return {"status": "auto_accepted"}
+
+        await db.commit()
+        return {"status": "invited"}
+
+
+# ---------------------------------------------------------------------------
+# GET /api/tournaments/{tournament_id}/my-invitations
+# ---------------------------------------------------------------------------
+
+@router.get("/tournaments/{tournament_id}/my-invitations", response_model=list[TeamInvitation])
+async def get_my_invitations(
+    tournament_id: int,
+    user: UserSession = Depends(require_auth),
+) -> list[TeamInvitation]:
+    """Gibt alle offenen Team-Einladungen des aktuellen Users zurück."""
+    async with get_db() as db:
+        await _load_tournament_or_404(db, tournament_id)
+        cursor = await db.execute(
+            "SELECT ti.id, ti.tournament_id, ti.team_id, t.name AS team_name, "
+            "ti.status, ti.created_at, ti.expires_at "
+            "FROM team_invitations ti "
+            "JOIN teams t ON t.id = ti.team_id "
+            "WHERE ti.tournament_id = ? AND ti.discord_id = ? AND ti.status = 'pending' "
+            "ORDER BY ti.created_at DESC",
+            (tournament_id, user.discord_id),
+        )
+        rows = await cursor.fetchall()
+        return [TeamInvitation(**dict(row)) for row in rows]
+
+
+# ---------------------------------------------------------------------------
+# POST /api/tournaments/{tournament_id}/invitations/{invite_id}/accept
+# ---------------------------------------------------------------------------
+
+@router.post("/tournaments/{tournament_id}/invitations/{invite_id}/accept", status_code=200)
+async def accept_team_invitation(
+    tournament_id: int,
+    invite_id: int,
+    user: UserSession = Depends(require_auth),
+) -> dict:
+    """Nimmt eine Team-Einladung an."""
+    async with get_db() as db:
+        tournament = await _load_tournament_or_404(db, tournament_id)
+        _ensure_registration_open(tournament)
+        cursor = await db.execute(
+            "SELECT * FROM team_invitations WHERE id = ? AND tournament_id = ?",
+            (invite_id, tournament_id),
+        )
+        invitation = await cursor.fetchone()
+        if not invitation:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Einladung nicht gefunden",
+            )
+        if invitation["discord_id"] != user.discord_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Diese Einladung gehört nicht zu dir",
+            )
+        if invitation["status"] != "pending":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Einladung ist nicht mehr offen",
+            )
+
+        await _load_team_or_404(db, tournament_id, invitation["team_id"])
+        await _ensure_team_has_capacity(db, invitation["team_id"], tournament["team_size"])
+        await _ensure_user_not_in_tournament_team(db, tournament_id, user.discord_id)
+
+        cursor = await db.execute(
+            "SELECT * FROM tournament_signups WHERE tournament_id = ? AND discord_id = ?",
+            (tournament_id, user.discord_id),
+        )
+        signup = await cursor.fetchone()
+        if signup:
+            steam_id = signup["steam_id"]
+            rank = signup["rank"]
+            rank_score = signup["rank_score"] or 0
+            discord_name = user.discord_name or signup["discord_name"]
+        else:
+            rank_data = await get_player_rank_profile(user.discord_id)
+            steam_id = rank_data.get("steam_id") if rank_data else None
+            rank = rank_data.get("rank") if rank_data else None
+            rank_score = rank_data.get("rank_score", 0) if rank_data else 0
+            discord_name = user.discord_name
+
+        await _add_user_to_team(
+            db,
+            tournament_id,
+            invitation["team_id"],
+            discord_id=user.discord_id,
+            discord_name=discord_name,
+            steam_id=steam_id,
+            rank=rank,
+            rank_score=rank_score,
+        )
+        await db.execute(
+            "UPDATE team_invitations SET status = 'accepted' WHERE id = ?",
+            (invite_id,),
+        )
+        await db.commit()
+
+    return {"status": "accepted", "invite_id": invite_id}
+
+
+# ---------------------------------------------------------------------------
+# POST /api/tournaments/{tournament_id}/invitations/{invite_id}/reject
+# ---------------------------------------------------------------------------
+
+@router.post("/tournaments/{tournament_id}/invitations/{invite_id}/reject", status_code=200)
+async def reject_team_invitation(
+    tournament_id: int,
+    invite_id: int,
+    user: UserSession = Depends(require_auth),
+) -> dict:
+    """Lehnt eine Team-Einladung ab."""
+    async with get_db() as db:
+        await _load_tournament_or_404(db, tournament_id)
+        cursor = await db.execute(
+            "SELECT * FROM team_invitations WHERE id = ? AND tournament_id = ?",
+            (invite_id, tournament_id),
+        )
+        invitation = await cursor.fetchone()
+        if not invitation:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Einladung nicht gefunden",
+            )
+        if invitation["discord_id"] != user.discord_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Diese Einladung gehört nicht zu dir",
+            )
+        if invitation["status"] != "pending":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Einladung ist nicht mehr offen",
+            )
+
+        await db.execute(
+            "UPDATE team_invitations SET status = 'rejected' WHERE id = ?",
+            (invite_id,),
+        )
+        await db.commit()
+
+    return {"status": "rejected", "invite_id": invite_id}
+
+
+# ---------------------------------------------------------------------------
+# POST /api/tournaments/{tournament_id}/teams/{team_id}/apply
+# ---------------------------------------------------------------------------
+
+@router.post("/tournaments/{tournament_id}/teams/{team_id}/apply", status_code=200)
+async def apply_to_team(
+    tournament_id: int,
+    team_id: int,
+    user: UserSession = Depends(require_auth),
+) -> dict:
+    """Bewirbt den aktuellen User auf ein Team."""
+    async with get_db() as db:
+        tournament = await _load_tournament_or_404(db, tournament_id)
+        _ensure_registration_open(tournament)
+        team = await _load_team_or_404(db, tournament_id, team_id)
+        if team["recruitment_status"] != RecruitmentStatus.application.value:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Dieses Team nimmt aktuell keine Bewerbungen an",
+            )
+
+        await _ensure_user_not_in_tournament_team(db, tournament_id, user.discord_id)
+
+        cursor = await db.execute(
+            "SELECT * FROM team_applications WHERE team_id = ? AND discord_id = ?",
+            (team_id, user.discord_id),
+        )
+        existing_application = await cursor.fetchone()
+        discord_name = await _resolve_discord_name(
+            db,
+            user.discord_id,
+            preferred_name=user.discord_name,
+        )
+
+        if existing_application and existing_application["status"] == "pending":
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Für dieses Team existiert bereits eine offene Bewerbung",
+            )
+
+        if existing_application:
+            await db.execute(
+                "UPDATE team_applications SET discord_name = ?, status = 'pending', created_at = datetime('now') "
+                "WHERE id = ?",
+                (discord_name, existing_application["id"]),
+            )
+        else:
+            await db.execute(
+                "INSERT INTO team_applications (team_id, discord_id, discord_name, status, created_at) "
+                "VALUES (?, ?, ?, 'pending', datetime('now'))",
+                (team_id, user.discord_id, discord_name),
+            )
+        await db.commit()
+
+    return {"status": "applied", "team_id": team_id}
+
+
+# ---------------------------------------------------------------------------
+# GET /api/tournaments/{tournament_id}/teams/{team_id}/applications
+# ---------------------------------------------------------------------------
+
+@router.get("/tournaments/{tournament_id}/teams/{team_id}/applications", response_model=list[TeamApplication])
+async def get_team_applications(
+    tournament_id: int,
+    team_id: int,
+    user: UserSession = Depends(require_auth),
+) -> list[TeamApplication]:
+    """Gibt alle Bewerbungen eines Teams zurück."""
+    async with get_db() as db:
+        await _load_tournament_or_404(db, tournament_id)
+        team = await _load_team_or_404(db, tournament_id, team_id)
+        _ensure_captain_or_mod(user, team)
+        cursor = await db.execute(
+            "SELECT id, team_id, discord_name, status, created_at "
+            "FROM team_applications WHERE team_id = ? ORDER BY created_at DESC",
+            (team_id,),
+        )
+        rows = await cursor.fetchall()
+        return [TeamApplication(**dict(row)) for row in rows]
+
+
+# ---------------------------------------------------------------------------
+# POST /api/tournaments/{tournament_id}/teams/{team_id}/applications/{app_id}/accept
+# ---------------------------------------------------------------------------
+
+@router.post("/tournaments/{tournament_id}/teams/{team_id}/applications/{app_id}/accept", status_code=200)
+async def accept_team_application(
+    tournament_id: int,
+    team_id: int,
+    app_id: int,
+    user: UserSession = Depends(require_auth),
+) -> dict:
+    """Nimmt eine Team-Bewerbung an."""
+    async with get_db() as db:
+        tournament = await _load_tournament_or_404(db, tournament_id)
+        _ensure_registration_open(tournament)
+        team = await _load_team_or_404(db, tournament_id, team_id)
+        _ensure_captain_or_mod(user, team)
+
+        cursor = await db.execute(
+            "SELECT * FROM team_applications WHERE id = ? AND team_id = ?",
+            (app_id, team_id),
+        )
+        application = await cursor.fetchone()
+        if not application:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Bewerbung nicht gefunden",
+            )
+        if application["status"] != "pending":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Bewerbung ist nicht mehr offen",
+            )
+
+        await _ensure_team_has_capacity(db, team_id, tournament["team_size"])
+        await _ensure_user_not_in_tournament_team(db, tournament_id, application["discord_id"])
+
+        cursor = await db.execute(
+            "SELECT * FROM tournament_signups WHERE tournament_id = ? AND discord_id = ?",
+            (tournament_id, application["discord_id"]),
+        )
+        signup = await cursor.fetchone()
+        if signup:
+            steam_id = signup["steam_id"]
+            rank = signup["rank"]
+            rank_score = signup["rank_score"] or 0
+            discord_name = signup["discord_name"] or application["discord_name"]
+        else:
+            rank_data = await get_player_rank_profile(application["discord_id"])
+            steam_id = rank_data.get("steam_id") if rank_data else None
+            rank = rank_data.get("rank") if rank_data else None
+            rank_score = rank_data.get("rank_score", 0) if rank_data else 0
+            discord_name = application["discord_name"]
+
+        await _add_user_to_team(
+            db,
+            tournament_id,
+            team_id,
+            discord_id=application["discord_id"],
+            discord_name=discord_name,
+            steam_id=steam_id,
+            rank=rank,
+            rank_score=rank_score,
+        )
+        await db.execute(
+            "UPDATE team_applications SET status = 'accepted' WHERE id = ?",
+            (app_id,),
+        )
+        await db.commit()
+
+    return {"status": "accepted", "application_id": app_id}
+
+
+# ---------------------------------------------------------------------------
+# POST /api/tournaments/{tournament_id}/teams/{team_id}/applications/{app_id}/reject
+# ---------------------------------------------------------------------------
+
+@router.post("/tournaments/{tournament_id}/teams/{team_id}/applications/{app_id}/reject", status_code=200)
+async def reject_team_application(
+    tournament_id: int,
+    team_id: int,
+    app_id: int,
+    user: UserSession = Depends(require_auth),
+) -> dict:
+    """Lehnt eine Team-Bewerbung ab."""
+    async with get_db() as db:
+        await _load_tournament_or_404(db, tournament_id)
+        team = await _load_team_or_404(db, tournament_id, team_id)
+        _ensure_captain_or_mod(user, team)
+        cursor = await db.execute(
+            "SELECT * FROM team_applications WHERE id = ? AND team_id = ?",
+            (app_id, team_id),
+        )
+        application = await cursor.fetchone()
+        if not application:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Bewerbung nicht gefunden",
+            )
+        if application["status"] != "pending":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Bewerbung ist nicht mehr offen",
+            )
+
+        await db.execute(
+            "UPDATE team_applications SET status = 'rejected' WHERE id = ?",
+            (app_id,),
+        )
+        await db.commit()
+
+    return {"status": "rejected", "application_id": app_id}
 
 
 # ---------------------------------------------------------------------------

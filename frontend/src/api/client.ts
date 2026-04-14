@@ -2,6 +2,8 @@ import type {
   UserSession,
   Tournament,
   TournamentDetail,
+  TournamentDetailPublic,
+  MyTournamentStatus,
   Team,
   TournamentSignup,
   TournamentCreate,
@@ -13,6 +15,13 @@ import type {
   CheckinStatus,
   FinalizeCheckinResult,
   TeamMoveRequest,
+  ConsentStatus,
+  UserProfile,
+  UserProfileUpdate,
+  TeamApplication,
+  TeamInvitation,
+  LeaderboardEntry,
+  PlayerProfile,
 } from '@/types/tournament'
 
 const API_BASE = '/turnier/api'
@@ -45,9 +54,12 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 // Auth
 export const fetchMe = () => request<UserSession>('/me')
 
-// Tournaments
+// Tournaments (public)
 export const fetchTournaments = () => request<Tournament[]>('/tournaments')
-export const fetchTournament = (id: number) => request<TournamentDetail>(`/tournaments/${id}`)
+export const fetchTournament = (id: number) => request<TournamentDetailPublic>(`/tournaments/${id}`)
+export const fetchMyTournamentStatus = (id: number) => request<MyTournamentStatus>(`/tournaments/${id}/me`)
+
+// Tournaments (admin)
 export const fetchAdminTournaments = () => request<Tournament[]>('/admin/tournaments')
 export const fetchAdminTournament = (id: number) => request<TournamentDetail>(`/admin/tournaments/${id}`)
 
@@ -208,8 +220,53 @@ export const withdrawSolo = (tournamentId: number) =>
 export const kickMember = (tournamentId: number, teamId: number, discordId: string) =>
   request<void>(`/tournaments/${tournamentId}/teams/${teamId}/members/${discordId}`, { method: 'DELETE' })
 
-export const inviteSoloPlayer = (tournamentId: number, teamId: number, discordId: string) =>
-  request<void>(`/tournaments/${tournamentId}/teams/${teamId}/invite/${discordId}`, { method: 'POST' })
+export const inviteBySignup = (tournamentId: number, teamId: number, signupId: number) =>
+  request<{ status: string }>(`/tournaments/${tournamentId}/teams/${teamId}/invite-by-signup/${signupId}`, { method: 'POST' })
 
 export const leaveTeam = (tournamentId: number, teamId: number) =>
   request<void>(`/tournaments/${tournamentId}/teams/${teamId}/leave`, { method: 'DELETE' })
+
+// Recruiting Status
+export const setRecruitingStatus = (tournamentId: number, teamId: number, recruitmentStatus: string) =>
+  request<void>(`/tournaments/${tournamentId}/teams/${teamId}/recruiting`, {
+    method: 'PATCH',
+    body: JSON.stringify({ recruitment_status: recruitmentStatus }),
+  })
+
+// Invitations
+export const fetchMyInvitations = (tournamentId: number) =>
+  request<TeamInvitation[]>(`/tournaments/${tournamentId}/my-invitations`)
+
+export const acceptInvitation = (tournamentId: number, inviteId: number) =>
+  request<void>(`/tournaments/${tournamentId}/invitations/${inviteId}/accept`, { method: 'POST' })
+
+export const rejectInvitation = (tournamentId: number, inviteId: number) =>
+  request<void>(`/tournaments/${tournamentId}/invitations/${inviteId}/reject`, { method: 'POST' })
+
+// Applications
+export const applyToTeam = (tournamentId: number, teamId: number) =>
+  request<void>(`/tournaments/${tournamentId}/teams/${teamId}/apply`, { method: 'POST' })
+
+export const fetchTeamApplications = (tournamentId: number, teamId: number) =>
+  request<TeamApplication[]>(`/tournaments/${tournamentId}/teams/${teamId}/applications`)
+
+export const acceptApplication = (tournamentId: number, teamId: number, appId: number) =>
+  request<void>(`/tournaments/${tournamentId}/teams/${teamId}/applications/${appId}/accept`, { method: 'POST' })
+
+export const rejectApplication = (tournamentId: number, teamId: number, appId: number) =>
+  request<void>(`/tournaments/${tournamentId}/teams/${teamId}/applications/${appId}/reject`, { method: 'POST' })
+
+// Consent
+export const fetchConsent = () => request<ConsentStatus>('/consent')
+export const setConsent = (version: number = 1) =>
+  request<ConsentStatus>('/consent', { method: 'POST', body: JSON.stringify({ consent_version: version }) })
+
+// Profile
+export const fetchMyProfile = () => request<UserProfile>('/profile')
+export const updateMyProfile = (data: UserProfileUpdate) =>
+  request<UserProfile>('/profile', { method: 'PUT', body: JSON.stringify(data) })
+
+// Leaderboard & Player Profiles
+export const fetchLeaderboard = () => request<LeaderboardEntry[]>('/leaderboard')
+export const fetchPlayerProfile = (discordName: string) =>
+  request<PlayerProfile>(`/players/${encodeURIComponent(discordName)}`)

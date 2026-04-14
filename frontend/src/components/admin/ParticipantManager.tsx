@@ -12,8 +12,9 @@ import {
   useMoveAdminTeamMember,
   useRemoveAdminTeamMember,
   useRenameAdminTeam,
+  useSetRecruitingStatus,
 } from '@/hooks/useTournament'
-import type { Team, TeamMember, TournamentSignup, TournamentStatus } from '@/types/tournament'
+import type { Team, TeamMember, TournamentSignup, TournamentStatus, RecruitmentStatus } from '@/types/tournament'
 import {
   AlertCircle,
   ArrowRightLeft,
@@ -24,6 +25,18 @@ import {
   UserPlus,
   Users,
 } from 'lucide-react'
+
+const RECRUITING_OPTIONS: { value: RecruitmentStatus; label: string }[] = [
+  { value: 'open', label: 'Offen' },
+  { value: 'application', label: 'Bewerbung' },
+  { value: 'closed', label: 'Geschlossen' },
+]
+
+function recruitingBadgeClass(status: RecruitmentStatus): string {
+  if (status === 'application') return 'text-amber-400 bg-amber-500/15 border border-amber-500/30'
+  if (status === 'closed') return 'text-muted bg-border/30 border border-border'
+  return 'text-green-400 bg-green-500/15 border border-green-500/30'
+}
 
 interface ParticipantManagerProps {
   tournamentId: number
@@ -63,6 +76,7 @@ export default function ParticipantManager({
   const moveMemberMutation = useMoveAdminTeamMember()
   const assignSignupMutation = useAssignSignupToAdminTeam()
   const deleteSignupMutation = useDeleteAdminSignup()
+  const recruitingMutation = useSetRecruitingStatus(tournamentId)
 
   const [newTeamName, setNewTeamName] = useState('')
   const [renameValues, setRenameValues] = useState<Record<number, string>>({})
@@ -88,7 +102,8 @@ export default function ParticipantManager({
     removeMemberMutation.error ||
     moveMemberMutation.error ||
     assignSignupMutation.error ||
-    deleteSignupMutation.error
+    deleteSignupMutation.error ||
+    recruitingMutation.error
 
   const isBusy =
     addMemberMutation.isPending ||
@@ -99,7 +114,8 @@ export default function ParticipantManager({
     removeMemberMutation.isPending ||
     moveMemberMutation.isPending ||
     assignSignupMutation.isPending ||
-    deleteSignupMutation.isPending
+    deleteSignupMutation.isPending ||
+    recruitingMutation.isPending
 
   const handleCreateTeam = () => {
     if (!newTeamName.trim()) return
@@ -349,6 +365,30 @@ export default function ParticipantManager({
               <div className="flex flex-wrap items-center gap-3 text-sm text-muted">
                 <span>{team.members.length}/{teamSize} Mitglieder</span>
                 <span>Captain: {captainLabel(team)}</span>
+                <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${recruitingBadgeClass(team.recruitment_status as RecruitmentStatus)}`}>
+                  {RECRUITING_OPTIONS.find((o) => o.value === team.recruitment_status)?.label ?? team.recruitment_status}
+                </span>
+                {team.has_pending_applications && (
+                  <span className="text-xs px-2 py-0.5 rounded-full border border-amber-500/30 bg-amber-500/10 text-amber-400 font-medium">
+                    Bewerbungen offen
+                  </span>
+                )}
+              </div>
+
+              <div className="flex flex-col gap-1 sm:flex-row sm:items-center">
+                <span className="text-xs text-muted">Recruiting:</span>
+                <select
+                  value={team.recruitment_status}
+                  onChange={(event) =>
+                    recruitingMutation.mutate({ teamId: team.id, status: event.target.value })
+                  }
+                  disabled={isBusy}
+                  className="rounded-lg border border-border bg-card px-2 py-1 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
+                >
+                  {RECRUITING_OPTIONS.map((opt) => (
+                    <option key={opt.value} value={opt.value}>{opt.label}</option>
+                  ))}
+                </select>
               </div>
 
               {canAddReplacementPlayers && ['group_phase', 'bracket'].includes(tournamentStatus) && (

@@ -4,7 +4,7 @@ import Card from '@/components/ui/Card'
 import Button from '@/components/ui/Button'
 import DateTimeInput from '@/components/ui/DateTimeInput'
 import { useCreateTournament } from '@/hooks/useTournament'
-import type { BracketFormat } from '@/types/tournament'
+import type { BracketFormat, InviteMode } from '@/types/tournament'
 import { Trophy, AlertCircle, CheckCircle } from 'lucide-react'
 
 export default function CreateTournamentForm() {
@@ -14,6 +14,9 @@ export default function CreateTournamentForm() {
   const [bracketFormat, setBracketFormat] = useState<BracketFormat>('single_elimination')
   const [regStart, setRegStart] = useState('')
   const [regEnd, setRegEnd] = useState('')
+  const [inviteMode, setInviteMode] = useState<InviteMode>('always')
+  const [inviteWindowStart, setInviteWindowStart] = useState('')
+  const [inviteWindowEnd, setInviteWindowEnd] = useState('')
   const [successMsg, setSuccessMsg] = useState('')
 
   const createMutation = useCreateTournament()
@@ -30,6 +33,9 @@ export default function CreateTournamentForm() {
         bracket_format: bracketFormat,
         registration_start: regStart || undefined,
         registration_end: regEnd || undefined,
+        invite_mode: inviteMode,
+        invite_window_start: inviteMode === 'window' ? inviteWindowStart || undefined : undefined,
+        invite_window_end: inviteMode === 'window' ? inviteWindowEnd || undefined : undefined,
       },
       {
         onSuccess: (tournament) => {
@@ -40,6 +46,9 @@ export default function CreateTournamentForm() {
           setBracketFormat('single_elimination')
           setRegStart('')
           setRegEnd('')
+          setInviteMode('always')
+          setInviteWindowStart('')
+          setInviteWindowEnd('')
         },
       }
     )
@@ -148,6 +157,55 @@ export default function CreateTournamentForm() {
             />
           </div>
         </div>
+
+        {/* Invite-Modus */}
+        <div>
+          <label htmlFor="invite-mode" className="block text-sm font-medium text-foreground mb-1.5">
+            Einladungs-Modus
+          </label>
+          <select
+            id="invite-mode"
+            value={inviteMode}
+            onChange={(e) => setInviteMode(e.target.value as InviteMode)}
+            className="w-full bg-background border border-border rounded-lg px-3 py-2 text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
+          >
+            <option value="always">Immer erlaubt</option>
+            <option value="window">Nur im Zeitfenster</option>
+            <option value="never">Deaktiviert (Auto-Balance)</option>
+          </select>
+          {inviteMode === 'never' && (
+            <p className="mt-1 text-xs text-muted">
+              Spieler werden beim Check-in-Abschluss automatisch rank-balanced auf Teams verteilt.
+            </p>
+          )}
+        </div>
+
+        {inviteMode === 'window' && (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label htmlFor="invite-start" className="block text-sm font-medium text-foreground mb-1.5">
+                Pick-Fenster Start
+              </label>
+              <DateTimeInput
+                id="invite-start"
+                value={inviteWindowStart}
+                onChange={(e) => setInviteWindowStart(e.target.value)}
+                className="w-full bg-background border border-border rounded-lg px-3 py-2 text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
+              />
+            </div>
+            <div>
+              <label htmlFor="invite-end" className="block text-sm font-medium text-foreground mb-1.5">
+                Pick-Fenster Ende
+              </label>
+              <DateTimeInput
+                id="invite-end"
+                value={inviteWindowEnd}
+                onChange={(e) => setInviteWindowEnd(e.target.value)}
+                className="w-full bg-background border border-border rounded-lg px-3 py-2 text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
+              />
+            </div>
+          </div>
+        )}
 
         {/* Fehler */}
         {createMutation.isError && (

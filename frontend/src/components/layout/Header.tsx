@@ -2,7 +2,7 @@ import { Link } from 'react-router-dom'
 import { useAuth } from '@/hooks/useAuth'
 import LoginButton from '@/components/auth/LoginButton'
 import Button from '@/components/ui/Button'
-import { Trophy, LogOut, Settings } from 'lucide-react'
+import { Trophy, LogOut, Settings, BarChart2, User } from 'lucide-react'
 
 export default function Header() {
   const { user, isLoggedIn, logout } = useAuth()
@@ -20,6 +20,10 @@ export default function Header() {
             <nav className="hidden sm:flex items-center gap-4">
               <Link to="/" className="text-sm text-muted hover:text-foreground transition-colors">
                 Startseite
+              </Link>
+              <Link to="/rangliste" className="flex items-center gap-1 text-sm text-muted hover:text-foreground transition-colors">
+                <BarChart2 size={14} />
+                Rangliste
               </Link>
               <Link to="/hilfe" className="text-sm text-muted hover:text-foreground transition-colors">
                 Hilfe
@@ -39,7 +43,7 @@ export default function Header() {
                     </Button>
                   </Link>
                 )}
-                <div className="flex items-center gap-2">
+                <Link to="/profil" className="flex items-center gap-2 hover:opacity-80 transition-opacity">
                   {user.discord_avatar ? (
                     <img
                       src={user.discord_avatar}
@@ -48,11 +52,11 @@ export default function Header() {
                     />
                   ) : (
                     <div className="w-8 h-8 rounded-full bg-primary/20 flex items-center justify-center text-sm font-medium text-primary">
-                      {user.discord_name.charAt(0).toUpperCase()}
+                      <User size={16} />
                     </div>
                   )}
                   <span className="hidden sm:inline text-sm text-foreground">{user.discord_name}</span>
-                </div>
+                </Link>
                 <Button variant="ghost" size="sm" onClick={logout}>
                   <LogOut size={16} />
                 </Button>

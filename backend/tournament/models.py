@@ -44,6 +44,31 @@ class TeamRole(str, Enum):
     member = "member"
 
 
+class RecruitmentStatus(str, Enum):
+    open = "open"
+    application = "application"
+    closed = "closed"
+
+
+class InviteMode(str, Enum):
+    always = "always"
+    window = "window"
+    never = "never"
+
+
+class InvitationStatus(str, Enum):
+    pending = "pending"
+    accepted = "accepted"
+    rejected = "rejected"
+    expired = "expired"
+
+
+class ApplicationStatus(str, Enum):
+    pending = "pending"
+    accepted = "accepted"
+    rejected = "rejected"
+
+
 class ResultSource(str, Enum):
     manual = "manual"
     automatic = "automatic"
@@ -71,6 +96,9 @@ class TournamentCreate(BaseModel):
     registration_end: Optional[str] = None
     group_phase_start: Optional[str] = None
     bracket_start: Optional[str] = None
+    invite_mode: InviteMode = InviteMode.always
+    invite_window_start: Optional[str] = None
+    invite_window_end: Optional[str] = None
 
 
 class TournamentUpdate(BaseModel):
@@ -83,6 +111,9 @@ class TournamentUpdate(BaseModel):
     registration_end: Optional[str] = None
     group_phase_start: Optional[str] = None
     bracket_start: Optional[str] = None
+    invite_mode: Optional[InviteMode] = None
+    invite_window_start: Optional[str] = None
+    invite_window_end: Optional[str] = None
 
 
 class TournamentSignup(BaseModel):
@@ -111,6 +142,9 @@ class Tournament(BaseModel):
     created_by: str
     created_at: str
     updated_at: str
+    invite_mode: InviteMode = InviteMode.always
+    invite_window_start: Optional[str] = None
+    invite_window_end: Optional[str] = None
 
 
 # --- Team ---
@@ -139,7 +173,30 @@ class Team(BaseModel):
     name_key: str
     captain_discord_id: str
     created_at: str
+    recruitment_status: RecruitmentStatus = RecruitmentStatus.open
     members: list[TeamMember] = []
+
+
+class TeamMemberPublic(BaseModel):
+    id: int
+    team_id: int
+    discord_name: Optional[str] = None
+    steam_id: Optional[str] = None
+    rank: Optional[str] = None
+    rank_score: int = 0
+    role: TeamRole = TeamRole.member
+    joined_at: str
+
+
+class TeamPublic(BaseModel):
+    id: int
+    tournament_id: int
+    name: str
+    name_key: str
+    members: list[TeamMemberPublic] = []
+    created_at: str
+    recruitment_status: RecruitmentStatus = RecruitmentStatus.open
+    has_pending_applications: bool = False
 
 
 # --- Group Phase ---
@@ -204,6 +261,39 @@ class TournamentDetail(Tournament):
     signups: list[TournamentSignup] = []
 
 
+class TournamentSignupPublic(BaseModel):
+    id: int
+    tournament_id: int
+    discord_name: Optional[str] = None
+    rank: Optional[str] = None
+    rank_score: int = 0
+    team_id: Optional[int] = None
+    signed_up_at: str
+
+
+class TournamentDetailPublic(BaseModel):
+    id: int
+    name: str
+    status: TournamentStatus
+    description: Optional[str] = None
+    team_size: int = 6
+    registration_start: Optional[str] = None
+    registration_end: Optional[str] = None
+    group_phase_start: Optional[str] = None
+    bracket_start: Optional[str] = None
+    bracket_format: str = "single_elimination"
+    created_by: str
+    created_at: str
+    updated_at: str
+    invite_mode: InviteMode = InviteMode.always
+    invite_window_start: Optional[str] = None
+    invite_window_end: Optional[str] = None
+    teams: list[TeamPublic] = []
+    groups: list[Group] = []
+    bracket_matches: list[BracketMatch] = []
+    signups: list[TournamentSignupPublic] = []
+
+
 class MatchResult(BaseModel):
     id: int
     bracket_match_id: Optional[int] = None
@@ -213,6 +303,81 @@ class MatchResult(BaseModel):
     player_stats: Optional[str] = None
     source: ResultSource = ResultSource.manual
     created_at: str
+
+
+class ConsentCreate(BaseModel):
+    consent_version: int = 1
+
+
+class ConsentStatus(BaseModel):
+    has_consent: bool
+    consented_at: Optional[str] = None
+    consent_version: Optional[int] = None
+
+
+class UserProfileUpdate(BaseModel):
+    bio: Optional[str] = None
+    invite_auto_accept: Optional[bool] = None
+    notify_discord_dm: Optional[bool] = None
+    notify_browser: Optional[bool] = None
+
+
+class UserProfile(BaseModel):
+    discord_id: str
+    bio: Optional[str] = None
+    invite_auto_accept: bool = False
+    notify_discord_dm: bool = True
+    notify_browser: bool = False
+    updated_at: Optional[str] = None
+
+
+class TeamApplication(BaseModel):
+    id: int
+    team_id: int
+    discord_name: str
+    status: ApplicationStatus = ApplicationStatus.pending
+    created_at: str
+
+
+class TeamInvitation(BaseModel):
+    id: int
+    tournament_id: int
+    team_id: int
+    team_name: Optional[str] = None
+    status: InvitationStatus = InvitationStatus.pending
+    created_at: str
+    expires_at: Optional[str] = None
+
+
+class TournamentHistoryEntry(BaseModel):
+    tournament_name: str
+    placement: Optional[int] = None
+    team_name: Optional[str] = None
+
+
+class PlayerProfile(BaseModel):
+    discord_name: str
+    discord_avatar: Optional[str] = None
+    bio: Optional[str] = None
+    rank: Optional[str] = None
+    rank_score: int = 0
+    tournaments_played: int = 0
+    matches_played: int = 0
+    matches_won: int = 0
+    best_placement: Optional[int] = None
+    total_points: int = 0
+    tournament_history: list[TournamentHistoryEntry] = []
+
+
+class LeaderboardEntry(BaseModel):
+    rank_position: int
+    discord_name: str
+    rank: Optional[str] = None
+    total_points: int = 0
+    tournaments_played: int = 0
+    matches_played: int = 0
+    matches_won: int = 0
+    best_placement: Optional[int] = None
 
 
 # --- Check-In ---

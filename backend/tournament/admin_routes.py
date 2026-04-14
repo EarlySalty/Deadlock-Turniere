@@ -25,7 +25,10 @@ from tournament.engine import (
     generate_groups,
 )
 from tournament.models import (
+    ApplicationStatus,
+    RecruitmentStatus,
     Team,
+    TeamApplication,
     TeamMember,
     TournamentDetail,
     Tournament,
@@ -100,6 +103,20 @@ async def _load_team_or_404(db, tournament_id: int, team_id: int):  # noqa: ANN0
             detail="Team nicht gefunden",
         )
     return team
+
+
+async def _load_team_application_or_404(db, team_id: int, application_id: int):  # noqa: ANN001
+    cursor = await db.execute(
+        "SELECT * FROM team_applications WHERE id = ? AND team_id = ?",
+        (application_id, team_id),
+    )
+    application = await cursor.fetchone()
+    if not application:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Bewerbung nicht gefunden",
+        )
+    return application
 
 
 async def _load_tournament_or_404(db, tournament_id: int):  # noqa: ANN001
@@ -431,8 +448,9 @@ async def create_tournament(
         cursor = await db.execute(
             "INSERT INTO tournaments "
             "(name, description, team_size, bracket_format, registration_start, "
-            "registration_end, group_phase_start, bracket_start, created_by) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "registration_end, group_phase_start, bracket_start, created_by, "
+            "invite_mode, invite_window_start, invite_window_end) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 body.name,
                 body.description,
@@ -443,6 +461,9 @@ async def create_tournament(
                 body.group_phase_start,
                 body.bracket_start,
                 user.discord_id,
+                body.invite_mode.value,
+                body.invite_window_start,
+                body.invite_window_end,
             ),
         )
         tournament_id = cursor.lastrowid
@@ -514,9 +535,16 @@ async def update_tournament(
                 )
 
         # Nur gesetzte Felder updaten
+        update_data = body.model_dump(exclude_unset=True)
+        if body.invite_mode is not None:
+            update_data["invite_mode"] = body.invite_mode.value
+        if "invite_window_start" in body.model_fields_set:
+            update_data["invite_window_start"] = body.invite_window_start
+        if "invite_window_end" in body.model_fields_set:
+            update_data["invite_window_end"] = body.invite_window_end
+
         updates: list[str] = []
         params: list = []
-        update_data = body.model_dump(exclude_unset=True)
         for field, value in update_data.items():
             if hasattr(value, "value"):
                 value = value.value
@@ -892,6 +920,247 @@ async def rename_team_admin(
         )
         await db.commit()
         return await _load_team_detail(db, team_id)
+
+
+@router.patch("/tournaments/{tournament_id}/teams/{team_id}/recruiting", status_code=200)
+async def update_team_recruitment_status_admin(
+    tournament_id: int,
+    team_id: int,
+    body: dict,
+    user: UserSession = Depends(require_mod),
+) -> dict:
+    """Recruiting-Status eines Teams setzen."""
+    raw_status = body.get("recruitment_status")
+    if not isinstance(raw_status, str):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="recruitment_status ist erforderlich",
+        )
+
+    try:
+        recruitment_status = RecruitmentStatus(raw_status)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Ungültiger recruitment_status",
+        ) from exc
+
+    async with get_db() as db:
+        tournament = await _load_tournament_or_404(db, tournament_id)
+        _ensure_participant_management_allowed(tournament["status"])
+        await _load_team_or_404(db, tournament_id, team_id)
+
+        await db.execute(
+            "UPDATE teams SET recruitment_status = ? WHERE id = ?",
+            (recruitment_status.value, team_id),
+        )
+        await _audit(
+            db,
+            "team_recruitment_status_admin",
+            user.discord_id,
+            json.dumps(
+                {
+                    "tournament_id": tournament_id,
+                    "team_id": team_id,
+                    "recruitment_status": recruitment_status.value,
+                }
+            ),
+        )
+        await db.commit()
+
+    return {
+        "status": "ok",
+        "team_id": team_id,
+        "recruitment_status": recruitment_status.value,
+    }
+
+
+@router.get(
+    "/tournaments/{tournament_id}/teams/{team_id}/applications",
+    response_model=list[TeamApplication],
+)
+async def list_team_applications_admin(
+    tournament_id: int,
+    team_id: int,
+    user: UserSession = Depends(require_mod),
+) -> list[TeamApplication]:
+    """Alle Bewerbungen für ein Team laden."""
+    async with get_db() as db:
+        tournament = await _load_tournament_or_404(db, tournament_id)
+        _ensure_participant_management_allowed(tournament["status"])
+        await _load_team_or_404(db, tournament_id, team_id)
+
+        cursor = await db.execute(
+            "SELECT id, team_id, discord_name, status, created_at "
+            "FROM team_applications WHERE team_id = ? "
+            "ORDER BY created_at DESC, id DESC",
+            (team_id,),
+        )
+        rows = await cursor.fetchall()
+
+    return [TeamApplication(**dict(row)) for row in rows]
+
+
+@router.post(
+    "/tournaments/{tournament_id}/teams/{team_id}/applications/{app_id}/accept",
+    status_code=200,
+)
+async def accept_team_application_admin(
+    tournament_id: int,
+    team_id: int,
+    app_id: int,
+    user: UserSession = Depends(require_mod),
+) -> dict:
+    """Nimmt eine Team-Bewerbung an und fügt den Spieler dem Team hinzu."""
+    async with get_db() as db:
+        tournament = await _load_tournament_or_404(db, tournament_id)
+        _ensure_participant_management_allowed(tournament["status"])
+        target_team = await _load_team_or_404(db, tournament_id, team_id)
+        application = await _load_team_application_or_404(db, team_id, app_id)
+
+        if application["status"] != ApplicationStatus.pending.value:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Nur ausstehende Bewerbungen können angenommen werden",
+            )
+
+        await _ensure_team_has_capacity(db, team_id, tournament["team_size"])
+
+        cursor = await db.execute(
+            "SELECT 1 FROM team_members tm "
+            "JOIN teams t ON tm.team_id = t.id "
+            "WHERE t.tournament_id = ? AND tm.discord_id = ?",
+            (tournament_id, application["discord_id"]),
+        )
+        if await cursor.fetchone():
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Spieler ist bereits Mitglied in einem Team dieses Turniers",
+            )
+
+        cursor = await db.execute(
+            "SELECT discord_name, steam_id, rank, rank_score, team_id "
+            "FROM tournament_signups WHERE tournament_id = ? AND discord_id = ?",
+            (tournament_id, application["discord_id"]),
+        )
+        signup = await cursor.fetchone()
+        if signup and signup["team_id"] not in (None, team_id):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Spieler ist bereits einem anderen Team zugeordnet",
+            )
+
+        target_member_count = await _count_team_members(db, team_id)
+        role = "captain" if target_member_count == 0 or not target_team["captain_discord_id"] else "member"
+        effective_name = application["discord_name"]
+        if signup and signup["discord_name"]:
+            effective_name = signup["discord_name"]
+        steam_id = signup["steam_id"] if signup else None
+        rank = signup["rank"] if signup else None
+        rank_score = int(signup["rank_score"] or 0) if signup else 0
+
+        await db.execute(
+            "INSERT INTO team_members (team_id, discord_id, discord_name, steam_id, rank, rank_score, role) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (
+                team_id,
+                application["discord_id"],
+                effective_name,
+                steam_id,
+                rank,
+                rank_score,
+                role,
+            ),
+        )
+        await _upsert_signup_for_team(
+            db,
+            tournament_id,
+            discord_id=application["discord_id"],
+            discord_name=effective_name,
+            steam_id=steam_id,
+            rank=rank,
+            rank_score=rank_score,
+            team_id=team_id,
+        )
+        if role == "captain":
+            await db.execute(
+                "UPDATE teams SET captain_discord_id = ? WHERE id = ?",
+                (application["discord_id"], team_id),
+            )
+
+        await db.execute(
+            "UPDATE team_applications SET status = ? WHERE id = ?",
+            (ApplicationStatus.accepted.value, app_id),
+        )
+        await _audit(
+            db,
+            "team_application_accept_admin",
+            user.discord_id,
+            json.dumps(
+                {
+                    "tournament_id": tournament_id,
+                    "team_id": team_id,
+                    "application_id": app_id,
+                    "discord_id": application["discord_id"],
+                }
+            ),
+        )
+        await db.commit()
+
+    return {
+        "status": ApplicationStatus.accepted.value,
+        "application_id": app_id,
+        "team_id": team_id,
+    }
+
+
+@router.post(
+    "/tournaments/{tournament_id}/teams/{team_id}/applications/{app_id}/reject",
+    status_code=200,
+)
+async def reject_team_application_admin(
+    tournament_id: int,
+    team_id: int,
+    app_id: int,
+    user: UserSession = Depends(require_mod),
+) -> dict:
+    """Lehnt eine Team-Bewerbung ab."""
+    async with get_db() as db:
+        tournament = await _load_tournament_or_404(db, tournament_id)
+        _ensure_participant_management_allowed(tournament["status"])
+        await _load_team_or_404(db, tournament_id, team_id)
+        application = await _load_team_application_or_404(db, team_id, app_id)
+
+        if application["status"] != ApplicationStatus.pending.value:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Nur ausstehende Bewerbungen können abgelehnt werden",
+            )
+
+        await db.execute(
+            "UPDATE team_applications SET status = ? WHERE id = ?",
+            (ApplicationStatus.rejected.value, app_id),
+        )
+        await _audit(
+            db,
+            "team_application_reject_admin",
+            user.discord_id,
+            json.dumps(
+                {
+                    "tournament_id": tournament_id,
+                    "team_id": team_id,
+                    "application_id": app_id,
+                    "discord_id": application["discord_id"],
+                }
+            ),
+        )
+        await db.commit()
+
+    return {
+        "status": ApplicationStatus.rejected.value,
+        "application_id": app_id,
+        "team_id": team_id,
+    }
 
 
 @router.delete("/tournaments/{tournament_id}/teams/{team_id}", status_code=200)
