@@ -280,3 +280,37 @@ async def get_avatar(discord_id: str) -> FileResponse | RedirectResponse:
         return RedirectResponse(url=row["discord_avatar"], status_code=status.HTTP_302_FOUND)
 
     raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Avatar nicht gefunden")
+
+
+@router.get("/avatars/by-name/{discord_name}", response_model=None)
+async def get_avatar_by_name(discord_name: str) -> FileResponse | RedirectResponse:
+    """Avatar via Discord-Name abrufen (z.B. für öffentliche Profile)."""
+    async with get_db() as db:
+        cursor = await db.execute(
+            "SELECT discord_id FROM sessions WHERE discord_name = ? LIMIT 1",
+            (discord_name,),
+        )
+        session_row = await cursor.fetchone()
+
+    if not session_row:
+        raise HTTPException(status_code=404, detail="Spieler nicht gefunden")
+
+    discord_id = session_row["discord_id"]
+    avatar_path = _avatar_file_path(discord_id)
+    if avatar_path:
+        media_type = _AVATAR_MEDIA_TYPES.get(avatar_path.suffix.lower(), "application/octet-stream")
+        return FileResponse(path=avatar_path, media_type=media_type)
+
+    async with get_db() as db:
+        cursor = await db.execute(
+            "SELECT discord_avatar FROM sessions WHERE discord_id = ? "
+            "AND discord_avatar IS NOT NULL AND discord_avatar != '' "
+            "ORDER BY created_at DESC LIMIT 1",
+            (discord_id,),
+        )
+        row = await cursor.fetchone()
+
+    if row and row["discord_avatar"]:
+        return RedirectResponse(url=row["discord_avatar"], status_code=status.HTTP_302_FOUND)
+
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Avatar nicht gefunden")

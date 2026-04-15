@@ -394,6 +394,7 @@ class PlayerProfile(BaseModel):
     discord_name: str
     display_name: Optional[str] = None
     discord_avatar: Optional[str] = None
+    avatar_filename: Optional[str] = None
     bio: Optional[str] = None
     rank: Optional[str] = None
     rank_score: int = 0

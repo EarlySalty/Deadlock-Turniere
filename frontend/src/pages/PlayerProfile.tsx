@@ -94,8 +94,10 @@ export default function PlayerProfile() {
     })
   }
 
-  const avatarUrl = isOwnProfile && myProfile?.avatar_filename
-    ? `/turnier/api/avatars/${myProfile.discord_id}`
+  const avatarUrl = profile.avatar_filename
+    ? isOwnProfile
+      ? `/turnier/api/avatars/${myProfile?.discord_id}`
+      : `/turnier/api/avatars/by-name/${encodeURIComponent(profile.discord_name)}`
     : (profile.discord_avatar ?? null)
 
   return (

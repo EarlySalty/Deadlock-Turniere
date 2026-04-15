@@ -420,6 +420,7 @@ export interface TournamentHistoryEntry {
 export interface PlayerProfile {
   discord_name: string
   discord_avatar: string | null
+  avatar_filename: string | null
   bio: string | null
   rank: string | null
   rank_score: number
