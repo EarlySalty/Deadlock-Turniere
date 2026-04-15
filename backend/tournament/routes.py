@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 from datetime import datetime, timezone
 
@@ -10,6 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from auth.permissions import require_auth
 from db import get_db
 from rank_reader import get_player_rank_profile
+from notifications.discord_notifier import notify_users
 from tournament.models import (
     BracketMatch,
     Group,
@@ -31,6 +33,7 @@ from tournament.models import (
 )
 
 router = APIRouter(prefix="/api", tags=["tournaments"])
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -76,6 +79,41 @@ def _parse_timestamp(value: str | None) -> datetime | None:
     return parsed.astimezone(timezone.utc)
 
 
+def _looks_like_discord_id(value: str | None) -> bool:
+    if not value:
+        return False
+    stripped = value.strip()
+    return stripped.isdigit() and 16 <= len(stripped) <= 21
+
+
+def _sanitize_discord_name(
+    discord_name: str | None,
+    *,
+    discord_id: str | None = None,
+) -> str | None:
+    if not discord_name:
+        return None
+    stripped = discord_name.strip()
+    if not stripped:
+        return None
+    if discord_id and stripped == str(discord_id).strip():
+        return None
+    if _looks_like_discord_id(stripped):
+        return None
+    return stripped
+
+
+def _preferred_discord_name(
+    *candidates: str | None,
+    discord_id: str | None = None,
+) -> str | None:
+    for candidate in candidates:
+        sanitized = _sanitize_discord_name(candidate, discord_id=discord_id)
+        if sanitized:
+            return sanitized
+    return None
+
+
 async def _load_teams_for_tournament(db, tournament_id: int) -> list[Team]:  # noqa: ANN001
     """Lädt alle Teams eines Turniers inkl. Members."""
     cursor = await db.execute(
@@ -86,8 +124,8 @@ async def _load_teams_for_tournament(db, tournament_id: int) -> list[Team]:  # n
     teams: list[Team] = []
     for t in team_rows:
         cursor = await db.execute(
-            "SELECT tm.id, tm.team_id, tm.discord_id, "
-            "COALESCE(NULLIF(tm.discord_name, ''), NULLIF(s.discord_name, '')) AS discord_name, "
+            "SELECT tm.id, tm.team_id, tm.discord_id, tm.discord_name AS team_member_discord_name, "
+            "s.discord_name AS session_discord_name, p.display_name AS profile_display_name, "
             "tm.steam_id, tm.rank, tm.rank_score, tm.role, tm.joined_at "
             "FROM team_members tm "
             "LEFT JOIN ("
@@ -96,12 +134,22 @@ async def _load_teams_for_tournament(db, tournament_id: int) -> list[Team]:  # n
             "    WHERE discord_name IS NOT NULL AND discord_name != '' "
             "    GROUP BY discord_id"
             ") s ON s.discord_id = tm.discord_id "
+            "LEFT JOIN user_profiles p ON p.discord_id = tm.discord_id "
             "WHERE tm.team_id = ? "
             "ORDER BY tm.joined_at",
             (t["id"],),
         )
         member_rows = await cursor.fetchall()
-        members = [TeamMember(**await _enrich_rank_data(dict(m))) for m in member_rows]
+        members: list[TeamMember] = []
+        for member_row in member_rows:
+            member_data = dict(member_row)
+            member_data["discord_name"] = _preferred_discord_name(
+                member_data.pop("profile_display_name", None),
+                member_data.pop("session_discord_name", None),
+                member_data.pop("team_member_discord_name", None),
+                discord_id=member_data["discord_id"],
+            )
+            members.append(TeamMember(**await _enrich_rank_data(member_data)))
         teams.append(Team(**{**dict(t), "members": members}))
     return teams
 
@@ -116,17 +164,28 @@ async def _load_teams_public(db, tournament_id: int) -> list[TeamPublic]:  # noq
     teams: list[TeamPublic] = []
     for t in team_rows:
         cursor = await db.execute(
-            "SELECT tm.id, tm.team_id, "
-            "COALESCE(NULLIF(tm.discord_name, ''), NULLIF(s.discord_name, '')) AS discord_name, "
+            "SELECT tm.id, tm.team_id, tm.discord_id, tm.discord_name AS team_member_discord_name, "
+            "s.discord_name AS session_discord_name, p.display_name AS profile_display_name, "
             "tm.steam_id, tm.rank, tm.rank_score, tm.role, tm.joined_at "
             "FROM team_members tm "
             "LEFT JOIN (SELECT discord_id, MAX(discord_name) AS discord_name FROM sessions "
             "WHERE discord_name IS NOT NULL AND discord_name != '' GROUP BY discord_id) s "
-            "ON s.discord_id = tm.discord_id WHERE tm.team_id = ? ORDER BY tm.joined_at",
+            "ON s.discord_id = tm.discord_id "
+            "LEFT JOIN user_profiles p ON p.discord_id = tm.discord_id "
+            "WHERE tm.team_id = ? ORDER BY tm.joined_at",
             (t["id"],),
         )
         member_rows = await cursor.fetchall()
-        members = [TeamMemberPublic(**dict(m)) for m in member_rows]
+        members: list[TeamMemberPublic] = []
+        for member_row in member_rows:
+            member_data = dict(member_row)
+            member_data["discord_name"] = _preferred_discord_name(
+                member_data.pop("profile_display_name", None),
+                member_data.pop("session_discord_name", None),
+                member_data.pop("team_member_discord_name", None),
+                discord_id=member_data.pop("discord_id", None),
+            )
+            members.append(TeamMemberPublic(**member_data))
         cursor2 = await db.execute(
             "SELECT COUNT(*) FROM team_applications WHERE team_id = ? AND status = 'pending'",
             (t["id"],),
@@ -189,7 +248,8 @@ async def _load_signups_for_tournament(db, tournament_id: int) -> list[Tournamen
     """Lädt alle Solo-/Signup-Einträge eines Turniers."""
     cursor = await db.execute(
         "SELECT ts.id, ts.tournament_id, ts.discord_id, "
-        "COALESCE(NULLIF(ts.discord_name, ''), NULLIF(s.discord_name, ''), NULLIF(tm.discord_name, '')) AS discord_name, "
+        "ts.discord_name AS signup_discord_name, s.discord_name AS session_discord_name, "
+        "tm.discord_name AS team_member_discord_name, p.display_name AS profile_display_name, "
         "ts.steam_id, ts.rank, ts.rank_score, ts.team_id, ts.signed_up_at "
         "FROM tournament_signups ts "
         "LEFT JOIN ("
@@ -204,19 +264,32 @@ async def _load_signups_for_tournament(db, tournament_id: int) -> list[Tournamen
         "    WHERE discord_name IS NOT NULL AND discord_name != '' "
         "    GROUP BY discord_id"
         ") tm ON tm.discord_id = ts.discord_id "
+        "LEFT JOIN user_profiles p ON p.discord_id = ts.discord_id "
         "WHERE ts.tournament_id = ? "
         "ORDER BY ts.signed_up_at DESC",
         (tournament_id,),
     )
     rows = await cursor.fetchall()
-    return [TournamentSignup(**await _enrich_rank_data(dict(r))) for r in rows]
+    signups: list[TournamentSignup] = []
+    for row in rows:
+        signup_data = dict(row)
+        signup_data["discord_name"] = _preferred_discord_name(
+            signup_data.pop("profile_display_name", None),
+            signup_data.pop("session_discord_name", None),
+            signup_data.pop("signup_discord_name", None),
+            signup_data.pop("team_member_discord_name", None),
+            discord_id=signup_data["discord_id"],
+        )
+        signups.append(TournamentSignup(**await _enrich_rank_data(signup_data)))
+    return signups
 
 
 async def _load_signups_public(db, tournament_id: int) -> list[TournamentSignupPublic]:  # noqa: ANN001
     """Lädt Signups ohne discord_id."""
     cursor = await db.execute(
-        "SELECT ts.id, ts.tournament_id, "
-        "COALESCE(NULLIF(ts.discord_name, ''), NULLIF(s.discord_name, ''), NULLIF(tm.discord_name, '')) AS discord_name, "
+        "SELECT ts.id, ts.tournament_id, ts.discord_id, "
+        "ts.discord_name AS signup_discord_name, s.discord_name AS session_discord_name, "
+        "tm.discord_name AS team_member_discord_name, p.display_name AS profile_display_name, "
         "ts.steam_id, ts.rank, ts.rank_score, ts.team_id, ts.signed_up_at "
         "FROM tournament_signups ts "
         "LEFT JOIN (SELECT discord_id, MAX(discord_name) AS discord_name FROM sessions "
@@ -225,11 +298,23 @@ async def _load_signups_public(db, tournament_id: int) -> list[TournamentSignupP
         "LEFT JOIN (SELECT discord_id, MAX(discord_name) AS discord_name FROM team_members "
         "WHERE discord_name IS NOT NULL AND discord_name != '' GROUP BY discord_id) tm "
         "ON tm.discord_id = ts.discord_id "
+        "LEFT JOIN user_profiles p ON p.discord_id = ts.discord_id "
         "WHERE ts.tournament_id = ? ORDER BY ts.signed_up_at DESC",
         (tournament_id,),
     )
     rows = await cursor.fetchall()
-    return [TournamentSignupPublic(**dict(r)) for r in rows]
+    signups: list[TournamentSignupPublic] = []
+    for row in rows:
+        signup_data = dict(row)
+        signup_data["discord_name"] = _preferred_discord_name(
+            signup_data.pop("profile_display_name", None),
+            signup_data.pop("session_discord_name", None),
+            signup_data.pop("signup_discord_name", None),
+            signup_data.pop("team_member_discord_name", None),
+            discord_id=signup_data.pop("discord_id", None),
+        )
+        signups.append(TournamentSignupPublic(**signup_data))
+    return signups
 
 
 async def _upsert_signup(
@@ -395,10 +480,9 @@ async def _resolve_discord_name(
     *,
     preferred_name: str | None = None,
 ) -> str:  # noqa: ANN001
-    if preferred_name:
-        stripped = preferred_name.strip()
-        if stripped:
-            return stripped
+    sanitized_preferred = _sanitize_discord_name(preferred_name, discord_id=discord_id)
+    if sanitized_preferred:
+        return sanitized_preferred
 
     cursor = await db.execute(
         "SELECT discord_name FROM sessions "
@@ -407,8 +491,13 @@ async def _resolve_discord_name(
         (discord_id,),
     )
     row = await cursor.fetchone()
-    if row and row["discord_name"]:
-        return row["discord_name"]
+    if row:
+        sanitized_session_name = _sanitize_discord_name(
+            row["discord_name"],
+            discord_id=discord_id,
+        )
+        if sanitized_session_name:
+            return sanitized_session_name
 
     cursor = await db.execute(
         "SELECT discord_name FROM team_members "
@@ -417,8 +506,28 @@ async def _resolve_discord_name(
         (discord_id,),
     )
     row = await cursor.fetchone()
-    if row and row["discord_name"]:
-        return row["discord_name"]
+    if row:
+        sanitized_member_name = _sanitize_discord_name(
+            row["discord_name"],
+            discord_id=discord_id,
+        )
+        if sanitized_member_name:
+            return sanitized_member_name
+
+    cursor = await db.execute(
+        "SELECT display_name FROM user_profiles "
+        "WHERE discord_id = ? AND display_name IS NOT NULL AND display_name != '' "
+        "ORDER BY updated_at DESC LIMIT 1",
+        (discord_id,),
+    )
+    row = await cursor.fetchone()
+    if row:
+        sanitized_profile_name = _sanitize_discord_name(
+            row["display_name"],
+            discord_id=discord_id,
+        )
+        if sanitized_profile_name:
+            return sanitized_profile_name
 
     return discord_id
 
@@ -460,22 +569,32 @@ async def _load_team_response(db, team_id: int) -> Team:  # noqa: ANN001
     cursor = await db.execute("SELECT * FROM teams WHERE id = ?", (team_id,))
     team_row = await cursor.fetchone()
     cursor = await db.execute(
-        "SELECT tm.id, tm.team_id, tm.discord_id, "
-        "COALESCE(NULLIF(tm.discord_name, ''), NULLIF(s.discord_name, '')) AS discord_name, "
+        "SELECT tm.id, tm.team_id, tm.discord_id, tm.discord_name AS team_member_discord_name, "
+        "s.discord_name AS session_discord_name, p.display_name AS profile_display_name, "
         "tm.steam_id, tm.rank, tm.rank_score, tm.role, tm.joined_at "
         "FROM team_members tm "
         "LEFT JOIN ("
-        "    SELECT discord_id, MAX(discord_name) AS discord_name "
-        "    FROM sessions "
-        "    WHERE discord_name IS NOT NULL AND discord_name != '' "
-        "    GROUP BY discord_id"
+            "    SELECT discord_id, MAX(discord_name) AS discord_name "
+            "    FROM sessions "
+            "    WHERE discord_name IS NOT NULL AND discord_name != '' "
+            "    GROUP BY discord_id"
         ") s ON s.discord_id = tm.discord_id "
+        "LEFT JOIN user_profiles p ON p.discord_id = tm.discord_id "
         "WHERE tm.team_id = ? "
         "ORDER BY tm.joined_at",
         (team_id,),
     )
     member_rows = await cursor.fetchall()
-    members = [TeamMember(**await _enrich_rank_data(dict(m))) for m in member_rows]
+    members: list[TeamMember] = []
+    for member_row in member_rows:
+        member_data = dict(member_row)
+        member_data["discord_name"] = _preferred_discord_name(
+            member_data.pop("profile_display_name", None),
+            member_data.pop("session_discord_name", None),
+            member_data.pop("team_member_discord_name", None),
+            discord_id=member_data["discord_id"],
+        )
+        members.append(TeamMember(**await _enrich_rank_data(member_data)))
     return Team(**{**dict(team_row), "members": members})
 
 
@@ -1077,7 +1196,20 @@ async def invite_to_team_by_signup(
             return {"status": "auto_accepted"}
 
         await db.commit()
-        return {"status": "invited"}
+    try:
+        await notify_users(
+            [signup["discord_id"]],
+            "team_invite",
+            f"Du wurdest von `{team['name']}` für `{tournament['name']}` eingeladen.",
+        )
+    except Exception:
+        logger.exception(
+            "Signup invite notification failed (tournament=%s team=%s signup=%s)",
+            tournament_id,
+            team_id,
+            signup_id,
+        )
+    return {"status": "invited"}
 
 
 # ---------------------------------------------------------------------------
@@ -1840,13 +1972,27 @@ async def invite_to_team(
             team_id=team_id,
         )
 
-        await db.commit()
-
         # Aktualisiertes Team zurückgeben
         cursor = await db.execute("SELECT * FROM teams WHERE id = ?", (team_id,))
         team_row = await cursor.fetchone()
         cursor = await db.execute("SELECT * FROM team_members WHERE team_id = ?", (team_id,))
         members = [TeamMember(**dict(m)) for m in await cursor.fetchall()]
+
+        await db.commit()
+
+    try:
+        await notify_users(
+            [target_discord_id],
+            "team_invite",
+            f"Du wurdest zu `{team['name']}` für `{tournament['name']}` eingeladen.",
+        )
+    except Exception:
+        logger.exception(
+            "Team invite notification failed (tournament=%s team=%s target=%s)",
+            tournament_id,
+            team_id,
+            target_discord_id,
+        )
 
     return Team(**{**dict(team_row), "members": members})
 

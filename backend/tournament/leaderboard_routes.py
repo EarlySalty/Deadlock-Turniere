@@ -62,10 +62,11 @@ async def get_player_profile(discord_name: str) -> PlayerProfile:
         discord_avatar = avatar_row["discord_avatar"] if avatar_row else None
 
         cursor = await db.execute(
-            "SELECT bio FROM user_profiles WHERE discord_id = ?",
+            "SELECT display_name, bio FROM user_profiles WHERE discord_id = ?",
             (discord_id,),
         )
         profile_row = await cursor.fetchone()
+        display_name = profile_row["display_name"] if profile_row else None
         bio = profile_row["bio"] if profile_row else None
 
         cursor = await db.execute(
@@ -100,6 +101,7 @@ async def get_player_profile(discord_name: str) -> PlayerProfile:
 
     return PlayerProfile(
         discord_name=discord_name,
+        display_name=display_name or discord_name,
         discord_avatar=discord_avatar,
         bio=bio,
         rank=rank,

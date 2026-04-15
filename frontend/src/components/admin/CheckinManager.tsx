@@ -24,7 +24,7 @@ interface ParticipantRow {
 }
 
 function participantName(row: ParticipantRow): string {
-  return row.discord_name?.trim() || row.discord_id
+  return row.discord_name?.trim() || 'Unbekannt'
 }
 
 export default function CheckinManager({
@@ -267,7 +267,7 @@ export default function CheckinManager({
                       key={player.discord_id}
                       className="rounded-full bg-card px-3 py-1 text-xs text-foreground"
                     >
-                      {player.discord_name?.trim() || player.discord_id}
+                      {player.discord_name?.trim() || 'Unbekannt'}
                     </span>
                   ))}
                 </div>

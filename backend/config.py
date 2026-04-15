@@ -208,6 +208,31 @@ class Settings:
         ],
         default="",
     )
+    DISCORD_MASTER_BROKER_BASE_URL: str = _get_first_string(
+        [
+            "DISCORD_MASTER_BROKER_BASE_URL",
+            "DISCORD_OAUTH_INTERNAL_API_BASE_URL",
+        ],
+        default="http://127.0.0.1:8766",
+    )
+    DISCORD_MASTER_BROKER_TOKEN: str = _get_first_string(
+        [
+            "DISCORD_MASTER_BROKER_TOKEN",
+            "TURNIER_INTERNAL_API_TOKEN",
+            "MASTER_BROKER_TOKEN",
+            "MAIN_BOT_INTERNAL_TOKEN",
+            "TWITCH_INTERNAL_API_TOKEN",
+        ],
+        default="",
+    )
+    DISCORD_MATCH_CHANNEL_CATEGORY_ID: int = _get_int(
+        "DISCORD_MATCH_CHANNEL_CATEGORY_ID",
+        default=1412800850580996256,
+    )
+    DISCORD_MATCH_CHANNEL_DELETE_DELAY_SECONDS: int = _get_int(
+        "DISCORD_MATCH_CHANNEL_DELETE_DELAY_SECONDS",
+        default=300,
+    )
     DISCORD_BOT_TOKEN: str = _get_first_string(
         ["DISCORD_BOT_TOKEN", "DISCORD_TOKEN", "BOT_TOKEN"],
         keyring_service="DeadlockBot",
@@ -239,6 +264,10 @@ class Settings:
     DATABASE_PATH: str = _get_string(
         "DATABASE_PATH",
         default="data/tournament.db",
+    )
+    AVATAR_DIR: str = _get_string(
+        "AVATAR_DIR",
+        default="data/avatars",
     )
     STEAM_BRIDGE_DB_PATH: str = _get_string(
         "STEAM_BRIDGE_DB_PATH",

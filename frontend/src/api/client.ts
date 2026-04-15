@@ -12,6 +12,11 @@ import type {
   LobbyCreateResult,
   MatchStartResult,
   MatchFetchResult,
+  MatchEventPresetListResult,
+  ApplyMatchConvarsRequest,
+  ApplyMatchConvarsResult,
+  ApplyMatchEventPresetRequest,
+  ApplyMatchEventPresetResult,
   CheckinStatus,
   FinalizeCheckinResult,
   TeamMoveRequest,
@@ -134,6 +139,37 @@ export const leaveLobby = (tournamentId: number, matchId: number) =>
   request<{ success: boolean }>(`/admin/tournaments/${tournamentId}/matches/${matchId}/leave-lobby`, {
     method: 'POST',
   })
+
+export const fetchMatchEventPresets = (tournamentId: number, matchId: number) =>
+  request<MatchEventPresetListResult>(
+    `/admin/tournaments/${tournamentId}/matches/${matchId}/event-presets`
+  )
+
+export const applyMatchConvars = (
+  tournamentId: number,
+  matchId: number,
+  data: ApplyMatchConvarsRequest,
+) =>
+  request<ApplyMatchConvarsResult>(
+    `/admin/tournaments/${tournamentId}/matches/${matchId}/apply-convars`,
+    {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }
+  )
+
+export const applyMatchEventPreset = (
+  tournamentId: number,
+  matchId: number,
+  data: ApplyMatchEventPresetRequest,
+) =>
+  request<ApplyMatchEventPresetResult>(
+    `/admin/tournaments/${tournamentId}/matches/${matchId}/apply-event-preset`,
+    {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }
+  )
 
 export const createAdminTeam = (tournamentId: number, name: string) =>
   request<Team>(`/admin/tournaments/${tournamentId}/teams`, {
@@ -265,6 +301,21 @@ export const setConsent = (version: number = 1) =>
 export const fetchMyProfile = () => request<UserProfile>('/profile')
 export const updateMyProfile = (data: UserProfileUpdate) =>
   request<UserProfile>('/profile', { method: 'PUT', body: JSON.stringify(data) })
+export const uploadProfileAvatar = async (file: File): Promise<UserProfile> => {
+  const formData = new FormData()
+  formData.append('file', file)
+  const res = await fetch(`${API_BASE}/profile/avatar`, {
+    method: 'POST',
+    credentials: 'include',
+    body: formData,
+  })
+  if (res.status === 401) throw new ApiError(401, 'Nicht authentifiziert')
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}))
+    throw new ApiError(res.status, body.detail || 'Upload fehlgeschlagen')
+  }
+  return res.json()
+}
 
 // Leaderboard & Player Profiles
 export const fetchLeaderboard = () => request<LeaderboardEntry[]>('/leaderboard')

@@ -108,6 +108,7 @@ class TournamentCreate(BaseModel):
     bracket_format: BracketFormat = BracketFormat.single_elimination
     registration_start: Optional[str] = None
     registration_end: Optional[str] = None
+    checkin_start: Optional[str] = None
     group_phase_start: Optional[str] = None
     bracket_start: Optional[str] = None
     invite_mode: InviteMode = InviteMode.always
@@ -125,6 +126,7 @@ class TournamentUpdate(BaseModel):
     bracket_format: Optional[BracketFormat] = None
     registration_start: Optional[str] = None
     registration_end: Optional[str] = None
+    checkin_start: Optional[str] = None
     group_phase_start: Optional[str] = None
     bracket_start: Optional[str] = None
     invite_mode: Optional[InviteMode] = None
@@ -154,6 +156,7 @@ class Tournament(BaseModel):
     team_size: int = 6
     registration_start: Optional[str] = None
     registration_end: Optional[str] = None
+    checkin_start: Optional[str] = None
     group_phase_start: Optional[str] = None
     bracket_start: Optional[str] = None
     bracket_format: str = "single_elimination"

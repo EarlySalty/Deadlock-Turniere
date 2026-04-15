@@ -43,6 +43,11 @@ interface ResultEntry {
   sortTime: number
 }
 
+function safePublicName(name: string | null | undefined): string {
+  const trimmed = name?.trim()
+  return trimmed ? trimmed : 'Unbekannt'
+}
+
 function getTeamName(teamId: number | null, teams: TeamPublic[]): string {
   if (teamId === null) return 'Freilos'
   return teams.find((team) => team.id === teamId)?.name ?? `Team #${teamId}`
@@ -657,7 +662,7 @@ export default function Tournament() {
                 <div className="mt-2 space-y-1">
                   {userTeam.members.map((m, i) => (
                     <div key={i} className="flex items-center gap-2 text-sm">
-                      <span className="text-foreground flex-1">{m.discord_name ?? '—'}</span>
+                      <span className="text-foreground flex-1">{safePublicName(m.discord_name)}</span>
                       {m.role === 'captain' && <span className="text-xs text-primary font-medium">Captain</span>}
                       <span className="text-xs text-muted">{m.rank ?? '—'}</span>
                     </div>
@@ -688,7 +693,7 @@ export default function Tournament() {
                           <tbody>
                             {openSoloSignups.map((signup) => (
                               <tr key={signup.id} className="border-b border-border/50 last:border-0">
-                                <td className="py-2 pr-4 font-medium text-foreground">{signup.discord_name ?? '—'}</td>
+                                <td className="py-2 pr-4 font-medium text-foreground">{safePublicName(signup.discord_name)}</td>
                                 <td className="py-2 pr-4 text-muted text-xs">
                                   {signup.rank
                                     ? `${signup.rank} · ${signup.rank_score}`
@@ -746,10 +751,14 @@ export default function Tournament() {
                       {openSoloSignups.map((signup) => (
                         <tr key={signup.id} className="border-b border-border/50 last:border-0">
                           <td className="py-2 pr-4 font-medium text-foreground">
-                            <Link to={`/spieler/${encodeURIComponent(signup.discord_name ?? '')}`}
-                              className="hover:text-primary transition-colors">
-                              {signup.discord_name ?? '—'}
-                            </Link>
+                            {signup.discord_name?.trim() ? (
+                              <Link to={`/spieler/${encodeURIComponent(signup.discord_name)}`}
+                                className="hover:text-primary transition-colors">
+                                {signup.discord_name}
+                              </Link>
+                            ) : (
+                              safePublicName(signup.discord_name)
+                            )}
                           </td>
                           <td className="py-2 pr-4 text-muted text-xs hidden sm:table-cell">
                             {signup.rank ?? '—'}
@@ -789,10 +798,14 @@ export default function Tournament() {
                         <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1">
                           {team.members.map((m, i) => (
                             <span key={i} className="text-xs text-muted">
-                              <Link to={`/spieler/${encodeURIComponent(m.discord_name ?? '')}`}
-                                className="hover:text-primary transition-colors">
-                                {m.discord_name ?? '—'}
-                              </Link>
+                              {m.discord_name?.trim() ? (
+                                <Link to={`/spieler/${encodeURIComponent(m.discord_name)}`}
+                                  className="hover:text-primary transition-colors">
+                                  {m.discord_name}
+                                </Link>
+                              ) : (
+                                safePublicName(m.discord_name)
+                              )}
                               {m.role === 'captain' && <span className="ml-1 text-primary">(C)</span>}
                               <span className="ml-1 opacity-60">[{m.rank ?? '—'}]</span>
                             </span>

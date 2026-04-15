@@ -1,10 +1,13 @@
 """Result Processor — Vereinheitlicht Bracket-Ergebnisse für manuell und automatisch."""
 from __future__ import annotations
 
+import asyncio
 import json
 from typing import Any
 
+from config import settings
 from db import get_db
+from notifications.discord_notifier import delete_match_channel_later
 from tournament.engine import advance_bracket_winner
 
 
@@ -40,7 +43,8 @@ async def apply_bracket_match_result(
         cursor = await db.execute(
             """
             SELECT id, round, position, team1_id, team2_id, winner_id, status,
-                   source_match1_id, source_match2_id, match_duration_s, match_stats
+                   source_match1_id, source_match2_id, match_duration_s, match_stats,
+                   discord_channel_id
             FROM bracket_matches
             WHERE id = ? AND tournament_id = ?
             """,
@@ -137,6 +141,15 @@ async def apply_bracket_match_result(
             (match_id, winner_id_value, duration_value, player_stats_json, source),
         )
         await db.commit()
+
+    discord_channel_id = match.get("discord_channel_id")
+    if discord_channel_id:
+        asyncio.create_task(
+            delete_match_channel_later(
+                str(discord_channel_id),
+                delay_seconds=float(settings.DISCORD_MATCH_CHANNEL_DELETE_DELAY_SECONDS),
+            )
+        )
 
     await advance_bracket_winner(tournament_id, match_id, winner_id_value)
 

@@ -46,6 +46,7 @@ from tournament.routes import (
     _load_groups_for_tournament,
     _load_signups_for_tournament,
     _load_teams_for_tournament,
+    _preferred_discord_name,
 )
 from tournament.scheduler import advance_tournament_status
 
@@ -389,8 +390,8 @@ async def _load_team_detail(db, team_id: int):  # noqa: ANN001
     cursor = await db.execute("SELECT * FROM teams WHERE id = ?", (team_id,))
     team_row = await cursor.fetchone()
     cursor = await db.execute(
-        "SELECT tm.id, tm.team_id, tm.discord_id, "
-        "COALESCE(NULLIF(tm.discord_name, ''), NULLIF(s.discord_name, '')) AS discord_name, "
+        "SELECT tm.id, tm.team_id, tm.discord_id, tm.discord_name AS team_member_discord_name, "
+        "s.discord_name AS session_discord_name, p.display_name AS profile_display_name, "
         "tm.steam_id, tm.rank, tm.rank_score, tm.role, tm.joined_at "
         "FROM team_members tm "
         "LEFT JOIN ("
@@ -399,14 +400,25 @@ async def _load_team_detail(db, team_id: int):  # noqa: ANN001
         "    WHERE discord_name IS NOT NULL AND discord_name != '' "
         "    GROUP BY discord_id"
         ") s ON s.discord_id = tm.discord_id "
+        "LEFT JOIN user_profiles p ON p.discord_id = tm.discord_id "
         "WHERE tm.team_id = ? "
         "ORDER BY tm.joined_at",
         (team_id,),
     )
     members = await cursor.fetchall()
+    member_models: list[TeamMember] = []
+    for member in members:
+        member_data = dict(member)
+        member_data["discord_name"] = _preferred_discord_name(
+            member_data.pop("profile_display_name", None),
+            member_data.pop("session_discord_name", None),
+            member_data.pop("team_member_discord_name", None),
+            discord_id=member_data["discord_id"],
+        )
+        member_models.append(TeamMember(**await _enrich_rank_data(member_data)))
     return Team(
         **dict(team_row),
-        members=[TeamMember(**await _enrich_rank_data(dict(member))) for member in members],
+        members=member_models,
     )
 
 
@@ -552,9 +564,9 @@ async def create_tournament(
         cursor = await db.execute(
             "INSERT INTO tournaments "
             "(name, description, team_size, bracket_format, registration_start, "
-            "registration_end, group_phase_start, bracket_start, created_by, "
-            "invite_mode, invite_window_start, invite_window_end) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "registration_end, checkin_start, group_phase_start, bracket_start, "
+            "created_by, invite_mode, invite_window_start, invite_window_end) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 body.name,
                 body.description,
@@ -562,6 +574,7 @@ async def create_tournament(
                 body.bracket_format.value,
                 body.registration_start,
                 body.registration_end,
+                body.checkin_start,
                 body.group_phase_start,
                 body.bracket_start,
                 user.discord_id,
@@ -2101,6 +2114,160 @@ async def leave_match_lobby(
             "match_leave_lobby",
             user.discord_id,
             json.dumps({"tournament_id": tournament_id, "match_id": match_id}),
+        )
+        await db.commit()
+
+    return result
+
+
+@router.get("/tournaments/{tournament_id}/matches/{match_id}/event-presets", status_code=200)
+async def get_match_event_presets(
+    tournament_id: int,
+    match_id: int,
+    user: UserSession = Depends(require_mod),
+) -> dict:
+    """Liefert Live-Event-Presets fuer das Admin-Panel."""
+    del user
+    try:
+        match = await match_manager._get_bracket_match(tournament_id, match_id)  # noqa: SLF001
+    except MatchNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        ) from exc
+
+    presets = await match_manager.list_match_event_presets()
+    return {
+        "success": True,
+        "match_id": match_id,
+        "party_id": match.get("steam_party_id"),
+        "party_code": match.get("party_code"),
+        "presets": presets,
+    }
+
+
+@router.post("/tournaments/{tournament_id}/matches/{match_id}/apply-convars", status_code=200)
+async def apply_match_convars(
+    tournament_id: int,
+    match_id: int,
+    body: dict,
+    user: UserSession = Depends(require_mod),
+) -> dict:
+    """Wendet frei definierte Match-ConVars auf eine laufende Lobby an."""
+    convars = body.get("convars")
+    try:
+        result = await match_manager.apply_match_convars(tournament_id, match_id, convars)
+    except MatchNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        ) from exc
+    except MatchStateError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+    except SteamTaskError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=str(exc),
+        ) from exc
+    except TimeoutError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+            detail="Steam Bot hat beim Anwenden der Match-ConVars nicht rechtzeitig geantwortet",
+        ) from exc
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=str(exc),
+        ) from exc
+
+    async with get_db() as db:
+        await _audit(
+            db,
+            "match_apply_convars",
+            user.discord_id,
+            json.dumps(
+                {
+                    "tournament_id": tournament_id,
+                    "match_id": match_id,
+                    "party_id": result.get("party_id"),
+                    "applied_convars": result.get("applied_convars"),
+                },
+                default=str,
+            ),
+        )
+        await db.commit()
+
+    return result
+
+
+@router.post("/tournaments/{tournament_id}/matches/{match_id}/apply-event-preset", status_code=200)
+async def apply_match_event_preset(
+    tournament_id: int,
+    match_id: int,
+    body: dict,
+    user: UserSession = Depends(require_mod),
+) -> dict:
+    """Wendet ein Event-Preset auf eine laufende Match-Lobby an."""
+    preset_key = str(body.get("preset_key") or "").strip()
+    enabled = bool(body.get("enabled", True))
+    if not preset_key:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="preset_key ist erforderlich",
+        )
+
+    try:
+        result = await match_manager.apply_match_event_preset(
+            tournament_id,
+            match_id,
+            preset_key,
+            enabled=enabled,
+        )
+    except MatchNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        ) from exc
+    except MatchStateError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+    except SteamTaskError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=str(exc),
+        ) from exc
+    except TimeoutError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+            detail="Steam Bot hat beim Anwenden des Match-Events nicht rechtzeitig geantwortet",
+        ) from exc
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=str(exc),
+        ) from exc
+
+    async with get_db() as db:
+        await _audit(
+            db,
+            "match_apply_event_preset",
+            user.discord_id,
+            json.dumps(
+                {
+                    "tournament_id": tournament_id,
+                    "match_id": match_id,
+                    "preset_key": result.get("preset_key"),
+                    "enabled": result.get("enabled"),
+                    "party_id": result.get("party_id"),
+                    "applied_convars": result.get("applied_convars"),
+                },
+                default=str,
+            ),
         )
         await db.commit()
 

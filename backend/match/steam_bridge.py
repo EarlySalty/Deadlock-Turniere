@@ -11,6 +11,7 @@ import aiosqlite
 from config import settings
 
 STALE_RUNNING_TASK_TIMEOUT_MS = 120_000
+GC_LOBBY_INVITE_PLAYER = "GC_LOBBY_INVITE_PLAYER"
 
 
 def _now_ms() -> int:
@@ -96,6 +97,7 @@ async def has_active_task(
     *,
     match_id: int | None = None,
     party_id: str | None = None,
+    steam_id: str | None = None,
 ) -> bool:
     """Prüft, ob bereits ein passender PENDING/RUNNING Task existiert."""
     clauses = ["type = ?", "status IN ('PENDING', 'RUNNING')"]
@@ -109,6 +111,10 @@ async def has_active_task(
         clauses.append("json_extract(payload, '$.party_id') = ?")
         params.append(str(party_id))
 
+    if steam_id is not None:
+        clauses.append("json_extract(payload, '$.steam_id') = ?")
+        params.append(str(steam_id))
+
     async with aiosqlite.connect(settings.STEAM_BRIDGE_DB_PATH) as db:
         await _fail_stale_running_tasks(db)
         cursor = await db.execute(
@@ -120,7 +126,87 @@ async def has_active_task(
             """,
             params,
         )
-        return await cursor.fetchone() is not None
+    return await cursor.fetchone() is not None
+
+
+async def invite_players_to_lobby(party_id: str, steam_ids: list[str]) -> dict[str, Any]:
+    """Lädt mehrere Spieler per Steam-Task in eine Lobby ein."""
+    normalized_party_id = str(party_id or "").strip()
+    if not normalized_party_id:
+        raise ValueError("party_id ist erforderlich")
+
+    unique_steam_ids = []
+    seen: set[str] = set()
+    for steam_id in steam_ids:
+        normalized_steam_id = str(steam_id or "").strip()
+        if not normalized_steam_id or normalized_steam_id in seen:
+            continue
+        seen.add(normalized_steam_id)
+        unique_steam_ids.append(normalized_steam_id)
+
+    invited: list[dict[str, Any]] = []
+    failed: list[dict[str, Any]] = []
+    skipped: list[dict[str, Any]] = []
+
+    for steam_id in unique_steam_ids:
+        if await has_active_task(
+            GC_LOBBY_INVITE_PLAYER,
+            party_id=normalized_party_id,
+            steam_id=steam_id,
+        ):
+            skipped.append(
+                {
+                    "steam_id": steam_id,
+                    "party_id": normalized_party_id,
+                    "reason": "already_active",
+                }
+            )
+            continue
+
+        task_id = await create_task(
+            GC_LOBBY_INVITE_PLAYER,
+            {"steam_id": steam_id, "party_id": normalized_party_id},
+        )
+        try:
+            result = await poll_task_result(task_id, timeout_s=30)
+        except TimeoutError as exc:
+            failed.append(
+                {
+                    "steam_id": steam_id,
+                    "party_id": normalized_party_id,
+                    "task_id": task_id,
+                    "error": str(exc),
+                }
+            )
+            continue
+
+        if result.get("success") is False:
+            failed.append(
+                {
+                    "steam_id": steam_id,
+                    "party_id": normalized_party_id,
+                    "task_id": task_id,
+                    "error": result.get("error") or "Steam invite failed",
+                }
+            )
+            continue
+
+        invited.append(
+            {
+                "steam_id": steam_id,
+                "party_id": normalized_party_id,
+                "task_id": task_id,
+                "result": result,
+            }
+        )
+
+    return {
+        "success": not failed,
+        "party_id": normalized_party_id,
+        "invited": invited,
+        "failed": failed,
+        "skipped": skipped,
+    }
 
 
 async def _fail_stale_running_tasks(db: aiosqlite.Connection) -> None:

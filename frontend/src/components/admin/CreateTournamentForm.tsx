@@ -153,6 +153,7 @@ export default function CreateTournamentForm() {
   const [bracketFormat, setBracketFormat] = useState<BracketFormat>('single_elimination')
   const [regStart, setRegStart] = useState('')
   const [regEnd, setRegEnd] = useState('')
+  const [checkinStart, setCheckinStart] = useState('')
   const [inviteMode, setInviteMode] = useState<InviteMode>('always')
   const [inviteWindowStart, setInviteWindowStart] = useState('')
   const [inviteWindowEnd, setInviteWindowEnd] = useState('')
@@ -206,6 +207,7 @@ export default function CreateTournamentForm() {
         bracket_format: bracketFormat,
         registration_start: regStart || undefined,
         registration_end: regEnd || undefined,
+        checkin_start: checkinStart || undefined,
         invite_mode: inviteMode,
         invite_window_start: inviteMode === 'window' ? inviteWindowStart || undefined : undefined,
         invite_window_end: inviteMode === 'window' ? inviteWindowEnd || undefined : undefined,
@@ -221,6 +223,7 @@ export default function CreateTournamentForm() {
           setBracketFormat('single_elimination')
           setRegStart('')
           setRegEnd('')
+          setCheckinStart('')
           setInviteMode('always')
           setInviteWindowStart('')
           setInviteWindowEnd('')
@@ -328,6 +331,18 @@ export default function CreateTournamentForm() {
               onChange={(e) => setRegEnd(e.target.value)}
               className="w-full bg-background border border-border rounded-lg px-3 py-2 text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
             />
+          </div>
+          <div>
+            <label htmlFor="checkin-start" className="block text-sm font-medium text-foreground mb-1.5">
+              Check-in Start
+            </label>
+            <DateTimeInput
+              id="checkin-start"
+              value={checkinStart}
+              onChange={(e) => setCheckinStart(e.target.value)}
+              className="w-full bg-background border border-border rounded-lg px-3 py-2 text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
+            />
+            <p className="text-xs text-muted mt-1">Leer = Check-in startet automatisch mit Anmeldeschluss.</p>
           </div>
         </div>
 

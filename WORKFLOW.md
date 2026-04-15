@@ -1,5 +1,40 @@
 # Turnier-Bot Upgrade – WORKFLOW
 
+---
+
+## Neue Aufgabe (2026-04-15): Profil-Upload, Namensänderung, Check-in-Start, Zeitplan-Deduplizierung
+
+### Ziel
+1. Profilbild-Upload und Anzeigename-Änderung im Frontend aktivieren (Backend bereits fertig)
+2. `checkin_start` als konfigurierbaren Zeitstempel für Turniere ergänzen (Backend + Frontend)
+3. Doppeltes „Zeitplan anpassen"-Panel im TournamentManager entfernen
+
+### Status (2026-04-15)
+→ **In Bearbeitung** — GPT-Worker laufen
+
+### Fortschritt GPT-Worker 2 (2026-04-15)
+- Frontend-Dateien für Profilbild/Anzeigename/`checkin_start` vollständig geprüft
+- Implementierung in `tournament.ts`, `client.ts`, `useTournament.ts`, `PlayerProfile.tsx`, `TournamentManager.tsx`, `CreateTournamentForm.tsx` abgeschlossen
+- Verifikation: `cd frontend && npx tsc --noEmit` erfolgreich, keine TypeScript-Fehler
+
+### Fortschritt (2026-04-15)
+- GPT-Worker 1: Backend für `checkin_start` umgesetzt: DB-Migration, Modelle, Admin-Create/Update, Scheduler
+- Verifikation: Syntax-Check erfolgreich, `pytest` aktuell nicht ausführbar, weil in den verfügbaren Python-Umgebungen kein `pytest` installiert ist
+
+### Offene Punkte
+- [x] Backend: `checkin_start` DB-Migration, Modelle, Scheduler, Admin-Routes
+- [ ] Frontend: Typen, API-Client, Hooks, Profil-Seite, TournamentManager, CreateTournamentForm
+- [ ] Review, Verifikation, Commit & Push
+
+### Wichtige Entscheidungen
+- Avatar-Upload-Backend ist vollständig implementiert → keine Backend-Änderungen nötig
+- `checkin_start` Fallback: falls nicht gesetzt → `registration_end` bleibt der Trigger
+- Quick-Schedule-Panel wird entfernt (dupliziert das Hauptformular)
+- Ergebnis-Eintrag ist bereits implementiert, erscheint automatisch nach Match-Generierung
+
+---
+
+
 ## Ziel
 Großes Feature-Upgrade mit 8 Phasen: DSGVO-Consent, Discord-ID-Schutz, Rangliste, Spieler-Profile, Recruiting-Status, Pick-Zeitfenster, Invite-Flow, Admin-Cards.
 
@@ -15,6 +50,7 @@ Großes Feature-Upgrade mit 8 Phasen: DSGVO-Consent, Discord-ID-Schutz, Ranglist
 - [x] Worker B: `backend/tournament/routes.py` erweitert: Public Tournament-Detail, Consent-Gates, Recruiting-Status, Invite-by-Signup, Bewerbungs- und Einladungs-Flow umgesetzt
 - [x] Worker C: admin_routes.py (Phase 4 Recruiting + Phase 5 Pick-Fenster) → Invite-Felder in Create/Update ergänzt, Recruiting-Patch sowie Applications List/Accept/Reject umgesetzt
 - [x] Worker D: Neue Backend-Dateien (Phase 3 Consent/Profile + Phase 7 Spieler-Profil + Phase 8 Rangliste + points.py) erstellt, `main.py` angebunden, Import-Check mit `./.venv/bin/python` erfolgreich
+- [x] Security-Fixes: `join_team` mit Consent-Gate ergänzt, Check-in-Status auf `checked_in_names` ohne Discord-ID umgestellt, Leaderboard-Fallback auf `"Unbekannt"` geändert; Frontend-Verweis in `CheckinManager.tsx` angepasst
 - [ ] Frontend: types/tournament.ts erweitern (neue Typen, discord_id aus Public entfernen)
 - [ ] Frontend: ConsentModal.tsx (Phase 3)
 - [ ] Frontend: Tournament.tsx Solo-Tabelle + Invite-Flow (Phase 6)

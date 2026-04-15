@@ -37,6 +37,7 @@ export interface Tournament {
   team_size: number
   registration_start: string | null
   registration_end: string | null
+  checkin_start: string | null
   group_phase_start: string | null
   bracket_start: string | null
   bracket_format: BracketFormat
@@ -238,6 +239,7 @@ export interface TournamentCreate {
   bracket_format: BracketFormat
   registration_start?: string
   registration_end?: string
+  checkin_start?: string | null
   invite_mode?: InviteMode
   invite_window_start?: string
   invite_window_end?: string
@@ -253,6 +255,7 @@ export interface TournamentUpdate {
   bracket_format?: BracketFormat
   registration_start?: string
   registration_end?: string
+  checkin_start?: string | null
   group_phase_start?: string
   bracket_start?: string
   invite_mode?: InviteMode
@@ -296,6 +299,46 @@ export interface MatchFetchResult {
   players: MatchPlayerStats[]
 }
 
+export interface MatchEventPreset {
+  key: string
+  label: string
+  description: string
+  requires_cheats: boolean
+  convars: Record<string, string | number | boolean>
+  reset_convars: Record<string, string | number | boolean>
+}
+
+export interface MatchEventPresetListResult {
+  success: boolean
+  match_id: number
+  party_id: string | null
+  party_code: string | null
+  presets: MatchEventPreset[]
+}
+
+export interface ApplyMatchConvarsRequest {
+  convars: Record<string, string | number | boolean>
+}
+
+export interface ApplyMatchConvarsResult {
+  success: boolean
+  match_id: number
+  party_id: string
+  applied_convars: Record<string, string | number | boolean>
+}
+
+export interface ApplyMatchEventPresetRequest {
+  preset_key: string
+  enabled?: boolean
+}
+
+export interface ApplyMatchEventPresetResult extends ApplyMatchConvarsResult {
+  preset_key: string
+  enabled: boolean
+  label: string
+  requires_cheats: boolean
+}
+
 export interface TeamMoveRequest {
   from_team_id: number
   discord_id: string
@@ -314,6 +357,8 @@ export interface ConsentStatus {
 export interface UserProfile {
   discord_id: string
   bio: string | null
+  display_name: string | null
+  avatar_filename: string | null
   invite_auto_accept: boolean
   notify_discord_dm: boolean
   notify_browser: boolean
@@ -322,6 +367,8 @@ export interface UserProfile {
 
 export interface UserProfileUpdate {
   bio?: string
+  display_name?: string
+  avatar_filename?: string
   invite_auto_accept?: boolean
   notify_discord_dm?: boolean
   notify_browser?: boolean

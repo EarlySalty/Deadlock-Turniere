@@ -8,6 +8,7 @@ import {
   withdrawSolo, kickMember, inviteBySignup, leaveTeam,
   generateGroups, generateBracket,
   createLobby, startMatch, fetchMatchResult, leaveLobby, submitMatchResult,
+  fetchMatchEventPresets, applyMatchConvars, applyMatchEventPreset,
   createAdminTeam, renameAdminTeam, deleteAdminTeam,
   changeAdminCaptain, removeAdminTeamMember, moveAdminTeamMember,
   assignSignupToAdminTeam, deleteAdminSignup, addTeamMember,
@@ -15,7 +16,7 @@ import {
   fetchMyInvitations, acceptInvitation, rejectInvitation,
   applyToTeam, fetchTeamApplications, acceptApplication, rejectApplication,
   fetchConsent, setConsent,
-  fetchMyProfile, updateMyProfile,
+  fetchMyProfile, updateMyProfile, uploadProfileAvatar,
   fetchLeaderboard, fetchPlayerProfile,
 } from '@/api/client'
 import type {
@@ -265,6 +266,58 @@ export function useLeaveLobby() {
       leaveLobby(tournamentId, matchId),
     onSuccess: (_data, vars) => {
       invalidateTournamentCaches(qc, vars.tournamentId)
+    },
+  })
+}
+
+export function useMatchEventPresets(tournamentId: number, matchId: number, enabled = true) {
+  return useQuery({
+    queryKey: ['admin', 'tournaments', tournamentId, 'matches', matchId, 'event-presets'],
+    queryFn: () => fetchMatchEventPresets(tournamentId, matchId),
+    enabled: tournamentId > 0 && matchId > 0 && enabled,
+  })
+}
+
+export function useApplyMatchConvars() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({
+      tournamentId,
+      matchId,
+      convars,
+    }: {
+      tournamentId: number
+      matchId: number
+      convars: Record<string, string | number | boolean>
+    }) => applyMatchConvars(tournamentId, matchId, { convars }),
+    onSuccess: (_data, vars) => {
+      invalidateTournamentCaches(qc, vars.tournamentId)
+      qc.invalidateQueries({
+        queryKey: ['admin', 'tournaments', vars.tournamentId, 'matches', vars.matchId, 'event-presets'],
+      })
+    },
+  })
+}
+
+export function useApplyMatchEventPreset() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({
+      tournamentId,
+      matchId,
+      presetKey,
+      enabled,
+    }: {
+      tournamentId: number
+      matchId: number
+      presetKey: string
+      enabled?: boolean
+    }) => applyMatchEventPreset(tournamentId, matchId, { preset_key: presetKey, enabled }),
+    onSuccess: (_data, vars) => {
+      invalidateTournamentCaches(qc, vars.tournamentId)
+      qc.invalidateQueries({
+        queryKey: ['admin', 'tournaments', vars.tournamentId, 'matches', vars.matchId, 'event-presets'],
+      })
     },
   })
 }
@@ -547,6 +600,16 @@ export function useUpdateMyProfile() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (data: UserProfileUpdate) => updateMyProfile(data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['profile', 'me'] })
+    },
+  })
+}
+
+export function useUploadProfileAvatar() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (file: File) => uploadProfileAvatar(file),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['profile', 'me'] })
     },

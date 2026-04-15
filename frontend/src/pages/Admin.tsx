@@ -9,14 +9,17 @@ import TournamentManager from '@/components/admin/TournamentManager'
 import ParticipantManager from '@/components/admin/ParticipantManager'
 import CheckinManager from '@/components/admin/CheckinManager'
 import MatchAdminPanel from '@/components/admin/MatchAdminPanel'
+import MatchEventPanel from '@/components/admin/MatchEventPanel'
 import GroupMatchAdminPanel from '@/components/admin/GroupMatchAdminPanel'
 import { Archive, Plus, Settings, Trash2 } from 'lucide-react'
 
 type AdminTab = 'erstellen' | 'verwalten'
+type BracketAdminTab = 'matches' | 'events'
 
 export default function Admin() {
   const { data: tournaments, isLoading } = useAdminTournaments()
   const [activeTab, setActiveTab] = useState<AdminTab>('verwalten')
+  const [bracketAdminTab, setBracketAdminTab] = useState<BracketAdminTab>('matches')
   const [selectedTournamentId, setSelectedTournamentId] = useState<number | null>(null)
   const deleteMutation = useDeleteTournament()
 
@@ -252,16 +255,49 @@ export default function Admin() {
                   <div>
                     <h2 className="text-lg font-semibold text-foreground">Bracket-Matches</h2>
                     <p className="mt-1 text-sm text-muted">
-                      Lobbys steuern, Ergebnisse abrufen und bei Bedarf manuell nachpflegen.
+                      Lobbys steuern, Ergebnisse abrufen und Match-Events ohne Hexenwerk live setzen.
                     </p>
                   </div>
-                  <MatchAdminPanel
-                    tournamentId={selectedDetail.id}
-                    matches={selectedDetail.bracket_matches}
-                    teams={selectedDetail.teams}
-                    onRefresh={() => void refetchSelectedDetail()}
-                    allowManualOverride={allowManualOverride}
-                  />
+
+                  <div className="flex border-b border-border">
+                    <button
+                      onClick={() => setBracketAdminTab('matches')}
+                      className={`border-b-2 px-4 py-3 text-sm font-medium transition-colors ${
+                        bracketAdminTab === 'matches'
+                          ? 'border-primary text-primary'
+                          : 'border-transparent text-muted hover:text-foreground'
+                      }`}
+                    >
+                      Match-Steuerung
+                    </button>
+                    <button
+                      onClick={() => setBracketAdminTab('events')}
+                      className={`border-b-2 px-4 py-3 text-sm font-medium transition-colors ${
+                        bracketAdminTab === 'events'
+                          ? 'border-primary text-primary'
+                          : 'border-transparent text-muted hover:text-foreground'
+                      }`}
+                    >
+                      Match-Events
+                    </button>
+                  </div>
+
+                  {bracketAdminTab === 'matches' ? (
+                    <MatchAdminPanel
+                      tournamentId={selectedDetail.id}
+                      matches={selectedDetail.bracket_matches}
+                      teams={selectedDetail.teams}
+                      onRefresh={() => void refetchSelectedDetail()}
+                      allowManualOverride={allowManualOverride}
+                    />
+                  ) : (
+                    <MatchEventPanel
+                      tournamentId={selectedDetail.id}
+                      matches={selectedDetail.bracket_matches}
+                      teams={selectedDetail.teams}
+                      onRefresh={() => void refetchSelectedDetail()}
+                    />
+                  )}
                 </section>
               )}
             </>

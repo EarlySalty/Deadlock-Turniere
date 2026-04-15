@@ -1,7 +1,9 @@
+const DISCORD_LOGIN_URL = `${import.meta.env.BASE_URL}auth/discord/login`
+
 export default function LoginButton({ className = '' }: { className?: string }) {
   return (
     <a
-      href="/turnier/auth/discord/login"
+      href={DISCORD_LOGIN_URL}
       className={`inline-flex items-center gap-2 rounded-lg bg-[#5865F2] px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-[#4752C4] ${className}`}
     >
       <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">

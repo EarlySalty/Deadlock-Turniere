@@ -8,6 +8,7 @@ from datetime import datetime
 from typing import Any
 
 from db import get_db
+from notifications.discord_notifier import notify_users
 from tournament.engine import (
     VALID_STATUS_TRANSITIONS,
     generate_bracket,
@@ -49,6 +50,17 @@ def _get_due_next_status(tournament_row: Any, now: datetime) -> str | None:
     if current_status == "draft" and _is_due(tournament_row["registration_start"], now):
         return "registration"
 
+    checkin_trigger = (
+        tournament_row["checkin_start"]
+        if "checkin_start" in tournament_row.keys()
+        else None
+    ) or tournament_row["registration_end"]
+    if current_status == "registration" and _is_due(checkin_trigger, now):
+        return "checkin"
+
+    if current_status == "checkin" and _is_due(tournament_row["group_phase_start"], now):
+        return "group_phase"
+
     if current_status == "group_phase" and _is_due(tournament_row["bracket_start"], now):
         return "bracket"
 
@@ -70,6 +82,23 @@ async def _has_other_active_tournament(db, tournament_id: int) -> bool:  # noqa:
         (tournament_id,),
     )
     return await cursor.fetchone() is not None
+
+
+async def _load_tournament_participant_ids(db, tournament_id: int) -> list[str]:  # noqa: ANN001
+    cursor = await db.execute(
+        "SELECT DISTINCT discord_id FROM tournament_signups WHERE tournament_id = ? "
+        "UNION SELECT DISTINCT tm.discord_id FROM team_members tm "
+        "JOIN teams t ON tm.team_id = t.id WHERE t.tournament_id = ?",
+        (tournament_id, tournament_id),
+    )
+    rows = await cursor.fetchall()
+    return [str(row["discord_id"]) for row in rows if row["discord_id"]]
+
+
+async def _load_all_profile_ids(db) -> list[str]:  # noqa: ANN001
+    cursor = await db.execute("SELECT DISTINCT discord_id FROM user_profiles")
+    rows = await cursor.fetchall()
+    return [str(row["discord_id"]) for row in rows if row["discord_id"]]
 
 
 async def advance_tournament_status(
@@ -164,6 +193,31 @@ async def _advance_due_tournament(tournament_row: Any, now: datetime) -> bool:
         current_status,
         next_status,
     )
+
+    try:
+        if next_status == "checkin":
+            async with get_db() as db:
+                participant_ids = await _load_tournament_participant_ids(db, tournament_id)
+            await notify_users(
+                participant_ids,
+                "checkin",
+                f"Der Check-in für Turnier #{tournament_id} ist jetzt geöffnet.",
+            )
+        elif next_status == "registration":
+            async with get_db() as db:
+                profile_ids = await _load_all_profile_ids(db)
+            await notify_users(
+                profile_ids,
+                "tournament_news",
+                f"Die Registrierung für Turnier #{tournament_id} ist jetzt geöffnet.",
+            )
+    except Exception:
+        logger.exception(
+            "Scheduler notifications failed (tournament=%s next_status=%s)",
+            tournament_id,
+            next_status,
+        )
+
     return True
 
 

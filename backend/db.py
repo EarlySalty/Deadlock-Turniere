@@ -23,6 +23,7 @@ CREATE TABLE IF NOT EXISTS tournaments(
     bracket_start TEXT,
     bracket_format TEXT NOT NULL DEFAULT 'single_elimination',
     created_by TEXT NOT NULL,
+    lobby_settings TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -86,6 +87,7 @@ CREATE TABLE IF NOT EXISTS group_matches(
     team2_id INTEGER NOT NULL REFERENCES teams(id),
     winner_id INTEGER REFERENCES teams(id),
     status TEXT NOT NULL DEFAULT 'pending',
+    discord_channel_id TEXT,
     scheduled_at TEXT,
     played_at TEXT
 );
@@ -105,6 +107,7 @@ CREATE TABLE IF NOT EXISTS bracket_matches(
     steam_party_id TEXT,
     party_code TEXT,
     deadlock_match_id TEXT,
+    discord_channel_id TEXT,
     match_duration_s INTEGER,
     match_stats TEXT,
     scheduled_at TEXT,
@@ -187,6 +190,12 @@ CREATE TABLE IF NOT EXISTS user_profiles (
   invite_auto_accept INTEGER NOT NULL DEFAULT 0,
   notify_discord_dm INTEGER NOT NULL DEFAULT 1,
   notify_browser INTEGER NOT NULL DEFAULT 0,
+  display_name TEXT CHECK(display_name IS NULL OR LENGTH(display_name) <= 32),
+  avatar_filename TEXT,
+  notify_match_start INTEGER NOT NULL DEFAULT 1,
+  notify_checkin INTEGER NOT NULL DEFAULT 1,
+  notify_team_invite INTEGER NOT NULL DEFAULT 1,
+  notify_tournament_news INTEGER NOT NULL DEFAULT 0,
   updated_at TEXT NOT NULL
 );
 
@@ -221,6 +230,17 @@ CREATE TABLE IF NOT EXISTS team_invitations (
   expires_at TEXT,
   UNIQUE(team_id, discord_id)
 );
+
+CREATE TABLE IF NOT EXISTS discord_tasks(
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    type TEXT NOT NULL,
+    payload TEXT,
+    status TEXT DEFAULT 'PENDING',
+    result_payload TEXT,
+    error TEXT,
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT
+);
 """
 
 
@@ -228,6 +248,7 @@ async def init_db() -> None:
     """Erstellt alle Tabellen und aktiviert WAL-Mode + Foreign Keys."""
     db_path = Path(settings.DATABASE_PATH)
     db_path.parent.mkdir(parents=True, exist_ok=True)
+    Path(settings.AVATAR_DIR).mkdir(parents=True, exist_ok=True)
 
     async with aiosqlite.connect(str(db_path)) as db:
         await db.execute("PRAGMA journal_mode=WAL;")
@@ -255,6 +276,8 @@ async def _ensure_schema_upgrades(db: aiosqlite.Connection) -> None:
     await _ensure_column(db, "bracket_matches", "match_stats", "TEXT")
     await _ensure_column(db, "bracket_matches", "source_match1_id", "INTEGER")
     await _ensure_column(db, "bracket_matches", "source_match2_id", "INTEGER")
+    await _ensure_column(db, "bracket_matches", "discord_channel_id", "TEXT")
+    await _ensure_column(db, "group_matches", "discord_channel_id", "TEXT")
     await _ensure_column(db, "tournament_signups", "discord_name", "TEXT")
     await _ensure_column(
         db, "teams", "recruitment_status", "TEXT NOT NULL DEFAULT 'open'"
@@ -264,7 +287,40 @@ async def _ensure_schema_upgrades(db: aiosqlite.Connection) -> None:
     )
     await _ensure_column(db, "tournaments", "invite_window_start", "TEXT")
     await _ensure_column(db, "tournaments", "invite_window_end", "TEXT")
+    await _ensure_column(db, "tournaments", "lobby_settings", "TEXT")
     await _ensure_column(db, "tournament_signups", "invited_by_team_id", "INTEGER")
+    await _ensure_column(
+        db,
+        "user_profiles",
+        "display_name",
+        "TEXT CHECK(display_name IS NULL OR LENGTH(display_name) <= 32)",
+    )
+    await _ensure_column(db, "user_profiles", "avatar_filename", "TEXT")
+    await _ensure_column(
+        db,
+        "user_profiles",
+        "notify_match_start",
+        "INTEGER NOT NULL DEFAULT 1",
+    )
+    await _ensure_column(
+        db,
+        "user_profiles",
+        "notify_checkin",
+        "INTEGER NOT NULL DEFAULT 1",
+    )
+    await _ensure_column(
+        db,
+        "user_profiles",
+        "notify_team_invite",
+        "INTEGER NOT NULL DEFAULT 1",
+    )
+    await _ensure_column(
+        db,
+        "user_profiles",
+        "notify_tournament_news",
+        "INTEGER NOT NULL DEFAULT 0",
+    )
+    await _ensure_column(db, "tournaments", "checkin_start", "TEXT")
 
 
 async def _ensure_column(

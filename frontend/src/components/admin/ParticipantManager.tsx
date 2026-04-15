@@ -47,16 +47,16 @@ interface ParticipantManagerProps {
 }
 
 function playerLabel(member: Pick<TeamMember, 'discord_id' | 'discord_name'>): string {
-  return member.discord_name ?? member.discord_id
+  return member.discord_name?.trim() || 'Unbekannt'
 }
 
 function captainLabel(team: Team): string {
   const captain = team.members.find((member) => member.discord_id === team.captain_discord_id)
-  return captain ? playerLabel(captain) : team.captain_discord_id || 'noch keiner gesetzt'
+  return captain ? playerLabel(captain) : 'noch keiner gesetzt'
 }
 
 function signupName(signup: TournamentSignup): string {
-  return signup.discord_name?.trim() || signup.discord_id
+  return signup.discord_name?.trim() || 'Unbekannt'
 }
 
 export default function ParticipantManager({
@@ -92,6 +92,7 @@ export default function ParticipantManager({
     [signups]
   )
   const canAddReplacementPlayers = user?.is_admin === true
+  const showDiscordIds = user?.is_admin === true
 
   const error =
     addMemberMutation.error ||
@@ -283,7 +284,7 @@ export default function ParticipantManager({
                 <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
                   <div className="space-y-1">
                     <div className="font-medium text-foreground">{signupName(signup)}</div>
-                    <div className="text-xs text-muted">{signup.discord_id}</div>
+                    {showDiscordIds && <div className="text-xs text-muted">{signup.discord_id}</div>}
                     <div className="text-xs text-muted">
                       {signup.rank ? `${signup.rank} · Score ${signup.rank_score}` : `Score ${signup.rank_score}`}
                     </div>
@@ -442,7 +443,7 @@ export default function ParticipantManager({
                         <div className="flex items-start justify-between gap-3">
                           <div>
                             <div className="font-medium text-foreground">{playerLabel(member)}</div>
-                            <div className="text-xs text-muted">{member.discord_id}</div>
+                            {showDiscordIds && <div className="text-xs text-muted">{member.discord_id}</div>}
                             <div className="text-xs text-muted">
                               {member.role === 'captain' ? 'Captain' : 'Mitglied'}
                               {member.rank ? ` · ${member.rank}` : ''}

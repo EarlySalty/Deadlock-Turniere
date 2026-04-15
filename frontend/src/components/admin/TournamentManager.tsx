@@ -52,7 +52,6 @@ export default function TournamentManager({
   matchCount,
 }: TournamentManagerProps) {
   const detailsUpdateMutation = useUpdateTournament()
-  const scheduleUpdateMutation = useUpdateTournament()
   const advanceMutation = useAdvanceTournament()
   const openCheckinMutation = useOpenCheckin(tournament.id)
   const assignMutation = useAssignRandomTeams()
@@ -67,20 +66,15 @@ export default function TournamentManager({
     bracket_format: tournament.bracket_format,
     registration_start: toInputDateTime(tournament.registration_start),
     registration_end: toInputDateTime(tournament.registration_end),
+    checkin_start: toInputDateTime(tournament.checkin_start ?? null),
     group_phase_start: toInputDateTime(tournament.group_phase_start),
     bracket_start: toInputDateTime(tournament.bracket_start),
   })
-  const [scheduleForm, setScheduleForm] = useState({
-    registration_end: toInputDateTime(tournament.registration_end),
-    group_phase_start: toInputDateTime(tournament.group_phase_start),
-  })
   const [successMessage, setSuccessMessage] = useState('')
-  const [scheduleSuccessMessage, setScheduleSuccessMessage] = useState('')
 
   const action = STATUS_ACTIONS[tournament.status]
   const isLoading =
     detailsUpdateMutation.isPending ||
-    scheduleUpdateMutation.isPending ||
     advanceMutation.isPending ||
     openCheckinMutation.isPending ||
     assignMutation.isPending ||
@@ -112,43 +106,13 @@ export default function TournamentManager({
       bracket_format: form.bracket_format,
       registration_start: form.registration_start || undefined,
       registration_end: form.registration_end || undefined,
+      checkin_start: form.checkin_start || undefined,
       group_phase_start: form.group_phase_start || undefined,
       bracket_start: form.bracket_start || undefined,
     }
     detailsUpdateMutation.mutate(
       { id: tournament.id, data: payload },
       { onSuccess: () => setSuccessMessage('Turnierdaten gespeichert.') }
-    )
-  }
-
-  const handleScheduleChange = (
-    key: keyof typeof scheduleForm,
-    value: string,
-  ) => {
-    setScheduleSuccessMessage('')
-    setScheduleForm((current) => ({ ...current, [key]: value }))
-  }
-
-  const handleSaveSchedule = () => {
-    setScheduleSuccessMessage('')
-    scheduleUpdateMutation.mutate(
-      {
-        id: tournament.id,
-        data: {
-          registration_end: scheduleForm.registration_end || undefined,
-          group_phase_start: scheduleForm.group_phase_start || undefined,
-        },
-      },
-      {
-        onSuccess: () => {
-          setForm((current) => ({
-            ...current,
-            registration_end: scheduleForm.registration_end,
-            group_phase_start: scheduleForm.group_phase_start,
-          }))
-          setScheduleSuccessMessage('Zeitplan aktualisiert.')
-        },
-      },
     )
   }
 
@@ -318,6 +282,21 @@ export default function TournamentManager({
           </div>
 
           <div>
+            <label htmlFor="form-checkin-start" className="mb-1.5 block text-sm font-medium text-foreground">
+              Check-in Start
+            </label>
+            <DateTimeInput
+              id="form-checkin-start"
+              value={form.checkin_start}
+              onChange={(event) => handleChange('checkin_start', event.target.value)}
+              className="w-full rounded-lg border border-border bg-background px-3 py-2 text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
+            />
+            <p className="mt-1 text-xs text-muted">
+              Falls leer: Check-in startet automatisch mit Anmeldeschluss.
+            </p>
+          </div>
+
+          <div>
             <label htmlFor="admin-group-start" className="mb-1.5 block text-sm font-medium text-foreground">
               Gruppenphase Start
             </label>
@@ -342,73 +321,6 @@ export default function TournamentManager({
           </div>
         </div>
       </div>
-
-      {['registration', 'checkin', 'group_phase'].includes(tournament.status) && (
-        <div className="rounded-xl border border-primary/20 bg-primary/5 p-5 space-y-4">
-          <div>
-            <h3 className="text-base font-semibold text-foreground">Zeitplan anpassen</h3>
-            <p className="mt-1 text-sm text-muted">
-              Anmeldung verlängern oder den Start der Gruppenphase direkt verschieben.
-            </p>
-          </div>
-
-          <div className="grid gap-4 md:grid-cols-2">
-            <div>
-              <label htmlFor="quick-registration-end" className="mb-1.5 block text-sm font-medium text-foreground">
-                Anmeldung Ende
-              </label>
-              <DateTimeInput
-                id="quick-registration-end"
-                value={scheduleForm.registration_end}
-                onChange={(event) => handleScheduleChange('registration_end', event.target.value)}
-                className="w-full rounded-lg border border-border bg-background px-3 py-2 text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
-              />
-            </div>
-
-            <div>
-              <label htmlFor="quick-group-start" className="mb-1.5 block text-sm font-medium text-foreground">
-                Gruppenphase Start
-              </label>
-              <DateTimeInput
-                id="quick-group-start"
-                value={scheduleForm.group_phase_start}
-                onChange={(event) => handleScheduleChange('group_phase_start', event.target.value)}
-                className="w-full rounded-lg border border-border bg-background px-3 py-2 text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
-              />
-            </div>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-3">
-            <Button
-              variant="primary"
-              size="sm"
-              disabled={isLoading}
-              onClick={handleSaveSchedule}
-            >
-              <CalendarRange size={14} />
-              {scheduleUpdateMutation.isPending ? 'Speichert...' : 'Zeitplan speichern'}
-            </Button>
-
-            {scheduleSuccessMessage && (
-              <div className="flex items-center gap-2 rounded-lg border border-green-500/20 bg-green-500/10 px-3 py-2 text-sm text-green-400">
-                <CheckCircle2 size={16} />
-                <span>{scheduleSuccessMessage}</span>
-              </div>
-            )}
-
-            {scheduleUpdateMutation.error && (
-              <div className="flex items-center gap-2 rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-2 text-sm text-red-400">
-                <AlertCircle size={16} />
-                <span>
-                  {scheduleUpdateMutation.error instanceof Error
-                    ? scheduleUpdateMutation.error.message
-                    : 'Zeitplan konnte nicht aktualisiert werden'}
-                </span>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
 
       <div className="flex flex-wrap gap-2">
         <Button

@@ -1,10 +1,10 @@
-import { useState } from 'react'
+import { useRef, useState, type ChangeEvent } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import {
-  User, Trophy, Swords, Target, Star, Edit2, Check, X, Bell, UserCheck,
+  User, Trophy, Swords, Target, Star, Edit2, Check, X, Bell, UserCheck, Camera,
 } from 'lucide-react'
 import {
-  usePlayerProfile, useMyProfile, useUpdateMyProfile, useConsent,
+  usePlayerProfile, useMyProfile, useUpdateMyProfile, useConsent, useUploadProfileAvatar,
 } from '@/hooks/useTournament'
 import { useAuth } from '@/hooks/useAuth'
 import Card from '@/components/ui/Card'
@@ -36,6 +36,10 @@ export default function PlayerProfile() {
   const [bioValue, setBioValue] = useState('')
   const [showSettings, setShowSettings] = useState(false)
   const [settingsSaved, setSettingsSaved] = useState(false)
+  const uploadAvatar = useUploadProfileAvatar()
+  const [editName, setEditName] = useState(false)
+  const [nameValue, setNameValue] = useState('')
+  const avatarInputRef = useRef<HTMLInputElement>(null)
 
   if (!username) {
     return <Card className="text-center py-10"><p className="text-muted">Kein Benutzername angegeben.</p></Card>
@@ -64,6 +68,23 @@ export default function PlayerProfile() {
     setEditBio(true)
   }
 
+  const handleNameEdit = () => {
+    setNameValue(myProfile?.display_name ?? profile.discord_name ?? '')
+    setEditName(true)
+  }
+
+  const handleNameSave = () => {
+    updateProfile.mutate({ display_name: nameValue.trim() || undefined }, {
+      onSuccess: () => setEditName(false),
+    })
+  }
+
+  const handleAvatarChange = (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    uploadAvatar.mutate(file)
+  }
+
   const handleSettingsSave = (updates: { invite_auto_accept?: boolean; notify_discord_dm?: boolean }) => {
     updateProfile.mutate(updates, {
       onSuccess: () => {
@@ -73,26 +94,77 @@ export default function PlayerProfile() {
     })
   }
 
-  const avatarUrl = profile.discord_avatar ?? null
+  const avatarUrl = isOwnProfile && myProfile?.avatar_filename
+    ? `/turnier/api/avatars/${myProfile.discord_id}`
+    : (profile.discord_avatar ?? null)
 
   return (
     <div className="space-y-6 max-w-2xl mx-auto">
       {/* Header */}
       <Card className="p-6">
         <div className="flex items-start gap-4">
-          {avatarUrl ? (
-            <img
-              src={avatarUrl}
-              alt={profile.discord_name}
-              className="w-16 h-16 rounded-full border-2 border-border flex-shrink-0"
-            />
-          ) : (
-            <div className="w-16 h-16 rounded-full border-2 border-border bg-background/60 flex items-center justify-center flex-shrink-0">
-              <User size={28} className="text-muted" />
-            </div>
-          )}
+          <div className="relative flex-shrink-0">
+            {avatarUrl ? (
+              <img
+                src={avatarUrl}
+                alt={profile.discord_name}
+                className="w-16 h-16 rounded-full border-2 border-border"
+              />
+            ) : (
+              <div className="w-16 h-16 rounded-full border-2 border-border bg-background/60 flex items-center justify-center">
+                <User size={28} className="text-muted" />
+              </div>
+            )}
+            {isOwnProfile && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => avatarInputRef.current?.click()}
+                  disabled={uploadAvatar.isPending}
+                  className="absolute inset-0 rounded-full flex items-center justify-center bg-black/50 opacity-0 hover:opacity-100 transition-opacity"
+                  title="Profilbild ändern"
+                >
+                  <Camera size={18} className="text-white" />
+                </button>
+                <input
+                  ref={avatarInputRef}
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp"
+                  className="hidden"
+                  onChange={handleAvatarChange}
+                />
+              </>
+            )}
+          </div>
           <div className="flex-1 min-w-0">
-            <h1 className="text-xl font-bold text-foreground truncate">{profile.discord_name}</h1>
+            {editName && isOwnProfile ? (
+              <div className="flex items-center gap-2">
+                <input
+                  value={nameValue}
+                  onChange={(e) => setNameValue(e.target.value)}
+                  maxLength={32}
+                  className="bg-background border border-border rounded px-2 py-1 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 w-40"
+                  autoFocus
+                />
+                <Button variant="ghost" size="sm" onClick={() => setEditName(false)}>
+                  <X size={13} />
+                </Button>
+                <Button variant="primary" size="sm" onClick={handleNameSave} disabled={updateProfile.isPending}>
+                  <Check size={13} />
+                </Button>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2">
+                <h1 className="text-xl font-bold text-foreground truncate">
+                  {(isOwnProfile && myProfile?.display_name) ? myProfile.display_name : profile.discord_name}
+                </h1>
+                {isOwnProfile && (
+                  <button type="button" onClick={handleNameEdit} className="text-muted hover:text-foreground transition-colors flex-shrink-0">
+                    <Edit2 size={13} />
+                  </button>
+                )}
+              </div>
+            )}
             {profile.rank && (
               <span className="inline-block mt-1 text-xs px-2 py-0.5 rounded-full bg-primary/15 text-primary font-medium">
                 {profile.rank}
