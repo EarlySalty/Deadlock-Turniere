@@ -733,15 +733,9 @@ async def delete_tournament(
     tournament_id: int,
     user: UserSession = Depends(require_admin),
 ) -> dict:
-    """Turnier löschen (Admin only). Nur Draft- oder abgeschlossene Turniere."""
+    """Turnier löschen (Admin only)."""
     async with get_db() as db:
         existing = await _load_tournament_or_404(db, tournament_id)
-
-        if existing["status"] not in {"draft", "completed", "archived"}:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Nur Draft-, abgeschlossene oder archivierte Turniere können gelöscht werden",
-            )
 
         await _delete_tournament_tree(db, tournament_id)
 
