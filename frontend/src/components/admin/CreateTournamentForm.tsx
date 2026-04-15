@@ -5,21 +5,146 @@ import Button from '@/components/ui/Button'
 import DateTimeInput from '@/components/ui/DateTimeInput'
 import { useCreateTournament } from '@/hooks/useTournament'
 import type { BracketFormat, InviteMode, LobbySettingsPreset } from '@/types/tournament'
-import { Trophy, AlertCircle, CheckCircle } from 'lucide-react'
+import { Trophy, AlertCircle, CheckCircle, SlidersHorizontal } from 'lucide-react'
+
+// ---------------------------------------------------------------------------
+// Preset-Metadaten (spiegeln das Backend)
+// ---------------------------------------------------------------------------
 
 const PRESET_LABELS: Record<LobbySettingsPreset, string> = {
-  standard: 'Standard',
-  fast_mode: 'Fast Mode (schnelle Cooldowns)',
+  standard:    'Standard',
+  fast_mode:   'Fast Mode (schnelle Cooldowns)',
   high_damage: 'High Damage (2× DPS)',
   low_gravity: 'Low Gravity (Mondschwerchkraft)',
-  speed_mode: 'Speed Mode (2× Bewegung + schnelle Cooldowns)',
-  glass_cannon: 'Glass Cannon (5× Schaden, jeder stirbt sofort)',
-  rich_start: 'Rich Start (10.000 Gold beim Start)',
-  chaos_mode: 'Chaos Mode (weniger Schwerkraft, schneller, mehr Schaden, viel Gold)',
-  all_same_hero: 'All Same Hero (Duplikate erlaubt)',
-  immortal: 'Immortal (kein Heldentod)',
-  custom: 'Custom (manuelles JSON)',
+  speed_mode:  'Speed Mode (2× Bewegung + schnelle Cooldowns)',
+  glass_cannon:'Glass Cannon (5× Schaden, jeder stirbt sofort)',
+  rich_start:  'Rich Start (10.000 Gold beim Start)',
+  chaos_mode:  'Chaos Mode (weniger Schwerkraft, schneller, mehr Schaden, viel Gold)',
+  all_same_hero:'All Same Hero (Duplikate erlaubt)',
+  immortal:    'Immortal (kein Heldentod)',
+  custom:      'Custom (manuelles JSON)',
 }
+
+// Basis-Convars je Preset — muss mit dem Backend übereinstimmen
+const PRESET_BASE_CONVARS: Record<LobbySettingsPreset, Record<string, number>> = {
+  standard:    {},
+  fast_mode:   { citadel_enable_fast_cooldowns: 1 },
+  high_damage: { citadel_dps_multiplier: 2 },
+  low_gravity: { sv_gravity: 200 },
+  speed_mode:  { citadel_player_move_speed_scale: 2.0, citadel_enable_fast_cooldowns: 1 },
+  glass_cannon:{ citadel_weapon_damage_multiplier: 5, citadel_dps_multiplier: 3, citadel_melee_damage_scale: 3.0 },
+  rich_start:  { citadel_player_starting_gold: 10000 },
+  chaos_mode:  { sv_gravity: 400, citadel_player_move_speed_scale: 1.5, citadel_weapon_damage_multiplier: 2, citadel_enable_fast_cooldowns: 1, citadel_player_starting_gold: 5000, citadel_trooper_gold_reward: 200 },
+  all_same_hero:{ citadel_allow_duplicate_heroes: 1 },
+  immortal:    { citadel_enable_no_hero_death: 1 },
+  custom:      {},
+}
+
+// ---------------------------------------------------------------------------
+// Konfigurierbare Regler (alle OFF by default)
+// ---------------------------------------------------------------------------
+
+interface ConvarSliderConfig {
+  key: string
+  label: string
+  min: number
+  max: number
+  step: number
+  defaultValue: number
+  unit: string
+  hint: string
+}
+
+const CONVAR_SLIDERS: ConvarSliderConfig[] = [
+  {
+    key: 'sv_gravity',
+    label: 'Schwerkraft',
+    min: 50,
+    max: 800,
+    step: 10,
+    defaultValue: 800,
+    unit: '',
+    hint: 'Standard: 800 — niedriger = höhere Sprünge, mehr Luftzeit',
+  },
+  {
+    key: 'host_timescale',
+    label: 'Spielgeschwindigkeit',
+    min: 0.1,
+    max: 3.0,
+    step: 0.1,
+    defaultValue: 1.0,
+    unit: '×',
+    hint: 'Standard: 1.0 — unter 1 = Zeitlupe, über 1 = Zeitraffer',
+  },
+  {
+    key: 'citadel_player_move_speed_scale',
+    label: 'Bewegungsgeschwindigkeit',
+    min: 0.5,
+    max: 3.0,
+    step: 0.1,
+    defaultValue: 1.0,
+    unit: '×',
+    hint: 'Standard: 1.0 — gilt für alle Spieler',
+  },
+  {
+    key: 'citadel_weapon_damage_multiplier',
+    label: 'Waffenschaden',
+    min: 0.5,
+    max: 10,
+    step: 0.5,
+    defaultValue: 1.0,
+    unit: '×',
+    hint: 'Standard: 1.0',
+  },
+  {
+    key: 'citadel_dps_multiplier',
+    label: 'DPS-Multiplikator',
+    min: 0.5,
+    max: 5,
+    step: 0.5,
+    defaultValue: 1.0,
+    unit: '×',
+    hint: 'Standard: 1.0',
+  },
+]
+
+interface SliderState {
+  enabled: boolean
+  value: number
+}
+
+function initSliders(): Record<string, SliderState> {
+  return Object.fromEntries(
+    CONVAR_SLIDERS.map((c) => [c.key, { enabled: false, value: c.defaultValue }])
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Hilfsfunktion: Preset-Basis + aktive Slider zusammenführen
+// ---------------------------------------------------------------------------
+
+function buildFinalConvars(
+  preset: LobbySettingsPreset,
+  customJsonParsed: Record<string, unknown> | undefined,
+  sliders: Record<string, SliderState>,
+): Record<string, unknown> | null {
+  const activeSliderEntries = CONVAR_SLIDERS
+    .filter((c) => sliders[c.key]?.enabled)
+    .map((c) => [c.key, sliders[c.key].value])
+
+  if (activeSliderEntries.length === 0) return null
+
+  const base: Record<string, unknown> =
+    preset === 'custom'
+      ? { ...(customJsonParsed ?? {}) }
+      : { ...PRESET_BASE_CONVARS[preset] }
+
+  return { ...base, ...Object.fromEntries(activeSliderEntries) }
+}
+
+// ---------------------------------------------------------------------------
+// Formular
+// ---------------------------------------------------------------------------
 
 export default function CreateTournamentForm() {
   const [name, setName] = useState('')
@@ -34,15 +159,25 @@ export default function CreateTournamentForm() {
   const [lobbyPreset, setLobbyPreset] = useState<LobbySettingsPreset>('standard')
   const [customJson, setCustomJson] = useState('')
   const [customJsonError, setCustomJsonError] = useState('')
+  const [sliders, setSliders] = useState<Record<string, SliderState>>(initSliders)
   const [successMsg, setSuccessMsg] = useState('')
 
   const createMutation = useCreateTournament()
+
+  const hasActiveSliders = CONVAR_SLIDERS.some((c) => sliders[c.key]?.enabled)
+
+  const setSliderEnabled = (key: string, enabled: boolean) =>
+    setSliders((prev) => ({ ...prev, [key]: { ...prev[key], enabled } }))
+
+  const setSliderValue = (key: string, value: number) =>
+    setSliders((prev) => ({ ...prev, [key]: { ...prev[key], value } }))
 
   const handleSubmit = (e: FormEvent) => {
     e.preventDefault()
     setSuccessMsg('')
     setCustomJsonError('')
 
+    // Custom-JSON parsen (falls Preset = custom)
     let parsedCustom: Record<string, unknown> | undefined
     if (lobbyPreset === 'custom') {
       try {
@@ -57,6 +192,12 @@ export default function CreateTournamentForm() {
       }
     }
 
+    // Wenn Regler aktiv: Preset-Basis + Regler zusammenführen → 'custom' senden
+    const mergedConvars = buildFinalConvars(lobbyPreset, parsedCustom, sliders)
+    const finalPreset: LobbySettingsPreset = mergedConvars ? 'custom' : lobbyPreset
+    const finalSettings: Record<string, unknown> | undefined =
+      mergedConvars ?? (lobbyPreset === 'custom' ? parsedCustom : undefined)
+
     createMutation.mutate(
       {
         name: name.trim(),
@@ -68,8 +209,8 @@ export default function CreateTournamentForm() {
         invite_mode: inviteMode,
         invite_window_start: inviteMode === 'window' ? inviteWindowStart || undefined : undefined,
         invite_window_end: inviteMode === 'window' ? inviteWindowEnd || undefined : undefined,
-        lobby_settings_preset: lobbyPreset,
-        lobby_settings: lobbyPreset === 'custom' ? parsedCustom : undefined,
+        lobby_settings_preset: finalPreset,
+        lobby_settings: finalSettings,
       },
       {
         onSuccess: (tournament) => {
@@ -85,6 +226,7 @@ export default function CreateTournamentForm() {
           setInviteWindowEnd('')
           setLobbyPreset('standard')
           setCustomJson('')
+          setSliders(initSliders())
         },
       }
     )
@@ -142,9 +284,7 @@ export default function CreateTournamentForm() {
               className="w-full bg-background border border-border rounded-lg px-3 py-2 text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
             >
               {[2, 3, 4, 5, 6].map((n) => (
-                <option key={n} value={n}>
-                  {n} Spieler
-                </option>
+                <option key={n} value={n}>{n} Spieler</option>
               ))}
             </select>
           </div>
@@ -167,7 +307,6 @@ export default function CreateTournamentForm() {
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          {/* Anmeldung Start */}
           <div>
             <label htmlFor="reg-start" className="block text-sm font-medium text-foreground mb-1.5">
               Anmeldung Start
@@ -179,8 +318,6 @@ export default function CreateTournamentForm() {
               className="w-full bg-background border border-border rounded-lg px-3 py-2 text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
             />
           </div>
-
-          {/* Anmeldung Ende */}
           <div>
             <label htmlFor="reg-end" className="block text-sm font-medium text-foreground mb-1.5">
               Anmeldung Ende
@@ -243,7 +380,7 @@ export default function CreateTournamentForm() {
           </div>
         )}
 
-        {/* Lobby-Modus */}
+        {/* Match-Modus Preset */}
         <div>
           <label htmlFor="lobby-preset" className="block text-sm font-medium text-foreground mb-1.5">
             Match-Modus
@@ -261,6 +398,11 @@ export default function CreateTournamentForm() {
               <option key={key} value={key}>{PRESET_LABELS[key]}</option>
             ))}
           </select>
+          {hasActiveSliders && lobbyPreset !== 'custom' && (
+            <p className="mt-1 text-xs text-muted">
+              Aktive Regler werden mit den Preset-Werten zusammengeführt und als Custom gespeichert.
+            </p>
+          )}
         </div>
 
         {lobbyPreset === 'custom' && (
@@ -279,6 +421,87 @@ export default function CreateTournamentForm() {
             {customJsonError && (
               <p className="mt-1 text-xs text-red-400">{customJsonError}</p>
             )}
+          </div>
+        )}
+
+        {/* Regler */}
+        <div className="border border-border rounded-lg overflow-hidden">
+          <div className="flex items-center gap-2 px-4 py-3 bg-surface border-b border-border">
+            <SlidersHorizontal size={15} className="text-primary" />
+            <span className="text-sm font-medium text-foreground">Erweiterte Regler</span>
+            <span className="ml-auto text-xs text-muted">überschreiben Preset-Werte</span>
+          </div>
+          <div className="divide-y divide-border">
+            {CONVAR_SLIDERS.map((cfg) => {
+              const state = sliders[cfg.key]
+              return (
+                <div key={cfg.key} className="px-4 py-3 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      {/* Toggle */}
+                      <button
+                        type="button"
+                        onClick={() => setSliderEnabled(cfg.key, !state.enabled)}
+                        className={`relative w-9 h-5 rounded-full transition-colors ${
+                          state.enabled ? 'bg-primary' : 'bg-border'
+                        }`}
+                      >
+                        <span
+                          className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${
+                            state.enabled ? 'translate-x-4' : 'translate-x-0'
+                          }`}
+                        />
+                      </button>
+                      <span className={`text-sm font-medium ${state.enabled ? 'text-foreground' : 'text-muted'}`}>
+                        {cfg.label}
+                      </span>
+                    </div>
+                    {state.enabled && (
+                      <span className="text-sm font-mono font-semibold text-primary">
+                        {state.value}{cfg.unit}
+                      </span>
+                    )}
+                  </div>
+
+                  {state.enabled && (
+                    <div className="pl-11 space-y-1">
+                      <input
+                        type="range"
+                        min={cfg.min}
+                        max={cfg.max}
+                        step={cfg.step}
+                        value={state.value}
+                        onChange={(e) => setSliderValue(cfg.key, parseFloat(e.target.value))}
+                        className="w-full accent-primary"
+                      />
+                      <div className="flex justify-between text-xs text-muted">
+                        <span>{cfg.min}{cfg.unit}</span>
+                        <span className="text-center text-muted/70">{cfg.hint}</span>
+                        <span>{cfg.max}{cfg.unit}</span>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        </div>
+
+        {/* Vorschau der aktiven Convars */}
+        {hasActiveSliders && (
+          <div className="bg-surface border border-border rounded-lg p-3">
+            <p className="text-xs font-medium text-muted mb-1.5">Gesendete Convars (Vorschau)</p>
+            <pre className="text-xs text-foreground font-mono overflow-x-auto">
+              {JSON.stringify(
+                buildFinalConvars(
+                  lobbyPreset,
+                  (() => { try { return JSON.parse(customJson) } catch { return undefined } })(),
+                  sliders,
+                ) ?? PRESET_BASE_CONVARS[lobbyPreset],
+                null,
+                2,
+              )}
+            </pre>
           </div>
         )}
 
@@ -302,7 +525,6 @@ export default function CreateTournamentForm() {
           </div>
         )}
 
-        {/* Submit */}
         <Button
           type="submit"
           variant="primary"
