@@ -10,6 +10,7 @@ import random
 from db import get_db
 from rank_reader import get_player_rank_profile
 from tournament.seeding import rank_score as calc_rank_score
+from tournament.models import TournamentMode
 
 TEAM_NAMES = [
     "Alpha", "Bravo", "Charlie", "Delta", "Echo", "Foxtrot", "Golf", "Hotel",
@@ -24,6 +25,30 @@ VALID_STATUS_TRANSITIONS: dict[str, list[str]] = {
     "bracket": ["completed"],
     "completed": ["archived"],
 }
+
+# Auto Tournament Mode: >= 12 Teams = Group Stage, < 12 Teams = Bracket Only
+AUTO_GROUP_STAGE_THRESHOLD = 12
+
+
+def determine_tournament_mode(
+    team_count: int,
+    force_mode: TournamentMode | None = None,
+) -> TournamentMode:
+    """Bestimmt automatisch den Turnier-Modus basierend auf Team-Anzahl.
+
+    Args:
+        team_count: Anzahl der Teams im Turnier
+        force_mode: Admin-Override (ignoriert team_count)
+
+    Returns:
+        TournamentMode: group_stage oder bracket_only
+    """
+    if force_mode is not None:
+        return force_mode
+
+    if team_count >= AUTO_GROUP_STAGE_THRESHOLD:
+        return TournamentMode.group_stage
+    return TournamentMode.bracket_only
 
 
 def get_valid_status_transitions() -> dict[str, list[str]]:

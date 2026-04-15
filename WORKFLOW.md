@@ -2,7 +2,41 @@
 
 ---
 
-## Neue Aufgabe (2026-04-15): Profil-Upload, Namensänderung, Check-in-Start, Zeitplan-Deduplizierung
+## Neue Aufgabe (2026-04-15): Auto Tournament Mode Management
+
+### Ziel
+Bot entscheidet automatisch, ob Gruppen-Phase oder nur Bracket basierend auf Team-Anzahl:
+- **>= 12 Teams**: Group Stage + Bracket (wie EM/WM)
+- **< 12 Teams**: Nur Bracket (schnell & einfach)
+- **Admin-Override**: Admins können manuell entscheiden
+
+Zusätzlich: Hilfe-Dokumentation für Turnier-Modi.
+
+### Status (2026-04-15)
+→ **Implementierung fertig** — Syntaktisch korrekt, Review & Commit ausstehend
+
+### Implementierungs-Schritte
+1. [x] `models.py`: `TournamentMode` Enum + `force_tournament_mode` Feld in Create/Update
+2. [x] `engine.py`: `determine_tournament_mode(team_count, force_mode)` Funktion
+3. [x] `scheduler.py`: Auto-Logik in `_get_due_next_status()` — wenn bracket_only → skip group_phase
+4. [x] `db.py`: `tournament_mode` Spalte hinzugefügt via `_ensure_schema_upgrades()`
+5. [x] `admin_routes.py`: Override-Flag in Create/Update, Mode-Berechnung, Validierung
+6. [x] Hilfe-Datei `HELP_TOURNAMENT_MODES.md` erstellt (Erklärungen, Unterschiede, Ablauf, FAQ)
+7. [ ] Frontend: Info-Text für Turnier-Modus (optional für nächste Phase)
+8. [ ] Review, Test, Commit
+
+### Was wurde implementiert
+- **Auto-Logic**: >= 12 Teams → group_stage (Standard EM/WM), < 12 Teams → bracket_only
+- **Admin-Override**: `force_tournament_mode` im TournamentCreate/Update (nur in Draft-Phase änderbar)
+- **Scheduler-Integration**: Wenn bracket_only, skip group_phase und springe direkt zu bracket
+- **Dokumentation**: Ausführliche Hilfe-Datei mit Beispielen, Vergleichen und FAQ
+
+### Syntax-Check
+✅ Alle Python-Dateien syntaktisch korrekt (models.py, engine.py, scheduler.py, db.py, admin_routes.py)
+
+---
+
+## Alte Aufgabe (2026-04-15): Profil-Upload, Namensänderung, Check-in-Start, Zeitplan-Deduplizierung
 
 ### Ziel
 1. Profilbild-Upload und Anzeigename-Änderung im Frontend aktivieren (Backend bereits fertig)

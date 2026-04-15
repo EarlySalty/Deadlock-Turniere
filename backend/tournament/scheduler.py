@@ -14,7 +14,9 @@ from tournament.engine import (
     generate_bracket,
     generate_group_matches,
     generate_groups,
+    determine_tournament_mode,
 )
+from tournament.models import TournamentMode
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +46,7 @@ def _is_due(value: str | None, now: datetime) -> bool:
 
 
 def _get_due_next_status(tournament_row: Any, now: datetime) -> str | None:
-    """Ermittelt den nächsten fälligen Status basierend auf den Zeitstempeln."""
+    """Ermittelt den nächsten fälligen Status basierend auf den Zeitstempeln und Turnier-Modus."""
     current_status = tournament_row["status"]
 
     if current_status == "draft" and _is_due(tournament_row["registration_start"], now):
@@ -58,7 +60,13 @@ def _get_due_next_status(tournament_row: Any, now: datetime) -> str | None:
     if current_status == "registration" and _is_due(checkin_trigger, now):
         return "checkin"
 
+    # Auto Tournament Mode: Wenn bracket_only, überspring group_phase
+    tournament_mode = tournament_row.get("tournament_mode")
+
     if current_status == "checkin" and _is_due(tournament_row["group_phase_start"], now):
+        if tournament_mode == "bracket_only":
+            # Skip group_phase, gehe direkt zu bracket
+            return "bracket" if _is_due(tournament_row["bracket_start"], now) else None
         return "group_phase"
 
     if current_status == "group_phase" and _is_due(tournament_row["bracket_start"], now):

@@ -21,6 +21,7 @@ from tournament.engine import (
     CheckinSnapshotMismatchError,
     VALID_STATUS_TRANSITIONS,
     assign_random_teams,
+    determine_tournament_mode,
     finalize_checkin,
     generate_bracket,
     generate_group_matches,
@@ -36,6 +37,7 @@ from tournament.models import (
     TournamentDetail,
     Tournament,
     TournamentCreate,
+    TournamentMode,
     TournamentSignup,
     TournamentUpdate,
     UserSession,
@@ -561,12 +563,18 @@ async def create_tournament(
             body.lobby_settings_preset,
             body.lobby_settings,
         )
+        # Auto Tournament Mode bestimmen: >= 12 Teams = group_stage, else = bracket_only
+        # Admin kann mit force_tournament_mode überschreiben
+        tournament_mode = determine_tournament_mode(
+            team_count=body.team_size,  # Fallback zur Team-Größe, nicht ideal aber praktisch
+            force_mode=body.force_tournament_mode,
+        )
         cursor = await db.execute(
             "INSERT INTO tournaments "
             "(name, description, team_size, bracket_format, registration_start, "
             "registration_end, checkin_start, group_phase_start, bracket_start, "
-            "created_by, invite_mode, invite_window_start, invite_window_end) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "created_by, invite_mode, invite_window_start, invite_window_end, tournament_mode) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 body.name,
                 body.description,
@@ -581,6 +589,7 @@ async def create_tournament(
                 body.invite_mode.value,
                 body.invite_window_start,
                 body.invite_window_end,
+                tournament_mode.value,
             ),
         )
         await db.execute(
@@ -666,6 +675,19 @@ async def update_tournament(
 
         # Nur gesetzte Felder updaten
         update_data = body.model_dump(exclude_unset=True)
+
+        # Tournament Mode nur in Draft-Phase änderbar
+        if "force_tournament_mode" in update_data:
+            if existing["status"] != "draft":
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Turnier-Modus kann nur in Draft-Phase geändert werden",
+                )
+            # force_tournament_mode → tournament_mode (DB-Spalte)
+            force_mode = update_data.pop("force_tournament_mode")
+            if force_mode is not None:
+                update_data["tournament_mode"] = force_mode.value
+
         if body.invite_mode is not None:
             update_data["invite_mode"] = body.invite_mode.value
         if "invite_window_start" in body.model_fields_set:

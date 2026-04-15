@@ -39,6 +39,12 @@ class BracketFormat(str, Enum):
     double_elimination = "double_elimination"
 
 
+class TournamentMode(str, Enum):
+    """Automatisch bestimmter Turnier-Modus basierend auf Team-Anzahl."""
+    group_stage = "group_stage"  # Group Phase + Bracket (>= 12 Teams)
+    bracket_only = "bracket_only"  # Nur Bracket (< 12 Teams)
+
+
 class LobbySettingsPreset(str, Enum):
     standard = "standard"
     fast_mode = "fast_mode"
@@ -116,6 +122,7 @@ class TournamentCreate(BaseModel):
     invite_window_end: Optional[str] = None
     lobby_settings_preset: LobbySettingsPreset = LobbySettingsPreset.standard
     lobby_settings: Optional[dict[str, Any]] = None
+    force_tournament_mode: Optional[TournamentMode] = None  # Admin-Override: erzwingt group_stage oder bracket_only
 
 
 class TournamentUpdate(BaseModel):
@@ -134,6 +141,7 @@ class TournamentUpdate(BaseModel):
     invite_window_end: Optional[str] = None
     lobby_settings_preset: Optional[LobbySettingsPreset] = None
     lobby_settings: Optional[dict[str, Any]] = None
+    force_tournament_mode: Optional[TournamentMode] = None  # Admin-Override: erzwingt group_stage oder bracket_only
 
 
 class TournamentSignup(BaseModel):
@@ -160,6 +168,7 @@ class Tournament(BaseModel):
     group_phase_start: Optional[str] = None
     bracket_start: Optional[str] = None
     bracket_format: str = "single_elimination"
+    tournament_mode: TournamentMode  # Auto-determined oder admin-override
     created_by: str
     created_at: str
     updated_at: str
@@ -304,6 +313,7 @@ class TournamentDetailPublic(BaseModel):
     group_phase_start: Optional[str] = None
     bracket_start: Optional[str] = None
     bracket_format: str = "single_elimination"
+    tournament_mode: TournamentMode  # Auto-determined oder admin-override
     created_by: str
     created_at: str
     updated_at: str

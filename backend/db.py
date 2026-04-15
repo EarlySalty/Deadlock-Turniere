@@ -321,6 +321,9 @@ async def _ensure_schema_upgrades(db: aiosqlite.Connection) -> None:
         "INTEGER NOT NULL DEFAULT 0",
     )
     await _ensure_column(db, "tournaments", "checkin_start", "TEXT")
+    await _ensure_column(
+        db, "tournaments", "tournament_mode", "TEXT NOT NULL DEFAULT 'group_stage'"
+    )
 
 
 async def _ensure_column(
