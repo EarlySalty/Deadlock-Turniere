@@ -386,20 +386,22 @@ export default function TournamentManager({
           </Button>
         )}
 
-        <Button
-          variant={deleteConfirmed ? 'danger' : 'ghost'}
-          size="sm"
-          disabled={isLoading}
-          onClick={handleDelete}
-          className={deleteConfirmed ? 'border-red-500 bg-red-500/10 text-red-400 hover:bg-red-500/20' : ''}
-        >
-          <Trash2 size={14} />
-          {deleteMutation.isPending
-            ? 'Löscht...'
-            : deleteConfirmed
-              ? 'Wirklich löschen? (Letzte Bestätigung)'
-              : 'Turnier löschen'}
-        </Button>
+        {['draft', 'completed', 'archived'].includes(tournament.status) && (
+          <Button
+            variant={deleteConfirmed ? 'danger' : 'ghost'}
+            size="sm"
+            disabled={isLoading}
+            onClick={handleDelete}
+            className={deleteConfirmed ? 'border-red-500 bg-red-500/10 text-red-400 hover:bg-red-500/20' : ''}
+          >
+            <Trash2 size={14} />
+            {deleteMutation.isPending
+              ? 'Löscht...'
+              : deleteConfirmed
+                ? 'Wirklich löschen? (Letzte Bestätigung)'
+                : 'Turnier löschen'}
+          </Button>
+        )}
       </div>
 
       {successMessage && (
