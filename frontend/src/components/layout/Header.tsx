@@ -1,11 +1,22 @@
 import { Link } from 'react-router-dom'
+import { useQuery } from '@tanstack/react-query'
 import { useAuth } from '@/hooks/useAuth'
+import { fetchMyProfile } from '@/api/client'
 import LoginButton from '@/components/auth/LoginButton'
 import Button from '@/components/ui/Button'
 import { Trophy, LogOut, Settings, BarChart2, User } from 'lucide-react'
 
 export default function Header() {
   const { user, isLoggedIn, logout } = useAuth()
+  const { data: myProfile } = useQuery({
+    queryKey: ['profile', 'me'],
+    queryFn: fetchMyProfile,
+    enabled: isLoggedIn,
+    staleTime: 5 * 60_000,
+  })
+  const avatarUrl = myProfile?.avatar_filename
+    ? `/turnier/api/avatars/${user?.discord_id}`
+    : (user?.discord_avatar ?? null)
 
   return (
     <header className="border-b border-border bg-card/80 backdrop-blur-sm sticky top-0 z-50">
@@ -44,9 +55,9 @@ export default function Header() {
                   </Link>
                 )}
                 <Link to="/profil" className="flex items-center gap-2 hover:opacity-80 transition-opacity">
-                  {user.discord_avatar ? (
+                  {avatarUrl ? (
                     <img
-                      src={user.discord_avatar}
+                      src={avatarUrl}
                       alt={user.discord_name}
                       className="w-8 h-8 rounded-full"
                     />
