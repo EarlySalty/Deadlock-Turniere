@@ -247,8 +247,8 @@ async def upload_profile_avatar(
             )
         else:
             await db.execute(
-                "INSERT INTO user_profiles (discord_id, avatar_filename, updated_at) VALUES (?, ?, ?)",
-                (user.discord_id, avatar_path.name, now),
+                "INSERT INTO user_profiles (discord_id, avatar_filename, updated_at, invite_auto_accept, notify_discord_dm, notify_browser, notify_match_start, notify_checkin, notify_team_invite, notify_tournament_news) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (user.discord_id, avatar_path.name, now, 0, 1, 0, 1, 1, 1, 0),
             )
         await db.commit()
         cursor = await db.execute(
