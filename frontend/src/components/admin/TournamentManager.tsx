@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import Card from '@/components/ui/Card'
 import Badge from '@/components/ui/Badge'
 import Button from '@/components/ui/Button'
@@ -71,6 +71,12 @@ export default function TournamentManager({
     bracket_start: toInputDateTime(tournament.bracket_start),
   })
   const [successMessage, setSuccessMessage] = useState('')
+  const [deleteConfirmed, setDeleteConfirmed] = useState(false)
+
+  // Reset delete confirmation when tournament changes
+  useEffect(() => {
+    setDeleteConfirmed(false)
+  }, [tournament.id])
 
   const action = STATUS_ACTIONS[tournament.status]
   const isLoading =
@@ -155,8 +161,20 @@ export default function TournamentManager({
   }
 
   const handleDelete = () => {
-    if (window.confirm(`Turnier "${tournament.name}" unwiderruflich löschen?`)) {
-      deleteMutation.mutate(tournament.id)
+    if (!deleteConfirmed) {
+      if (window.confirm(`Turnier "${tournament.name}" unwiderruflich löschen?\n\nDiese Aktion kann nicht rückgängig gemacht werden!`)) {
+        setDeleteConfirmed(true)
+      }
+    } else {
+      deleteMutation.mutate(tournament.id, {
+        onSuccess: () => {
+          setDeleteConfirmed(false)
+          setSuccessMessage('Turnier wurde gelöscht.')
+        },
+        onError: () => {
+          setDeleteConfirmed(false)
+        }
+      })
     }
   }
 
@@ -368,12 +386,20 @@ export default function TournamentManager({
           </Button>
         )}
 
-        {['draft', 'completed', 'archived'].includes(tournament.status) && (
-          <Button variant="danger" size="sm" disabled={isLoading} onClick={handleDelete}>
-            <Trash2 size={14} />
-            {deleteMutation.isPending ? 'Löscht...' : 'Turnier löschen'}
-          </Button>
-        )}
+        <Button
+          variant={deleteConfirmed ? 'danger' : 'ghost'}
+          size="sm"
+          disabled={isLoading}
+          onClick={handleDelete}
+          className={deleteConfirmed ? 'border-red-500 bg-red-500/10 text-red-400 hover:bg-red-500/20' : ''}
+        >
+          <Trash2 size={14} />
+          {deleteMutation.isPending
+            ? 'Löscht...'
+            : deleteConfirmed
+              ? 'Wirklich löschen? (Letzte Bestätigung)'
+              : 'Turnier löschen'}
+        </Button>
       </div>
 
       {successMessage && (
