@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from enum import Enum
-from typing import Optional
+from typing import Any, Optional
 
 from pydantic import BaseModel
 
@@ -37,6 +37,20 @@ class BracketType(str, Enum):
 class BracketFormat(str, Enum):
     single_elimination = "single_elimination"
     double_elimination = "double_elimination"
+
+
+class LobbySettingsPreset(str, Enum):
+    standard = "standard"
+    fast_mode = "fast_mode"
+    high_damage = "high_damage"
+    low_gravity = "low_gravity"
+    speed_mode = "speed_mode"
+    glass_cannon = "glass_cannon"
+    rich_start = "rich_start"
+    chaos_mode = "chaos_mode"
+    all_same_hero = "all_same_hero"
+    immortal = "immortal"
+    custom = "custom"
 
 
 class TeamRole(str, Enum):
@@ -99,6 +113,8 @@ class TournamentCreate(BaseModel):
     invite_mode: InviteMode = InviteMode.always
     invite_window_start: Optional[str] = None
     invite_window_end: Optional[str] = None
+    lobby_settings_preset: LobbySettingsPreset = LobbySettingsPreset.standard
+    lobby_settings: Optional[dict[str, Any]] = None
 
 
 class TournamentUpdate(BaseModel):
@@ -114,6 +130,8 @@ class TournamentUpdate(BaseModel):
     invite_mode: Optional[InviteMode] = None
     invite_window_start: Optional[str] = None
     invite_window_end: Optional[str] = None
+    lobby_settings_preset: Optional[LobbySettingsPreset] = None
+    lobby_settings: Optional[dict[str, Any]] = None
 
 
 class TournamentSignup(BaseModel):
@@ -145,6 +163,7 @@ class Tournament(BaseModel):
     invite_mode: InviteMode = InviteMode.always
     invite_window_start: Optional[str] = None
     invite_window_end: Optional[str] = None
+    lobby_settings: Optional[str] = None
 
 
 # --- Team ---
@@ -288,6 +307,7 @@ class TournamentDetailPublic(BaseModel):
     invite_mode: InviteMode = InviteMode.always
     invite_window_start: Optional[str] = None
     invite_window_end: Optional[str] = None
+    lobby_settings: Optional[str] = None
     teams: list[TeamPublic] = []
     groups: list[Group] = []
     bracket_matches: list[BracketMatch] = []
@@ -320,6 +340,12 @@ class UserProfileUpdate(BaseModel):
     invite_auto_accept: Optional[bool] = None
     notify_discord_dm: Optional[bool] = None
     notify_browser: Optional[bool] = None
+    display_name: Optional[str] = None
+    avatar_filename: Optional[str] = None
+    notify_match_start: Optional[bool] = None
+    notify_checkin: Optional[bool] = None
+    notify_team_invite: Optional[bool] = None
+    notify_tournament_news: Optional[bool] = None
 
 
 class UserProfile(BaseModel):
@@ -328,6 +354,12 @@ class UserProfile(BaseModel):
     invite_auto_accept: bool = False
     notify_discord_dm: bool = True
     notify_browser: bool = False
+    display_name: Optional[str] = None
+    avatar_filename: Optional[str] = None
+    notify_match_start: bool = True
+    notify_checkin: bool = True
+    notify_team_invite: bool = True
+    notify_tournament_news: bool = False
     updated_at: Optional[str] = None
 
 
@@ -357,6 +389,7 @@ class TournamentHistoryEntry(BaseModel):
 
 class PlayerProfile(BaseModel):
     discord_name: str
+    display_name: Optional[str] = None
     discord_avatar: Optional[str] = None
     bio: Optional[str] = None
     rank: Optional[str] = None

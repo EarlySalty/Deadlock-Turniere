@@ -2,12 +2,14 @@
 from __future__ import annotations
 
 import json
+import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from auth.permissions import require_admin, require_mod
 from db import get_db
 from match import manager as match_manager
+from notifications.discord_notifier import notify_users
 from match.result_processor import (
     MatchNotFoundError,
     MatchResultError,
@@ -27,6 +29,7 @@ from tournament.engine import (
 from tournament.models import (
     ApplicationStatus,
     RecruitmentStatus,
+    LobbySettingsPreset,
     Team,
     TeamApplication,
     TeamMember,
@@ -47,6 +50,7 @@ from tournament.routes import (
 from tournament.scheduler import advance_tournament_status
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -59,6 +63,101 @@ async def _audit(db, action: str, user_id: str, details: str) -> None:  # noqa: 
         "INSERT INTO audit_log (action, user_id, details) VALUES (?, ?, ?)",
         (action, user_id, details),
     )
+
+
+async def _load_all_profile_ids(db) -> list[str]:  # noqa: ANN001
+    cursor = await db.execute("SELECT DISTINCT discord_id FROM user_profiles")
+    rows = await cursor.fetchall()
+    return [str(row["discord_id"]) for row in rows if row["discord_id"]]
+
+
+_LOBBY_SETTINGS_PRESET_MAP: dict[LobbySettingsPreset, dict[str, object] | None] = {
+    LobbySettingsPreset.standard: None,
+    LobbySettingsPreset.fast_mode: {
+        "citadel_enable_fast_cooldowns": 1,
+    },
+    LobbySettingsPreset.high_damage: {
+        "citadel_dps_multiplier": 2,
+    },
+    # Niedrige Schwerkraft — Spieler fliegen höher und weiter
+    LobbySettingsPreset.low_gravity: {
+        "sv_gravity": 200,
+    },
+    # Alle rennen schnell + kurze Cooldowns
+    LobbySettingsPreset.speed_mode: {
+        "citadel_player_move_speed_scale": 2.0,
+        "citadel_enable_fast_cooldowns": 1,
+    },
+    # Hoher Schaden — jeder stirbt sofort
+    LobbySettingsPreset.glass_cannon: {
+        "citadel_weapon_damage_multiplier": 5,
+        "citadel_dps_multiplier": 3,
+        "citadel_melee_damage_scale": 3.0,
+    },
+    # Alle starten reich — sofort viele Items möglich
+    LobbySettingsPreset.rich_start: {
+        "citadel_player_starting_gold": 10000,
+    },
+    # Chaos: alles auf einmal leicht verrückt
+    LobbySettingsPreset.chaos_mode: {
+        "sv_gravity": 400,
+        "citadel_player_move_speed_scale": 1.5,
+        "citadel_weapon_damage_multiplier": 2,
+        "citadel_enable_fast_cooldowns": 1,
+        "citadel_player_starting_gold": 5000,
+        "citadel_trooper_gold_reward": 200,
+    },
+    # Alle spielen denselben Helden
+    LobbySettingsPreset.all_same_hero: {
+        "citadel_allow_duplicate_heroes": 1,
+    },
+    # Niemand stirbt
+    LobbySettingsPreset.immortal: {
+        "citadel_enable_no_hero_death": 1,
+    },
+}
+
+
+def _serialize_lobby_settings(
+    preset: LobbySettingsPreset,
+    custom_settings: dict | None,
+) -> str | None:
+    if preset == LobbySettingsPreset.custom:
+        if custom_settings is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Für lobby_settings_preset=custom ist lobby_settings erforderlich",
+            )
+        if not isinstance(custom_settings, dict):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="lobby_settings muss ein JSON-Objekt sein",
+            )
+        try:
+            return json.dumps(custom_settings)
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="lobby_settings enthält nicht serialisierbare Werte",
+            ) from exc
+
+    if custom_settings is not None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="lobby_settings ist nur mit lobby_settings_preset=custom erlaubt",
+        )
+
+    preset_payload = _LOBBY_SETTINGS_PRESET_MAP.get(preset)
+    if preset_payload is None:
+        return None
+
+    try:
+        return json.dumps(preset_payload)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Vordefinierte lobby_settings konnten nicht serialisiert werden",
+        ) from exc
 
 
 ACTIVE_TOURNAMENT_STATUSES = ("draft", "registration", "checkin", "group_phase", "bracket")
@@ -445,6 +544,11 @@ async def create_tournament(
     """Neues Turnier erstellen (Mod+)."""
     async with get_db() as db:
         await _ensure_single_active_tournament(db)
+        profile_ids = await _load_all_profile_ids(db)
+        lobby_settings = _serialize_lobby_settings(
+            body.lobby_settings_preset,
+            body.lobby_settings,
+        )
         cursor = await db.execute(
             "INSERT INTO tournaments "
             "(name, description, team_size, bracket_format, registration_start, "
@@ -466,6 +570,10 @@ async def create_tournament(
                 body.invite_window_end,
             ),
         )
+        await db.execute(
+            "UPDATE tournaments SET lobby_settings = ? WHERE id = ?",
+            (lobby_settings, cursor.lastrowid),
+        )
         tournament_id = cursor.lastrowid
 
         await _audit(
@@ -481,6 +589,15 @@ async def create_tournament(
             (tournament_id,),
         )
         row = await cursor.fetchone()
+
+    try:
+        await notify_users(
+            profile_ids,
+            "tournament_news",
+            f"Ein neues Turnier wurde angelegt: `{body.name}`.",
+        )
+    except Exception:
+        logger.exception("Tournament news notification failed for tournament %s", tournament_id)
 
     return Tournament(**dict(row))
 
@@ -542,6 +659,18 @@ async def update_tournament(
             update_data["invite_window_start"] = body.invite_window_start
         if "invite_window_end" in body.model_fields_set:
             update_data["invite_window_end"] = body.invite_window_end
+        if "lobby_settings_preset" in body.model_fields_set or "lobby_settings" in body.model_fields_set:
+            preset = body.lobby_settings_preset
+            custom_settings = body.lobby_settings
+            if preset is None and custom_settings is not None:
+                preset = LobbySettingsPreset.custom
+            if preset is not None:
+                update_data["lobby_settings"] = _serialize_lobby_settings(preset, custom_settings)
+            elif custom_settings is not None:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="lobby_settings_preset ist erforderlich, wenn lobby_settings gesetzt wird",
+                )
 
         updates: list[str] = []
         params: list = []

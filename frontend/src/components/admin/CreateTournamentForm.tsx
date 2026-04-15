@@ -4,8 +4,22 @@ import Card from '@/components/ui/Card'
 import Button from '@/components/ui/Button'
 import DateTimeInput from '@/components/ui/DateTimeInput'
 import { useCreateTournament } from '@/hooks/useTournament'
-import type { BracketFormat, InviteMode } from '@/types/tournament'
+import type { BracketFormat, InviteMode, LobbySettingsPreset } from '@/types/tournament'
 import { Trophy, AlertCircle, CheckCircle } from 'lucide-react'
+
+const PRESET_LABELS: Record<LobbySettingsPreset, string> = {
+  standard: 'Standard',
+  fast_mode: 'Fast Mode (schnelle Cooldowns)',
+  high_damage: 'High Damage (2× DPS)',
+  low_gravity: 'Low Gravity (Mondschwerchkraft)',
+  speed_mode: 'Speed Mode (2× Bewegung + schnelle Cooldowns)',
+  glass_cannon: 'Glass Cannon (5× Schaden, jeder stirbt sofort)',
+  rich_start: 'Rich Start (10.000 Gold beim Start)',
+  chaos_mode: 'Chaos Mode (weniger Schwerkraft, schneller, mehr Schaden, viel Gold)',
+  all_same_hero: 'All Same Hero (Duplikate erlaubt)',
+  immortal: 'Immortal (kein Heldentod)',
+  custom: 'Custom (manuelles JSON)',
+}
 
 export default function CreateTournamentForm() {
   const [name, setName] = useState('')
@@ -17,6 +31,9 @@ export default function CreateTournamentForm() {
   const [inviteMode, setInviteMode] = useState<InviteMode>('always')
   const [inviteWindowStart, setInviteWindowStart] = useState('')
   const [inviteWindowEnd, setInviteWindowEnd] = useState('')
+  const [lobbyPreset, setLobbyPreset] = useState<LobbySettingsPreset>('standard')
+  const [customJson, setCustomJson] = useState('')
+  const [customJsonError, setCustomJsonError] = useState('')
   const [successMsg, setSuccessMsg] = useState('')
 
   const createMutation = useCreateTournament()
@@ -24,6 +41,21 @@ export default function CreateTournamentForm() {
   const handleSubmit = (e: FormEvent) => {
     e.preventDefault()
     setSuccessMsg('')
+    setCustomJsonError('')
+
+    let parsedCustom: Record<string, unknown> | undefined
+    if (lobbyPreset === 'custom') {
+      try {
+        parsedCustom = JSON.parse(customJson)
+        if (typeof parsedCustom !== 'object' || Array.isArray(parsedCustom) || parsedCustom === null) {
+          setCustomJsonError('Muss ein JSON-Objekt sein, z.B. {"sv_gravity": 200}')
+          return
+        }
+      } catch {
+        setCustomJsonError('Ungültiges JSON')
+        return
+      }
+    }
 
     createMutation.mutate(
       {
@@ -36,6 +68,8 @@ export default function CreateTournamentForm() {
         invite_mode: inviteMode,
         invite_window_start: inviteMode === 'window' ? inviteWindowStart || undefined : undefined,
         invite_window_end: inviteMode === 'window' ? inviteWindowEnd || undefined : undefined,
+        lobby_settings_preset: lobbyPreset,
+        lobby_settings: lobbyPreset === 'custom' ? parsedCustom : undefined,
       },
       {
         onSuccess: (tournament) => {
@@ -49,6 +83,8 @@ export default function CreateTournamentForm() {
           setInviteMode('always')
           setInviteWindowStart('')
           setInviteWindowEnd('')
+          setLobbyPreset('standard')
+          setCustomJson('')
         },
       }
     )
@@ -204,6 +240,45 @@ export default function CreateTournamentForm() {
                 className="w-full bg-background border border-border rounded-lg px-3 py-2 text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
               />
             </div>
+          </div>
+        )}
+
+        {/* Lobby-Modus */}
+        <div>
+          <label htmlFor="lobby-preset" className="block text-sm font-medium text-foreground mb-1.5">
+            Match-Modus
+          </label>
+          <select
+            id="lobby-preset"
+            value={lobbyPreset}
+            onChange={(e) => {
+              setLobbyPreset(e.target.value as LobbySettingsPreset)
+              setCustomJsonError('')
+            }}
+            className="w-full bg-background border border-border rounded-lg px-3 py-2 text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
+          >
+            {(Object.keys(PRESET_LABELS) as LobbySettingsPreset[]).map((key) => (
+              <option key={key} value={key}>{PRESET_LABELS[key]}</option>
+            ))}
+          </select>
+        </div>
+
+        {lobbyPreset === 'custom' && (
+          <div>
+            <label htmlFor="custom-json" className="block text-sm font-medium text-foreground mb-1.5">
+              Custom Convars (JSON)
+            </label>
+            <textarea
+              id="custom-json"
+              value={customJson}
+              onChange={(e) => { setCustomJson(e.target.value); setCustomJsonError('') }}
+              rows={4}
+              placeholder={'{"sv_gravity": 400, "citadel_dps_multiplier": 2}'}
+              className="w-full bg-background border border-border rounded-lg px-3 py-2 text-foreground placeholder:text-muted font-mono text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 resize-none"
+            />
+            {customJsonError && (
+              <p className="mt-1 text-xs text-red-400">{customJsonError}</p>
+            )}
           </div>
         )}
 

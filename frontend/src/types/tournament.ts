@@ -3,6 +3,18 @@ export type BracketFormat = 'single_elimination' | 'double_elimination'
 export type MatchStatus = 'pending' | 'checkin' | 'lobby_created' | 'in_progress' | 'completed' | 'forfeit' | 'cancelled'
 export type RecruitmentStatus = 'open' | 'application' | 'closed'
 export type InviteMode = 'always' | 'window' | 'never'
+export type LobbySettingsPreset =
+  | 'standard'
+  | 'fast_mode'
+  | 'high_damage'
+  | 'low_gravity'
+  | 'speed_mode'
+  | 'glass_cannon'
+  | 'rich_start'
+  | 'chaos_mode'
+  | 'all_same_hero'
+  | 'immortal'
+  | 'custom'
 export type InvitationStatus = 'pending' | 'accepted' | 'rejected' | 'expired'
 export type ApplicationStatus = 'pending' | 'accepted' | 'rejected'
 
@@ -229,6 +241,8 @@ export interface TournamentCreate {
   invite_mode?: InviteMode
   invite_window_start?: string
   invite_window_end?: string
+  lobby_settings_preset?: LobbySettingsPreset
+  lobby_settings?: Record<string, unknown>
 }
 
 export interface TournamentUpdate {
