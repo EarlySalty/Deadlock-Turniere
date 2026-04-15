@@ -303,7 +303,7 @@ export const updateMyProfile = (data: UserProfileUpdate) =>
   request<UserProfile>('/profile', { method: 'PUT', body: JSON.stringify(data) })
 export const uploadProfileAvatar = async (file: File): Promise<UserProfile> => {
   const formData = new FormData()
-  formData.append('file', file)
+  formData.append('avatar', file)
   const res = await fetch(`${API_BASE}/profile/avatar`, {
     method: 'POST',
     credentials: 'include',
