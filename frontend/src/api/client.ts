@@ -294,8 +294,9 @@ export const rejectApplication = (tournamentId: number, teamId: number, appId: n
 
 // Consent
 export const fetchConsent = () => request<ConsentStatus>('/consent')
-export const setConsent = (version: number = 1) =>
+export const setConsent = (version: number = 2) =>
   request<ConsentStatus>('/consent', { method: 'POST', body: JSON.stringify({ consent_version: version }) })
+export const revokeConsent = () => request<void>('/consent', { method: 'DELETE' })
 
 // Profile
 export const fetchMyProfile = () => request<UserProfile>('/profile')

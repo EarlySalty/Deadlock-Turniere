@@ -127,6 +127,42 @@ class ProfileRouteTests(unittest.TestCase):
         self.assertEqual(response.status_code, 302)
         self.assertEqual(response.headers["location"], "https://cdn.discordapp.com/avatars/123/abc.png")
 
+    def test_consent_can_be_revoked_when_no_active_tournament_exists(self) -> None:
+        create_response = self.client.post("/api/consent", json={})
+        self.assertEqual(create_response.status_code, 201)
+
+        delete_response = self.client.delete("/api/consent")
+        self.assertEqual(delete_response.status_code, 204)
+
+        status_response = self.client.get("/api/consent")
+        self.assertEqual(status_response.status_code, 200)
+        self.assertFalse(status_response.json()["has_consent"])
+
+    def test_consent_revoke_is_blocked_during_active_tournament_participation(self) -> None:
+        async def _seed_active_signup() -> None:
+            async with get_db() as db:
+                cursor = await db.execute(
+                    "INSERT INTO tournaments (name, description, team_size, bracket_format, status, registration_start, registration_end, group_phase_start, bracket_start) "
+                    "VALUES (?, ?, ?, ?, ?, datetime('now'), datetime('now', '+1 day'), datetime('now', '+2 day'), datetime('now', '+3 day'))",
+                    ("Aktives Turnier", None, 6, "single_elimination", "registration"),
+                )
+                tournament_id = cursor.lastrowid
+                await db.execute(
+                    "INSERT INTO tournament_signups (tournament_id, discord_id, discord_name, steam_id, rank, rank_score) VALUES (?, ?, ?, ?, ?, ?)",
+                    (tournament_id, "123456789012345678", "OriginalName", None, None, 0),
+                )
+                await db.execute(
+                    "INSERT OR REPLACE INTO user_consents (discord_id, consented_at, consent_version) VALUES (?, datetime('now'), ?)",
+                    ("123456789012345678", 2),
+                )
+                await db.commit()
+
+        asyncio.run(_seed_active_signup())
+
+        delete_response = self.client.delete("/api/consent")
+        self.assertEqual(delete_response.status_code, 409)
+        self.assertIn("aktiven Turnier", delete_response.json()["detail"])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -554,35 +554,120 @@ export default function Tournament() {
       {/* Tab Content */}
       <div>
         {activeTab === 'übersicht' && (
-          <Card className="p-6">
-            <h2 className="text-lg font-semibold text-foreground mb-4">Turnier-Informationen</h2>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
-              {tournament.registration_start && (
-                <div>
-                  <span className="text-muted">Anmeldung Start:</span>
-                  <span className="ml-2 text-foreground">
-                    {new Date(tournament.registration_start).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
-                  </span>
+          <div className="space-y-4">
+            <Card className="p-6">
+              <h2 className="text-lg font-semibold text-foreground mb-4">Turnier-Informationen</h2>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
+                {tournament.registration_start && (
+                  <div>
+                    <span className="text-muted">Anmeldung Start:</span>
+                    <span className="ml-2 text-foreground">
+                      {new Date(tournament.registration_start).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                    </span>
+                  </div>
+                )}
+                {tournament.registration_end && (
+                  <div>
+                    <span className="text-muted">Anmeldung Ende:</span>
+                    <span className="ml-2 text-foreground">
+                      {new Date(tournament.registration_end).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                    </span>
+                  </div>
+                )}
+              </div>
+            </Card>
+
+            {isRegistration && (
+              <Card className="p-4">
+                <div className="flex items-center justify-between gap-3 mb-3">
+                  <div>
+                    <h3 className="text-sm font-semibold text-foreground">Anmeldung</h3>
+                    <p className="text-sm text-muted">
+                      Direkter Einstieg für Solo-Anmeldung. Teams bleiben separat im Tab `Teams`.
+                    </p>
+                  </div>
+                  <Button variant="ghost" size="sm" onClick={() => setActiveTab('teams')}>
+                    <Users size={14} />
+                    Zu Teams
+                  </Button>
                 </div>
-              )}
-              {tournament.registration_end && (
-                <div>
-                  <span className="text-muted">Anmeldung Ende:</span>
-                  <span className="ml-2 text-foreground">
-                    {new Date(tournament.registration_end).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
-                  </span>
-                </div>
-              )}
-            </div>
-          </Card>
+
+                {mutationError && (
+                  <div className="flex items-center gap-2 text-red-400 text-sm bg-red-500/10 border border-red-500/20 rounded-lg p-3 mb-3">
+                    <AlertCircle size={16} />
+                    <span>{mutationError instanceof Error ? mutationError.message : 'Ein Fehler ist aufgetreten'}</span>
+                  </div>
+                )}
+
+                {!isLoggedIn ? (
+                  <p className="text-sm text-muted">
+                    Melde dich an, um dich für das Turnier zu registrieren oder ein Team zu erstellen.
+                  </p>
+                ) : !userTeam && !userHasSoloSignup ? (
+                  <div className="flex flex-wrap gap-2">
+                    <Button variant="secondary" size="sm" onClick={handleSignupSolo} disabled={isMutating}>
+                      <UserPlus size={14} />
+                      {signupSoloMutation.isPending ? 'Wird angemeldet...' : 'Für Turnier anmelden'}
+                    </Button>
+                  </div>
+                ) : userHasSoloSignup && !userTeam ? (
+                  <div className="flex items-center gap-3 flex-wrap">
+                    <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-medium bg-green-600 text-white">
+                      ✓ Solo eingetragen
+                    </span>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={handleWithdrawSolo}
+                      disabled={isMutating}
+                      className="text-red-400 border border-red-500/40 hover:bg-red-500/10"
+                    >
+                      {withdrawSoloMutation.isPending ? 'Wird ausgetragen...' : 'Austragen'}
+                    </Button>
+                    <Button variant="ghost" size="sm" onClick={() => setActiveTab('teams')}>
+                      <Users size={14} />
+                      Teams ansehen
+                    </Button>
+                  </div>
+                ) : userTeam ? (
+                  <div className="space-y-3">
+                    <div className="inline-flex items-center gap-2 rounded-full bg-primary/15 px-3 py-1 text-sm text-primary">
+                      <Shield size={14} />
+                      Angemeldet mit {userTeam.name}
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <Button variant="primary" size="sm" onClick={() => setActiveTab('teams')}>
+                        <Users size={14} />
+                        Team verwalten
+                      </Button>
+                      {isRegistration && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleLeaveTeam(userTeam.id)}
+                          disabled={isMutating || (isUserCaptain && userTeam.members.length > 1)}
+                          title={isUserCaptain && userTeam.members.length > 1 ? 'Übergib zuerst die Captain-Rolle' : undefined}
+                          className="text-red-400 border border-red-500/40 hover:bg-red-500/10"
+                        >
+                          {leaveTeamMutation.isPending ? 'Verlasse...' : 'Team verlassen'}
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                ) : null}
+              </Card>
+            )}
+          </div>
         )}
 
         {activeTab === 'teams' && (
           <div className="space-y-4">
-            {/* Registration Actions */}
             {isRegistration && isLoggedIn && !userTeam && !userHasSoloSignup && (
               <Card className="p-4">
-                <h3 className="text-sm font-semibold text-foreground mb-3">Anmeldung</h3>
+                <h3 className="text-sm font-semibold text-foreground mb-3">Team erstellen</h3>
+                <p className="text-sm text-muted mb-3">
+                  Team-Anlage und Team-Verwaltung sind hier separat gebündelt.
+                </p>
                 {mutationError && (
                   <div className="flex items-center gap-2 text-red-400 text-sm bg-red-500/10 border border-red-500/20 rounded-lg p-3 mb-3">
                     <AlertCircle size={16} />
@@ -596,7 +681,7 @@ export default function Tournament() {
                   </Button>
                   <Button variant="secondary" size="sm" onClick={handleSignupSolo} disabled={isMutating}>
                     <UserPlus size={14} />
-                    {signupSoloMutation.isPending ? 'Wird angemeldet...' : 'Solo anmelden'}
+                    {signupSoloMutation.isPending ? 'Wird angemeldet...' : 'Für Turnier anmelden'}
                   </Button>
                 </div>
                 {showCreateTeam && (
@@ -623,6 +708,7 @@ export default function Tournament() {
             {/* Solo signup status */}
             {isRegistration && isLoggedIn && userHasSoloSignup && !userTeam && (
               <Card className="p-4">
+                <h3 className="text-sm font-semibold text-foreground mb-3">Solo-Anmeldung</h3>
                 {mutationError && (
                   <div className="flex items-center gap-2 text-red-400 text-sm bg-red-500/10 border border-red-500/20 rounded-lg p-3 mb-3">
                     <AlertCircle size={16} />

@@ -252,6 +252,10 @@ class Settings:
         "DISCORD_ADMIN_ROLE_IDS",
         default="1304169657124782100,1337518124647579661,1411000883155832852,1401891955931222110",
     )
+    DISCORD_TOURNAMENT_ADMIN_ROLE_IDS: str = _get_string(
+        "DISCORD_TOURNAMENT_ADMIN_ROLE_IDS",
+        default="1494120177577754747",
+    )
     DISCORD_MOD_ROLE_IDS: str = _get_string(
         "DISCORD_MOD_ROLE_IDS",
         default="1474210107255554331",
@@ -293,9 +297,15 @@ class Settings:
 
     @property
     def admin_role_ids(self) -> set[str]:
-        if not self.DISCORD_ADMIN_ROLE_IDS:
-            return set()
-        return {role.strip() for role in self.DISCORD_ADMIN_ROLE_IDS.split(",") if role.strip()}
+        role_ids: set[str] = set()
+        for raw_roles in (
+            self.DISCORD_ADMIN_ROLE_IDS,
+            self.DISCORD_TOURNAMENT_ADMIN_ROLE_IDS,
+        ):
+            if not raw_roles:
+                continue
+            role_ids.update(role.strip() for role in raw_roles.split(",") if role.strip())
+        return role_ids
 
     @property
     def mod_role_ids(self) -> set[str]:

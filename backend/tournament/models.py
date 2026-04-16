@@ -339,7 +339,7 @@ class MatchResult(BaseModel):
 
 
 class ConsentCreate(BaseModel):
-    consent_version: int = 1
+    consent_version: int = 2
 
 
 class ConsentStatus(BaseModel):

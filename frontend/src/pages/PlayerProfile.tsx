@@ -4,7 +4,7 @@ import {
   User, Trophy, Swords, Target, Star, Edit2, Check, X, Bell, UserCheck, Camera,
 } from 'lucide-react'
 import {
-  usePlayerProfile, useMyProfile, useUpdateMyProfile, useConsent, useUploadProfileAvatar,
+  usePlayerProfile, useMyProfile, useUpdateMyProfile, useConsent, useUploadProfileAvatar, useRevokeConsent,
 } from '@/hooks/useTournament'
 import { useAuth } from '@/hooks/useAuth'
 import Card from '@/components/ui/Card'
@@ -31,6 +31,7 @@ export default function PlayerProfile() {
   const { data: myProfile } = useMyProfile()
   const { data: consent } = useConsent()
   const updateProfile = useUpdateMyProfile()
+  const revokeConsent = useRevokeConsent()
 
   const [editBio, setEditBio] = useState(false)
   const [bioValue, setBioValue] = useState('')
@@ -39,6 +40,7 @@ export default function PlayerProfile() {
   const uploadAvatar = useUploadProfileAvatar()
   const [editName, setEditName] = useState(false)
   const [nameValue, setNameValue] = useState('')
+  const [consentMessage, setConsentMessage] = useState<string | null>(null)
   const avatarInputRef = useRef<HTMLInputElement>(null)
 
   if (!username) {
@@ -90,6 +92,20 @@ export default function PlayerProfile() {
       onSuccess: () => {
         setSettingsSaved(true)
         setTimeout(() => setSettingsSaved(false), 2000)
+      },
+    })
+  }
+
+  const handleRevokeConsent = () => {
+    if (!window.confirm('Deine Turnier-Einwilligung wirklich widerrufen? Danach musst du vor einer neuen Anmeldung erneut zustimmen.')) {
+      return
+    }
+    revokeConsent.mutate(undefined, {
+      onSuccess: () => {
+        setConsentMessage('Einwilligung widerrufen. Für neue Turnier-Anmeldungen ist eine erneute Zustimmung erforderlich.')
+      },
+      onError: (error) => {
+        setConsentMessage(error instanceof Error ? error.message : 'Widerruf fehlgeschlagen.')
       },
     })
   }
@@ -294,16 +310,43 @@ export default function PlayerProfile() {
           {showSettings && (
             <div className="space-y-4 pt-2">
               {consent && (
-                <div className="flex items-start gap-3 p-3 rounded-lg bg-background/60 border border-border">
-                  <UserCheck size={16} className="text-green-400 flex-shrink-0 mt-0.5" />
-                  <div className="text-sm">
-                    <div className="font-medium text-foreground">DSGVO-Einwilligung</div>
-                    <div className="text-muted text-xs mt-0.5">
-                      {consent.has_consent
-                        ? `Eingewilligt am ${new Date(consent.consented_at!).toLocaleDateString('de-DE')}`
-                        : 'Noch nicht eingewilligt'}
+                <div className="space-y-3 p-3 rounded-lg bg-background/60 border border-border">
+                  <div className="flex items-start gap-3">
+                    <UserCheck size={16} className={`${consent.has_consent ? 'text-green-400' : 'text-amber-400'} flex-shrink-0 mt-0.5`} />
+                    <div className="text-sm flex-1">
+                      <div className="font-medium text-foreground">Turnier-Einwilligung</div>
+                      <div className="text-muted text-xs mt-0.5">
+                        {consent.has_consent
+                          ? `Eingewilligt am ${new Date(consent.consented_at!).toLocaleDateString('de-DE')}`
+                          : consent.consent_version
+                            ? 'Einwilligung muss erneut bestätigt werden.'
+                            : 'Noch nicht eingewilligt'}
+                      </div>
+                      <div className="text-muted text-xs mt-2 leading-relaxed">
+                        Gilt für Live-Übertragungen sowie spätere Videos, Highlights und Zusammenschnitte
+                        im Turnierkontext. Ein Widerruf ist nicht möglich, solange du in einem aktiven
+                        Turnier angemeldet bist.
+                      </div>
                     </div>
                   </div>
+                  {consentMessage && (
+                    <div className={`text-xs ${consent.has_consent ? 'text-green-400' : 'text-muted'}`}>
+                      {consentMessage}
+                    </div>
+                  )}
+                  {consent.has_consent && (
+                    <div className="flex justify-end">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={handleRevokeConsent}
+                        disabled={revokeConsent.isPending}
+                        className="text-red-400 border border-red-500/40 hover:bg-red-500/10"
+                      >
+                        {revokeConsent.isPending ? 'Widerruft...' : 'Einwilligung widerrufen'}
+                      </Button>
+                    </div>
+                  )}
                 </div>
               )}
 

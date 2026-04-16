@@ -44,6 +44,16 @@ class SettingsSecurityTests(unittest.TestCase):
         self.assertIn("api.example.org", configured.allowed_hosts)
         self.assertIn("*.example.net", configured.allowed_hosts)
 
+    def test_tournament_admin_role_is_always_allowed(self) -> None:
+        configured = Settings()
+        configured.DISCORD_ADMIN_ROLE_IDS = "111,222"
+        configured.DISCORD_TOURNAMENT_ADMIN_ROLE_IDS = "1494120177577754747"
+
+        self.assertEqual(
+            configured.admin_role_ids,
+            {"111", "222", "1494120177577754747"},
+        )
+
     def test_cors_allowed_origins_follow_frontend_url(self) -> None:
         configured = Settings()
         configured.FRONTEND_URL = "https://frontend.example.org/"

@@ -33,6 +33,7 @@ from tournament.models import (
 )
 
 router = APIRouter(prefix="/api", tags=["tournaments"])
+_CURRENT_CONSENT_VERSION = 2
 logger = logging.getLogger(__name__)
 
 
@@ -728,10 +729,11 @@ async def create_team(
 
     async with get_db() as db:
         cursor = await db.execute(
-            "SELECT discord_id FROM user_consents WHERE discord_id = ?",
+            "SELECT consent_version FROM user_consents WHERE discord_id = ?",
             (user.discord_id,),
         )
-        if not await cursor.fetchone():
+        consent_row = await cursor.fetchone()
+        if not consent_row or int(consent_row["consent_version"]) < _CURRENT_CONSENT_VERSION:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="CONSENT_REQUIRED",
@@ -829,10 +831,11 @@ async def join_team(
     """Einem bestehenden Team beitreten."""
     async with get_db() as db:
         cursor = await db.execute(
-            "SELECT discord_id FROM user_consents WHERE discord_id = ?",
+            "SELECT consent_version FROM user_consents WHERE discord_id = ?",
             (user.discord_id,),
         )
-        if not await cursor.fetchone():
+        consent_row = await cursor.fetchone()
+        if not consent_row or int(consent_row["consent_version"]) < _CURRENT_CONSENT_VERSION:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="CONSENT_REQUIRED",
@@ -1003,10 +1006,11 @@ async def solo_signup(
     """Solo-Anmeldung — User wird später zufällig einem Team zugewiesen."""
     async with get_db() as db:
         cursor = await db.execute(
-            "SELECT discord_id FROM user_consents WHERE discord_id = ?",
+            "SELECT consent_version FROM user_consents WHERE discord_id = ?",
             (user.discord_id,),
         )
-        if not await cursor.fetchone():
+        consent_row = await cursor.fetchone()
+        if not consent_row or int(consent_row["consent_version"]) < _CURRENT_CONSENT_VERSION:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="CONSENT_REQUIRED",

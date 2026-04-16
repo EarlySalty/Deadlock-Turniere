@@ -19,6 +19,8 @@ from tournament.models import (
 )
 
 router = APIRouter(prefix="/api", tags=["consent"])
+_CURRENT_CONSENT_VERSION = 2
+_ACTIVE_TOURNAMENT_STATUSES = ("registration", "checkin", "group_phase", "bracket")
 
 _MAX_AVATAR_SIZE = 2 * 1024 * 1024
 _AVATAR_MEDIA_TYPES = {
@@ -78,6 +80,18 @@ def _serialize_profile_row(row: dict[str, object], user: UserSession) -> UserPro
     return UserProfile(**payload)
 
 
+async def _has_active_tournament_participation(db, discord_id: str) -> bool:  # noqa: ANN001
+    cursor = await db.execute(
+        "SELECT 1 "
+        "FROM tournament_signups ts "
+        "JOIN tournaments t ON t.id = ts.tournament_id "
+        f"WHERE ts.discord_id = ? AND t.status IN ({','.join('?' for _ in _ACTIVE_TOURNAMENT_STATUSES)}) "
+        "LIMIT 1",
+        (discord_id, *_ACTIVE_TOURNAMENT_STATUSES),
+    )
+    return bool(await cursor.fetchone())
+
+
 @router.get("/consent")
 async def get_consent(user: UserSession = Depends(require_auth)) -> ConsentStatus:
     async with get_db() as db:
@@ -88,10 +102,11 @@ async def get_consent(user: UserSession = Depends(require_auth)) -> ConsentStatu
         row = await cursor.fetchone()
     if not row:
         return ConsentStatus(has_consent=False)
+    consent_version = int(row["consent_version"])
     return ConsentStatus(
-        has_consent=True,
+        has_consent=consent_version >= _CURRENT_CONSENT_VERSION,
         consented_at=row["consented_at"],
-        consent_version=row["consent_version"],
+        consent_version=consent_version,
     )
 
 
@@ -112,6 +127,18 @@ async def set_consent(
         consented_at=now,
         consent_version=body.consent_version,
     )
+
+
+@router.delete("/consent", status_code=204)
+async def revoke_consent(user: UserSession = Depends(require_auth)) -> None:
+    async with get_db() as db:
+        if await _has_active_tournament_participation(db, user.discord_id):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Ein Widerruf ist nicht möglich, solange du in einem aktiven Turnier angemeldet bist.",
+            )
+        await db.execute("DELETE FROM user_consents WHERE discord_id = ?", (user.discord_id,))
+        await db.commit()
 
 
 @router.get("/profile")

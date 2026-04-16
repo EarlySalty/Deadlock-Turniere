@@ -15,7 +15,7 @@ import {
   setRecruitingStatus,
   fetchMyInvitations, acceptInvitation, rejectInvitation,
   applyToTeam, fetchTeamApplications, acceptApplication, rejectApplication,
-  fetchConsent, setConsent,
+  fetchConsent, setConsent, revokeConsent,
   fetchMyProfile, updateMyProfile, uploadProfileAvatar,
   fetchLeaderboard, fetchPlayerProfile,
 } from '@/api/client'
@@ -581,7 +581,17 @@ export function useConsent() {
 export function useSetConsent() {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: () => setConsent(1),
+    mutationFn: () => setConsent(2),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['consent'] })
+    },
+  })
+}
+
+export function useRevokeConsent() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: revokeConsent,
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['consent'] })
     },

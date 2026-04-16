@@ -42,9 +42,13 @@ export default function ConsentModal({ onAccepted, onDismiss }: ConsentModalProp
         </p>
 
         <div className="rounded-lg border border-border bg-background/60 p-4 mb-5 text-sm text-foreground leading-relaxed">
-          Ich stimme zu, dass meine Stimme und mein Bild in Streams auf Twitch/YouTube und in
-          Videos verwendet werden dürfen, solange ich mit anderen im Discord zusammen bin.
-          Die Stimme wird nicht separat isoliert aufgezeichnet.
+          Ich bin damit einverstanden, dass Turnier-Matches und begleitende Community-Streams live
+          übertragen sowie später als Videos, Highlights oder Zusammenschnitte auf Plattformen wie
+          Twitch, YouTube oder vergleichbaren Kanälen veröffentlicht werden können. Wenn ich dabei
+          im Discord mit anderen spreche oder im Stream sichtbar bin, kann meine Stimme bzw. mein
+          Bild im Rahmen dieser Übertragung und Veröffentlichung mit enthalten sein. Eine gezielte
+          separate Aufnahme oder bloßstellende Hervorhebung einzelner Personen ist damit nicht
+          gemeint.
         </div>
 
         <label className="flex items-start gap-3 cursor-pointer mb-6">
