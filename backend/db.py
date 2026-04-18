@@ -25,7 +25,8 @@ CREATE TABLE IF NOT EXISTS tournaments(
     created_by TEXT NOT NULL,
     lobby_settings TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    series_format INTEGER NOT NULL DEFAULT 1
 );
 
 CREATE TABLE IF NOT EXISTS teams(
@@ -112,6 +113,47 @@ CREATE TABLE IF NOT EXISTS bracket_matches(
     match_stats TEXT,
     scheduled_at TEXT,
     played_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS match_games (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    bracket_match_id    INTEGER NOT NULL REFERENCES bracket_matches(id) ON DELETE CASCADE,
+    game_number         INTEGER NOT NULL CHECK(game_number IN (1,2,3,4,5)),
+    status              TEXT NOT NULL DEFAULT 'pending'
+                            CHECK(status IN ('pending','lobby_created','in_progress','completed','cancelled')),
+    steam_party_id      TEXT,
+    party_code          TEXT,
+    deadlock_match_id   TEXT,
+    winner_team         INTEGER CHECK(winner_team IN (1,2)),
+    duration_s          INTEGER,
+    match_stats         TEXT,
+    created_at          TEXT NOT NULL,
+    completed_at        TEXT,
+    UNIQUE(bracket_match_id, game_number)
+);
+
+CREATE TABLE IF NOT EXISTS draft_sessions (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    bracket_match_id INTEGER NOT NULL REFERENCES bracket_matches(id) ON DELETE CASCADE,
+    status          TEXT NOT NULL DEFAULT 'pending'
+                        CHECK(status IN ('pending','in_progress','completed','cancelled')),
+    current_action_index INTEGER NOT NULL DEFAULT 0,
+    started_by      TEXT,
+    started_at      TEXT,
+    completed_at    TEXT,
+    created_at      TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS draft_actions (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id      INTEGER NOT NULL REFERENCES draft_sessions(id) ON DELETE CASCADE,
+    sequence_index  INTEGER NOT NULL,
+    action_type     TEXT NOT NULL CHECK(action_type IN ('ban','pick')),
+    team_slot       INTEGER NOT NULL CHECK(team_slot IN (1,2)),
+    hero_name       TEXT,
+    taken_by        TEXT,
+    taken_at        TEXT,
+    is_admin_forced INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS match_results(
@@ -324,6 +366,64 @@ async def _ensure_schema_upgrades(db: aiosqlite.Connection) -> None:
     await _ensure_column(
         db, "tournaments", "tournament_mode", "TEXT NOT NULL DEFAULT 'group_stage'"
     )
+
+    # series_format
+    try:
+        await db.execute(
+            "ALTER TABLE tournaments ADD COLUMN series_format INTEGER NOT NULL DEFAULT 1"
+        )
+    except Exception:
+        pass
+
+    # match_games
+    await db.execute("""
+        CREATE TABLE IF NOT EXISTS match_games (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            bracket_match_id INTEGER NOT NULL REFERENCES bracket_matches(id) ON DELETE CASCADE,
+            game_number INTEGER NOT NULL CHECK(game_number IN (1,2,3,4,5)),
+            status TEXT NOT NULL DEFAULT 'pending'
+                CHECK(status IN ('pending','lobby_created','in_progress','completed','cancelled')),
+            steam_party_id TEXT,
+            party_code TEXT,
+            deadlock_match_id TEXT,
+            winner_team INTEGER CHECK(winner_team IN (1,2)),
+            duration_s INTEGER,
+            match_stats TEXT,
+            created_at TEXT NOT NULL,
+            completed_at TEXT,
+            UNIQUE(bracket_match_id, game_number)
+        )
+    """)
+
+    # draft_sessions
+    await db.execute("""
+        CREATE TABLE IF NOT EXISTS draft_sessions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            bracket_match_id INTEGER NOT NULL REFERENCES bracket_matches(id) ON DELETE CASCADE,
+            status TEXT NOT NULL DEFAULT 'pending'
+                CHECK(status IN ('pending','in_progress','completed','cancelled')),
+            current_action_index INTEGER NOT NULL DEFAULT 0,
+            started_by TEXT,
+            started_at TEXT,
+            completed_at TEXT,
+            created_at TEXT NOT NULL
+        )
+    """)
+
+    # draft_actions
+    await db.execute("""
+        CREATE TABLE IF NOT EXISTS draft_actions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id INTEGER NOT NULL REFERENCES draft_sessions(id) ON DELETE CASCADE,
+            sequence_index INTEGER NOT NULL,
+            action_type TEXT NOT NULL CHECK(action_type IN ('ban','pick')),
+            team_slot INTEGER NOT NULL CHECK(team_slot IN (1,2)),
+            hero_name TEXT,
+            taken_by TEXT,
+            taken_at TEXT,
+            is_admin_forced INTEGER NOT NULL DEFAULT 0
+        )
+    """)
 
 
 async def _ensure_column(

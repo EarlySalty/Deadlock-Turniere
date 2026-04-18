@@ -3,7 +3,7 @@ from __future__ import annotations
 from enum import Enum
 from typing import Any, Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 # --- Enums ---
@@ -112,6 +112,7 @@ class TournamentCreate(BaseModel):
     description: Optional[str] = None
     team_size: int = 6
     bracket_format: BracketFormat = BracketFormat.single_elimination
+    series_format: int = Field(default=1, ge=1, le=5, description="Bo1=1, Bo3=3, Bo5=5")
     registration_start: Optional[str] = None
     registration_end: Optional[str] = None
     checkin_start: Optional[str] = None
@@ -131,6 +132,7 @@ class TournamentUpdate(BaseModel):
     status: Optional[TournamentStatus] = None
     team_size: Optional[int] = None
     bracket_format: Optional[BracketFormat] = None
+    series_format: int | None = Field(default=None, ge=1, le=5)
     registration_start: Optional[str] = None
     registration_end: Optional[str] = None
     checkin_start: Optional[str] = None
@@ -162,6 +164,7 @@ class Tournament(BaseModel):
     status: TournamentStatus
     description: Optional[str] = None
     team_size: int = 6
+    series_format: int = 1
     registration_start: Optional[str] = None
     registration_end: Optional[str] = None
     checkin_start: Optional[str] = None
@@ -279,8 +282,26 @@ class BracketMatch(BaseModel):
     deadlock_match_id: Optional[str] = None
     match_duration_s: Optional[int] = None
     match_stats: Optional[str] = None
+    series_wins_team1: int = 0
+    series_wins_team2: int = 0
+    games: list["MatchGame"] = []
     scheduled_at: Optional[str] = None
     played_at: Optional[str] = None
+
+
+class MatchGame(BaseModel):
+    id: int
+    bracket_match_id: int
+    game_number: int
+    status: str
+    steam_party_id: str | None = None
+    party_code: str | None = None
+    deadlock_match_id: str | None = None
+    winner_team: int | None = None
+    duration_s: int | None = None
+    match_stats: dict | None = None
+    created_at: str
+    completed_at: str | None = None
 
 
 # --- Match Result ---
@@ -308,6 +329,7 @@ class TournamentDetailPublic(BaseModel):
     status: TournamentStatus
     description: Optional[str] = None
     team_size: int = 6
+    series_format: int = 1
     registration_start: Optional[str] = None
     registration_end: Optional[str] = None
     group_phase_start: Optional[str] = None
