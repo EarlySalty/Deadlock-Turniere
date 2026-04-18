@@ -20,6 +20,11 @@ import type {
   CheckinStatus,
   FinalizeCheckinResult,
   TeamMoveRequest,
+  VoiceTeamMoveResult,
+  VoiceMoveResult,
+  VoiceChannelMember,
+  DraftState,
+  SeriesGameResult,
   ConsentStatus,
   UserProfile,
   UserProfileUpdate,
@@ -322,3 +327,65 @@ export const uploadProfileAvatar = async (file: File): Promise<UserProfile> => {
 export const fetchLeaderboard = () => request<LeaderboardEntry[]>('/leaderboard')
 export const fetchPlayerProfile = (discordName: string) =>
   request<PlayerProfile>(`/players/${encodeURIComponent(discordName)}`)
+
+// --- Voice Channel Management ---
+export const voiceMoveTeams = (tournamentId: number, matchId: number) =>
+  request<VoiceTeamMoveResult>(
+    `/admin/tournaments/${tournamentId}/voice/move-teams?match_id=${matchId}`,
+    { method: 'POST' }
+  )
+
+export const voiceMoveSammelpunkt = (tournamentId: number) =>
+  request<VoiceMoveResult>(
+    `/admin/tournaments/${tournamentId}/voice/move-sammelpunkt`,
+    { method: 'POST' }
+  )
+
+export const voiceMoveUser = (discordId: string, channelId: string) =>
+  request<VoiceMoveResult>('/admin/voice/move-user', {
+    method: 'POST',
+    body: JSON.stringify({ discord_id: discordId, channel_id: parseInt(channelId, 10) }),
+  })
+
+export const voiceGetChannelMembers = (channelId: string) =>
+  request<{ channel_id: number; members: VoiceChannelMember[] }>(
+    `/admin/voice/channel-members/${channelId}`
+  )
+
+// --- Draft ---
+export const fetchDraftHeroes = () =>
+  request<{ heroes: string[] }>('/draft/heroes')
+
+export const startDraft = (matchId: number) =>
+  request<DraftState>(`/draft/matches/${matchId}/start`, { method: 'POST' })
+
+export const fetchDraftSession = (sessionId: number) =>
+  request<DraftState>(`/draft/sessions/${sessionId}`)
+
+export const submitDraftAction = (sessionId: number, heroName: string, takenBy: string) =>
+  request<DraftState>(`/draft/sessions/${sessionId}/action`, {
+    method: 'POST',
+    body: JSON.stringify({ hero_name: heroName, taken_by: takenBy, force: true }),
+  })
+
+// --- Series Games ---
+export const startSeriesGame = (tournamentId: number, matchId: number, gameNumber: number) =>
+  request<{ game_id: number; game_number: number; games: unknown[] }>(
+    `/admin/tournaments/${tournamentId}/matches/${matchId}/games/${gameNumber}/start`,
+    { method: 'POST' }
+  )
+
+export const submitSeriesGameResult = (
+  tournamentId: number,
+  matchId: number,
+  gameNumber: number,
+  winnerTeam: 1 | 2,
+  durationS?: number
+) =>
+  request<SeriesGameResult>(
+    `/admin/tournaments/${tournamentId}/matches/${matchId}/games/${gameNumber}/result`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ winner_team: winnerTeam, duration_s: durationS ?? null }),
+    }
+  )

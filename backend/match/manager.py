@@ -10,6 +10,7 @@ from match import steam_bridge
 from notifications.discord_notifier import (
     create_match_channel,
     notify_users,
+    send_lobby_announcement,
     send_match_lobby_info,
 )
 from match.result_processor import (
@@ -188,6 +189,30 @@ async def create_lobby(
             )
             await db.commit()
         await send_match_lobby_info(discord_channel_id, str(party_code), participant_discord_ids)
+        team1_ids = [
+            str(row["discord_id"])
+            for row in participant_rows
+            if row["discord_id"] and row["team_id"] == match.get("team1_id")
+        ]
+        team2_ids = [
+            str(row["discord_id"])
+            for row in participant_rows
+            if row["discord_id"] and row["team_id"] == match.get("team2_id")
+        ]
+        try:
+            await send_lobby_announcement(
+                match_id=match_id,
+                party_code=str(party_code),
+                team1_name=match_context["team1_name"],
+                team2_name=match_context["team2_name"],
+                team1_discord_ids=team1_ids,
+                team2_discord_ids=team2_ids,
+            )
+        except Exception:
+            logger.exception(
+                "Lobby-Announcement für Match %s fehlgeschlagen (non-critical)",
+                match_id,
+            )
     except Exception:
         logger.exception(
             "Discord match channel setup failed (tournament=%s match=%s)",

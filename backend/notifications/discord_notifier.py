@@ -307,3 +307,128 @@ async def delete_match_channel_later(channel_id: str | int, delay_seconds: float
         await delete_match_channel(channel_id)
     except Exception:
         logger.exception("Delayed deletion of Discord match channel %s failed", channel_id)
+
+
+async def move_users_to_voice_channel(
+    discord_ids: list[str],
+    channel_id: int,
+    *,
+    guild_id: int,
+) -> dict[str, Any]:
+    """Verschiebt eine Liste von Discord-Usern in einen Voice-Kanal."""
+    import secrets as _secrets
+
+    unique_ids = _unique_preserve_order(discord_ids)
+    results: dict[str, Any] = {"moved": [], "failed": []}
+    for discord_id in unique_ids:
+        payload = {
+            "guild_id": guild_id,
+            "user_id": int(discord_id),
+            "channel_id": channel_id,
+            "idempotency_key": f"move-{discord_id}-{channel_id}-{_secrets.token_hex(4)}",
+        }
+        try:
+            await _post_internal_api("/internal/master/v1/discord/member/move-voice", payload)
+            results["moved"].append(discord_id)
+        except Exception as exc:
+            logger.warning("move_voice failed for %s: %s", discord_id, exc)
+            results["failed"].append({"discord_id": discord_id, "error": str(exc)})
+    return results
+
+
+async def get_voice_channel_members(channel_id: int) -> list[dict[str, Any]]:
+    """Gibt die aktuellen Mitglieder eines Voice-Kanals zurück."""
+    result = await _post_internal_api(
+        "/internal/master/v1/discord/voice-channel/members",
+        {"channel_id": channel_id},
+    )
+    return result.get("members") or []
+
+
+async def send_lobby_announcement(
+    *,
+    match_id: int,
+    party_code: str,
+    team1_name: str,
+    team2_name: str,
+    team1_discord_ids: list[str],
+    team2_discord_ids: list[str],
+) -> dict[str, Any]:
+    """Postet Lobby-Code + Team-Zuordnung in den zentralen Turnier-Kanal."""
+    import secrets as _sec
+    from config import settings as _settings
+
+    team1_mentions = " ".join(f"<@{uid}>" for uid in team1_discord_ids) or "—"
+    team2_mentions = " ".join(f"<@{uid}>" for uid in team2_discord_ids) or "—"
+    all_ids = [int(uid) for uid in team1_discord_ids + team2_discord_ids if uid]
+
+    embed = {
+        "title": f"Match {match_id} — Lobby bereit",
+        "fields": [
+            {"name": "Lobby-Code", "value": f"`{party_code}`", "inline": False},
+            {"name": f"🔵 {team1_name}", "value": team1_mentions, "inline": True},
+            {"name": f"🔴 {team2_name}", "value": team2_mentions, "inline": True},
+        ],
+    }
+    content = " ".join(f"<@{uid}>" for uid in team1_discord_ids + team2_discord_ids if uid) or None
+
+    payload = {
+        "channel_id": _settings.DISCORD_TOURNAMENT_LOBBY_CHANNEL_ID,
+        "content": content,
+        "embed": embed,
+        "allowed_user_ids": all_ids,
+        "idempotency_key": f"lobby-ann-{match_id}-{_sec.token_hex(4)}",
+    }
+    return await _post_internal_api("/internal/master/v1/discord/send-rich-message", payload)
+
+
+async def send_match_stats_to_channel(
+    channel_id: str | int,
+    *,
+    match_id: int,
+    deadlock_match_id: str | None,
+    team1_name: str,
+    team2_name: str,
+    winner_name: str,
+    duration_s: int | None,
+    player_stats: list[dict] | None,
+) -> dict[str, Any]:
+    """Postet Match-Stats (Ergebnis + K/D/A) in den Discord-Match-Channel."""
+    import secrets as _sec
+
+    duration_str = f"{duration_s // 60}m {duration_s % 60}s" if duration_s else "unbekannt"
+
+    stats_lines = []
+    if player_stats:
+        for p in player_stats[:12]:
+            name = p.get("hero") or p.get("player_name") or p.get("discord_name") or "?"
+            kills = p.get("kills", 0)
+            deaths = p.get("deaths", 0)
+            assists = p.get("assists", 0)
+            stats_lines.append(f"**{name}** — {kills}/{deaths}/{assists}")
+
+    embed = {
+        "title": f"Match {match_id} — Ergebnis",
+        "description": f"**Sieger: {winner_name}**\nDauer: {duration_str}",
+        "fields": [
+            {"name": "Match ID (Deadlock)", "value": deadlock_match_id or "—", "inline": True},
+            {"name": "Teams", "value": f"{team1_name} vs {team2_name}", "inline": True},
+        ],
+    }
+    if stats_lines:
+        embed["fields"].append(
+            {
+                "name": "Spieler-Stats (K/D/A)",
+                "value": "\n".join(stats_lines[:10]),
+                "inline": False,
+            }
+        )
+
+    payload = {
+        "channel_id": int(channel_id),
+        "content": None,
+        "embed": embed,
+        "allowed_user_ids": [],
+        "idempotency_key": f"stats-{match_id}-{_sec.token_hex(4)}",
+    }
+    return await _post_internal_api("/internal/master/v1/discord/send-rich-message", payload)

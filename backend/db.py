@@ -372,7 +372,7 @@ async def _ensure_schema_upgrades(db: aiosqlite.Connection) -> None:
         await db.execute(
             "ALTER TABLE tournaments ADD COLUMN series_format INTEGER NOT NULL DEFAULT 1"
         )
-    except Exception:
+    except aiosqlite.OperationalError:
         pass
 
     # match_games

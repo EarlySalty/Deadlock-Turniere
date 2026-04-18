@@ -53,14 +53,15 @@ async def apply_bracket_match_result(
         match = await cursor.fetchone()
         if not match:
             raise MatchNotFoundError(f"Bracket-Match {match_id} nicht gefunden")
+        match_row = dict(match)
 
-        if match["status"] in {"completed", "cancelled", "forfeit"} and not force:
+        if match_row["status"] in {"completed", "cancelled", "forfeit"} and not force:
             raise MatchStateError(
-                f"Bracket-Match {match_id} kann aus Status {match['status']} nicht verarbeitet werden"
+                f"Bracket-Match {match_id} kann aus Status {match_row['status']} nicht verarbeitet werden"
             )
 
-        team1_id = match["team1_id"]
-        team2_id = match["team2_id"]
+        team1_id = match_row["team1_id"]
+        team2_id = match_row["team2_id"]
         if team1_id is None or team2_id is None:
             raise MatchStateError(
                 f"Bracket-Match {match_id} hat noch nicht beide Teams gesetzt"
@@ -97,18 +98,18 @@ async def apply_bracket_match_result(
 
         if (
             force
-            and match["winner_id"] is not None
-            and int(match["winner_id"]) != winner_id_value
+            and match_row["winner_id"] is not None
+            and int(match_row["winner_id"]) != winner_id_value
         ):
-            await _reset_bracket_downstream(db, tournament_id, dict(match))
+            await _reset_bracket_downstream(db, tournament_id, match_row)
 
         duration_value = _coerce_optional_int(duration_s, "duration_s")
         if duration_value is None:
-            duration_value = match["match_duration_s"]
+            duration_value = match_row["match_duration_s"]
 
         player_stats_json, return_players = _resolve_player_stats(
             players,
-            match["match_stats"],
+            match_row["match_stats"],
         )
 
         await db.execute(
@@ -142,7 +143,7 @@ async def apply_bracket_match_result(
         )
         await db.commit()
 
-    discord_channel_id = match.get("discord_channel_id")
+    discord_channel_id = match_row.get("discord_channel_id")
     if discord_channel_id:
         asyncio.create_task(
             delete_match_channel_later(
@@ -152,6 +153,45 @@ async def apply_bracket_match_result(
         )
 
     await advance_bracket_winner(tournament_id, match_id, winner_id_value)
+
+    # Stats in Discord-Match-Channel posten (non-blocking)
+    if discord_channel_id and players:
+        import asyncio as _asyncio
+        from notifications.discord_notifier import send_match_stats_to_channel
+
+        async with get_db() as db:
+            cursor = await db.execute(
+                """
+                SELECT bm.deadlock_match_id,
+                       t1.name AS team1_name,
+                       t2.name AS team2_name,
+                       winner.name AS winner_name
+                FROM bracket_matches bm
+                LEFT JOIN teams t1 ON t1.id = bm.team1_id
+                LEFT JOIN teams t2 ON t2.id = bm.team2_id
+                LEFT JOIN teams winner ON winner.id = bm.winner_id
+                WHERE bm.id = ? AND bm.tournament_id = ?
+                """,
+                (match_id, tournament_id),
+            )
+            stats_row = await cursor.fetchone()
+
+        stats_payload = dict(stats_row) if stats_row else {}
+        try:
+            _asyncio.create_task(
+                send_match_stats_to_channel(
+                    discord_channel_id,
+                    match_id=match_id,
+                    deadlock_match_id=str(stats_payload.get("deadlock_match_id") or "") or None,
+                    team1_name=str(stats_payload.get("team1_name") or "Team 1"),
+                    team2_name=str(stats_payload.get("team2_name") or "Team 2"),
+                    winner_name=str(stats_payload.get("winner_name") or "Unbekannt"),
+                    duration_s=duration_value,
+                    player_stats=players if isinstance(players, list) else None,
+                )
+            )
+        except Exception:
+            pass
 
     return {
         "match_id": match_id,

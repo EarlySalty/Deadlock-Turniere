@@ -5,11 +5,18 @@ import json
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from pydantic import BaseModel, Field
 
 from auth.permissions import require_admin, require_mod
+from config import settings
 from db import get_db
 from match import manager as match_manager
-from notifications.discord_notifier import notify_users
+from match.series_manager import ensure_game_exists, get_series_games, record_game_result
+from notifications.discord_notifier import (
+    get_voice_channel_members,
+    move_users_to_voice_channel,
+    notify_users,
+)
 from match.result_processor import (
     MatchNotFoundError,
     MatchResultError,
@@ -54,6 +61,16 @@ from tournament.scheduler import advance_tournament_status
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 logger = logging.getLogger(__name__)
+
+
+class VoiceMoveRequest(BaseModel):
+    discord_id: str
+    channel_id: int
+
+
+class GameResultRequest(BaseModel):
+    winner_team: int = Field(ge=1, le=2)
+    duration_s: int | None = Field(default=None, ge=0)
 
 
 # ---------------------------------------------------------------------------
@@ -233,6 +250,24 @@ async def _load_tournament_or_404(db, tournament_id: int):  # noqa: ANN001
             detail="Turnier nicht gefunden",
         )
     return tournament
+
+
+async def _load_bracket_match_for_tournament_or_404(
+    db,
+    tournament_id: int,
+    match_id: int,
+):  # noqa: ANN001
+    cursor = await db.execute(
+        "SELECT * FROM bracket_matches WHERE id = ? AND tournament_id = ?",
+        (match_id, tournament_id),
+    )
+    match = await cursor.fetchone()
+    if not match:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Bracket-Match nicht gefunden",
+        )
+    return match
 
 
 async def _count_team_members(db, team_id: int) -> int:  # noqa: ANN001
@@ -1919,6 +1954,97 @@ async def set_match_result(
         )
 
 
+@router.post("/tournaments/{tournament_id}/matches/{match_id}/games/{game_number}/start", status_code=200)
+async def start_series_game(
+    tournament_id: int,
+    match_id: int,
+    game_number: int,
+    user: UserSession = Depends(require_admin),
+) -> dict:
+    """Stellt sicher dass Spiel N existiert und gibt aktuelle Spiel-IDs zurück."""
+    del user
+    async with get_db() as db:
+        cursor = await db.execute(
+            "SELECT id, status FROM bracket_matches WHERE id = ? AND tournament_id = ?",
+            (match_id, tournament_id),
+        )
+        bm = await cursor.fetchone()
+    if not bm:
+        raise HTTPException(status_code=404, detail="Match nicht gefunden oder gehört nicht zu diesem Turnier")
+    if bm["status"] in ("completed", "forfeit", "cancelled"):
+        raise HTTPException(status_code=400, detail="Match bereits abgeschlossen")
+
+    game_id = await ensure_game_exists(match_id, game_number)
+    games = await get_series_games(match_id)
+    return {"game_id": game_id, "game_number": game_number, "games": games}
+
+
+@router.post("/tournaments/{tournament_id}/matches/{match_id}/games/{game_number}/result", status_code=200)
+async def submit_series_game_result(
+    tournament_id: int,
+    match_id: int,
+    game_number: int,
+    body: GameResultRequest,
+    user: UserSession = Depends(require_admin),
+) -> dict:
+    """Trägt Ergebnis für Spiel N ein. Wenn Serie entschieden: Bracket-Winner wird gesetzt."""
+    async with get_db() as db:
+        cursor = await db.execute(
+            "SELECT id, status FROM bracket_matches WHERE id = ? AND tournament_id = ?",
+            (match_id, tournament_id),
+        )
+        bm = await cursor.fetchone()
+    if not bm:
+        raise HTTPException(status_code=404, detail="Match nicht gefunden oder gehört nicht zu diesem Turnier")
+    if bm["status"] in ("completed", "forfeit", "cancelled"):
+        raise HTTPException(status_code=400, detail="Match bereits abgeschlossen")
+
+    await ensure_game_exists(match_id, game_number)
+    series_result = await record_game_result(
+        match_id,
+        game_number,
+        winner_team=body.winner_team,
+        duration_s=body.duration_s,
+    )
+
+    if series_result["series_done"]:
+        async with get_db() as db:
+            match_row = await _load_bracket_match_for_tournament_or_404(db, tournament_id, match_id)
+            winner_team = int(series_result["series_winner_team"])
+            winner_id = match_row["team1_id"] if winner_team == 1 else match_row["team2_id"]
+
+            await _audit(
+                db,
+                "match_result_series",
+                user.discord_id,
+                json.dumps(
+                    {
+                        "tournament_id": tournament_id,
+                        "match_id": match_id,
+                        "game_number": game_number,
+                        "winner_id": winner_id,
+                        "series_winner_team": winner_team,
+                        "wins_team1": series_result["wins_team1"],
+                        "wins_team2": series_result["wins_team2"],
+                        "source": "series_manual",
+                    }
+                ),
+            )
+            await db.commit()
+
+        await apply_bracket_match_result(
+            tournament_id,
+            match_id,
+            winning_team=winner_team - 1,
+            winner_id=winner_id,
+            duration_s=body.duration_s,
+            players=None,
+            source="series_manual",
+        )
+
+    return series_result
+
+
 @router.post("/tournaments/{tournament_id}/matches/{match_id}/create-lobby", status_code=200)
 async def create_match_lobby(
     tournament_id: int,
@@ -2358,3 +2484,98 @@ async def generate_bracket_endpoint(
         await db.commit()
 
     return {"bracket_matches_created": match_count}
+
+
+@router.post("/tournaments/{tournament_id}/voice/move-teams")
+async def voice_move_teams(
+    tournament_id: int,
+    match_id: int = Query(..., description="ID des Bracket-Matches"),
+    user: UserSession = Depends(require_admin),
+) -> dict:
+    """Verschiebt Team1 → VC1, Team2 → VC2 basierend auf dem aktuellen Match."""
+    del user
+    async with get_db() as db:
+        cursor = await db.execute(
+            "SELECT team1_id, team2_id FROM bracket_matches WHERE id = ? AND tournament_id = ?",
+            (match_id, tournament_id),
+        )
+        match = await cursor.fetchone()
+    if not match:
+        raise HTTPException(status_code=404, detail="Match nicht gefunden")
+
+    async def _load_discord_ids(team_id: int | None) -> list[str]:
+        if team_id is None:
+            return []
+        async with get_db() as db:
+            cursor = await db.execute(
+                "SELECT discord_id FROM team_members WHERE team_id = ? AND discord_id IS NOT NULL",
+                (team_id,),
+            )
+            rows = await cursor.fetchall()
+        return [str(r["discord_id"]) for r in rows if r["discord_id"]]
+
+    guild_id = int(settings.DISCORD_GUILD_ID)
+    team1_ids = await _load_discord_ids(match["team1_id"])
+    team2_ids = await _load_discord_ids(match["team2_id"])
+    result1 = await move_users_to_voice_channel(
+        team1_ids,
+        settings.DISCORD_TEAM1_VOICE_CHANNEL_ID,
+        guild_id=guild_id,
+    )
+    result2 = await move_users_to_voice_channel(
+        team2_ids,
+        settings.DISCORD_TEAM2_VOICE_CHANNEL_ID,
+        guild_id=guild_id,
+    )
+    return {"team1": result1, "team2": result2}
+
+
+@router.post("/tournaments/{tournament_id}/voice/move-sammelpunkt")
+async def voice_move_sammelpunkt(
+    tournament_id: int,
+    user: UserSession = Depends(require_admin),
+) -> dict:
+    """Verschiebt alle Turnier-Teilnehmer zurück in den Sammelpunkt-VC."""
+    del user
+    async with get_db() as db:
+        cursor = await db.execute(
+            """
+            SELECT DISTINCT tm.discord_id
+            FROM team_members tm
+            JOIN teams t ON t.id = tm.team_id
+            WHERE t.tournament_id = ? AND tm.discord_id IS NOT NULL
+            """,
+            (tournament_id,),
+        )
+        rows = await cursor.fetchall()
+    all_ids = [str(r["discord_id"]) for r in rows if r["discord_id"]]
+    guild_id = int(settings.DISCORD_GUILD_ID)
+    result = await move_users_to_voice_channel(
+        all_ids,
+        settings.DISCORD_SAMMELPUNKT_CHANNEL_ID,
+        guild_id=guild_id,
+    )
+    return result
+
+
+@router.post("/voice/move-user")
+async def voice_move_user(
+    body: VoiceMoveRequest,
+    user: UserSession = Depends(require_admin),
+) -> dict:
+    """Verschiebt einen einzelnen User manuell in einen Voice-Kanal."""
+    del user
+    guild_id = int(settings.DISCORD_GUILD_ID)
+    result = await move_users_to_voice_channel([body.discord_id], body.channel_id, guild_id=guild_id)
+    return result
+
+
+@router.get("/voice/channel-members/{channel_id}")
+async def voice_get_channel_members(
+    channel_id: int,
+    user: UserSession = Depends(require_admin),
+) -> dict:
+    """Gibt zurück, wer aktuell in einem Voice-Kanal ist."""
+    del user
+    members = await get_voice_channel_members(channel_id)
+    return {"channel_id": channel_id, "members": members}

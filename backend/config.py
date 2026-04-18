@@ -233,6 +233,22 @@ class Settings:
         "DISCORD_MATCH_CHANNEL_DELETE_DELAY_SECONDS",
         default=300,
     )
+    DISCORD_SAMMELPUNKT_CHANNEL_ID: int = _get_int(
+        "DISCORD_SAMMELPUNKT_CHANNEL_ID",
+        default=1426160735469174875,
+    )
+    DISCORD_TEAM1_VOICE_CHANNEL_ID: int = _get_int(
+        "DISCORD_TEAM1_VOICE_CHANNEL_ID",
+        default=1462434609563173019,
+    )
+    DISCORD_TEAM2_VOICE_CHANNEL_ID: int = _get_int(
+        "DISCORD_TEAM2_VOICE_CHANNEL_ID",
+        default=1462434639858897017,
+    )
+    DISCORD_TOURNAMENT_LOBBY_CHANNEL_ID: int = _get_int(
+        "DISCORD_TOURNAMENT_LOBBY_CHANNEL_ID",
+        default=1412411665713987635,
+    )
     DISCORD_BOT_TOKEN: str = _get_first_string(
         ["DISCORD_BOT_TOKEN", "DISCORD_TOKEN", "BOT_TOKEN"],
         keyring_service="DeadlockBot",

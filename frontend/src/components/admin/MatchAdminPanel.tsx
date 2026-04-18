@@ -2,13 +2,14 @@ import { useState } from 'react'
 import Card from '@/components/ui/Card'
 import Button from '@/components/ui/Button'
 import ManualResultForm from '@/components/admin/ManualResultForm'
+import DraftPanel from '@/components/admin/DraftPanel'
 import {
   useCreateLobby,
   useStartMatch,
   useFetchMatchResult,
   useLeaveLobby,
 } from '@/hooks/useTournament'
-import type { BracketMatch, Team } from '@/types/tournament'
+import type { BracketMatch, MatchGame, Team } from '@/types/tournament'
 import {
   AlertCircle,
   Copy,
@@ -243,6 +244,11 @@ export default function MatchAdminPanel({
                 <h3 className="text-lg font-semibold text-foreground">
                   {teamName(match.team1_id, teams)} vs {teamName(match.team2_id, teams)}
                 </h3>
+                {(match.series_wins_team1 + match.series_wins_team2) > 0 && (
+                  <div className="text-sm font-medium text-foreground">
+                    Serie: {teamName(match.team1_id, teams)} {match.series_wins_team1} : {match.series_wins_team2} {teamName(match.team2_id, teams)}
+                  </div>
+                )}
                 <div className="flex flex-wrap gap-3 text-xs text-muted">
                   <span>Status: {statusLabel(match)}</span>
                   {match.deadlock_match_id && <span>Deadlock Match-ID: {match.deadlock_match_id}</span>}
@@ -322,6 +328,78 @@ export default function MatchAdminPanel({
               )}
             </div>
 
+            {match.games && match.games.length > 0 && (
+              <div className="border-t border-border pt-3">
+                <p className="mb-2 text-xs font-medium uppercase tracking-wider text-muted">Spiele</p>
+                <div className="flex flex-wrap gap-2">
+                  {match.games.map((game: MatchGame) => (
+                    <div
+                      key={game.id}
+                      className={`rounded-lg border px-3 py-2 text-xs ${
+                        game.status === 'completed'
+                          ? 'border-green-500/20 bg-green-500/10 text-green-400'
+                          : 'border-border bg-background text-muted'
+                      }`}
+                    >
+                      Spiel {game.game_number}
+                      {game.winner_team &&
+                        ` — ${
+                          game.winner_team === 1
+                            ? teamName(match.team1_id, teams)
+                            : teamName(match.team2_id, teams)
+                        } gewinnt`}
+                      {game.duration_s && ` (${Math.floor(game.duration_s / 60)}m)`}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {match.status === 'completed' && match.match_stats && (() => {
+              try {
+                const stats = JSON.parse(match.match_stats) as {
+                  players?: Array<{
+                    hero_id?: number
+                    kills?: number
+                    deaths?: number
+                    assists?: number
+                  }>
+                }
+                if (!stats.players?.length) return null
+                return (
+                  <details className="border-t border-border pt-3">
+                    <summary className="cursor-pointer text-xs font-medium uppercase tracking-wider text-muted hover:text-foreground">
+                      Match-Stats anzeigen
+                    </summary>
+                    <div className="mt-2 overflow-x-auto">
+                      <table className="w-full text-xs">
+                        <thead>
+                          <tr className="text-left text-muted">
+                            <th className="pb-1 pr-3">Hero ID</th>
+                            <th className="pb-1 pr-3">K</th>
+                            <th className="pb-1 pr-3">D</th>
+                            <th className="pb-1">A</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {stats.players.map((player, index) => (
+                            <tr key={index} className="border-t border-border/50 text-foreground">
+                              <td className="py-1 pr-3">{player.hero_id ?? '—'}</td>
+                              <td className="py-1 pr-3">{player.kills ?? '—'}</td>
+                              <td className="py-1 pr-3">{player.deaths ?? '—'}</td>
+                              <td className="py-1">{player.assists ?? '—'}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </details>
+                )
+              } catch {
+                return null
+              }
+            })()}
+
             {message && (
               <div
                 className={`flex items-center gap-2 rounded-lg p-3 text-sm ${
@@ -351,6 +429,14 @@ export default function MatchAdminPanel({
                 teams={teams}
                 onSuccess={handleRefresh}
                 allowOverride
+              />
+            )}
+
+            {!isTerminalMatch(match) && (
+              <DraftPanel
+                matchId={match.id}
+                team1Name={teamName(match.team1_id, teams)}
+                team2Name={teamName(match.team2_id, teams)}
               />
             )}
           </Card>

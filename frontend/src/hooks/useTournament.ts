@@ -18,6 +18,9 @@ import {
   fetchConsent, setConsent, revokeConsent,
   fetchMyProfile, updateMyProfile, uploadProfileAvatar,
   fetchLeaderboard, fetchPlayerProfile,
+  voiceMoveTeams, voiceMoveSammelpunkt, voiceMoveUser,
+  fetchDraftHeroes, startDraft, fetchDraftSession, submitDraftAction,
+  submitSeriesGameResult,
 } from '@/api/client'
 import type {
   ManualResult, TeamMoveRequest, TournamentCreate, TournamentUpdate,
@@ -638,5 +641,85 @@ export function usePlayerProfile(discordName: string) {
     queryKey: ['players', discordName],
     queryFn: () => fetchPlayerProfile(discordName),
     enabled: Boolean(discordName),
+  })
+}
+
+// Voice
+export function useVoiceMoveTeams(tournamentId: number) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (matchId: number) => voiceMoveTeams(tournamentId, matchId),
+    onSuccess: () => invalidateTournamentCaches(qc, tournamentId),
+  })
+}
+
+export function useVoiceMoveSammelpunkt(tournamentId: number) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: () => voiceMoveSammelpunkt(tournamentId),
+    onSuccess: () => invalidateTournamentCaches(qc, tournamentId),
+  })
+}
+
+export function useVoiceMoveUser() {
+  return useMutation({
+    mutationFn: ({ discordId, channelId }: { discordId: string; channelId: string }) =>
+      voiceMoveUser(discordId, channelId),
+  })
+}
+
+// Draft
+export function useDraftHeroes() {
+  return useQuery({
+    queryKey: ['draft', 'heroes'],
+    queryFn: fetchDraftHeroes,
+    staleTime: Infinity,
+  })
+}
+
+export function useDraftSession(sessionId: number | null) {
+  return useQuery({
+    queryKey: ['draft', 'session', sessionId],
+    queryFn: () => fetchDraftSession(sessionId!),
+    enabled: sessionId !== null,
+    refetchInterval: 3000,
+  })
+}
+
+export function useStartDraft() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (matchId: number) => startDraft(matchId),
+    onSuccess: (data) => {
+      qc.setQueryData(['draft', 'session', data.id], data)
+    },
+  })
+}
+
+export function useSubmitDraftAction(sessionId: number) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ heroName, takenBy }: { heroName: string; takenBy: string }) =>
+      submitDraftAction(sessionId, heroName, takenBy),
+    onSuccess: (data) => {
+      qc.setQueryData(['draft', 'session', sessionId], data)
+    },
+  })
+}
+
+// Series
+export function useSubmitSeriesGameResult(tournamentId: number, matchId: number) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({
+      gameNumber,
+      winnerTeam,
+      durationS,
+    }: {
+      gameNumber: number
+      winnerTeam: 1 | 2
+      durationS?: number
+    }) => submitSeriesGameResult(tournamentId, matchId, gameNumber, winnerTeam, durationS),
+    onSuccess: () => invalidateTournamentCaches(qc, tournamentId),
   })
 }

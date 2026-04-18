@@ -151,6 +151,7 @@ export default function CreateTournamentForm() {
   const [description, setDescription] = useState('')
   const [teamSize, setTeamSize] = useState(4)
   const [bracketFormat, setBracketFormat] = useState<BracketFormat>('single_elimination')
+  const [seriesFormat, setSeriesFormat] = useState<1 | 3 | 5>(1)
   const [regStart, setRegStart] = useState('')
   const [regEnd, setRegEnd] = useState('')
   const [checkinStart, setCheckinStart] = useState('')
@@ -205,6 +206,7 @@ export default function CreateTournamentForm() {
         description: description.trim() || undefined,
         team_size: teamSize,
         bracket_format: bracketFormat,
+        series_format: seriesFormat,
         registration_start: regStart || undefined,
         registration_end: regEnd || undefined,
         checkin_start: checkinStart || undefined,
@@ -221,6 +223,7 @@ export default function CreateTournamentForm() {
           setDescription('')
           setTeamSize(4)
           setBracketFormat('single_elimination')
+          setSeriesFormat(1)
           setRegStart('')
           setRegEnd('')
           setCheckinStart('')
@@ -307,6 +310,22 @@ export default function CreateTournamentForm() {
               <option value="double_elimination">Double Elimination</option>
             </select>
           </div>
+        </div>
+
+        <div>
+          <label htmlFor="series-format" className="block text-sm font-medium text-foreground mb-1.5">
+            Serienformat
+          </label>
+          <select
+            id="series-format"
+            value={seriesFormat}
+            onChange={(e) => setSeriesFormat(Number(e.target.value) as 1 | 3 | 5)}
+            className="w-full bg-background border border-border rounded-lg px-3 py-2 text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
+          >
+            <option value={1}>Bo1</option>
+            <option value={3}>Bo3</option>
+            <option value={5}>Bo5</option>
+          </select>
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">

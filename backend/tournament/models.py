@@ -3,7 +3,7 @@ from __future__ import annotations
 from enum import Enum
 from typing import Any, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 # --- Enums ---
@@ -112,7 +112,7 @@ class TournamentCreate(BaseModel):
     description: Optional[str] = None
     team_size: int = 6
     bracket_format: BracketFormat = BracketFormat.single_elimination
-    series_format: int = Field(default=1, ge=1, le=5, description="Bo1=1, Bo3=3, Bo5=5")
+    series_format: int = Field(default=1)
     registration_start: Optional[str] = None
     registration_end: Optional[str] = None
     checkin_start: Optional[str] = None
@@ -125,6 +125,13 @@ class TournamentCreate(BaseModel):
     lobby_settings: Optional[dict[str, Any]] = None
     force_tournament_mode: Optional[TournamentMode] = None  # Admin-Override: erzwingt group_stage oder bracket_only
 
+    @field_validator("series_format")
+    @classmethod
+    def validate_series_format(cls, v: int) -> int:
+        if v not in (1, 3, 5):
+            raise ValueError("series_format muss 1, 3 oder 5 sein")
+        return v
+
 
 class TournamentUpdate(BaseModel):
     name: Optional[str] = None
@@ -132,7 +139,7 @@ class TournamentUpdate(BaseModel):
     status: Optional[TournamentStatus] = None
     team_size: Optional[int] = None
     bracket_format: Optional[BracketFormat] = None
-    series_format: int | None = Field(default=None, ge=1, le=5)
+    series_format: int | None = Field(default=None)
     registration_start: Optional[str] = None
     registration_end: Optional[str] = None
     checkin_start: Optional[str] = None
@@ -144,6 +151,15 @@ class TournamentUpdate(BaseModel):
     lobby_settings_preset: Optional[LobbySettingsPreset] = None
     lobby_settings: Optional[dict[str, Any]] = None
     force_tournament_mode: Optional[TournamentMode] = None  # Admin-Override: erzwingt group_stage oder bracket_only
+
+    @field_validator("series_format")
+    @classmethod
+    def validate_series_format(cls, v: int | None) -> int | None:
+        if v is None:
+            return v
+        if v not in (1, 3, 5):
+            raise ValueError("series_format muss 1, 3 oder 5 sein")
+        return v
 
 
 class TournamentSignup(BaseModel):

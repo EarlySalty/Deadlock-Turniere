@@ -11,6 +11,7 @@ import CheckinManager from '@/components/admin/CheckinManager'
 import MatchAdminPanel from '@/components/admin/MatchAdminPanel'
 import MatchEventPanel from '@/components/admin/MatchEventPanel'
 import GroupMatchAdminPanel from '@/components/admin/GroupMatchAdminPanel'
+import VoiceChannelPanel from '@/components/admin/VoiceChannelPanel'
 import { Archive, Plus, Settings, Trash2 } from 'lucide-react'
 
 type AdminTab = 'erstellen' | 'verwalten'
@@ -57,6 +58,9 @@ export default function Admin() {
   const allowManualOverride = selectedDetail
     ? ['completed', 'archived'].includes(selectedDetail.status)
     : false
+  const currentBracketMatchId = selectedDetail?.bracket_matches.find(
+    (match) => !['completed', 'forfeit', 'cancelled'].includes(match.status)
+  )?.id ?? null
 
   const handleDeleteArchived = (id: number, name: string) => {
     if (!window.confirm(`Turnier "${name}" endgültig löschen?`)) return
@@ -258,6 +262,11 @@ export default function Admin() {
                       Lobbys steuern, Ergebnisse abrufen und Match-Events ohne Hexenwerk live setzen.
                     </p>
                   </div>
+
+                  <VoiceChannelPanel
+                    tournamentId={selectedDetail.id}
+                    currentMatchId={currentBracketMatchId}
+                  />
 
                   <div className="flex border-b border-border">
                     <button

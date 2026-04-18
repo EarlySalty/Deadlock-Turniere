@@ -14,12 +14,13 @@ from auth.discord_oauth import router as auth_router
 from auth.middleware import get_current_user
 from config import settings
 from db import init_db
+from draft.routes import router as draft_router
 from tournament.consent_routes import router as consent_router
-from tournament.models import UserSession
 from tournament.leaderboard_routes import router as leaderboard_router
+from tournament.models import UserSession
 from tournament.scheduler import start_scheduler
-from tournament.routes import router as tournament_router
 from tournament.admin_routes import router as admin_router
+from tournament.routes import router as tournament_router
 
 
 @asynccontextmanager
@@ -61,6 +62,7 @@ app.include_router(tournament_router)
 app.include_router(admin_router)
 app.include_router(consent_router)
 app.include_router(leaderboard_router)
+app.include_router(draft_router)
 
 
 # --- Auth: /api/me ---

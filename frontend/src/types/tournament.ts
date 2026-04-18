@@ -35,6 +35,7 @@ export interface Tournament {
   status: TournamentStatus
   description: string | null
   team_size: number
+  series_format: 1 | 3 | 5
   registration_start: string | null
   registration_end: string | null
   checkin_start: string | null
@@ -226,8 +227,26 @@ export interface BracketMatch {
   deadlock_match_id: string | null
   match_duration_s: number | null
   match_stats: string | null
+  series_wins_team1: number
+  series_wins_team2: number
+  games: MatchGame[]
   scheduled_at: string | null
   played_at: string | null
+}
+
+export interface MatchGame {
+  id: number
+  bracket_match_id: number
+  game_number: number
+  status: 'pending' | 'lobby_created' | 'in_progress' | 'completed' | 'cancelled'
+  steam_party_id: string | null
+  party_code: string | null
+  deadlock_match_id: string | null
+  winner_team: 1 | 2 | null
+  duration_s: number | null
+  match_stats: string | null
+  created_at: string
+  completed_at: string | null
 }
 
 // --- Create/Update ---
@@ -237,6 +256,7 @@ export interface TournamentCreate {
   description?: string
   team_size: number
   bracket_format: BracketFormat
+  series_format?: 1 | 3 | 5
   registration_start?: string
   registration_end?: string
   checkin_start?: string | null
@@ -253,6 +273,7 @@ export interface TournamentUpdate {
   status?: TournamentStatus
   team_size?: number
   bracket_format?: BracketFormat
+  series_format?: 1 | 3 | 5
   registration_start?: string
   registration_end?: string
   checkin_start?: string | null
@@ -342,6 +363,57 @@ export interface ApplyMatchEventPresetResult extends ApplyMatchConvarsResult {
 export interface TeamMoveRequest {
   from_team_id: number
   discord_id: string
+}
+
+export interface VoiceMoveResult {
+  moved: string[]
+  failed: { discord_id: string; error: string }[]
+}
+
+export interface VoiceTeamMoveResult {
+  team1: VoiceMoveResult
+  team2: VoiceMoveResult
+}
+
+export interface VoiceChannelMember {
+  user_id: number
+  display_name: string
+}
+
+export interface DraftState {
+  id: number
+  bracket_match_id: number
+  status: 'pending' | 'in_progress' | 'completed' | 'cancelled'
+  current_action_index: number
+  current_action_type: 'ban' | 'pick' | null
+  current_team_slot: 1 | 2 | null
+  bans: string[]
+  picks_team1: string[]
+  picks_team2: string[]
+  actions: DraftAction[]
+  started_by: string | null
+  started_at: string | null
+  completed_at: string | null
+}
+
+export interface DraftAction {
+  id: number
+  session_id: number
+  sequence_index: number
+  action_type: 'ban' | 'pick'
+  team_slot: 1 | 2
+  hero_name: string | null
+  taken_by: string | null
+  taken_at: string | null
+  is_admin_forced: number
+}
+
+export interface SeriesGameResult {
+  series_done: boolean
+  series_winner_team: 1 | 2 | null
+  wins_team1: number
+  wins_team2: number
+  next_game_number: number | null
 }
 
 // --- Consent ---
