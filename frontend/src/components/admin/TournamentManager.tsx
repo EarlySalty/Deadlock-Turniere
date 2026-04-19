@@ -10,9 +10,10 @@ import {
   useGenerateBracket,
   useGenerateGroups,
   useOpenCheckin,
+  useRevertCheckin,
   useUpdateTournament,
 } from '@/hooks/useTournament'
-import type { Tournament, TournamentUpdate } from '@/types/tournament'
+import type { Tournament, TournamentMode, TournamentUpdate } from '@/types/tournament'
 import {
   AlertCircle,
   ArrowRight,
@@ -31,6 +32,7 @@ interface TournamentManagerProps {
   teamCount: number
   playerCount: number
   matchCount: number
+  canChangeTournamentMode: boolean
 }
 
 const STATUS_ACTIONS: Record<string, { label: string; confirmMsg: string }> = {
@@ -45,15 +47,29 @@ function toInputDateTime(value: string | null | undefined): string {
   return value.replace(' ', 'T').slice(0, 16)
 }
 
+function toReminderOffsetString(value: number[] | null | undefined): string {
+  return (value && value.length > 0 ? value : [1440, 120, 15]).join(', ')
+}
+
+function parseReminderOffsets(value: string): number[] {
+  const parsed = value
+    .split(',')
+    .map((entry) => Number(entry.trim()))
+    .filter((entry) => Number.isFinite(entry) && entry >= 0)
+  return parsed.length > 0 ? parsed : [1440, 120, 15]
+}
+
 export default function TournamentManager({
   tournament,
   teamCount,
   playerCount,
   matchCount,
+  canChangeTournamentMode,
 }: TournamentManagerProps) {
   const detailsUpdateMutation = useUpdateTournament()
   const advanceMutation = useAdvanceTournament()
   const openCheckinMutation = useOpenCheckin(tournament.id)
+  const revertCheckinMutation = useRevertCheckin(tournament.id)
   const assignMutation = useAssignRandomTeams()
   const deleteMutation = useDeleteTournament()
   const generateGroupsMutation = useGenerateGroups()
@@ -64,11 +80,14 @@ export default function TournamentManager({
     description: tournament.description ?? '',
     team_size: tournament.team_size,
     bracket_format: tournament.bracket_format,
+    tournament_mode: tournament.tournament_mode,
     registration_start: toInputDateTime(tournament.registration_start),
     registration_end: toInputDateTime(tournament.registration_end),
     checkin_start: toInputDateTime(tournament.checkin_start ?? null),
     group_phase_start: toInputDateTime(tournament.group_phase_start),
     bracket_start: toInputDateTime(tournament.bracket_start),
+    exclude_from_leaderboard: tournament.exclude_from_leaderboard,
+    reminder_offsets: toReminderOffsetString(tournament.reminder_offsets),
   })
   const [successMessage, setSuccessMessage] = useState('')
   const [deleteConfirmed, setDeleteConfirmed] = useState(false)
@@ -83,6 +102,7 @@ export default function TournamentManager({
     detailsUpdateMutation.isPending ||
     advanceMutation.isPending ||
     openCheckinMutation.isPending ||
+    revertCheckinMutation.isPending ||
     assignMutation.isPending ||
     deleteMutation.isPending ||
     generateGroupsMutation.isPending ||
@@ -92,6 +112,7 @@ export default function TournamentManager({
     detailsUpdateMutation.error ||
     advanceMutation.error ||
     openCheckinMutation.error ||
+    revertCheckinMutation.error ||
     assignMutation.error ||
     deleteMutation.error ||
     generateGroupsMutation.error ||
@@ -99,7 +120,7 @@ export default function TournamentManager({
 
   const handleChange = (
     key: keyof typeof form,
-    value: string | number
+    value: string | number | boolean
   ) => {
     setForm((current) => ({ ...current, [key]: value }))
   }
@@ -115,6 +136,11 @@ export default function TournamentManager({
       checkin_start: form.checkin_start || undefined,
       group_phase_start: form.group_phase_start || undefined,
       bracket_start: form.bracket_start || undefined,
+      exclude_from_leaderboard: form.exclude_from_leaderboard,
+      reminder_offsets: parseReminderOffsets(form.reminder_offsets),
+    }
+    if (canChangeTournamentMode && form.tournament_mode !== tournament.tournament_mode) {
+      payload.force_tournament_mode = form.tournament_mode as TournamentMode
     }
     detailsUpdateMutation.mutate(
       { id: tournament.id, data: payload },
@@ -143,6 +169,14 @@ export default function TournamentManager({
     if (window.confirm('Check-in jetzt öffnen?')) {
       openCheckinMutation.mutate(undefined, {
         onSuccess: () => setSuccessMessage('Check-in wurde geöffnet.'),
+      })
+    }
+  }
+
+  const handleRevertCheckin = () => {
+    if (window.confirm('Check-in zurück auf Anmeldung setzen und alle Check-ins löschen?')) {
+      revertCheckinMutation.mutate(undefined, {
+        onSuccess: () => setSuccessMessage('Check-in wurde zurückgesetzt. Das Turnier ist wieder in der Anmeldung.'),
       })
     }
   }
@@ -246,18 +280,15 @@ export default function TournamentManager({
             <label htmlFor="admin-team-size" className="mb-1.5 block text-sm font-medium text-foreground">
               Teamgröße
             </label>
-            <select
+            <input
               id="admin-team-size"
+              type="number"
+              min={1}
+              max={20}
               value={form.team_size}
               onChange={(event) => handleChange('team_size', Number(event.target.value))}
               className="w-full rounded-lg border border-border bg-background px-3 py-2 text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
-            >
-              {[2, 3, 4, 5, 6].map((size) => (
-                <option key={size} value={size}>
-                  {size} Spieler
-                </option>
-              ))}
-            </select>
+            />
           </div>
 
           <div>
@@ -273,6 +304,25 @@ export default function TournamentManager({
               <option value="single_elimination">Single Elimination</option>
               <option value="double_elimination">Double Elimination</option>
             </select>
+          </div>
+
+          <div>
+            <label htmlFor="admin-tournament-mode" className="mb-1.5 block text-sm font-medium text-foreground">
+              Turniermodus
+            </label>
+            <select
+              id="admin-tournament-mode"
+              value={form.tournament_mode}
+              onChange={(event) => handleChange('tournament_mode', event.target.value)}
+              disabled={!canChangeTournamentMode}
+              className="w-full rounded-lg border border-border bg-background px-3 py-2 text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 disabled:opacity-60"
+            >
+              <option value="bracket_only">Nur Bracket</option>
+              <option value="group_stage">Gruppenphase + Bracket</option>
+            </select>
+            <p className="mt-1 text-xs text-muted">
+              Änderbar in Check-in oder in der Gruppenphase, solange noch kein Gruppenmatch gespielt wurde.
+            </p>
           </div>
 
           <div>
@@ -327,6 +377,32 @@ export default function TournamentManager({
           </div>
 
           <div>
+            <label htmlFor="admin-reminder-offsets" className="mb-1.5 block text-sm font-medium text-foreground">
+              Reminder vor Anmeldeschluss
+            </label>
+            <input
+              id="admin-reminder-offsets"
+              type="text"
+              value={form.reminder_offsets}
+              onChange={(event) => handleChange('reminder_offsets', event.target.value)}
+              className="w-full rounded-lg border border-border bg-background px-3 py-2 text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
+            />
+          </div>
+
+          <label className="flex items-center gap-3 rounded-lg border border-border px-3 py-2 cursor-pointer sm:col-span-2">
+            <input
+              type="checkbox"
+              checked={form.exclude_from_leaderboard}
+              onChange={(event) => handleChange('exclude_from_leaderboard', event.target.checked)}
+              className="h-4 w-4 accent-primary"
+            />
+            <div>
+              <div className="text-sm font-medium text-foreground">Von Rangliste ausschließen</div>
+              <div className="text-xs text-muted">Für Testturniere oder Events ohne Punktevergabe.</div>
+            </div>
+          </label>
+
+          <div>
             <label htmlFor="admin-bracket-start" className="mb-1.5 block text-sm font-medium text-foreground">
               Bracket Start
             </label>
@@ -376,6 +452,13 @@ export default function TournamentManager({
           <Button variant="primary" size="sm" disabled={isLoading} onClick={handleOpenCheckin}>
             <ArrowRight size={14} />
             {openCheckinMutation.isPending ? 'Öffnet...' : 'Check-in öffnen'}
+          </Button>
+        )}
+
+        {tournament.status === 'checkin' && (
+          <Button variant="danger" size="sm" disabled={isLoading} onClick={handleRevertCheckin}>
+            <ArrowRight size={14} />
+            {revertCheckinMutation.isPending ? 'Setzt zurück...' : 'Check-in zurücksetzen'}
           </Button>
         )}
 

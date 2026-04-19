@@ -394,7 +394,7 @@ async def _load_team_or_404(db, tournament_id: int, team_id: int):  # noqa: ANN0
 
 
 def _ensure_registration_open(tournament) -> None:  # noqa: ANN001
-    if tournament["status"] != "registration":
+    if tournament["status"] not in ("registration", "checkin"):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Anmeldung ist nicht geöffnet",
@@ -751,7 +751,7 @@ async def create_team(
                 detail="Turnier nicht gefunden",
             )
 
-        if tournament["status"] != "registration":
+        if tournament["status"] not in ("registration", "checkin"):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Anmeldung ist nicht geöffnet",
@@ -852,7 +852,7 @@ async def join_team(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Turnier nicht gefunden",
             )
-        if tournament["status"] != "registration":
+        if tournament["status"] not in ("registration", "checkin"):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Anmeldung ist nicht geöffnet",
@@ -1027,7 +1027,7 @@ async def solo_signup(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Turnier nicht gefunden",
             )
-        if tournament["status"] != "registration":
+        if tournament["status"] not in ("registration", "checkin"):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Anmeldung ist nicht geöffnet",

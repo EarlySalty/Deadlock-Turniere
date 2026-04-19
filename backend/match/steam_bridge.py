@@ -96,6 +96,7 @@ async def has_active_task(
     task_type: str,
     *,
     match_id: int | None = None,
+    match_type: str | None = None,
     party_id: str | None = None,
     steam_id: str | None = None,
 ) -> bool:
@@ -106,6 +107,10 @@ async def has_active_task(
     if match_id is not None:
         clauses.append("json_extract(payload, '$.match_id') = ?")
         params.append(match_id)
+
+    if match_type is not None:
+        clauses.append("json_extract(payload, '$.match_type') = ?")
+        params.append(str(match_type))
 
     if party_id is not None:
         clauses.append("json_extract(payload, '$.party_id') = ?")

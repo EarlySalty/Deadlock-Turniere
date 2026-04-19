@@ -234,6 +234,7 @@ export default function Tournament() {
   }
 
   const isRegistration = tournament.status === 'registration'
+  const isSignupOpen = ['registration', 'checkin'].includes(tournament.status)
   const isCheckinPhase = tournament.status === 'checkin'
 
   // User state from status endpoint (no discord_id scanning needed)
@@ -414,7 +415,7 @@ export default function Tournament() {
       )}
 
       {/* Pick-Window-Hinweis */}
-      {isRegistration && tournament.invite_mode === 'window' && (
+      {isSignupOpen && tournament.invite_mode === 'window' && (
         <Card className="p-3 border-amber-500/20 bg-amber-500/5 text-sm text-amber-300">
           {tournament.invite_window_start && tournament.invite_window_end ? (
             <span>
@@ -428,7 +429,7 @@ export default function Tournament() {
           )}
         </Card>
       )}
-      {isRegistration && tournament.invite_mode === 'never' && (
+      {isSignupOpen && tournament.invite_mode === 'never' && (
         <Card className="p-3 border-border/30 bg-background/40 text-sm text-muted">
           Teams werden beim Turnier-Start automatisch zusammengestellt.
         </Card>
@@ -577,7 +578,7 @@ export default function Tournament() {
               </div>
             </Card>
 
-            {isRegistration && (
+            {isSignupOpen && (
               <Card className="p-4">
                 <div className="flex items-center justify-between gap-3 mb-3">
                   <div>
@@ -605,7 +606,7 @@ export default function Tournament() {
                   </p>
                 ) : !userTeam && !userHasSoloSignup ? (
                   <div className="flex flex-wrap gap-2">
-                    <Button variant="secondary" size="sm" onClick={handleSignupSolo} disabled={isMutating}>
+                    <Button variant="secondary" size="sm" onClick={handleSignupSolo} disabled={signupSoloMutation.isPending}>
                       <UserPlus size={14} />
                       {signupSoloMutation.isPending ? 'Wird angemeldet...' : 'Für Turnier anmelden'}
                     </Button>
@@ -662,7 +663,7 @@ export default function Tournament() {
 
         {activeTab === 'teams' && (
           <div className="space-y-4">
-            {isRegistration && isLoggedIn && !userTeam && !userHasSoloSignup && (
+            {isSignupOpen && isLoggedIn && !userTeam && !userHasSoloSignup && (
               <Card className="p-4">
                 <h3 className="text-sm font-semibold text-foreground mb-3">Team erstellen</h3>
                 <p className="text-sm text-muted mb-3">
@@ -675,11 +676,11 @@ export default function Tournament() {
                   </div>
                 )}
                 <div className="flex flex-wrap gap-2">
-                  <Button variant="primary" size="sm" onClick={() => setShowCreateTeam(!showCreateTeam)} disabled={isMutating}>
+                  <Button variant="primary" size="sm" onClick={() => setShowCreateTeam(!showCreateTeam)} disabled={createTeamMutation.isPending}>
                     <Plus size={14} />
                     Team erstellen
                   </Button>
-                  <Button variant="secondary" size="sm" onClick={handleSignupSolo} disabled={isMutating}>
+                  <Button variant="secondary" size="sm" onClick={handleSignupSolo} disabled={signupSoloMutation.isPending}>
                     <UserPlus size={14} />
                     {signupSoloMutation.isPending ? 'Wird angemeldet...' : 'Für Turnier anmelden'}
                   </Button>
@@ -706,7 +707,7 @@ export default function Tournament() {
             )}
 
             {/* Solo signup status */}
-            {isRegistration && isLoggedIn && userHasSoloSignup && !userTeam && (
+            {isSignupOpen && isLoggedIn && userHasSoloSignup && !userTeam && (
               <Card className="p-4">
                 <h3 className="text-sm font-semibold text-foreground mb-3">Solo-Anmeldung</h3>
                 {mutationError && (
@@ -756,7 +757,7 @@ export default function Tournament() {
                 </div>
 
                 {/* Captain: Solo-Spieler einladen */}
-                {isUserCaptain && isRegistration && canInvite && openSoloSignups.length > 0 && (
+                {isUserCaptain && isSignupOpen && canInvite && openSoloSignups.length > 0 && (
                   <div className="mt-4 border-t border-border pt-3">
                     <button
                       className="flex items-center gap-1.5 text-sm font-medium text-foreground hover:text-primary transition-colors"
@@ -803,7 +804,7 @@ export default function Tournament() {
                     )}
                   </div>
                 )}
-                {isUserCaptain && isRegistration && !canInvite && tournament.invite_mode !== 'always' && (
+                {isUserCaptain && isSignupOpen && !canInvite && tournament.invite_mode !== 'always' && (
                   <p className="mt-3 text-xs text-muted pt-2 border-t border-border">
                     {tournament.invite_mode === 'never'
                       ? 'Einladungen sind für dieses Turnier deaktiviert.'
@@ -814,7 +815,7 @@ export default function Tournament() {
             )}
 
             {/* Error outside registration context */}
-            {mutationError && !isRegistration && (
+            {mutationError && !isSignupOpen && (
               <div className="flex items-center gap-2 text-red-400 text-sm bg-red-500/10 border border-red-500/20 rounded-lg p-3">
                 <AlertCircle size={16} />
                 <span>{mutationError instanceof Error ? mutationError.message : 'Ein Fehler ist aufgetreten'}</span>
@@ -863,8 +864,8 @@ export default function Tournament() {
                 const recruiting = recruitingLabel(team.recruitment_status)
                 const isCaptainTeam = userTeam?.id === team.id
                 const isFull = team.members.length >= tournament.team_size
-                const showJoin = isRegistration && isLoggedIn && !isCaptainTeam && team.recruitment_status === 'open' && !isFull
-                const showApply = isRegistration && isLoggedIn && !isCaptainTeam && team.recruitment_status === 'application' && !isFull && !userTeam
+                const showJoin = isSignupOpen && isLoggedIn && !isCaptainTeam && team.recruitment_status === 'open' && !isFull
+                const showApply = isSignupOpen && isLoggedIn && !isCaptainTeam && team.recruitment_status === 'application' && !isFull && !userTeam
                 return (
                   <Card key={team.id} className={`p-4 ${isCaptainTeam ? 'border-primary/30' : ''}`}>
                     <div className="flex items-start justify-between gap-3">
@@ -900,13 +901,13 @@ export default function Tournament() {
                       </div>
                       <div className="flex gap-2 flex-shrink-0">
                         {showJoin && (
-                          <Button variant="secondary" size="sm" onClick={() => handleJoinTeam(team)} disabled={isMutating}>
+                          <Button variant="secondary" size="sm" onClick={() => handleJoinTeam(team)} disabled={joinTeamMutation.isPending}>
                             <UserPlus size={14} />
                             Beitreten
                           </Button>
                         )}
                         {showApply && (
-                          <Button variant="ghost" size="sm" onClick={() => handleApply(team.id)} disabled={isMutating}
+                          <Button variant="ghost" size="sm" onClick={() => handleApply(team.id)} disabled={applyMutation.isPending}
                             className="border border-amber-500/40 text-amber-400 hover:bg-amber-500/10">
                             Bewerben
                           </Button>

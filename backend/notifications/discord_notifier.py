@@ -23,12 +23,14 @@ _NOTIFICATION_EVENT_COLUMNS = {
     "checkin": "notify_checkin",
     "team_invite": "notify_team_invite",
     "tournament_news": "notify_tournament_news",
+    "registration_reminder": "notify_registration_reminder",
 }
 _NOTIFICATION_DEFAULTS = {
     "notify_match_start": True,
     "notify_checkin": True,
     "notify_team_invite": True,
     "notify_tournament_news": False,
+    "notify_registration_reminder": True,
 }
 
 
@@ -252,7 +254,8 @@ async def notify_users(
                    notify_match_start,
                    notify_checkin,
                    notify_team_invite,
-                   notify_tournament_news
+                   notify_tournament_news,
+                   notify_registration_reminder
             FROM user_profiles
             WHERE discord_id IN ({placeholder_sql})
             """,
@@ -269,6 +272,7 @@ async def notify_users(
             "notify_checkin": bool(values.get("notify_checkin", 1)),
             "notify_team_invite": bool(values.get("notify_team_invite", 1)),
             "notify_tournament_news": bool(values.get("notify_tournament_news", 0)),
+            "notify_registration_reminder": bool(values.get("notify_registration_reminder", 1)),
         }
 
     default_flag = _NOTIFICATION_DEFAULTS[column_name]
@@ -343,6 +347,16 @@ async def get_voice_channel_members(channel_id: int) -> list[dict[str, Any]]:
         {"channel_id": channel_id},
     )
     return result.get("members") or []
+
+
+async def get_role_members(guild_id: int, role_id: int) -> list[dict[str, Any]]:
+    """Lädt Guild-Mitglieder mit einer bestimmten Rolle über den Broker."""
+    result = await _post_internal_api(
+        "/internal/master/v1/discord/role/members",
+        {"guild_id": guild_id, "role_id": role_id},
+    )
+    members = result.get("members")
+    return members if isinstance(members, list) else []
 
 
 async def send_lobby_announcement(
@@ -432,3 +446,50 @@ async def send_match_stats_to_channel(
         "idempotency_key": f"stats-{match_id}-{_sec.token_hex(4)}",
     }
     return await _post_internal_api("/internal/master/v1/discord/send-rich-message", payload)
+
+
+async def notify_casters_match_created(
+    match_id: int,
+    channel_id: str | int,
+    caster_discord_ids: list[str],
+) -> dict[str, Any]:
+    """Informiert zugewiesene Caster per DM und erwähnt sie im Match-Channel."""
+    unique_ids = _unique_preserve_order(caster_discord_ids)
+    summary = {"sent": [], "failed": []}
+    channel_url = (
+        f"https://discord.com/channels/{settings.DISCORD_GUILD_ID}/{int(channel_id)}"
+        if settings.DISCORD_GUILD_ID
+        else None
+    )
+
+    for discord_id in unique_ids:
+        try:
+            await _post_internal_api(
+                "/internal/master/v1/discord/send-message",
+                {
+                    "user_id": int(discord_id),
+                    "content": (
+                        f"Du bist als Caster für Match #{match_id} eingetragen. "
+                        f"Match-Channel: {channel_url or f'#{channel_id}'}"
+                    ),
+                },
+            )
+            summary["sent"].append(discord_id)
+        except Exception as exc:
+            summary["failed"].append({"discord_id": discord_id, "error": str(exc)})
+
+    if unique_ids:
+        await _post_internal_api(
+            "/internal/master/v1/discord/send-rich-message",
+            {
+                "channel_id": int(channel_id),
+                "content": " ".join(f"<@{discord_id}>" for discord_id in unique_ids),
+                "embed": {
+                    "title": "Caster informiert",
+                    "description": "Die zugewiesenen Caster wurden benachrichtigt.",
+                },
+                "allowed_user_ids": [int(discord_id) for discord_id in unique_ids],
+            },
+        )
+
+    return summary

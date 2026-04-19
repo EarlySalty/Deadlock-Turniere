@@ -4,11 +4,12 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 from db import get_db
 from notifications.discord_notifier import notify_users
+from tournament.points import recalculate_player_points
 from tournament.engine import (
     VALID_STATUS_TRANSITIONS,
     generate_bracket,
@@ -43,6 +44,24 @@ def _parse_timestamp(value: str | None) -> datetime | None:
 def _is_due(value: str | None, now: datetime) -> bool:
     parsed = _parse_timestamp(value)
     return parsed is not None and parsed <= now
+
+
+def _parse_reminder_offsets(value: Any) -> list[int]:
+    if isinstance(value, list):
+        parsed = value
+    elif isinstance(value, str) and value.strip():
+        try:
+            parsed = json.loads(value)
+        except ValueError:
+            parsed = None
+    else:
+        parsed = None
+
+    if not isinstance(parsed, list):
+        return [1440, 120, 15]
+
+    offsets = sorted({int(offset) for offset in parsed if int(offset) >= 0}, reverse=True)
+    return offsets or [1440, 120, 15]
 
 
 def _get_due_next_status(tournament_row: Any, now: datetime) -> str | None:
@@ -152,6 +171,16 @@ async def advance_tournament_status(
 
         action = "tournament_auto_advance" if source == "scheduler" else "tournament_advance"
         await _audit(db, action, actor_id, json.dumps(metadata))
+
+        if next_status == "completed":
+            cursor = await db.execute(
+                "SELECT exclude_from_leaderboard FROM tournaments WHERE id = ?",
+                (tournament_id,),
+            )
+            row = await cursor.fetchone()
+            if row and not bool(row["exclude_from_leaderboard"]):
+                await recalculate_player_points(db, tournament_id)
+
         await db.commit()
 
     return metadata
@@ -251,15 +280,87 @@ async def _check_and_advance_tournaments() -> None:
                 return
 
 
+async def _check_and_send_registration_reminders() -> None:
+    async with get_db() as db:
+        cursor = await db.execute(
+            "SELECT id, name, status, registration_end, reminder_offsets "
+            "FROM tournaments "
+            "WHERE status IN ('draft', 'registration') AND registration_end IS NOT NULL "
+            "ORDER BY id"
+        )
+        tournaments = await cursor.fetchall()
+
+        now = datetime.now()
+        tolerance_end = now + timedelta(minutes=5)
+
+        for tournament in tournaments:
+            registration_end = _parse_timestamp(tournament["registration_end"])
+            if registration_end is None:
+                continue
+
+            for offset_minutes in _parse_reminder_offsets(tournament["reminder_offsets"]):
+                reminder_at = registration_end - timedelta(minutes=offset_minutes)
+                if not (reminder_at <= now <= reminder_at + timedelta(minutes=5)):
+                    continue
+
+                dedupe_cur = await db.execute(
+                    "SELECT 1 FROM sent_tournament_reminders WHERE tournament_id = ? AND offset_minutes = ?",
+                    (tournament["id"], offset_minutes),
+                )
+                if await dedupe_cur.fetchone():
+                    continue
+
+                profile_cur = await db.execute(
+                    "SELECT discord_id FROM user_profiles WHERE notify_registration_reminder = 1"
+                )
+                profile_rows = await profile_cur.fetchall()
+                profile_ids = [str(row["discord_id"]) for row in profile_rows if row["discord_id"]]
+                if not profile_ids:
+                    continue
+
+                hours = offset_minutes // 60
+                minutes = offset_minutes % 60
+                if hours and minutes:
+                    offset_label = f"{hours}h {minutes}min"
+                elif hours:
+                    offset_label = f"{hours}h"
+                else:
+                    offset_label = f"{minutes}min"
+
+                try:
+                    await notify_users(
+                        profile_ids,
+                        "registration_reminder",
+                        f"Anmeldeschluss für Turnier '{tournament['name']}' in {offset_label}!",
+                    )
+                except Exception:
+                    logger.exception(
+                        "Registration reminder failed (tournament=%s offset=%s)",
+                        tournament["id"],
+                        offset_minutes,
+                    )
+                    continue
+
+                await db.execute(
+                    "INSERT OR IGNORE INTO sent_tournament_reminders (tournament_id, offset_minutes, sent_at) "
+                    "VALUES (?, ?, datetime('now'))",
+                    (tournament["id"], offset_minutes),
+                )
+
+        await db.commit()
+
+
 async def start_scheduler(app: Any | None = None) -> None:
     """Startet den Hintergrund-Loop für automatische Turnier-Übergänge."""
     logger.info("Tournament-Scheduler gestartet")
 
     try:
         await _check_and_advance_tournaments()
+        await _check_and_send_registration_reminders()
         while True:
             await asyncio.sleep(SCHEDULER_INTERVAL_SECONDS)
             await _check_and_advance_tournaments()
+            await _check_and_send_registration_reminders()
     except asyncio.CancelledError:
         logger.info("Tournament-Scheduler gestoppt")
         raise

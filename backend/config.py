@@ -249,6 +249,14 @@ class Settings:
         "DISCORD_TOURNAMENT_LOBBY_CHANNEL_ID",
         default=1412411665713987635,
     )
+    DISCORD_CASTER_ROLE_ID: int = _get_int(
+        "DISCORD_CASTER_ROLE_ID",
+        default=1495154811799077067,
+    )
+    DISCORD_CASTER_VOICE_CHANNEL_ID: int = _get_int(
+        "DISCORD_CASTER_VOICE_CHANNEL_ID",
+        default=1495155113772450042,
+    )
     DISCORD_BOT_TOKEN: str = _get_first_string(
         ["DISCORD_BOT_TOKEN", "DISCORD_TOKEN", "BOT_TOKEN"],
         keyring_service="DeadlockBot",

@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import Card from '@/components/ui/Card'
 import Button from '@/components/ui/Button'
-import { useCheckinStatus, useFinalizeCheckin } from '@/hooks/useTournament'
+import { useCheckinStatus, useFinalizeCheckin, useRevertCheckin } from '@/hooks/useTournament'
 import type {
   FinalizeCheckinResult,
   Team,
@@ -35,6 +35,7 @@ export default function CheckinManager({
 }: CheckinManagerProps) {
   const { data: checkinStatus } = useCheckinStatus(tournamentId)
   const finalizeMutation = useFinalizeCheckin(tournamentId)
+  const revertMutation = useRevertCheckin(tournamentId)
 
   const [preview, setPreview] = useState<FinalizeCheckinResult | null>(null)
   const [allowedTeams, setAllowedTeams] = useState<Record<number, boolean>>({})
@@ -75,8 +76,8 @@ export default function CheckinManager({
     })
   }, [checkedInNames, signups, teams])
 
-  const error = finalizeMutation.error
-  const isBusy = finalizeMutation.isPending
+  const error = finalizeMutation.error ?? revertMutation.error
+  const isBusy = finalizeMutation.isPending || revertMutation.isPending
 
   const runPreview = () => {
     setFeedback('')
@@ -106,12 +107,29 @@ export default function CheckinManager({
         snapshotToken: preview.snapshot_token,
       },
       {
-        onSuccess: () => {
-          setFeedback('Check-in abgeschlossen und Turnier in die Gruppenphase verschoben.')
+        onSuccess: (result) => {
+          setFeedback(
+            result.advanced_to_bracket
+              ? 'Check-in abgeschlossen und Turnier direkt ins Bracket verschoben.'
+              : 'Check-in abgeschlossen und Turnier in die Gruppenphase verschoben.'
+          )
           setPreview(null)
         },
       }
     )
+  }
+
+  const handleRevert = () => {
+    if (!window.confirm('Check-in zurück auf Anmeldung setzen und alle Check-ins löschen?')) return
+
+    setFeedback('')
+    revertMutation.mutate(undefined, {
+      onSuccess: () => {
+        setPreview(null)
+        setAllowedTeams({})
+        setFeedback('Check-in wurde zurückgesetzt. Das Turnier ist wieder in der Anmeldung.')
+      },
+    })
   }
 
   return (
@@ -155,9 +173,14 @@ export default function CheckinManager({
           </div>
         )}
 
-        <Button variant="primary" size="sm" disabled={isBusy} onClick={runPreview}>
-          {finalizeMutation.isPending ? 'Prüft...' : 'Check-in abschließen & Teams bereinigen'}
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          <Button variant="primary" size="sm" disabled={isBusy} onClick={runPreview}>
+            {finalizeMutation.isPending ? 'Prüft...' : 'Check-in abschließen & Teams bereinigen'}
+          </Button>
+          <Button variant="danger" size="sm" disabled={isBusy} onClick={handleRevert}>
+            {revertMutation.isPending ? 'Setzt zurück...' : 'Check-in zurücksetzen'}
+          </Button>
+        </div>
       </Card>
 
       <Card className="p-6">

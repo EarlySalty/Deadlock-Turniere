@@ -13,7 +13,9 @@ from db import get_db
 from match import manager as match_manager
 from match.series_manager import ensure_game_exists, get_series_games, record_game_result
 from notifications.discord_notifier import (
+    delete_match_channel,
     get_voice_channel_members,
+    get_role_members,
     move_users_to_voice_channel,
     notify_users,
 )
@@ -25,6 +27,7 @@ from match.result_processor import (
     apply_bracket_match_result,
 )
 from tournament.engine import (
+    _build_seeded_bracket,
     CheckinSnapshotMismatchError,
     VALID_STATUS_TRANSITIONS,
     assign_random_teams,
@@ -73,6 +76,22 @@ class GameResultRequest(BaseModel):
     duration_s: int | None = Field(default=None, ge=0)
 
 
+class ManualLobbyCodeRequest(BaseModel):
+    party_code: str
+    steam_party_id: str | None = None
+
+
+class CasterAssignRequest(BaseModel):
+    discord_id: str
+
+
+class MatchCasterOut(BaseModel):
+    discord_id: str
+    display_name: str | None = None
+    assigned_at: str | None = None
+    assigned_by: str | None = None
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -89,6 +108,84 @@ async def _load_all_profile_ids(db) -> list[str]:  # noqa: ANN001
     cursor = await db.execute("SELECT DISTINCT discord_id FROM user_profiles")
     rows = await cursor.fetchall()
     return [str(row["discord_id"]) for row in rows if row["discord_id"]]
+
+
+def _serialize_reminder_offsets(offsets: list[int] | None) -> str:
+    cleaned = sorted({int(offset) for offset in (offsets or [1440, 120, 15]) if int(offset) >= 0}, reverse=True)
+    return json.dumps(cleaned or [1440, 120, 15])
+
+
+async def _load_assigned_casters(db, match_type: str, match_id: int) -> list[MatchCasterOut]:  # noqa: ANN001
+    display_names: dict[str, str] = {}
+    try:
+        members = await get_role_members(int(settings.DISCORD_GUILD_ID), settings.DISCORD_CASTER_ROLE_ID)
+        for member in members:
+            discord_id = str(member.get("user_id") or member.get("id") or "").strip()
+            if not discord_id:
+                continue
+            display_names[discord_id] = str(
+                member.get("display_name")
+                or member.get("global_name")
+                or member.get("username")
+                or discord_id
+            )
+    except Exception:
+        logger.exception("Caster-Rollenmitglieder konnten nicht geladen werden")
+
+    cursor = await db.execute(
+        "SELECT discord_id, assigned_at, assigned_by FROM match_casters "
+        "WHERE match_type = ? AND match_id = ? ORDER BY assigned_at, discord_id",
+        (match_type, match_id),
+    )
+    rows = await cursor.fetchall()
+    casters: list[MatchCasterOut] = []
+    for row in rows:
+        discord_id = str(row["discord_id"])
+        casters.append(
+            MatchCasterOut(
+                discord_id=discord_id,
+                display_name=display_names.get(discord_id, discord_id),
+                assigned_at=row["assigned_at"],
+                assigned_by=row["assigned_by"],
+            )
+        )
+    return casters
+
+
+async def _ensure_bracket_match_exists(db, tournament_id: int, match_id: int) -> None:  # noqa: ANN001
+    cursor = await db.execute(
+        "SELECT 1 FROM bracket_matches WHERE id = ? AND tournament_id = ?",
+        (match_id, tournament_id),
+    )
+    if not await cursor.fetchone():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Match nicht gefunden")
+
+
+async def _reset_match_record(
+    *,
+    db,  # noqa: ANN001
+    select_sql: str,
+    select_params: tuple,
+    update_sql: str,
+    update_params: tuple,
+    match_id: int,
+) -> bool:
+    cursor = await db.execute(select_sql, select_params)
+    row = await cursor.fetchone()
+    if not row:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Match nicht gefunden")
+    if row["status"] in {"completed", "forfeit", "cancelled"}:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Abgeschlossene oder abgebrochene Matches können nicht zurückgesetzt werden",
+        )
+    if row["discord_channel_id"]:
+        try:
+            await delete_match_channel(row["discord_channel_id"])
+        except Exception:
+            logger.exception("Discord-Channel konnte beim Match-Reset nicht gelöscht werden")
+    result = await db.execute(update_sql, update_params)
+    return result.rowcount > 0
 
 
 _LOBBY_SETTINGS_PRESET_MAP: dict[LobbySettingsPreset, dict[str, object] | None] = {
@@ -527,6 +624,53 @@ async def _delete_tournament_tree(db, tournament_id: int) -> None:  # noqa: ANN0
     )
 
 
+async def _delete_group_phase_tree(db, tournament_id: int) -> None:  # noqa: ANN001
+    cursor = await db.execute(
+        "SELECT id FROM groups WHERE tournament_id = ?",
+        (tournament_id,),
+    )
+    group_ids = [row["id"] for row in await cursor.fetchall()]
+
+    if not group_ids:
+        return
+
+    placeholders = ", ".join("?" for _ in group_ids)
+    await db.execute(
+        f"DELETE FROM match_results WHERE group_match_id IN ("  # noqa: S608
+        f"SELECT id FROM group_matches WHERE group_id IN ({placeholders}))",
+        group_ids,
+    )
+    await db.execute(
+        f"DELETE FROM checkins WHERE match_type = 'group' AND match_id IN ("  # noqa: S608
+        f"SELECT id FROM group_matches WHERE group_id IN ({placeholders}))",
+        group_ids,
+    )
+    await db.execute(
+        f"DELETE FROM group_matches WHERE group_id IN ({placeholders})",  # noqa: S608
+        group_ids,
+    )
+    await db.execute(
+        f"DELETE FROM group_teams WHERE group_id IN ({placeholders})",  # noqa: S608
+        group_ids,
+    )
+    await db.execute(
+        f"DELETE FROM groups WHERE id IN ({placeholders})",  # noqa: S608
+        group_ids,
+    )
+
+
+async def _group_phase_has_played_matches(db, tournament_id: int) -> bool:  # noqa: ANN001
+    cursor = await db.execute(
+        "SELECT 1 FROM group_matches gm "
+        "JOIN groups g ON gm.group_id = g.id "
+        "WHERE g.tournament_id = ? "
+        "AND (gm.status != 'pending' OR gm.winner_id IS NOT NULL OR gm.played_at IS NOT NULL) "
+        "LIMIT 1",
+        (tournament_id,),
+    )
+    return await cursor.fetchone() is not None
+
+
 def _ensure_participant_management_allowed(tournament_status: str) -> None:
     if tournament_status not in ACTIVE_TOURNAMENT_STATUSES:
         raise HTTPException(
@@ -608,8 +752,9 @@ async def create_tournament(
             "INSERT INTO tournaments "
             "(name, description, team_size, bracket_format, registration_start, "
             "registration_end, checkin_start, group_phase_start, bracket_start, "
-            "created_by, invite_mode, invite_window_start, invite_window_end, tournament_mode) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "created_by, invite_mode, invite_window_start, invite_window_end, tournament_mode, "
+            "exclude_from_leaderboard, reminder_offsets) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 body.name,
                 body.description,
@@ -625,6 +770,8 @@ async def create_tournament(
                 body.invite_window_start,
                 body.invite_window_end,
                 tournament_mode.value,
+                1 if body.exclude_from_leaderboard else 0,
+                _serialize_reminder_offsets(body.reminder_offsets),
             ),
         )
         await db.execute(
@@ -711,20 +858,38 @@ async def update_tournament(
         # Nur gesetzte Felder updaten
         update_data = body.model_dump(exclude_unset=True)
 
-        # Tournament Mode nur in Draft-Phase änderbar
+        mode_changed_to_bracket_only = False
+
+        # Tournament Mode: in Draft immer, in Check-in oder ungespielter Gruppenphase ebenfalls
         if "force_tournament_mode" in update_data:
-            if existing["status"] != "draft":
+            if existing["status"] not in {"draft", "checkin", "group_phase"}:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Turnier-Modus kann nur in Draft-Phase geändert werden",
+                    detail="Turnier-Modus kann nur in Draft-, Check-in- oder ungespielter Gruppenphase geändert werden",
+                )
+            if (
+                existing["status"] == "group_phase"
+                and await _group_phase_has_played_matches(db, tournament_id)
+            ):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Turnier-Modus kann nach Start der Gruppenmatches nicht mehr geändert werden",
                 )
             # force_tournament_mode → tournament_mode (DB-Spalte)
             force_mode = update_data.pop("force_tournament_mode")
             if force_mode is not None:
                 update_data["tournament_mode"] = force_mode.value
+                mode_changed_to_bracket_only = (
+                    force_mode.value == TournamentMode.bracket_only.value
+                    and existing["tournament_mode"] != TournamentMode.bracket_only.value
+                )
 
         if body.invite_mode is not None:
             update_data["invite_mode"] = body.invite_mode.value
+        if body.exclude_from_leaderboard is not None:
+            update_data["exclude_from_leaderboard"] = 1 if body.exclude_from_leaderboard else 0
+        if body.reminder_offsets is not None:
+            update_data["reminder_offsets"] = _serialize_reminder_offsets(body.reminder_offsets)
         if "invite_window_start" in body.model_fields_set:
             update_data["invite_window_start"] = body.invite_window_start
         if "invite_window_end" in body.model_fields_set:
@@ -763,6 +928,23 @@ async def update_tournament(
             f"UPDATE tournaments SET {', '.join(updates)} WHERE id = ?",  # noqa: S608
             params,
         )
+
+        if existing["status"] == "group_phase" and mode_changed_to_bracket_only:
+            await _delete_group_phase_tree(db, tournament_id)
+            await db.execute(
+                "DELETE FROM bracket_matches WHERE tournament_id = ?",
+                (tournament_id,),
+            )
+            cursor = await db.execute(
+                "SELECT id FROM teams WHERE tournament_id = ? ORDER BY created_at, id",
+                (tournament_id,),
+            )
+            seeded_entries = [{"team_id": row["id"]} for row in await cursor.fetchall()]
+            await _build_seeded_bracket(db, tournament_id, seeded_entries)
+            await db.execute(
+                "UPDATE tournaments SET status = 'bracket', updated_at = datetime('now') WHERE id = ?",
+                (tournament_id,),
+            )
 
         await _audit(
             db,
@@ -855,6 +1037,52 @@ async def open_checkin(
         ) from exc
 
     async with get_db() as db:
+        cursor = await db.execute(
+            "SELECT * FROM tournaments WHERE id = ?",
+            (tournament_id,),
+        )
+        row = await cursor.fetchone()
+
+    return Tournament(**dict(row))
+
+
+@router.post("/tournaments/{tournament_id}/revert-checkin", response_model=Tournament)
+async def revert_checkin(
+    tournament_id: int,
+    user: UserSession = Depends(require_mod),
+) -> Tournament:
+    """Setzt die Check-in-Phase zurück auf Registration."""
+    async with get_db() as db:
+        existing = await _load_tournament_or_404(db, tournament_id)
+        if existing["status"] != "checkin":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Check-in kann nur aus der Check-in-Phase zurückgesetzt werden",
+            )
+
+        await db.execute(
+            "DELETE FROM tournament_checkins WHERE tournament_id = ?",
+            (tournament_id,),
+        )
+        await db.execute(
+            "UPDATE tournaments "
+            "SET status = ?, registration_end = NULL, checkin_start = NULL, updated_at = datetime('now') "
+            "WHERE id = ?",
+            ("registration", tournament_id),
+        )
+        await _audit(
+            db,
+            "tournament_revert_checkin",
+            user.discord_id,
+            json.dumps({
+                "tournament_id": tournament_id,
+                "from_status": "checkin",
+                "to_status": "registration",
+                "cleared_schedule_fields": ["registration_end", "checkin_start"],
+            }),
+        )
+        await db.commit()
+
         cursor = await db.execute(
             "SELECT * FROM tournaments WHERE id = ?",
             (tournament_id,),
@@ -2260,6 +2488,381 @@ async def leave_match_lobby(
         await db.commit()
 
     return result
+
+
+@router.post("/tournaments/{tournament_id}/matches/{match_id}/reset", status_code=200)
+async def reset_match(
+    tournament_id: int,
+    match_id: int,
+    user: UserSession = Depends(require_admin),
+) -> dict:
+    async with get_db() as db:
+        await _reset_match_record(
+            db=db,
+            select_sql="SELECT discord_channel_id, status FROM bracket_matches WHERE id = ? AND tournament_id = ?",
+            select_params=(match_id, tournament_id),
+            update_sql=(
+                "UPDATE bracket_matches "
+                "SET status = 'pending', steam_party_id = NULL, party_code = NULL, "
+                "deadlock_match_id = NULL, discord_channel_id = NULL "
+                "WHERE id = ? AND tournament_id = ?"
+            ),
+            update_params=(match_id, tournament_id),
+            match_id=match_id,
+        )
+        await _audit(
+            db,
+            "match_reset",
+            user.discord_id,
+            json.dumps({"tournament_id": tournament_id, "match_id": match_id}),
+        )
+        await db.commit()
+    return {"success": True}
+
+
+@router.post("/tournaments/{tournament_id}/matches/{match_id}/manual-lobby", status_code=200)
+async def set_manual_match_lobby(
+    tournament_id: int,
+    match_id: int,
+    body: ManualLobbyCodeRequest,
+    user: UserSession = Depends(require_mod),
+) -> dict:
+    party_code = body.party_code.strip()
+    if not party_code:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="party_code ist erforderlich")
+
+    async with get_db() as db:
+        cursor = await db.execute(
+            "UPDATE bracket_matches "
+            "SET party_code = ?, steam_party_id = ?, status = 'lobby_created' "
+            "WHERE id = ? AND tournament_id = ? AND status NOT IN ('completed', 'forfeit', 'cancelled')",
+            (party_code, body.steam_party_id.strip() if body.steam_party_id else None, match_id, tournament_id),
+        )
+        if cursor.rowcount == 0:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Match kann nicht manuell gesetzt werden")
+        await _audit(
+            db,
+            "match_manual_lobby",
+            user.discord_id,
+            json.dumps({"tournament_id": tournament_id, "match_id": match_id, "party_code": party_code}),
+        )
+        await db.commit()
+    return {"success": True, "party_code": party_code}
+
+
+@router.post("/tournaments/{tournament_id}/group-matches/{match_id}/create-lobby", status_code=200)
+async def create_group_match_lobby(
+    tournament_id: int,
+    match_id: int,
+    user: UserSession = Depends(require_mod),
+) -> dict:
+    """Erstellt eine Steam-Custom-Lobby fuer ein Group-Match."""
+    try:
+        result = await match_manager.create_group_lobby(tournament_id, match_id)
+    except MatchNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except MatchStateError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except SteamTaskError as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+    except TimeoutError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+            detail="Steam Bot hat beim Erstellen der Gruppen-Lobby nicht rechtzeitig geantwortet",
+        ) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+
+    async with get_db() as db:
+        await _audit(
+            db,
+            "group_match_create_lobby",
+            user.discord_id,
+            json.dumps(
+                {
+                    "tournament_id": tournament_id,
+                    "match_id": match_id,
+                    "party_id": result.get("party_id"),
+                    "party_code": result.get("party_code"),
+                    "join_code": result.get("join_code"),
+                }
+            ),
+        )
+        await db.commit()
+
+    return {
+        "success": True,
+        "party_id": result.get("party_id"),
+        "party_code": result.get("party_code"),
+        "join_code": result.get("join_code"),
+    }
+
+
+@router.post("/tournaments/{tournament_id}/group-matches/{match_id}/start", status_code=200)
+async def start_group_match_via_steam(
+    tournament_id: int,
+    match_id: int,
+    user: UserSession = Depends(require_mod),
+) -> dict:
+    """Startet ein Group-Match ueber den Steam-Bot."""
+    try:
+        result = await match_manager.start_group_match(tournament_id, match_id)
+    except MatchNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except MatchStateError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except SteamTaskError as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+    except TimeoutError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+            detail="Steam Bot hat beim Start des Gruppen-Matches nicht rechtzeitig geantwortet",
+        ) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+
+    async with get_db() as db:
+        await _audit(
+            db,
+            "group_match_start_steam",
+            user.discord_id,
+            json.dumps(
+                {
+                    "tournament_id": tournament_id,
+                    "match_id": match_id,
+                    "deadlock_match_id": result.get("match_id"),
+                }
+            ),
+        )
+        await db.commit()
+
+    return {"success": True, "match_id": result.get("match_id")}
+
+
+@router.post("/tournaments/{tournament_id}/group-matches/{match_id}/fetch-result", status_code=200)
+async def fetch_group_match_result_via_steam(
+    tournament_id: int,
+    match_id: int,
+    user: UserSession = Depends(require_mod),
+) -> dict:
+    """Laedt das Ergebnis eines Group-Matches aus Deadlock."""
+    try:
+        result = await match_manager.fetch_group_match_result(tournament_id, match_id)
+    except MatchNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except MatchStateError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except SteamTaskError as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+    except TimeoutError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+            detail="Steam Bot hat beim Abrufen des Gruppen-Ergebnisses nicht rechtzeitig geantwortet",
+        ) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+
+    async with get_db() as db:
+        await _audit(
+            db,
+            "group_match_fetch_result_steam",
+            user.discord_id,
+            json.dumps(
+                {
+                    "tournament_id": tournament_id,
+                    "match_id": match_id,
+                    "winner_id": result.get("winner_id"),
+                    "duration_s": result.get("duration_s"),
+                }
+            ),
+        )
+        await db.commit()
+
+    return result
+
+
+@router.post("/tournaments/{tournament_id}/group-matches/{match_id}/leave-lobby", status_code=200)
+async def leave_group_match_lobby(
+    tournament_id: int,
+    match_id: int,
+    user: UserSession = Depends(require_mod),
+) -> dict:
+    """Laesst den Steam-Bot die Gruppen-Lobby verlassen."""
+    try:
+        result = await match_manager.leave_group_lobby(tournament_id, match_id)
+    except MatchNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except MatchStateError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except SteamTaskError as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+    except TimeoutError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+            detail="Steam Bot hat beim Verlassen der Gruppen-Lobby nicht rechtzeitig geantwortet",
+        ) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+
+    async with get_db() as db:
+        await _audit(
+            db,
+            "group_match_leave_lobby",
+            user.discord_id,
+            json.dumps({"tournament_id": tournament_id, "match_id": match_id}),
+        )
+        await db.commit()
+
+    return result
+
+
+@router.post("/tournaments/{tournament_id}/group-matches/{match_id}/reset", status_code=200)
+async def reset_group_match(
+    tournament_id: int,
+    match_id: int,
+    user: UserSession = Depends(require_admin),
+) -> dict:
+    async with get_db() as db:
+        await _reset_match_record(
+            db=db,
+            select_sql=(
+                "SELECT gm.discord_channel_id, gm.status "
+                "FROM group_matches gm "
+                "JOIN groups g ON g.id = gm.group_id "
+                "WHERE gm.id = ? AND g.tournament_id = ?"
+            ),
+            select_params=(match_id, tournament_id),
+            update_sql=(
+                "UPDATE group_matches "
+                "SET status = 'pending', steam_party_id = NULL, party_code = NULL, "
+                "deadlock_match_id = NULL, discord_channel_id = NULL "
+                "WHERE id = ? AND group_id IN (SELECT id FROM groups WHERE tournament_id = ?)"
+            ),
+            update_params=(match_id, tournament_id),
+            match_id=match_id,
+        )
+        await _audit(
+            db,
+            "group_match_reset",
+            user.discord_id,
+            json.dumps({"tournament_id": tournament_id, "match_id": match_id}),
+        )
+        await db.commit()
+    return {"success": True}
+
+
+@router.post("/tournaments/{tournament_id}/group-matches/{match_id}/manual-lobby", status_code=200)
+async def set_manual_group_match_lobby(
+    tournament_id: int,
+    match_id: int,
+    body: ManualLobbyCodeRequest,
+    user: UserSession = Depends(require_mod),
+) -> dict:
+    party_code = body.party_code.strip()
+    if not party_code:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="party_code ist erforderlich")
+
+    async with get_db() as db:
+        cursor = await db.execute(
+            "UPDATE group_matches "
+            "SET party_code = ?, steam_party_id = ?, status = 'lobby_created' "
+            "WHERE id = ? AND group_id IN (SELECT id FROM groups WHERE tournament_id = ?) "
+            "AND status NOT IN ('completed', 'forfeit', 'cancelled')",
+            (party_code, body.steam_party_id.strip() if body.steam_party_id else None, match_id, tournament_id),
+        )
+        if cursor.rowcount == 0:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Gruppen-Match kann nicht manuell gesetzt werden")
+        await _audit(
+            db,
+            "group_match_manual_lobby",
+            user.discord_id,
+            json.dumps({"tournament_id": tournament_id, "match_id": match_id, "party_code": party_code}),
+        )
+        await db.commit()
+    return {"success": True, "party_code": party_code}
+
+
+@router.get("/casters", response_model=list[MatchCasterOut])
+async def list_available_casters(
+    user: UserSession = Depends(require_mod),
+) -> list[MatchCasterOut]:
+    del user
+    members = await get_role_members(int(settings.DISCORD_GUILD_ID), settings.DISCORD_CASTER_ROLE_ID)
+    casters: list[MatchCasterOut] = []
+    for member in members:
+        discord_id = str(member.get("user_id") or member.get("id") or "").strip()
+        if not discord_id:
+            continue
+        casters.append(
+            MatchCasterOut(
+                discord_id=discord_id,
+                display_name=str(
+                    member.get("display_name")
+                    or member.get("global_name")
+                    or member.get("username")
+                    or discord_id
+                ),
+            )
+        )
+    return casters
+
+
+@router.get("/tournaments/{tournament_id}/matches/{match_id}/casters", response_model=list[MatchCasterOut])
+async def list_match_casters(
+    tournament_id: int,
+    match_id: int,
+    user: UserSession = Depends(require_mod),
+) -> list[MatchCasterOut]:
+    del user
+    async with get_db() as db:
+        await _ensure_bracket_match_exists(db, tournament_id, match_id)
+        return await _load_assigned_casters(db, "bracket", match_id)
+
+
+@router.post("/tournaments/{tournament_id}/matches/{match_id}/casters", response_model=list[MatchCasterOut])
+async def assign_match_caster(
+    tournament_id: int,
+    match_id: int,
+    body: CasterAssignRequest,
+    user: UserSession = Depends(require_mod),
+) -> list[MatchCasterOut]:
+    async with get_db() as db:
+        await _ensure_bracket_match_exists(db, tournament_id, match_id)
+        await db.execute(
+            "INSERT OR IGNORE INTO match_casters (match_id, match_type, discord_id, assigned_by) VALUES (?, 'bracket', ?, ?)",
+            (match_id, body.discord_id, user.discord_id),
+        )
+        await _audit(
+            db,
+            "match_caster_assign",
+            user.discord_id,
+            json.dumps({"match_id": match_id, "discord_id": body.discord_id, "match_type": "bracket"}),
+        )
+        await db.commit()
+        return await _load_assigned_casters(db, "bracket", match_id)
+
+
+@router.delete("/tournaments/{tournament_id}/matches/{match_id}/casters/{discord_id}", response_model=list[MatchCasterOut])
+async def remove_match_caster(
+    tournament_id: int,
+    match_id: int,
+    discord_id: str,
+    user: UserSession = Depends(require_mod),
+) -> list[MatchCasterOut]:
+    async with get_db() as db:
+        await _ensure_bracket_match_exists(db, tournament_id, match_id)
+        await db.execute(
+            "DELETE FROM match_casters WHERE match_id = ? AND match_type = 'bracket' AND discord_id = ?",
+            (match_id, discord_id),
+        )
+        await _audit(
+            db,
+            "match_caster_remove",
+            user.discord_id,
+            json.dumps({"match_id": match_id, "discord_id": discord_id, "match_type": "bracket"}),
+        )
+        await db.commit()
+        return await _load_assigned_casters(db, "bracket", match_id)
 
 
 @router.get("/tournaments/{tournament_id}/matches/{match_id}/event-presets", status_code=200)

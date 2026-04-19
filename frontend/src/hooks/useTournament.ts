@@ -3,11 +3,14 @@ import {
   fetchTournaments, fetchTournament, fetchAdminTournaments, fetchAdminTournament,
   fetchMyTournamentStatus,
   createTournament, updateTournament, deleteTournament,
-  advanceTournament, assignRandomTeams, openCheckin, finalizeCheckin,
+  advanceTournament, assignRandomTeams, openCheckin, revertCheckin, finalizeCheckin,
   createTeam, joinTeam, signupSolo, checkinPlayer, getCheckinStatus,
   withdrawSolo, kickMember, inviteBySignup, leaveTeam,
   generateGroups, generateBracket,
   createLobby, startMatch, fetchMatchResult, leaveLobby, submitMatchResult,
+  createGroupLobby, startGroupMatch, fetchGroupMatchResult, leaveGroupLobby,
+  resetMatch, setManualMatchLobby, resetGroupMatch, setManualGroupMatchLobby,
+  fetchAvailableCasters, fetchMatchCasters, assignMatchCaster, removeMatchCaster,
   fetchMatchEventPresets, applyMatchConvars, applyMatchEventPreset,
   createAdminTeam, renameAdminTeam, deleteAdminTeam,
   changeAdminCaptain, removeAdminTeamMember, moveAdminTeamMember,
@@ -51,6 +54,7 @@ export function useTournament(id: number) {
     queryKey: ['tournaments', id],
     queryFn: () => fetchTournament(id),
     enabled: id > 0,
+    refetchInterval: 5_000,
   })
 }
 
@@ -59,6 +63,7 @@ export function useMyTournamentStatus(tournamentId: number, enabled = true) {
     queryKey: ['tournaments', tournamentId, 'me'],
     queryFn: () => fetchMyTournamentStatus(tournamentId),
     enabled: tournamentId > 0 && enabled,
+    refetchInterval: 5_000,
     retry: false,
   })
 }
@@ -67,6 +72,7 @@ export function useAdminTournaments() {
   return useQuery({
     queryKey: ['admin', 'tournaments'],
     queryFn: fetchAdminTournaments,
+    refetchInterval: 5_000,
   })
 }
 
@@ -75,6 +81,7 @@ export function useAdminTournament(id: number) {
     queryKey: ['admin', 'tournaments', id],
     queryFn: () => fetchAdminTournament(id),
     enabled: id > 0,
+    refetchInterval: 3_000,
   })
 }
 
@@ -124,6 +131,16 @@ export function useOpenCheckin(tournamentId: number) {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: () => openCheckin(tournamentId),
+    onSuccess: () => {
+      invalidateTournamentCaches(qc, tournamentId)
+    },
+  })
+}
+
+export function useRevertCheckin(tournamentId: number) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: () => revertCheckin(tournamentId),
     onSuccess: () => {
       invalidateTournamentCaches(qc, tournamentId)
     },
@@ -194,7 +211,7 @@ export function useCheckinStatus(tournamentId: number) {
     queryKey: ['tournaments', tournamentId, 'checkin-status'],
     queryFn: () => getCheckinStatus(tournamentId),
     enabled: tournamentId > 0,
-    refetchInterval: 10_000,
+    refetchInterval: 3_000,
   })
 }
 
@@ -251,6 +268,81 @@ export function useStartMatch() {
   })
 }
 
+export function useCreateGroupLobby() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ tournamentId, matchId }: { tournamentId: number; matchId: number }) =>
+      createGroupLobby(tournamentId, matchId),
+    onSuccess: (_data, vars) => {
+      invalidateTournamentCaches(qc, vars.tournamentId)
+    },
+  })
+}
+
+export function useStartGroupMatch() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ tournamentId, matchId }: { tournamentId: number; matchId: number }) =>
+      startGroupMatch(tournamentId, matchId),
+    onSuccess: (_data, vars) => {
+      invalidateTournamentCaches(qc, vars.tournamentId)
+    },
+  })
+}
+
+export function useFetchGroupMatchResult() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ tournamentId, matchId }: { tournamentId: number; matchId: number }) =>
+      fetchGroupMatchResult(tournamentId, matchId),
+    onSuccess: (_data, vars) => {
+      invalidateTournamentCaches(qc, vars.tournamentId)
+    },
+  })
+}
+
+export function useLeaveGroupLobby() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ tournamentId, matchId }: { tournamentId: number; matchId: number }) =>
+      leaveGroupLobby(tournamentId, matchId),
+    onSuccess: (_data, vars) => {
+      invalidateTournamentCaches(qc, vars.tournamentId)
+    },
+  })
+}
+
+export function useResetGroupMatch() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ tournamentId, matchId }: { tournamentId: number; matchId: number }) =>
+      resetGroupMatch(tournamentId, matchId),
+    onSuccess: (_data, vars) => {
+      invalidateTournamentCaches(qc, vars.tournamentId)
+    },
+  })
+}
+
+export function useSetManualGroupMatchLobby() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({
+      tournamentId,
+      matchId,
+      partyCode,
+      steamPartyId,
+    }: {
+      tournamentId: number
+      matchId: number
+      partyCode: string
+      steamPartyId?: string
+    }) => setManualGroupMatchLobby(tournamentId, matchId, { party_code: partyCode, steam_party_id: steamPartyId }),
+    onSuccess: (_data, vars) => {
+      invalidateTournamentCaches(qc, vars.tournamentId)
+    },
+  })
+}
+
 export function useFetchMatchResult() {
   const qc = useQueryClient()
   return useMutation({
@@ -273,11 +365,79 @@ export function useLeaveLobby() {
   })
 }
 
+export function useResetMatch() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ tournamentId, matchId }: { tournamentId: number; matchId: number }) =>
+      resetMatch(tournamentId, matchId),
+    onSuccess: (_data, vars) => {
+      invalidateTournamentCaches(qc, vars.tournamentId)
+    },
+  })
+}
+
+export function useSetManualMatchLobby() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({
+      tournamentId,
+      matchId,
+      partyCode,
+      steamPartyId,
+    }: {
+      tournamentId: number
+      matchId: number
+      partyCode: string
+      steamPartyId?: string
+    }) => setManualMatchLobby(tournamentId, matchId, { party_code: partyCode, steam_party_id: steamPartyId }),
+    onSuccess: (_data, vars) => {
+      invalidateTournamentCaches(qc, vars.tournamentId)
+    },
+  })
+}
+
 export function useMatchEventPresets(tournamentId: number, matchId: number, enabled = true) {
   return useQuery({
     queryKey: ['admin', 'tournaments', tournamentId, 'matches', matchId, 'event-presets'],
     queryFn: () => fetchMatchEventPresets(tournamentId, matchId),
     enabled: tournamentId > 0 && matchId > 0 && enabled,
+  })
+}
+
+export function useAvailableCasters() {
+  return useQuery({
+    queryKey: ['admin', 'casters'],
+    queryFn: fetchAvailableCasters,
+  })
+}
+
+export function useMatchCasters(tournamentId: number, matchId: number, enabled = true) {
+  return useQuery({
+    queryKey: ['admin', 'tournaments', tournamentId, 'matches', matchId, 'casters'],
+    queryFn: () => fetchMatchCasters(tournamentId, matchId),
+    enabled: tournamentId > 0 && matchId > 0 && enabled,
+  })
+}
+
+export function useAssignMatchCaster() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ tournamentId, matchId, discordId }: { tournamentId: number; matchId: number; discordId: string }) =>
+      assignMatchCaster(tournamentId, matchId, discordId),
+    onSuccess: (_data, vars) => {
+      qc.invalidateQueries({ queryKey: ['admin', 'tournaments', vars.tournamentId, 'matches', vars.matchId, 'casters'] })
+    },
+  })
+}
+
+export function useRemoveMatchCaster() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ tournamentId, matchId, discordId }: { tournamentId: number; matchId: number; discordId: string }) =>
+      removeMatchCaster(tournamentId, matchId, discordId),
+    onSuccess: (_data, vars) => {
+      qc.invalidateQueries({ queryKey: ['admin', 'tournaments', vars.tournamentId, 'matches', vars.matchId, 'casters'] })
+    },
   })
 }
 

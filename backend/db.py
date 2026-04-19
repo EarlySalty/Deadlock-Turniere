@@ -24,6 +24,8 @@ CREATE TABLE IF NOT EXISTS tournaments(
     bracket_format TEXT NOT NULL DEFAULT 'single_elimination',
     created_by TEXT NOT NULL,
     lobby_settings TEXT,
+    exclude_from_leaderboard INTEGER NOT NULL DEFAULT 0,
+    reminder_offsets TEXT DEFAULT '[1440,120,15]',
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now')),
     series_format INTEGER NOT NULL DEFAULT 1
@@ -88,7 +90,12 @@ CREATE TABLE IF NOT EXISTS group_matches(
     team2_id INTEGER NOT NULL REFERENCES teams(id),
     winner_id INTEGER REFERENCES teams(id),
     status TEXT NOT NULL DEFAULT 'pending',
+    steam_party_id TEXT,
+    party_code TEXT,
+    deadlock_match_id TEXT,
     discord_channel_id TEXT,
+    match_duration_s INTEGER,
+    match_stats TEXT,
     scheduled_at TEXT,
     played_at TEXT
 );
@@ -238,6 +245,7 @@ CREATE TABLE IF NOT EXISTS user_profiles (
   notify_checkin INTEGER NOT NULL DEFAULT 1,
   notify_team_invite INTEGER NOT NULL DEFAULT 1,
   notify_tournament_news INTEGER NOT NULL DEFAULT 0,
+  notify_registration_reminder INTEGER NOT NULL DEFAULT 1,
   updated_at TEXT NOT NULL
 );
 
@@ -283,6 +291,24 @@ CREATE TABLE IF NOT EXISTS discord_tasks(
     created_at TEXT DEFAULT (datetime('now')),
     updated_at TEXT
 );
+
+CREATE TABLE IF NOT EXISTS sent_tournament_reminders(
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tournament_id INTEGER NOT NULL REFERENCES tournaments(id) ON DELETE CASCADE,
+    offset_minutes INTEGER NOT NULL,
+    sent_at TEXT NOT NULL,
+    UNIQUE(tournament_id, offset_minutes)
+);
+
+CREATE TABLE IF NOT EXISTS match_casters(
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    match_id INTEGER NOT NULL,
+    match_type TEXT NOT NULL DEFAULT 'bracket',
+    discord_id TEXT NOT NULL,
+    assigned_at TEXT NOT NULL DEFAULT (datetime('now')),
+    assigned_by TEXT,
+    UNIQUE(match_id, match_type, discord_id)
+);
 """
 
 
@@ -320,6 +346,11 @@ async def _ensure_schema_upgrades(db: aiosqlite.Connection) -> None:
     await _ensure_column(db, "bracket_matches", "source_match2_id", "INTEGER")
     await _ensure_column(db, "bracket_matches", "discord_channel_id", "TEXT")
     await _ensure_column(db, "group_matches", "discord_channel_id", "TEXT")
+    await _ensure_column(db, "group_matches", "steam_party_id", "TEXT")
+    await _ensure_column(db, "group_matches", "party_code", "TEXT")
+    await _ensure_column(db, "group_matches", "deadlock_match_id", "TEXT")
+    await _ensure_column(db, "group_matches", "match_duration_s", "INTEGER")
+    await _ensure_column(db, "group_matches", "match_stats", "TEXT")
     await _ensure_column(db, "tournament_signups", "discord_name", "TEXT")
     await _ensure_column(
         db, "teams", "recruitment_status", "TEXT NOT NULL DEFAULT 'open'"
@@ -365,6 +396,18 @@ async def _ensure_schema_upgrades(db: aiosqlite.Connection) -> None:
     await _ensure_column(db, "tournaments", "checkin_start", "TEXT")
     await _ensure_column(
         db, "tournaments", "tournament_mode", "TEXT NOT NULL DEFAULT 'group_stage'"
+    )
+    await _ensure_column(
+        db, "tournaments", "exclude_from_leaderboard", "INTEGER NOT NULL DEFAULT 0"
+    )
+    await _ensure_column(
+        db, "tournaments", "reminder_offsets", "TEXT DEFAULT '[1440,120,15]'"
+    )
+    await _ensure_column(
+        db,
+        "user_profiles",
+        "notify_registration_reminder",
+        "INTEGER NOT NULL DEFAULT 1",
     )
 
     # series_format
@@ -422,6 +465,26 @@ async def _ensure_schema_upgrades(db: aiosqlite.Connection) -> None:
             taken_by TEXT,
             taken_at TEXT,
             is_admin_forced INTEGER NOT NULL DEFAULT 0
+        )
+    """)
+    await db.execute("""
+        CREATE TABLE IF NOT EXISTS sent_tournament_reminders (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            tournament_id INTEGER NOT NULL REFERENCES tournaments(id) ON DELETE CASCADE,
+            offset_minutes INTEGER NOT NULL,
+            sent_at TEXT NOT NULL,
+            UNIQUE(tournament_id, offset_minutes)
+        )
+    """)
+    await db.execute("""
+        CREATE TABLE IF NOT EXISTS match_casters (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            match_id INTEGER NOT NULL,
+            match_type TEXT NOT NULL DEFAULT 'bracket',
+            discord_id TEXT NOT NULL,
+            assigned_at TEXT NOT NULL DEFAULT (datetime('now')),
+            assigned_by TEXT,
+            UNIQUE(match_id, match_type, discord_id)
         )
     """)
 

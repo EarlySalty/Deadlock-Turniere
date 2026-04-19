@@ -1,17 +1,20 @@
-"""Match Manager — Orchestriert Steam-Lobby-Workflow für Bracket-Matches."""
+"""Match Manager — Orchestriert Steam-Lobby-Workflow fuer Bracket- und Group-Matches."""
 from __future__ import annotations
 
-import logging
 import json
+import logging
 from typing import Any
 
+from config import settings
 from db import get_db
 from match import steam_bridge
 from notifications.discord_notifier import (
     create_match_channel,
+    notify_casters_match_created,
     notify_users,
     send_lobby_announcement,
     send_match_lobby_info,
+    move_users_to_voice_channel,
 )
 from match.result_processor import (
     MatchNotFoundError,
@@ -126,19 +129,54 @@ async def create_lobby(
     game_mode: int = DEFAULT_GAME_MODE,
     region_mode: int = DEFAULT_REGION_MODE,
 ) -> dict[str, Any]:
-    """Erstellt eine Steam-Custom-Lobby für ein Bracket-Match."""
-    match = await _get_bracket_match(tournament_id, match_id)
+    """Erstellt eine Steam-Custom-Lobby fuer ein Bracket-Match."""
+    return await _create_lobby_for_match(
+        "bracket",
+        tournament_id,
+        match_id,
+        game_mode=game_mode,
+        region_mode=region_mode,
+    )
+
+
+async def create_group_lobby(
+    tournament_id: int,
+    match_id: int,
+    *,
+    game_mode: int = DEFAULT_GAME_MODE,
+    region_mode: int = DEFAULT_REGION_MODE,
+) -> dict[str, Any]:
+    """Erstellt eine Steam-Custom-Lobby fuer ein Group-Match."""
+    return await _create_lobby_for_match(
+        "group",
+        tournament_id,
+        match_id,
+        game_mode=game_mode,
+        region_mode=region_mode,
+    )
+
+
+async def _create_lobby_for_match(
+    match_type: str,
+    tournament_id: int,
+    match_id: int,
+    *,
+    game_mode: int = DEFAULT_GAME_MODE,
+    region_mode: int = DEFAULT_REGION_MODE,
+) -> dict[str, Any]:
+    match = await _get_match(match_type, tournament_id, match_id)
     _require_match_ready_for_lobby(match)
-    await _ensure_no_duplicate_lobby_request(match_id, match)
+    await _ensure_no_duplicate_lobby_request(match_type, match_id, match)
     lobby_settings = await _get_tournament_lobby_settings(tournament_id)
-    match_context = await _load_match_context(tournament_id, match_id)
-    participant_rows = await _load_match_participants(tournament_id, match_id)
+    match_context = await _load_match_context(match_type, tournament_id, match_id)
+    participant_rows = await _load_match_participants(match_type, tournament_id, match_id)
     participant_discord_ids = [str(row["discord_id"]) for row in participant_rows if row["discord_id"]]
     steam_ids = [str(row["steam_id"]).strip() for row in participant_rows if row["steam_id"]]
 
     create_payload: dict[str, Any] = {
         "tournament_id": tournament_id,
         "match_id": match_id,
+        "match_type": match_type,
         "game_mode": game_mode,
         "region_mode": region_mode,
     }
@@ -164,12 +202,12 @@ async def create_lobby(
 
     async with get_db() as db:
         await db.execute(
-            """
-            UPDATE bracket_matches
+            f"""
+            UPDATE {_match_table(match_type)}
             SET steam_party_id = ?, party_code = ?, status = 'lobby_created'
-            WHERE id = ? AND tournament_id = ?
+            WHERE id = ? AND {_match_scope_column(match_type)} = ?
             """,
-            (party_id, str(party_code), match_id, tournament_id),
+            (party_id, str(party_code), match_id, _match_scope_value(match_type, match)),
         )
         await db.commit()
 
@@ -184,11 +222,15 @@ async def create_lobby(
         )
         async with get_db() as db:
             await db.execute(
-                "UPDATE bracket_matches SET discord_channel_id = ? WHERE id = ? AND tournament_id = ?",
-                (discord_channel_id, match_id, tournament_id),
+                f"UPDATE {_match_table(match_type)} SET discord_channel_id = ? "
+                f"WHERE id = ? AND {_match_scope_column(match_type)} = ?",
+                (discord_channel_id, match_id, _match_scope_value(match_type, match)),
             )
             await db.commit()
         await send_match_lobby_info(discord_channel_id, str(party_code), participant_discord_ids)
+        caster_ids = await _load_match_casters(match_type, match_id)
+        if caster_ids:
+            await notify_casters_match_created(match_id, discord_channel_id, caster_ids)
         team1_ids = [
             str(row["discord_id"])
             for row in participant_rows
@@ -238,7 +280,7 @@ async def create_lobby(
 
 async def set_bot_spectator(tournament_id: int, match_id: int) -> dict[str, Any]:
     """Setzt den Bot auf den Spectator-Slot."""
-    party_id = await _get_party_id(tournament_id, match_id)
+    party_id = await _get_party_id("bracket", tournament_id, match_id)
     return await _run_steam_task(
         action="Spectator-Slot setzen",
         task_type="GC_LOBBY_SET_SPECTATOR",
@@ -249,7 +291,7 @@ async def set_bot_spectator(tournament_id: int, match_id: int) -> dict[str, Any]
 
 async def set_bot_ready(tournament_id: int, match_id: int) -> dict[str, Any]:
     """Setzt den Bot in der Lobby auf ready."""
-    party_id = await _get_party_id(tournament_id, match_id)
+    party_id = await _get_party_id("bracket", tournament_id, match_id)
     return await _run_steam_task(
         action="Ready-Status setzen",
         task_type="GC_LOBBY_READY",
@@ -259,22 +301,46 @@ async def set_bot_ready(tournament_id: int, match_id: int) -> dict[str, Any]:
 
 
 async def start_match(tournament_id: int, match_id: int) -> dict[str, Any]:
-    """Startet ein Match über den Steam-Bot."""
-    match = await _get_bracket_match(tournament_id, match_id)
-    _require_match_ready_for_start(match)
-    match_context = await _load_match_context(tournament_id, match_id)
+    """Startet ein Bracket-Match ueber den Steam-Bot."""
+    return await _start_match_for_match("bracket", tournament_id, match_id)
 
-    await set_bot_spectator(tournament_id, match_id)
-    await set_bot_ready(tournament_id, match_id)
+
+async def start_group_match(tournament_id: int, match_id: int) -> dict[str, Any]:
+    """Startet ein Group-Match ueber den Steam-Bot."""
+    return await _start_match_for_match("group", tournament_id, match_id)
+
+
+async def _start_match_for_match(
+    match_type: str,
+    tournament_id: int,
+    match_id: int,
+) -> dict[str, Any]:
+    match = await _get_match(match_type, tournament_id, match_id)
+    _require_match_ready_for_start(match)
+    match_context = await _load_match_context(match_type, tournament_id, match_id)
+
+    party_id = await _get_party_id(match_type, tournament_id, match_id)
+    await _run_steam_task(
+        action="Spectator-Slot setzen",
+        task_type="GC_LOBBY_SET_SPECTATOR",
+        payload={"party_id": party_id},
+        timeout_s=20,
+    )
+    await _run_steam_task(
+        action="Ready-Status setzen",
+        task_type="GC_LOBBY_READY",
+        payload={"party_id": party_id},
+        timeout_s=20,
+    )
 
     result = await _run_steam_task(
         action="Match-Start",
         task_type="GC_LOBBY_START_MATCH",
-        payload={"party_id": match["steam_party_id"]},
+        payload={"party_id": party_id, "match_type": match_type, "match_id": match_id},
         timeout_s=45,
     )
 
-    participant_rows = await _load_match_participants(tournament_id, match_id)
+    participant_rows = await _load_match_participants(match_type, tournament_id, match_id)
     participant_discord_ids = [str(row["discord_id"]) for row in participant_rows if row["discord_id"]]
     try:
         await notify_users(
@@ -292,6 +358,17 @@ async def start_match(tournament_id: int, match_id: int) -> dict[str, Any]:
             match_id,
         )
 
+    caster_ids = await _load_match_casters(match_type, match_id)
+    if caster_ids:
+        try:
+            await move_users_to_voice_channel(
+                caster_ids,
+                settings.DISCORD_CASTER_VOICE_CHANNEL_ID,
+                guild_id=int(settings.DISCORD_GUILD_ID),
+            )
+        except Exception:
+            logger.exception("Caster voice move failed (match_type=%s match=%s)", match_type, match_id)
+
     match_id_value = _coerce_optional_int(
         result.get("match_id") or result.get("deadlock_match_id"),
         "match_id",
@@ -299,16 +376,16 @@ async def start_match(tournament_id: int, match_id: int) -> dict[str, Any]:
 
     async with get_db() as db:
         await db.execute(
-            """
-            UPDATE bracket_matches
+            f"""
+            UPDATE {_match_table(match_type)}
             SET status = 'in_progress',
                 deadlock_match_id = COALESCE(?, deadlock_match_id)
-            WHERE id = ? AND tournament_id = ?
+            WHERE id = ? AND {_match_scope_column(match_type)} = ?
             """,
             (
                 str(match_id_value) if match_id_value is not None else None,
                 match_id,
-                tournament_id,
+                _match_scope_value(match_type, match),
             ),
         )
         await db.commit()
@@ -318,9 +395,32 @@ async def start_match(tournament_id: int, match_id: int) -> dict[str, Any]:
     return normalized_result
 
 
+async def _load_match_casters(match_type: str, match_id: int) -> list[str]:
+    async with get_db() as db:
+        cursor = await db.execute(
+            "SELECT discord_id FROM match_casters WHERE match_type = ? AND match_id = ? ORDER BY assigned_at, discord_id",
+            (match_type, match_id),
+        )
+        rows = await cursor.fetchall()
+    return [str(row["discord_id"]) for row in rows if row["discord_id"]]
+
+
 async def fetch_match_result(tournament_id: int, match_id: int) -> dict[str, Any]:
-    """Holt das Match-Ergebnis über die Steam-Bridge und übernimmt es ins Bracket."""
-    match = await _get_bracket_match(tournament_id, match_id)
+    """Holt das Match-Ergebnis ueber die Steam-Bridge und uebernimmt es ins Bracket."""
+    return await _fetch_match_result_for_match("bracket", tournament_id, match_id)
+
+
+async def fetch_group_match_result(tournament_id: int, match_id: int) -> dict[str, Any]:
+    """Holt das Match-Ergebnis ueber die Steam-Bridge und uebernimmt es ins Group-Match."""
+    return await _fetch_match_result_for_match("group", tournament_id, match_id)
+
+
+async def _fetch_match_result_for_match(
+    match_type: str,
+    tournament_id: int,
+    match_id: int,
+) -> dict[str, Any]:
+    match = await _get_match(match_type, tournament_id, match_id)
     _require_match_ready_for_result_fetch(match)
 
     result = await _run_steam_task(
@@ -334,19 +434,29 @@ async def fetch_match_result(tournament_id: int, match_id: int) -> dict[str, Any
     winner_id_raw = result.get("winner_id")
 
     try:
-        applied = await apply_bracket_match_result(
-            tournament_id,
-            match_id,
-            winning_team=_coerce_optional_int(winning_team_raw, "winning_team"),
-            winner_id=_coerce_optional_int(winner_id_raw, "winner_id"),
-            duration_s=_coerce_optional_int(result.get("duration_s"), "duration_s"),
-            players=result.get("players"),
-            source="automatic",
-        )
-    except (MatchNotFoundError, MatchStateError):
-        raise
+        if match_type == "bracket":
+            applied = await apply_bracket_match_result(
+                tournament_id,
+                match_id,
+                winning_team=_coerce_optional_int(winning_team_raw, "winning_team"),
+                winner_id=_coerce_optional_int(winner_id_raw, "winner_id"),
+                duration_s=_coerce_optional_int(result.get("duration_s"), "duration_s"),
+                players=result.get("players"),
+                source="automatic",
+            )
+        else:
+            applied = await _apply_group_match_result(
+                tournament_id,
+                match_id,
+                winning_team=_coerce_optional_int(winning_team_raw, "winning_team"),
+                winner_id=_coerce_optional_int(winner_id_raw, "winner_id"),
+                deadlock_match_id=result.get("match_id") or result.get("deadlock_match_id"),
+                duration_s=_coerce_optional_int(result.get("duration_s"), "duration_s"),
+                players=result.get("players"),
+                source="automatic",
+            )
     except MatchResultError as exc:
-        raise SteamTaskError(f"Ungültige Steam-Ergebnisdaten: {exc}") from exc
+        raise SteamTaskError(f"Ungueltige Steam-Ergebnisdaten: {exc}") from exc
 
     normalized_result = dict(result)
     normalized_result.update(applied)
@@ -355,8 +465,21 @@ async def fetch_match_result(tournament_id: int, match_id: int) -> dict[str, Any
 
 
 async def leave_lobby(tournament_id: int, match_id: int) -> dict[str, Any]:
-    """Lässt den Bot die Lobby verlassen."""
-    match = await _get_bracket_match(tournament_id, match_id)
+    """Laesst den Bot eine Bracket-Lobby verlassen."""
+    return await _leave_lobby_for_match("bracket", tournament_id, match_id)
+
+
+async def leave_group_lobby(tournament_id: int, match_id: int) -> dict[str, Any]:
+    """Laesst den Bot eine Group-Lobby verlassen."""
+    return await _leave_lobby_for_match("group", tournament_id, match_id)
+
+
+async def _leave_lobby_for_match(
+    match_type: str,
+    tournament_id: int,
+    match_id: int,
+) -> dict[str, Any]:
+    match = await _get_match(match_type, tournament_id, match_id)
     _require_match_ready_for_leave(match)
     result = await _run_steam_task(
         action="Lobby verlassen",
@@ -466,8 +589,38 @@ async def _get_bracket_match(tournament_id: int, match_id: int) -> dict[str, Any
     return dict(row)
 
 
-async def _get_party_id(tournament_id: int, match_id: int) -> str:
-    match = await _get_bracket_match(tournament_id, match_id)
+async def _get_group_match(tournament_id: int, match_id: int) -> dict[str, Any]:
+    async with get_db() as db:
+        cursor = await db.execute(
+            """
+            SELECT gm.id, gm.group_id, gm.team1_id, gm.team2_id, gm.winner_id, gm.status,
+                   gm.steam_party_id, gm.party_code, gm.deadlock_match_id, gm.discord_channel_id,
+                   gm.match_duration_s, gm.match_stats, gm.scheduled_at, gm.played_at,
+                   g.tournament_id,
+                   t1.name AS team1_name, t2.name AS team2_name
+            FROM group_matches gm
+            JOIN groups g ON g.id = gm.group_id
+            LEFT JOIN teams t1 ON t1.id = gm.team1_id
+            LEFT JOIN teams t2 ON t2.id = gm.team2_id
+            WHERE gm.id = ? AND g.tournament_id = ?
+            """,
+            (match_id, tournament_id),
+        )
+        row = await cursor.fetchone()
+
+    if not row:
+        raise MatchNotFoundError(f"Group-Match {match_id} im Turnier {tournament_id} nicht gefunden")
+    return dict(row)
+
+
+async def _get_match(match_type: str, tournament_id: int, match_id: int) -> dict[str, Any]:
+    if match_type == "group":
+        return await _get_group_match(tournament_id, match_id)
+    return await _get_bracket_match(tournament_id, match_id)
+
+
+async def _get_party_id(match_type: str, tournament_id: int, match_id: int) -> str:
+    match = await _get_match(match_type, tournament_id, match_id)
     party_id = match.get("steam_party_id")
     if not party_id:
         raise MatchStateError(f"Für Match {match_id} ist keine Party-ID gespeichert")
@@ -520,16 +673,16 @@ async def _invite_match_participants_to_lobby(
     return await steam_bridge.invite_players_to_lobby(party_id, steam_ids)
 
 
-async def _load_match_context(tournament_id: int, match_id: int) -> dict[str, Any]:
-    match = await _get_bracket_match(tournament_id, match_id)
+async def _load_match_context(match_type: str, tournament_id: int, match_id: int) -> dict[str, Any]:
+    match = await _get_match(match_type, tournament_id, match_id)
     return {
         "team1_name": match.get("team1_name") or f"Team {match['team1_id']}",
         "team2_name": match.get("team2_name") or f"Team {match['team2_id']}",
     }
 
 
-async def _load_match_participants(tournament_id: int, match_id: int) -> list[dict[str, Any]]:
-    match = await _get_bracket_match(tournament_id, match_id)
+async def _load_match_participants(match_type: str, tournament_id: int, match_id: int) -> list[dict[str, Any]]:
+    match = await _get_match(match_type, tournament_id, match_id)
     team_ids = [match.get("team1_id"), match.get("team2_id")]
     team_ids = [int(team_id) for team_id in team_ids if team_id is not None]
     if not team_ids:
@@ -552,8 +705,8 @@ async def _load_match_participants(tournament_id: int, match_id: int) -> list[di
     return [dict(row) for row in rows]
 
 
-async def _load_match_participant_steam_ids(tournament_id: int, match_id: int) -> list[str]:
-    match = await _get_bracket_match(tournament_id, match_id)
+async def _load_match_participant_steam_ids(match_type: str, tournament_id: int, match_id: int) -> list[str]:
+    match = await _get_match(match_type, tournament_id, match_id)
     team_ids = [match.get("team1_id"), match.get("team2_id")]
     team_ids = [int(team_id) for team_id in team_ids if team_id is not None]
     if not team_ids:
@@ -620,11 +773,123 @@ def _require_match_has_live_lobby(match: dict[str, Any]) -> None:
         raise MatchStateError("Fuer dieses Match ist keine Party-ID gespeichert")
 
 
-async def _ensure_no_duplicate_lobby_request(match_id: int, match: dict[str, Any]) -> None:
+async def _ensure_no_duplicate_lobby_request(match_type: str, match_id: int, match: dict[str, Any]) -> None:
     if match.get("steam_party_id"):
         raise MatchStateError("Für dieses Match existiert bereits eine Lobby")
-    if await steam_bridge.has_active_task("GC_CREATE_CUSTOM_LOBBY", match_id=match_id):
+    if await steam_bridge.has_active_task(
+        "GC_CREATE_CUSTOM_LOBBY",
+        match_id=match_id,
+        match_type=match_type,
+    ):
         raise MatchStateError("Für dieses Match läuft bereits eine Lobby-Erstellung")
+
+
+def _match_table(match_type: str) -> str:
+    return "group_matches" if match_type == "group" else "bracket_matches"
+
+
+def _match_scope_column(match_type: str) -> str:
+    return "group_id" if match_type == "group" else "tournament_id"
+
+
+def _match_scope_value(match_type: str, match: dict[str, Any]) -> int:
+    return int(match["group_id"] if match_type == "group" else match["tournament_id"])
+
+
+async def _apply_group_match_result(
+    tournament_id: int,
+    match_id: int,
+    *,
+    winning_team: int | None = None,
+    winner_id: int | None = None,
+    deadlock_match_id: Any = None,
+    duration_s: int | None = None,
+    players: Any = None,
+    source: str = "manual",
+) -> dict[str, Any]:
+    async with get_db() as db:
+        cursor = await db.execute(
+            """
+            SELECT gm.*, g.tournament_id
+            FROM group_matches gm
+            JOIN groups g ON g.id = gm.group_id
+            WHERE gm.id = ? AND g.tournament_id = ?
+            """,
+            (match_id, tournament_id),
+        )
+        match = await cursor.fetchone()
+
+        if not match:
+            raise MatchNotFoundError(f"Group-Match {match_id} im Turnier {tournament_id} nicht gefunden")
+        if match["status"] in {"completed", "cancelled", "forfeit"}:
+            raise MatchStateError(
+                f"Group-Match {match_id} kann aus Status {match['status']} nicht verarbeitet werden"
+            )
+
+        if winner_id is None:
+            if winning_team == 1:
+                winner_id = int(match["team1_id"])
+            elif winning_team == 2:
+                winner_id = int(match["team2_id"])
+
+        if winner_id not in {match["team1_id"], match["team2_id"]}:
+            raise MatchResultError("winner_id muss eines der beiden Teams im Match sein")
+
+        winning_team_value = 1 if winner_id == match["team1_id"] else 2
+        loser_id = match["team2_id"] if winning_team_value == 1 else match["team1_id"]
+        match_stats = json.dumps({"players": players}, ensure_ascii=True) if players is not None else None
+
+        await db.execute(
+            """
+            UPDATE group_matches
+            SET winner_id = ?,
+                status = 'completed',
+                deadlock_match_id = COALESCE(?, deadlock_match_id),
+                match_duration_s = COALESCE(?, match_duration_s),
+                match_stats = COALESCE(?, match_stats),
+                played_at = datetime('now')
+            WHERE id = ?
+            """,
+            (
+                winner_id,
+                str(deadlock_match_id) if deadlock_match_id is not None else None,
+                duration_s,
+                match_stats,
+                match_id,
+            ),
+        )
+
+        await db.execute(
+            "UPDATE group_teams SET wins = wins + 1, points = points + 3 "
+            "WHERE group_id = ? AND team_id = ?",
+            (match["group_id"], winner_id),
+        )
+        await db.execute(
+            "UPDATE group_teams SET losses = losses + 1 "
+            "WHERE group_id = ? AND team_id = ?",
+            (match["group_id"], loser_id),
+        )
+        await db.execute("DELETE FROM match_results WHERE group_match_id = ?", (match_id,))
+        await db.execute(
+            "INSERT INTO match_results (group_match_id, winning_team, duration_s, player_stats, source) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (
+                match_id,
+                winning_team_value,
+                duration_s,
+                json.dumps(players, ensure_ascii=True) if players is not None else None,
+                source,
+            ),
+        )
+        await db.commit()
+
+    return {
+        "match_id": match_id,
+        "winner_id": int(winner_id),
+        "winning_team": winning_team_value,
+        "duration_s": duration_s,
+        "source": source,
+    }
 
 
 async def _run_steam_task(

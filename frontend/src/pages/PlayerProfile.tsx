@@ -87,7 +87,11 @@ export default function PlayerProfile() {
     uploadAvatar.mutate(file)
   }
 
-  const handleSettingsSave = (updates: { invite_auto_accept?: boolean; notify_discord_dm?: boolean }) => {
+  const handleSettingsSave = (updates: {
+    invite_auto_accept?: boolean
+    notify_discord_dm?: boolean
+    notify_registration_reminder?: boolean
+  }) => {
     updateProfile.mutate(updates, {
       onSuccess: () => {
         setSettingsSaved(true)
@@ -375,6 +379,22 @@ export default function PlayerProfile() {
                   <div>
                     <div className="text-sm font-medium text-foreground">Discord-DM-Benachrichtigungen</div>
                     <div className="text-xs text-muted">Bei neuen Einladungen und Bewerbungen</div>
+                  </div>
+                </div>
+              </label>
+
+              <label className="flex items-center gap-3 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={myProfile?.notify_registration_reminder ?? true}
+                  onChange={(e) => handleSettingsSave({ notify_registration_reminder: e.target.checked })}
+                  className="h-4 w-4 accent-primary"
+                />
+                <div className="flex items-center gap-2">
+                  <Bell size={14} className="text-muted" />
+                  <div>
+                    <div className="text-sm font-medium text-foreground">Reminder vor Anmeldeschluss</div>
+                    <div className="text-xs text-muted">DM 1 Tag, 2 Stunden oder 15 Minuten vor Anmeldeschluss</div>
                   </div>
                 </div>
               </label>

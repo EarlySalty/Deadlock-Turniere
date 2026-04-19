@@ -1,5 +1,6 @@
 export type TournamentStatus = 'draft' | 'registration' | 'checkin' | 'group_phase' | 'bracket' | 'completed' | 'archived'
 export type BracketFormat = 'single_elimination' | 'double_elimination'
+export type TournamentMode = 'group_stage' | 'bracket_only'
 export type MatchStatus = 'pending' | 'checkin' | 'lobby_created' | 'in_progress' | 'completed' | 'forfeit' | 'cancelled'
 export type RecruitmentStatus = 'open' | 'application' | 'closed'
 export type InviteMode = 'always' | 'window' | 'never'
@@ -42,9 +43,12 @@ export interface Tournament {
   group_phase_start: string | null
   bracket_start: string | null
   bracket_format: BracketFormat
+  tournament_mode: TournamentMode
   invite_mode: InviteMode
   invite_window_start: string | null
   invite_window_end: string | null
+  exclude_from_leaderboard: boolean
+  reminder_offsets: number[]
   created_by: string
   created_at: string
   updated_at: string
@@ -183,6 +187,7 @@ export interface FinalizeCheckinResult {
   groups_created?: number
   matches_created?: number
   advanced_to_group_phase?: boolean
+  advanced_to_bracket?: boolean
 }
 
 // --- Group & Bracket ---
@@ -194,6 +199,11 @@ export interface GroupMatch {
   team2_id: number
   winner_id: number | null
   status: MatchStatus
+  steam_party_id: string | null
+  party_code: string | null
+  deadlock_match_id: string | null
+  match_duration_s: number | null
+  match_stats: string | null
   scheduled_at: string | null
   played_at: string | null
 }
@@ -265,6 +275,8 @@ export interface TournamentCreate {
   invite_window_end?: string
   lobby_settings_preset?: LobbySettingsPreset
   lobby_settings?: Record<string, unknown>
+  exclude_from_leaderboard?: boolean
+  reminder_offsets?: number[]
 }
 
 export interface TournamentUpdate {
@@ -273,6 +285,7 @@ export interface TournamentUpdate {
   status?: TournamentStatus
   team_size?: number
   bracket_format?: BracketFormat
+  force_tournament_mode?: TournamentMode
   series_format?: 1 | 3 | 5
   registration_start?: string
   registration_end?: string
@@ -282,6 +295,8 @@ export interface TournamentUpdate {
   invite_mode?: InviteMode
   invite_window_start?: string
   invite_window_end?: string
+  exclude_from_leaderboard?: boolean
+  reminder_offsets?: number[]
 }
 
 export interface ManualResult {
@@ -434,6 +449,11 @@ export interface UserProfile {
   invite_auto_accept: boolean
   notify_discord_dm: boolean
   notify_browser: boolean
+  notify_match_start: boolean
+  notify_checkin: boolean
+  notify_team_invite: boolean
+  notify_tournament_news: boolean
+  notify_registration_reminder: boolean
   updated_at: string | null
 }
 
@@ -444,6 +464,18 @@ export interface UserProfileUpdate {
   invite_auto_accept?: boolean
   notify_discord_dm?: boolean
   notify_browser?: boolean
+  notify_match_start?: boolean
+  notify_checkin?: boolean
+  notify_team_invite?: boolean
+  notify_tournament_news?: boolean
+  notify_registration_reminder?: boolean
+}
+
+export interface MatchCaster {
+  discord_id: string
+  display_name: string | null
+  assigned_at?: string | null
+  assigned_by?: string | null
 }
 
 // --- Team Applications ---

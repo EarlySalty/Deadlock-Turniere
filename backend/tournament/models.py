@@ -124,6 +124,8 @@ class TournamentCreate(BaseModel):
     lobby_settings_preset: LobbySettingsPreset = LobbySettingsPreset.standard
     lobby_settings: Optional[dict[str, Any]] = None
     force_tournament_mode: Optional[TournamentMode] = None  # Admin-Override: erzwingt group_stage oder bracket_only
+    exclude_from_leaderboard: bool = False
+    reminder_offsets: list[int] = Field(default_factory=lambda: [1440, 120, 15])
 
     @field_validator("series_format")
     @classmethod
@@ -131,6 +133,12 @@ class TournamentCreate(BaseModel):
         if v not in (1, 3, 5):
             raise ValueError("series_format muss 1, 3 oder 5 sein")
         return v
+
+    @field_validator("reminder_offsets")
+    @classmethod
+    def validate_reminder_offsets(cls, value: list[int]) -> list[int]:
+        cleaned = sorted({int(offset) for offset in value if int(offset) >= 0}, reverse=True)
+        return cleaned or [1440, 120, 15]
 
 
 class TournamentUpdate(BaseModel):
@@ -151,6 +159,8 @@ class TournamentUpdate(BaseModel):
     lobby_settings_preset: Optional[LobbySettingsPreset] = None
     lobby_settings: Optional[dict[str, Any]] = None
     force_tournament_mode: Optional[TournamentMode] = None  # Admin-Override: erzwingt group_stage oder bracket_only
+    exclude_from_leaderboard: Optional[bool] = None
+    reminder_offsets: Optional[list[int]] = None
 
     @field_validator("series_format")
     @classmethod
@@ -160,6 +170,14 @@ class TournamentUpdate(BaseModel):
         if v not in (1, 3, 5):
             raise ValueError("series_format muss 1, 3 oder 5 sein")
         return v
+
+    @field_validator("reminder_offsets")
+    @classmethod
+    def validate_update_reminder_offsets(cls, value: list[int] | None) -> list[int] | None:
+        if value is None:
+            return value
+        cleaned = sorted({int(offset) for offset in value if int(offset) >= 0}, reverse=True)
+        return cleaned or [1440, 120, 15]
 
 
 class TournamentSignup(BaseModel):
@@ -195,6 +213,26 @@ class Tournament(BaseModel):
     invite_window_start: Optional[str] = None
     invite_window_end: Optional[str] = None
     lobby_settings: Optional[str] = None
+    exclude_from_leaderboard: bool = False
+    reminder_offsets: list[int] = Field(default_factory=lambda: [1440, 120, 15])
+
+    @field_validator("reminder_offsets", mode="before")
+    @classmethod
+    def parse_reminder_offsets(cls, value: Any) -> list[int]:
+        if value is None:
+            return [1440, 120, 15]
+        if isinstance(value, list):
+            return [int(offset) for offset in value]
+        if isinstance(value, str):
+            import json
+
+            try:
+                parsed = json.loads(value)
+            except ValueError:
+                return [1440, 120, 15]
+            if isinstance(parsed, list):
+                return [int(offset) for offset in parsed]
+        return [1440, 120, 15]
 
 
 # --- Team ---
@@ -268,6 +306,11 @@ class GroupMatch(BaseModel):
     team2_id: int
     winner_id: Optional[int] = None
     status: MatchStatus = MatchStatus.pending
+    steam_party_id: Optional[str] = None
+    party_code: Optional[str] = None
+    deadlock_match_id: Optional[str] = None
+    match_duration_s: Optional[int] = None
+    match_stats: Optional[str] = None
     scheduled_at: Optional[str] = None
     played_at: Optional[str] = None
 
@@ -397,6 +440,7 @@ class UserProfileUpdate(BaseModel):
     notify_checkin: Optional[bool] = None
     notify_team_invite: Optional[bool] = None
     notify_tournament_news: Optional[bool] = None
+    notify_registration_reminder: Optional[bool] = None
 
 
 class UserProfile(BaseModel):
@@ -411,6 +455,7 @@ class UserProfile(BaseModel):
     notify_checkin: bool = True
     notify_team_invite: bool = True
     notify_tournament_news: bool = False
+    notify_registration_reminder: bool = True
     updated_at: Optional[str] = None
 
 

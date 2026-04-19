@@ -2,6 +2,89 @@
 
 ---
 
+## Neue Aufgabe (2026-04-18): Feature-Erweiterungen — Voice, Bo3, Draft, Stats, Lobby
+
+### Ziel
+- **A** Voice-Kanal-Runden-Management: Start/Nächste Runde, Split Teams → VC1/VC2 → Sammelpunkt
+- **B** Best of 3: series_format pro Turnier (Bo1/Bo3/Bo5), match_games Tabelle
+- **C** Hero-Draft: Pick/Ban System (6 Bans + 12 Picks)
+- **D** Match-Stats: Deadlock Match-ID + K/D/A in Discord + Dashboard
+- **E** Lobby-Announcement: Lobby-Code immer in Kanal 1412411665713987635 mit User-Pings
+
+### Status (2026-04-18)
+→ **Gestartet** — GPT-Worker werden dispatched
+
+### Fortschritt GPT-Worker A1 (2026-04-18)
+- `service/master_broker.py` in `Deadlock-Bots` um `move-voice` und `voice-channel/members` erweitert
+- Routing, Auth, Idempotency und 404/502-Fehlerpfade an bestehendes Broker-Muster angeglichen
+- Verifikation: `python3 -m py_compile /home/naniadm/Documents/Deadlock-Bots/service/master_broker.py` erfolgreich
+- Übergabe: Änderungen bleiben absichtlich uncommitted für Claude-Review
+
+### Kritische Erkenntnis
+Broker hat KEINEN move-voice Endpoint → muss in Deadlock-Bots ergänzt werden.
+
+### Reihenfolge
+1. Parallel: A1 (Broker) + B1/C1 (DB-Schema)
+2. Parallel: A2-A4+E1-E3 (Backend Voice+Lobby) + B2-B4 (Series) + C2-C4 (Draft) + D1-D2 (Stats)
+3. Frontend: A5 + B5 + C5 + D3
+
+### Offene Punkte
+- [x] A1: Broker move-voice + get-voice-members (Deadlock-Bots)
+- [ ] B1+C1: DB schema_upgrades
+- [x] A2-A4: config.py + notifier + admin_routes Voice
+- [x] E1-E3: config + send_lobby_announcement + match/manager.py
+- [x] B2-B4: models + series_manager.py + Routen
+- [x] C2-C4: draft/heroes.py + draft/engine.py + draft/routes.py + main.py
+- [x] D1-D2: send_match_stats + result_processor
+- [ ] Frontend (A5, B5, C5, D3)
+
+### Fortschritt GPT-Worker B1+C1+B2 (2026-04-18)
+- `backend/db.py`: `series_format` in `tournaments` ergänzt, neue Tabellen `match_games`, `draft_sessions`, `draft_actions` im Schema und in `_ensure_schema_upgrades()` hinzugefügt
+- `backend/tournament/models.py`: `series_format` in Tournament-Modelle aufgenommen, `MatchGame` ergänzt, `BracketMatch` um Series-Tracking erweitert
+- Verifikation: `.venv/bin/python -m py_compile backend/db.py backend/tournament/models.py` erfolgreich
+- Übergabe: Änderungen bleiben absichtlich uncommitted für Claude-Review
+
+### Fortschritt GPT-Worker B3+B4+C2+C3+C4 (2026-04-18)
+- `backend/match/series_manager.py` neu erstellt: Serien-Spiele anlegen, Ergebnisse pro Game speichern, Serienstand auswerten
+- `backend/tournament/admin_routes.py` um Series-Start/Result-Endpunkte ergänzt; Match wird gegen `tournament_id` validiert und der Serien-Slot `1/2` auf die bestehende Bracket-Konvention `0/1` gemappt
+- Neues Paket `backend/draft/` mit `heroes.py`, `engine.py`, `routes.py` erstellt; `backend/main.py` bindet den Draft-Router ein
+- Verifikation steht als nächster Schritt an; Änderungen bleiben absichtlich uncommitted für Claude-Review
+
+### Fortschritt GPT-Worker A2+A3+A4+E1+E2+E3 (2026-04-18)
+- `backend/config.py`: Voice- und Turnier-Lobby-Channel-Settings ergänzt
+- `backend/notifications/discord_notifier.py`: Voice-Moves, Voice-Member-Abfrage, Lobby-Announcement und Match-Stats-Posting ergänzt
+- `backend/tournament/admin_routes.py`: Admin-Endpoints für VC-Split, Sammelpunkt, Einzel-Move und Channel-Member ergänzt
+- `backend/match/manager.py`: Zentrales Lobby-Announcement nach Lobby-Erstellung ergänzt
+- `backend/match/result_processor.py`: Non-blocking Stats-Posting in Discord-Match-Channels ergänzt
+- Verifikation: `.venv/bin/python -m py_compile backend/config.py backend/notifications/discord_notifier.py backend/tournament/admin_routes.py backend/match/manager.py backend/match/result_processor.py` erfolgreich
+- Übergabe: Änderungen bleiben absichtlich uncommitted für Claude-Review
+
+### Fortschritt GPT-Review Backend kritisch (2026-04-18)
+- Review-Scope gelesen: `backend/db.py`, `backend/tournament/models.py`, `backend/config.py`, `backend/notifications/discord_notifier.py`, `backend/tournament/admin_routes.py`, `backend/match/manager.py`, `backend/match/result_processor.py`, `backend/match/series_manager.py`, `backend/draft/*`, `backend/main.py`
+- Syntax-Check: `.venv/bin/python -m py_compile` auf allen genannten Backend-Dateien erfolgreich, keine Syntax-Fehler
+- Fokus des Reviews: Series-Flow, Discord-Notifier, Voice-Endpoints, Draft-Routen/Engine, DB-Migrationen
+- Ergebnis wird als reine Issue-Liste ohne Fixes an Claude zurückgegeben
+
+### Fortschritt GPT-Worker Backend Fix Review-Issues (2026-04-18)
+- Scope strikt auf 4 Fixes begrenzt: `series_format` Validator, Pre-Write-Matchvalidierung in Series-Endpunkten, `match_id`-Check im Draft-Start, engeres Exception-Handling in `_ensure_schema_upgrades()`
+- Betroffene Dateien aktualisiert: `backend/tournament/models.py`, `backend/tournament/admin_routes.py`, `backend/draft/routes.py`, `backend/db.py`
+- Verifikation: `.venv/bin/python -m py_compile backend/tournament/models.py backend/tournament/admin_routes.py backend/draft/routes.py backend/db.py` erfolgreich
+- Übergabe: Änderungen bleiben uncommitted für Claude-Review
+
+### Fortschritt GPT-Worker Frontend A5+B5+C5+D3 (2026-04-18)
+- `frontend/src/types/tournament.ts`: Series-, Voice- und Draft-Typen ergänzt; `BracketMatch` und `TournamentCreate/Update` erweitert
+- `frontend/src/api/client.ts` + `frontend/src/hooks/useTournament.ts`: neue Voice-, Draft- und Series-Requests/Hooks im bestehenden `request()`-/React-Query-Muster ergänzt
+- Neue Admin-Komponenten `VoiceChannelPanel.tsx` und `DraftPanel.tsx` erstellt; `MatchAdminPanel.tsx`, `CreateTournamentForm.tsx` und `pages/Admin.tsx` integriert
+- Verifikation: `cd /home/naniadm/Documents/Deadlock-Turniere/frontend && npx tsc --noEmit` erfolgreich
+- Übergabe: Änderungen bleiben absichtlich uncommitted für Claude-Review
+
+### Plan-Datei
+`/home/naniadm/.claude/plans/f-r-den-turnier-bot-bright-honey.md`
+
+---
+
+---
+
 ## Neue Aufgabe (2026-04-15): Auto Tournament Mode Management
 
 ### Ziel

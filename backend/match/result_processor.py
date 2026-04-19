@@ -27,14 +27,17 @@ class SteamTaskError(RuntimeError):
     """Die Steam-/GC-Ergebnisdaten sind ungültig oder unvollständig."""
 
 
+VALID_MANUAL_RESULT_STATUSES = {"pending", "checkin", "lobby_created", "in_progress"}
+
+
 async def apply_bracket_match_result(
     tournament_id: int,
     match_id: int,
     *,
     winning_team: int | None = None,
     winner_id: int | None = None,
-    duration_s: int | None,
-    players: list[dict[str, Any]] | None,
+    duration_s: int | None = None,
+    players: list[dict[str, Any]] | None = None,
     source: str = "automatic",
     force: bool = False,
 ) -> dict[str, Any]:
@@ -58,6 +61,15 @@ async def apply_bracket_match_result(
         if match_row["status"] in {"completed", "cancelled", "forfeit"} and not force:
             raise MatchStateError(
                 f"Bracket-Match {match_id} kann aus Status {match_row['status']} nicht verarbeitet werden"
+            )
+        if (
+            source in {"manual", "series_manual"}
+            and match_row["status"] not in VALID_MANUAL_RESULT_STATUSES
+            and match_row["status"] not in {"completed", "cancelled", "forfeit"}
+        ):
+            raise MatchStateError(
+                "Manuelle Bracket-Ergebnisse sind nur für ausstehende, eingecheckte, "
+                "Lobby-erstellte oder laufende Matches erlaubt"
             )
 
         team1_id = match_row["team1_id"]

@@ -3,11 +3,14 @@ import Card from '@/components/ui/Card'
 import Button from '@/components/ui/Button'
 import ManualResultForm from '@/components/admin/ManualResultForm'
 import DraftPanel from '@/components/admin/DraftPanel'
+import CasterPanel from '@/components/admin/CasterPanel'
 import {
   useCreateLobby,
-  useStartMatch,
   useFetchMatchResult,
   useLeaveLobby,
+  useResetMatch,
+  useSetManualMatchLobby,
+  useStartMatch,
 } from '@/hooks/useTournament'
 import type { BracketMatch, MatchGame, Team } from '@/types/tournament'
 import {
@@ -92,10 +95,13 @@ export default function MatchAdminPanel({
   const startMatchMutation = useStartMatch()
   const fetchResultMutation = useFetchMatchResult()
   const leaveLobbyMutation = useLeaveLobby()
+  const resetMatchMutation = useResetMatch()
+  const setManualLobbyMutation = useSetManualMatchLobby()
 
   const [activeAction, setActiveAction] = useState<ActiveAction | null>(null)
   const [messages, setMessages] = useState<Record<number, MatchMessage>>({})
   const [copyFeedback, setCopyFeedback] = useState<Record<number, boolean>>({})
+  const [manualCodes, setManualCodes] = useState<Record<number, string>>({})
 
   const actionableMatches = matches.filter((match) => match.team1_id !== null && match.team2_id !== null)
 
@@ -209,6 +215,41 @@ export default function MatchAdminPanel({
     }
   }
 
+  const handleResetMatch = async (matchId: number) => {
+    if (isLocked || !window.confirm('Match wirklich zurücksetzen? Lobby-Daten und Match-Channel werden gelöscht.')) return
+    setActiveAction({ matchId, action: 'leave' })
+    clearMessage(matchId)
+    try {
+      await resetMatchMutation.mutateAsync({ tournamentId, matchId })
+      setMessage(matchId, 'success', 'Match wurde auf pending zurückgesetzt.')
+      handleRefresh()
+    } catch (err) {
+      setMessage(matchId, 'error', err instanceof Error ? err.message : 'Match konnte nicht zurückgesetzt werden')
+    } finally {
+      setActiveAction(null)
+    }
+  }
+
+  const handleSetManualLobby = async (matchId: number) => {
+    if (isLocked) return
+    const partyCode = manualCodes[matchId]?.trim()
+    if (!partyCode) {
+      setMessage(matchId, 'error', 'Bitte zuerst einen Party-Code eingeben.')
+      return
+    }
+    setActiveAction({ matchId, action: 'create' })
+    clearMessage(matchId)
+    try {
+      await setManualLobbyMutation.mutateAsync({ tournamentId, matchId, partyCode })
+      setMessage(matchId, 'success', 'Party-Code wurde manuell gespeichert.')
+      handleRefresh()
+    } catch (err) {
+      setMessage(matchId, 'error', err instanceof Error ? err.message : 'Party-Code konnte nicht gespeichert werden')
+    } finally {
+      setActiveAction(null)
+    }
+  }
+
   const handleCopyCode = async (matchId: number, partyCode: string) => {
     try {
       await navigator.clipboard.writeText(partyCode)
@@ -231,6 +272,7 @@ export default function MatchAdminPanel({
         const canFetchResult = match.status === 'in_progress' && (Boolean(match.deadlock_match_id) || Boolean(match.steam_party_id))
         const canLeaveLobby =
           ['lobby_created', 'in_progress'].includes(match.status) && Boolean(match.steam_party_id)
+        const canReset = !['completed', 'forfeit', 'cancelled'].includes(match.status)
         const message = messages[match.id]
 
         return (
@@ -299,7 +341,7 @@ export default function MatchAdminPanel({
                   onClick={() => void handleStartMatch(match.id)}
                 >
                   <Play size={14} />
-                  {activeActionType === 'start' ? 'Match wird gestartet...' : 'Match starten'}
+                  {activeActionType === 'start' ? "Los geht's..." : "Los geht's"}
                 </Button>
               )}
 
@@ -326,7 +368,47 @@ export default function MatchAdminPanel({
                   {activeActionType === 'leave' ? 'Lobby wird verlassen...' : 'Lobby verlassen'}
                 </Button>
               )}
+
+              {canReset && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  disabled={isBusy}
+                  onClick={() => void handleResetMatch(match.id)}
+                >
+                  <RefreshCcw size={14} />
+                  Match zurücksetzen
+                </Button>
+              )}
             </div>
+
+            {!match.steam_party_id && !isTerminalMatch(match) && (
+              <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
+                <input
+                  type="text"
+                  value={manualCodes[match.id] ?? ''}
+                  onChange={(event) => setManualCodes((current) => ({ ...current, [match.id]: event.target.value }))}
+                  placeholder="Manuellen Party-Code eintragen"
+                  className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
+                />
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  disabled={isBusy}
+                  onClick={() => void handleSetManualLobby(match.id)}
+                >
+                  Code speichern
+                </Button>
+              </div>
+            )}
+
+            <CasterPanel tournamentId={tournamentId} matchId={match.id} />
+
+            {!match.steam_party_id && !isTerminalMatch(match) && (
+              <div className="rounded-lg border border-amber-500/20 bg-amber-500/10 p-3 text-xs text-amber-300">
+                Dieses Bracket-Match kann auch ohne Bot-Lobby gespielt und unten per manuellem Ergebnis abgeschlossen werden.
+              </div>
+            )}
 
             {match.games && match.games.length > 0 && (
               <div className="border-t border-border pt-3">

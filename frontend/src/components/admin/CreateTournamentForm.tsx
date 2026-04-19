@@ -142,6 +142,14 @@ function buildFinalConvars(
   return { ...base, ...Object.fromEntries(activeSliderEntries) }
 }
 
+function parseReminderOffsets(value: string): number[] {
+  const parsed = value
+    .split(',')
+    .map((entry) => Number(entry.trim()))
+    .filter((entry) => Number.isFinite(entry) && entry >= 0)
+  return parsed.length > 0 ? parsed : [1440, 120, 15]
+}
+
 // ---------------------------------------------------------------------------
 // Formular
 // ---------------------------------------------------------------------------
@@ -149,7 +157,7 @@ function buildFinalConvars(
 export default function CreateTournamentForm() {
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
-  const [teamSize, setTeamSize] = useState(4)
+  const [teamSize, setTeamSize] = useState(6)
   const [bracketFormat, setBracketFormat] = useState<BracketFormat>('single_elimination')
   const [seriesFormat, setSeriesFormat] = useState<1 | 3 | 5>(1)
   const [regStart, setRegStart] = useState('')
@@ -161,6 +169,8 @@ export default function CreateTournamentForm() {
   const [lobbyPreset, setLobbyPreset] = useState<LobbySettingsPreset>('standard')
   const [customJson, setCustomJson] = useState('')
   const [customJsonError, setCustomJsonError] = useState('')
+  const [excludeFromLeaderboard, setExcludeFromLeaderboard] = useState(false)
+  const [reminderOffsets, setReminderOffsets] = useState('1440, 120, 15')
   const [sliders, setSliders] = useState<Record<string, SliderState>>(initSliders)
   const [successMsg, setSuccessMsg] = useState('')
 
@@ -215,13 +225,15 @@ export default function CreateTournamentForm() {
         invite_window_end: inviteMode === 'window' ? inviteWindowEnd || undefined : undefined,
         lobby_settings_preset: finalPreset,
         lobby_settings: finalSettings,
+        exclude_from_leaderboard: excludeFromLeaderboard,
+        reminder_offsets: parseReminderOffsets(reminderOffsets),
       },
       {
         onSuccess: (tournament) => {
           setSuccessMsg(`Turnier "${tournament.name}" wurde erfolgreich erstellt!`)
           setName('')
           setDescription('')
-          setTeamSize(4)
+          setTeamSize(6)
           setBracketFormat('single_elimination')
           setSeriesFormat(1)
           setRegStart('')
@@ -232,6 +244,8 @@ export default function CreateTournamentForm() {
           setInviteWindowEnd('')
           setLobbyPreset('standard')
           setCustomJson('')
+          setExcludeFromLeaderboard(false)
+          setReminderOffsets('1440, 120, 15')
           setSliders(initSliders())
         },
       }
@@ -283,16 +297,15 @@ export default function CreateTournamentForm() {
             <label htmlFor="team-size" className="block text-sm font-medium text-foreground mb-1.5">
               Teamgröße
             </label>
-            <select
+            <input
               id="team-size"
+              type="number"
+              min={1}
+              max={20}
               value={teamSize}
               onChange={(e) => setTeamSize(Number(e.target.value))}
               className="w-full bg-background border border-border rounded-lg px-3 py-2 text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
-            >
-              {[2, 3, 4, 5, 6].map((n) => (
-                <option key={n} value={n}>{n} Spieler</option>
-              ))}
-            </select>
+            />
           </div>
 
           {/* Bracket-Format */}
@@ -363,6 +376,36 @@ export default function CreateTournamentForm() {
             />
             <p className="text-xs text-muted mt-1">Leer = Check-in startet automatisch mit Anmeldeschluss.</p>
           </div>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div>
+            <label htmlFor="reminder-offsets" className="block text-sm font-medium text-foreground mb-1.5">
+              Reminder vor Anmeldeschluss
+            </label>
+            <input
+              id="reminder-offsets"
+              type="text"
+              value={reminderOffsets}
+              onChange={(e) => setReminderOffsets(e.target.value)}
+              placeholder="1440, 120, 15"
+              className="w-full bg-background border border-border rounded-lg px-3 py-2 text-foreground placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-primary/50"
+            />
+            <p className="mt-1 text-xs text-muted">Kommagetrennte Minuten, z.B. 1440, 120, 15</p>
+          </div>
+
+          <label className="flex items-center gap-3 rounded-lg border border-border px-3 py-2 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={excludeFromLeaderboard}
+              onChange={(e) => setExcludeFromLeaderboard(e.target.checked)}
+              className="h-4 w-4 accent-primary"
+            />
+            <div>
+              <div className="text-sm font-medium text-foreground">Von Rangliste ausschließen</div>
+              <div className="text-xs text-muted">Ideal für Testturniere oder interne Cups</div>
+            </div>
+          </label>
         </div>
 
         {/* Invite-Modus */}

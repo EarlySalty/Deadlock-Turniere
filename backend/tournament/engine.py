@@ -556,15 +556,35 @@ async def finalize_checkin(
 
             groups_created = 0
             matches_created = 0
+            advanced_to_bracket = False
             if advance_to_group_phase:
-                group_ids = await _generate_groups_in_db(db, tournament_id)
-                groups_created = len(group_ids)
-                matches_created = await _generate_group_matches_in_db(db, tournament_id)
-                cursor = await db.execute(
-                    "UPDATE tournaments SET status = 'group_phase', updated_at = datetime('now') "
-                    "WHERE id = ? AND status = 'checkin'",
-                    (tournament_id,),
-                )
+                tournament_mode = TournamentMode(tournament["tournament_mode"])
+                if tournament_mode == TournamentMode.group_stage:
+                    group_ids = await _generate_groups_in_db(db, tournament_id)
+                    groups_created = len(group_ids)
+                    matches_created = await _generate_group_matches_in_db(db, tournament_id)
+                    cursor = await db.execute(
+                        "UPDATE tournaments SET status = 'group_phase', updated_at = datetime('now') "
+                        "WHERE id = ? AND status = 'checkin'",
+                        (tournament_id,),
+                    )
+                else:
+                    await db.execute(
+                        "DELETE FROM bracket_matches WHERE tournament_id = ?",
+                        (tournament_id,),
+                    )
+                    cursor = await db.execute(
+                        "SELECT id FROM teams WHERE tournament_id = ? ORDER BY created_at, id",
+                        (tournament_id,),
+                    )
+                    seeded_entries = [{"team_id": row["id"]} for row in await cursor.fetchall()]
+                    matches_created = await _build_seeded_bracket(db, tournament_id, seeded_entries)
+                    cursor = await db.execute(
+                        "UPDATE tournaments SET status = 'bracket', updated_at = datetime('now') "
+                        "WHERE id = ? AND status = 'checkin'",
+                        (tournament_id,),
+                    )
+                    advanced_to_bracket = True
                 if cursor.rowcount == 0:
                     raise RuntimeError("Turnierstatus wurde parallel geändert")
 
@@ -580,7 +600,9 @@ async def finalize_checkin(
                         "warnings": warnings,
                         "deleted_team_ids": deleted_team_ids,
                         "created_teams": [team["name"] for team in created_teams],
+                        "tournament_mode": tournament["tournament_mode"],
                         "advanced_to_group_phase": advance_to_group_phase,
+                        "advanced_to_bracket": advanced_to_bracket,
                         "groups_created": groups_created,
                         "matches_created": matches_created,
                     }
@@ -611,7 +633,8 @@ async def finalize_checkin(
         if confirm and advance_to_group_phase:
             result["groups_created"] = groups_created
             result["matches_created"] = matches_created
-            result["advanced_to_group_phase"] = True
+            result["advanced_to_group_phase"] = groups_created > 0
+            result["advanced_to_bracket"] = advanced_to_bracket
         return result
 
 

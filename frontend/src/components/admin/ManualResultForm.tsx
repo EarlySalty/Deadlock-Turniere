@@ -71,6 +71,11 @@ export default function ManualResultForm({
           {allowOverride && isTerminalMatch(match) ? 'Ergebnis korrigieren' : 'Manuelles Ergebnis'}
         </h4>
       </div>
+      {!allowOverride && (
+        <p className="mb-3 text-xs text-muted">
+          Dieses Ergebnis kann auch ohne Bot-Lobby oder automatischen Match-Start direkt gesetzt werden.
+        </p>
+      )}
 
       <form onSubmit={handleSubmit} className="space-y-3">
         <div className="flex flex-col gap-2">

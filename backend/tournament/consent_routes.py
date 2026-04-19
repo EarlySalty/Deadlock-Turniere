@@ -193,6 +193,8 @@ async def update_my_profile(
                 updates["notify_team_invite"] = 1 if body.notify_team_invite else 0
             if body.notify_tournament_news is not None:
                 updates["notify_tournament_news"] = 1 if body.notify_tournament_news else 0
+            if body.notify_registration_reminder is not None:
+                updates["notify_registration_reminder"] = 1 if body.notify_registration_reminder else 0
             set_clause = ", ".join(f"{key} = ?" for key in updates)
             await db.execute(
                 f"UPDATE user_profiles SET {set_clause} WHERE discord_id = ?",
@@ -211,8 +213,8 @@ async def update_my_profile(
                 else None
             )
             await db.execute(
-                "INSERT INTO user_profiles (discord_id, bio, invite_auto_accept, notify_discord_dm, notify_browser, display_name, avatar_filename, notify_match_start, notify_checkin, notify_team_invite, notify_tournament_news, updated_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO user_profiles (discord_id, bio, invite_auto_accept, notify_discord_dm, notify_browser, display_name, avatar_filename, notify_match_start, notify_checkin, notify_team_invite, notify_tournament_news, notify_registration_reminder, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     user.discord_id,
                     bio if bio else None,
@@ -225,6 +227,7 @@ async def update_my_profile(
                     1 if (body.notify_checkin is None or body.notify_checkin) else 0,
                     1 if (body.notify_team_invite is None or body.notify_team_invite) else 0,
                     1 if body.notify_tournament_news else 0,
+                    1 if (body.notify_registration_reminder is None or body.notify_registration_reminder) else 0,
                     now,
                 ),
             )
@@ -274,8 +277,8 @@ async def upload_profile_avatar(
             )
         else:
             await db.execute(
-                "INSERT INTO user_profiles (discord_id, avatar_filename, updated_at, invite_auto_accept, notify_discord_dm, notify_browser, notify_match_start, notify_checkin, notify_team_invite, notify_tournament_news) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (user.discord_id, avatar_path.name, now, 0, 1, 0, 1, 1, 1, 0),
+                "INSERT INTO user_profiles (discord_id, avatar_filename, updated_at, invite_auto_accept, notify_discord_dm, notify_browser, notify_match_start, notify_checkin, notify_team_invite, notify_tournament_news, notify_registration_reminder) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (user.discord_id, avatar_path.name, now, 0, 1, 0, 1, 1, 1, 0, 1),
             )
         await db.commit()
         cursor = await db.execute(

@@ -48,6 +48,18 @@ export default function Admin() {
   const matchCount =
     (selectedDetail?.bracket_matches.length ?? 0) +
     (selectedDetail?.groups.reduce((sum, group) => sum + group.matches.length, 0) ?? 0)
+  const groupMatchesStarted = selectedDetail
+    ? selectedDetail.groups.some((group) =>
+        group.matches.some((match) =>
+          match.status !== 'pending' || match.winner_id !== null || match.played_at !== null
+        )
+      )
+    : false
+  const canChangeTournamentMode = selectedDetail
+    ? selectedDetail.status === 'draft' ||
+      selectedDetail.status === 'checkin' ||
+      (selectedDetail.status === 'group_phase' && !groupMatchesStarted)
+    : false
   const canManageParticipants = selectedDetail
     ? ['draft', 'registration', 'checkin', 'group_phase', 'bracket'].includes(selectedDetail.status)
     : false
@@ -216,6 +228,7 @@ export default function Admin() {
                 teamCount={teamCount}
                 playerCount={playerCount}
                 matchCount={matchCount}
+                canChangeTournamentMode={canChangeTournamentMode}
               />
 
               {canManageParticipants && (

@@ -28,6 +28,7 @@ import type {
   ConsentStatus,
   UserProfile,
   UserProfileUpdate,
+  MatchCaster,
   TeamApplication,
   TeamInvitation,
   LeaderboardEntry,
@@ -97,6 +98,9 @@ export const advanceTournament = (id: number) =>
 export const openCheckin = (id: number) =>
   request<Tournament>(`/admin/tournaments/${id}/open-checkin`, { method: 'POST' })
 
+export const revertCheckin = (id: number) =>
+  request<Tournament>(`/admin/tournaments/${id}/revert-checkin`, { method: 'POST' })
+
 export const finalizeCheckin = (
   id: number,
   confirm: boolean,
@@ -143,6 +147,73 @@ export const fetchMatchResult = (tournamentId: number, matchId: number) =>
 export const leaveLobby = (tournamentId: number, matchId: number) =>
   request<{ success: boolean }>(`/admin/tournaments/${tournamentId}/matches/${matchId}/leave-lobby`, {
     method: 'POST',
+  })
+
+export const resetMatch = (tournamentId: number, matchId: number) =>
+  request<{ success: boolean }>(`/admin/tournaments/${tournamentId}/matches/${matchId}/reset`, {
+    method: 'POST',
+  })
+
+export const setManualMatchLobby = (
+  tournamentId: number,
+  matchId: number,
+  data: { party_code: string; steam_party_id?: string },
+) =>
+  request<{ success: boolean; party_code: string }>(`/admin/tournaments/${tournamentId}/matches/${matchId}/manual-lobby`, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  })
+
+export const createGroupLobby = (tournamentId: number, matchId: number) =>
+  request<LobbyCreateResult>(`/admin/tournaments/${tournamentId}/group-matches/${matchId}/create-lobby`, {
+    method: 'POST',
+  })
+
+export const startGroupMatch = (tournamentId: number, matchId: number) =>
+  request<MatchStartResult>(`/admin/tournaments/${tournamentId}/group-matches/${matchId}/start`, {
+    method: 'POST',
+  })
+
+export const fetchGroupMatchResult = (tournamentId: number, matchId: number) =>
+  request<MatchFetchResult>(`/admin/tournaments/${tournamentId}/group-matches/${matchId}/fetch-result`, {
+    method: 'POST',
+  })
+
+export const leaveGroupLobby = (tournamentId: number, matchId: number) =>
+  request<{ success: boolean }>(`/admin/tournaments/${tournamentId}/group-matches/${matchId}/leave-lobby`, {
+    method: 'POST',
+  })
+
+export const resetGroupMatch = (tournamentId: number, matchId: number) =>
+  request<{ success: boolean }>(`/admin/tournaments/${tournamentId}/group-matches/${matchId}/reset`, {
+    method: 'POST',
+  })
+
+export const setManualGroupMatchLobby = (
+  tournamentId: number,
+  matchId: number,
+  data: { party_code: string; steam_party_id?: string },
+) =>
+  request<{ success: boolean; party_code: string }>(`/admin/tournaments/${tournamentId}/group-matches/${matchId}/manual-lobby`, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  })
+
+export const fetchAvailableCasters = () =>
+  request<MatchCaster[]>('/admin/casters')
+
+export const fetchMatchCasters = (tournamentId: number, matchId: number) =>
+  request<MatchCaster[]>(`/admin/tournaments/${tournamentId}/matches/${matchId}/casters`)
+
+export const assignMatchCaster = (tournamentId: number, matchId: number, discordId: string) =>
+  request<MatchCaster[]>(`/admin/tournaments/${tournamentId}/matches/${matchId}/casters`, {
+    method: 'POST',
+    body: JSON.stringify({ discord_id: discordId }),
+  })
+
+export const removeMatchCaster = (tournamentId: number, matchId: number, discordId: string) =>
+  request<MatchCaster[]>(`/admin/tournaments/${tournamentId}/matches/${matchId}/casters/${encodeURIComponent(discordId)}`, {
+    method: 'DELETE',
   })
 
 export const fetchMatchEventPresets = (tournamentId: number, matchId: number) =>
