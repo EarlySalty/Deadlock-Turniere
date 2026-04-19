@@ -1,0 +1,122 @@
+name: "🔍 Lint & Type Check"
+
+on:
+  push:
+    branches: [ "main", "master", "develop" ]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ruff:
+    name: "⚡ Ruff (Lint & Format)"
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.13"
+
+      - name: Install Ruff
+        run: pip install ruff
+
+      - name: Run Ruff on full codebase
+        run: |
+          ruff check backend/ --output-format=github --target-version=py311
+          ruff format backend/ --check --target-version=py311
+
+      - name: Run Ruff SARIF (for Security tab)
+        if: always()
+        run: |
+          ruff check backend/ --output-format=sarif --target-version=py311 -o ruff.sarif || true
+
+      - name: Upload Ruff SARIF
+        if: always() && hashFiles('ruff.sarif') != ''
+        uses: github/codeql-action/upload-sarif@95e58e9a2cdfd71adc6e0353d5c52f41a045d225 # v4
+        with:
+          sarif_file: ruff.sarif
+          category: ruff
+
+  mypy:
+    name: "🔎 Type Check (mypy)"
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.13"
+
+      - name: Install mypy
+        run: pip install mypy
+
+      - name: Run mypy
+        run: |
+          mypy backend/ \
+            --ignore-missing-imports \
+            --no-error-summary \
+            --show-column-numbers
+
+  pytest:
+    name: "✅ Pytest"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.13"
+
+      - name: Install test dependencies
+        run: |
+          pip install pytest pytest-cov
+          pip install -r backend/requirements.txt
+
+      - name: Run tests with coverage
+        run: |
+          pytest -q \
+            backend/tests/ \
+            --cov=backend \
+            --cov-branch \
+            --cov-report=term-missing:skip-covered \
+            --cov-fail-under=40
+
+  frontend-ci:
+    name: "🧪 Frontend CI"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up Node.js
+        uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
+        with:
+          node-version: "24"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Run ESLint
+        working-directory: frontend
+        run: npm run lint
+
+      - name: TypeScript type check
+        working-directory: frontend
+        run: npx tsc --noEmit
+
+      - name: Build frontend
+        working-directory: frontend
+        run: npm run build
