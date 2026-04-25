@@ -120,22 +120,41 @@ def _serialize_reminder_offsets(offsets: list[int] | None) -> str:
     return json.dumps(cleaned or [1440, 120, 15])
 
 
-async def _load_assigned_casters(db, match_type: str, match_id: int) -> list[MatchCasterOut]:  # noqa: ANN001
-    display_names: dict[str, str] = {}
+def _caster_display_name(member: dict, discord_id: str) -> str | None:
+    return _preferred_discord_name(
+        member.get("display_name"),
+        member.get("global_name"),
+        member.get("username"),
+        discord_id=discord_id,
+    )
+
+
+async def _load_caster_role_members(*, strict: bool) -> dict[str, str | None]:
     try:
-        members = await get_role_members(int(settings.DISCORD_GUILD_ID), settings.DISCORD_CASTER_ROLE_ID)
-        for member in members:
-            discord_id = str(member.get("user_id") or member.get("id") or "").strip()
-            if not discord_id:
-                continue
-            display_names[discord_id] = str(
-                member.get("display_name")
-                or member.get("global_name")
-                or member.get("username")
-                or discord_id
-            )
-    except Exception:
+        members = await get_role_members(
+            int(settings.DISCORD_GUILD_ID),
+            settings.DISCORD_CASTER_ROLE_ID,
+        )
+    except Exception as exc:
+        if strict:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Caster-Rollenmitglieder konnten nicht geladen werden",
+            ) from exc
         logger.exception("Caster-Rollenmitglieder konnten nicht geladen werden")
+        return {}
+
+    display_names: dict[str, str | None] = {}
+    for member in members:
+        discord_id = str(member.get("user_id") or member.get("id") or "").strip()
+        if not discord_id:
+            continue
+        display_names[discord_id] = _caster_display_name(member, discord_id)
+    return display_names
+
+
+async def _load_assigned_casters(db, match_type: str, match_id: int) -> list[MatchCasterOut]:  # noqa: ANN001
+    display_names = await _load_caster_role_members(strict=False)
 
     cursor = await db.execute(
         "SELECT discord_id, assigned_at, assigned_by FROM match_casters "
@@ -149,12 +168,39 @@ async def _load_assigned_casters(db, match_type: str, match_id: int) -> list[Mat
         casters.append(
             MatchCasterOut(
                 discord_id=discord_id,
-                display_name=display_names.get(discord_id, discord_id),
+                display_name=display_names.get(discord_id),
                 assigned_at=row["assigned_at"],
                 assigned_by=row["assigned_by"],
             )
         )
     return casters
+
+
+async def _load_tournament_casters(
+    db,
+    tournament_id: int,
+    *,
+    display_names: dict[str, str | None] | None = None,
+) -> list[MatchCasterOut]:  # noqa: ANN001
+    if display_names is None:
+        display_names = await _load_caster_role_members(strict=False)
+
+    cursor = await db.execute(
+        "SELECT discord_id, assigned_at, assigned_by FROM tournament_casters "
+        "WHERE tournament_id = ? ORDER BY assigned_at, discord_id",
+        (tournament_id,),
+    )
+    rows = await cursor.fetchall()
+    return [
+        MatchCasterOut(
+            discord_id=str(row["discord_id"]),
+            display_name=display_names.get(str(row["discord_id"])),
+            assigned_at=row["assigned_at"],
+            assigned_by=row["assigned_by"],
+        )
+        for row in rows
+        if row["discord_id"]
+    ]
 
 
 async def _ensure_bracket_match_exists(db, tournament_id: int, match_id: int) -> None:  # noqa: ANN001
@@ -293,7 +339,8 @@ async def _ensure_single_active_tournament(
     """Stellt sicher, dass nur ein aktives Turnier existiert."""
     query = (
         "SELECT id, name, status FROM tournaments "
-        f"WHERE status IN ({', '.join('?' for _ in ACTIVE_TOURNAMENT_STATUSES)})"
+        f"WHERE status IN ({', '.join('?' for _ in ACTIVE_TOURNAMENT_STATUSES)}) "
+        "AND is_test = 0"
     )
     params: list = list(ACTIVE_TOURNAMENT_STATUSES)
     if ignore_tournament_id is not None:
@@ -794,8 +841,8 @@ async def create_tournament(
             "(name, description, team_size, bracket_format, registration_start, "
             "registration_end, checkin_start, group_phase_start, bracket_start, "
             "created_by, invite_mode, invite_window_start, invite_window_end, tournament_mode, "
-            "tournament_game_mode, auto_lobby_enabled, exclude_from_leaderboard, reminder_offsets) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "tournament_game_mode, auto_lobby_enabled, exclude_from_leaderboard, is_test, reminder_offsets) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 body.name,
                 body.description,
@@ -814,6 +861,7 @@ async def create_tournament(
                 body.tournament_game_mode.value,
                 1 if body.auto_lobby_enabled else 0,
                 1 if body.exclude_from_leaderboard else 0,
+                1 if body.is_test else 0,
                 _serialize_reminder_offsets(body.reminder_offsets),
             ),
         )
@@ -837,14 +885,15 @@ async def create_tournament(
         )
         row = await cursor.fetchone()
 
-    try:
-        await notify_users(
-            profile_ids,
-            "tournament_news",
-            f"Ein neues Turnier wurde angelegt: `{body.name}`.",
-        )
-    except Exception:
-        logger.exception("Tournament news notification failed for tournament %s", tournament_id)
+    if not body.is_test:
+        try:
+            await notify_users(
+                profile_ids,
+                "tournament_news",
+                f"Ein neues Turnier wurde angelegt: `{body.name}`.",
+            )
+        except Exception:
+            logger.exception("Tournament news notification failed for tournament %s", tournament_id)
 
     return Tournament(**dict(row))
 
@@ -933,6 +982,8 @@ async def update_tournament(
             update_data["exclude_from_leaderboard"] = 1 if body.exclude_from_leaderboard else 0
         if body.auto_lobby_enabled is not None:
             update_data["auto_lobby_enabled"] = 1 if body.auto_lobby_enabled else 0
+        if body.is_test is not None:
+            update_data["is_test"] = 1 if body.is_test else 0
         if body.tournament_game_mode is not None:
             update_data["tournament_game_mode"] = body.tournament_game_mode.value
         if body.reminder_offsets is not None:
@@ -2831,24 +2882,77 @@ async def list_available_casters(
     user: UserSession = Depends(require_mod),
 ) -> list[MatchCasterOut]:
     del user
-    members = await get_role_members(int(settings.DISCORD_GUILD_ID), settings.DISCORD_CASTER_ROLE_ID)
-    casters: list[MatchCasterOut] = []
-    for member in members:
-        discord_id = str(member.get("user_id") or member.get("id") or "").strip()
-        if not discord_id:
-            continue
-        casters.append(
-            MatchCasterOut(
-                discord_id=discord_id,
-                display_name=str(
-                    member.get("display_name")
-                    or member.get("global_name")
-                    or member.get("username")
-                    or discord_id
-                ),
-            )
+    display_names = await _load_caster_role_members(strict=True)
+    return [
+        MatchCasterOut(discord_id=discord_id, display_name=display_name)
+        for discord_id, display_name in sorted(display_names.items(), key=lambda item: (item[1] or "", item[0]))
+    ]
+
+
+@router.get("/tournaments/{tournament_id}/casters", response_model=list[MatchCasterOut])
+async def list_tournament_casters(
+    tournament_id: int,
+    user: UserSession = Depends(require_mod),
+) -> list[MatchCasterOut]:
+    del user
+    async with get_db() as db:
+        await _load_tournament_or_404(db, tournament_id)
+        return await _load_tournament_casters(db, tournament_id)
+
+
+@router.post("/tournaments/{tournament_id}/casters", response_model=list[MatchCasterOut])
+async def assign_tournament_caster(
+    tournament_id: int,
+    body: CasterAssignRequest,
+    user: UserSession = Depends(require_mod),
+) -> list[MatchCasterOut]:
+    display_names = await _load_caster_role_members(strict=True)
+    if body.discord_id not in display_names:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Discord-User ist kein Caster",
         )
-    return casters
+
+    async with get_db() as db:
+        await _load_tournament_or_404(db, tournament_id)
+        await db.execute(
+            "INSERT OR IGNORE INTO tournament_casters (tournament_id, discord_id, assigned_by) VALUES (?, ?, ?)",
+            (tournament_id, body.discord_id, user.discord_id),
+        )
+        await _audit(
+            db,
+            "tournament_caster_assign",
+            user.discord_id,
+            json.dumps({"tournament_id": tournament_id, "discord_id": body.discord_id}),
+        )
+        await db.commit()
+        return await _load_tournament_casters(
+            db,
+            tournament_id,
+            display_names=display_names,
+        )
+
+
+@router.delete("/tournaments/{tournament_id}/casters/{discord_id}", response_model=list[MatchCasterOut])
+async def remove_tournament_caster(
+    tournament_id: int,
+    discord_id: str,
+    user: UserSession = Depends(require_mod),
+) -> list[MatchCasterOut]:
+    async with get_db() as db:
+        await _load_tournament_or_404(db, tournament_id)
+        await db.execute(
+            "DELETE FROM tournament_casters WHERE tournament_id = ? AND discord_id = ?",
+            (tournament_id, discord_id),
+        )
+        await _audit(
+            db,
+            "tournament_caster_remove",
+            user.discord_id,
+            json.dumps({"tournament_id": tournament_id, "discord_id": discord_id}),
+        )
+        await db.commit()
+        return await _load_tournament_casters(db, tournament_id)
 
 
 @router.get("/tournaments/{tournament_id}/matches/{match_id}/casters", response_model=list[MatchCasterOut])
@@ -2860,7 +2964,7 @@ async def list_match_casters(
     del user
     async with get_db() as db:
         await _ensure_bracket_match_exists(db, tournament_id, match_id)
-        return await _load_assigned_casters(db, "bracket", match_id)
+        return await _load_tournament_casters(db, tournament_id)
 
 
 @router.post("/tournaments/{tournament_id}/matches/{match_id}/casters", response_model=list[MatchCasterOut])
@@ -2870,20 +2974,12 @@ async def assign_match_caster(
     body: CasterAssignRequest,
     user: UserSession = Depends(require_mod),
 ) -> list[MatchCasterOut]:
-    async with get_db() as db:
-        await _ensure_bracket_match_exists(db, tournament_id, match_id)
-        await db.execute(
-            "INSERT OR IGNORE INTO match_casters (match_id, match_type, discord_id, assigned_by) VALUES (?, 'bracket', ?, ?)",
-            (match_id, body.discord_id, user.discord_id),
-        )
-        await _audit(
-            db,
-            "match_caster_assign",
-            user.discord_id,
-            json.dumps({"match_id": match_id, "discord_id": body.discord_id, "match_type": "bracket"}),
-        )
-        await db.commit()
-        return await _load_assigned_casters(db, "bracket", match_id)
+    del body
+    del user
+    raise HTTPException(
+        status_code=status.HTTP_410_GONE,
+        detail="Caster werden auf Turnier-Ebene verwaltet — siehe /admin/tournaments/{id}/casters",
+    )
 
 
 @router.delete("/tournaments/{tournament_id}/matches/{match_id}/casters/{discord_id}", response_model=list[MatchCasterOut])
@@ -2893,20 +2989,14 @@ async def remove_match_caster(
     discord_id: str,
     user: UserSession = Depends(require_mod),
 ) -> list[MatchCasterOut]:
-    async with get_db() as db:
-        await _ensure_bracket_match_exists(db, tournament_id, match_id)
-        await db.execute(
-            "DELETE FROM match_casters WHERE match_id = ? AND match_type = 'bracket' AND discord_id = ?",
-            (match_id, discord_id),
-        )
-        await _audit(
-            db,
-            "match_caster_remove",
-            user.discord_id,
-            json.dumps({"match_id": match_id, "discord_id": discord_id, "match_type": "bracket"}),
-        )
-        await db.commit()
-        return await _load_assigned_casters(db, "bracket", match_id)
+    del tournament_id
+    del match_id
+    del discord_id
+    del user
+    raise HTTPException(
+        status_code=status.HTTP_410_GONE,
+        detail="Caster werden auf Turnier-Ebene verwaltet — siehe /admin/tournaments/{id}/casters",
+    )
 
 
 @router.get("/tournaments/{tournament_id}/matches/{match_id}/event-presets", status_code=200)

@@ -11,7 +11,10 @@ import {
   createLobby, startMatch, fetchMatchResult, leaveLobby, submitMatchResult,
   createGroupLobby, startGroupMatch, fetchGroupMatchResult, leaveGroupLobby,
   resetMatch, setManualMatchLobby, resetGroupMatch, setManualGroupMatchLobby,
-  fetchAvailableCasters, fetchMatchCasters, assignMatchCaster, removeMatchCaster,
+  fetchAvailableCasters,
+  fetchTournamentCasters, assignTournamentCaster, removeTournamentCaster,
+  fetchTestUsers, createTestUsers, wipeTestUsers,
+  createTestTournament, simulateTestRound, wipeTestData,
   fetchMatchEventPresets, applyMatchConvars, applyMatchEventPreset,
   createAdminTeam, renameAdminTeam, deleteAdminTeam,
   changeAdminCaptain, removeAdminTeamMember, moveAdminTeamMember,
@@ -29,6 +32,7 @@ import {
 import type {
   ManualResult, TeamMoveRequest, TournamentCreate, TournamentUpdate,
   UserProfileUpdate,
+  CreateTestTournamentRequest,
 } from '@/types/tournament'
 
 function invalidateTournamentCaches(qc: ReturnType<typeof useQueryClient>, tournamentId?: number) {
@@ -430,32 +434,92 @@ export function useAvailableCasters() {
   })
 }
 
-export function useMatchCasters(tournamentId: number, matchId: number, enabled = true) {
+export function useTournamentCasters(tournamentId: number, enabled = true) {
   return useQuery({
-    queryKey: ['admin', 'tournaments', tournamentId, 'matches', matchId, 'casters'],
-    queryFn: () => fetchMatchCasters(tournamentId, matchId),
-    enabled: tournamentId > 0 && matchId > 0 && enabled,
+    queryKey: ['admin', 'tournaments', tournamentId, 'casters'],
+    queryFn: () => fetchTournamentCasters(tournamentId),
+    enabled: tournamentId > 0 && enabled,
   })
 }
 
-export function useAssignMatchCaster() {
+export function useAssignTournamentCaster() {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: ({ tournamentId, matchId, discordId }: { tournamentId: number; matchId: number; discordId: string }) =>
-      assignMatchCaster(tournamentId, matchId, discordId),
+    mutationFn: ({ tournamentId, discordId }: { tournamentId: number; discordId: string }) =>
+      assignTournamentCaster(tournamentId, discordId),
     onSuccess: (_data, vars) => {
-      qc.invalidateQueries({ queryKey: ['admin', 'tournaments', vars.tournamentId, 'matches', vars.matchId, 'casters'] })
+      qc.invalidateQueries({ queryKey: ['admin', 'tournaments', vars.tournamentId, 'casters'] })
     },
   })
 }
 
-export function useRemoveMatchCaster() {
+export function useRemoveTournamentCaster() {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: ({ tournamentId, matchId, discordId }: { tournamentId: number; matchId: number; discordId: string }) =>
-      removeMatchCaster(tournamentId, matchId, discordId),
+    mutationFn: ({ tournamentId, discordId }: { tournamentId: number; discordId: string }) =>
+      removeTournamentCaster(tournamentId, discordId),
     onSuccess: (_data, vars) => {
-      qc.invalidateQueries({ queryKey: ['admin', 'tournaments', vars.tournamentId, 'matches', vars.matchId, 'casters'] })
+      qc.invalidateQueries({ queryKey: ['admin', 'tournaments', vars.tournamentId, 'casters'] })
+    },
+  })
+}
+
+// Test-Modus
+export function useTestUsers(enabled = true) {
+  return useQuery({
+    queryKey: ['admin', 'test', 'users'],
+    queryFn: fetchTestUsers,
+    enabled,
+  })
+}
+
+export function useCreateTestUsers() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (count: number) => createTestUsers(count),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['admin', 'test', 'users'] })
+    },
+  })
+}
+
+export function useWipeTestUsers() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: () => wipeTestUsers(),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['admin', 'test', 'users'] })
+    },
+  })
+}
+
+export function useCreateTestTournament() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (data: CreateTestTournamentRequest) => createTestTournament(data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['admin', 'tournaments'] })
+    },
+  })
+}
+
+export function useSimulateTestRound() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (tournamentId: number) => simulateTestRound(tournamentId),
+    onSuccess: (_data, tournamentId) => {
+      invalidateTournamentCaches(qc, tournamentId)
+    },
+  })
+}
+
+export function useWipeTestData() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: () => wipeTestData(),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['admin', 'tournaments'] })
+      qc.invalidateQueries({ queryKey: ['admin', 'test', 'users'] })
     },
   })
 }

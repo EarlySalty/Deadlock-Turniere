@@ -3,7 +3,6 @@ import Card from '@/components/ui/Card'
 import Button from '@/components/ui/Button'
 import ManualResultForm from '@/components/admin/ManualResultForm'
 import DraftPanel from '@/components/admin/DraftPanel'
-import CasterPanel from '@/components/admin/CasterPanel'
 import {
   useCreateLobby,
   useFetchMatchResult,
@@ -401,8 +400,6 @@ export default function MatchAdminPanel({
                 </Button>
               </div>
             )}
-
-            <CasterPanel tournamentId={tournamentId} matchId={match.id} />
 
             {!match.steam_party_id && !isTerminalMatch(match) && (
               <div className="rounded-lg border border-amber-500/20 bg-amber-500/10 p-3 text-xs text-amber-300">

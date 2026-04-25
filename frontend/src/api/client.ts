@@ -34,6 +34,12 @@ import type {
   LeaderboardEntry,
   PlayerProfile,
   BracketMiniGroup,
+  TestUser,
+  CreateTestTournamentRequest,
+  CreateTestTournamentResult,
+  CreateTestUsersResult,
+  SimulateTestRoundResult,
+  WipeTestDataResult,
 } from '@/types/tournament'
 
 const API_BASE = '/turnier/api'
@@ -203,19 +209,48 @@ export const setManualGroupMatchLobby = (
 export const fetchAvailableCasters = () =>
   request<MatchCaster[]>('/admin/casters')
 
-export const fetchMatchCasters = (tournamentId: number, matchId: number) =>
-  request<MatchCaster[]>(`/admin/tournaments/${tournamentId}/matches/${matchId}/casters`)
+export const fetchTournamentCasters = (tournamentId: number) =>
+  request<MatchCaster[]>(`/admin/tournaments/${tournamentId}/casters`)
 
-export const assignMatchCaster = (tournamentId: number, matchId: number, discordId: string) =>
-  request<MatchCaster[]>(`/admin/tournaments/${tournamentId}/matches/${matchId}/casters`, {
+export const assignTournamentCaster = (tournamentId: number, discordId: string) =>
+  request<MatchCaster[]>(`/admin/tournaments/${tournamentId}/casters`, {
     method: 'POST',
     body: JSON.stringify({ discord_id: discordId }),
   })
 
-export const removeMatchCaster = (tournamentId: number, matchId: number, discordId: string) =>
-  request<MatchCaster[]>(`/admin/tournaments/${tournamentId}/matches/${matchId}/casters/${encodeURIComponent(discordId)}`, {
-    method: 'DELETE',
+export const removeTournamentCaster = (tournamentId: number, discordId: string) =>
+  request<MatchCaster[]>(
+    `/admin/tournaments/${tournamentId}/casters/${encodeURIComponent(discordId)}`,
+    { method: 'DELETE' },
+  )
+
+// Test-Modus
+export const fetchTestUsers = () =>
+  request<TestUser[]>('/admin/test/users')
+
+export const createTestUsers = (count: number) =>
+  request<CreateTestUsersResult>('/admin/test/users', {
+    method: 'POST',
+    body: JSON.stringify({ count }),
   })
+
+export const wipeTestUsers = () =>
+  request<{ deleted: number }>('/admin/test/users', { method: 'DELETE' })
+
+export const createTestTournament = (data: CreateTestTournamentRequest) =>
+  request<CreateTestTournamentResult>('/admin/test/tournaments', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  })
+
+export const simulateTestRound = (tournamentId: number) =>
+  request<SimulateTestRoundResult>(
+    `/admin/test/tournaments/${tournamentId}/simulate-round`,
+    { method: 'POST' },
+  )
+
+export const wipeTestData = () =>
+  request<WipeTestDataResult>('/admin/test/wipe', { method: 'DELETE' })
 
 export const fetchMatchEventPresets = (tournamentId: number, matchId: number) =>
   request<MatchEventPresetListResult>(

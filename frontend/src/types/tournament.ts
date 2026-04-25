@@ -52,6 +52,7 @@ export interface Tournament {
   invite_window_end: string | null
   exclude_from_leaderboard: boolean
   reminder_offsets: number[]
+  is_test: boolean
   created_by: string
   created_at: string
   updated_at: string
@@ -298,6 +299,7 @@ export interface TournamentCreate {
   auto_lobby_enabled?: boolean
   exclude_from_leaderboard?: boolean
   reminder_offsets?: number[]
+  is_test?: boolean
 }
 
 export interface TournamentUpdate {
@@ -499,6 +501,41 @@ export interface MatchCaster {
   display_name: string | null
   assigned_at?: string | null
   assigned_by?: string | null
+}
+
+// --- Test-Modus ---
+
+export interface TestUser {
+  discord_id: string
+  display_name: string
+  rank: string | null
+  rank_score: number
+}
+
+export interface CreateTestTournamentRequest {
+  name: string
+  team_size: number
+  num_teams: number
+  mode: 'bracket_only' | 'group_then_bracket'
+  tournament_game_mode?: TournamentGameMode
+  advance_to?: 'checkin' | 'group_phase' | 'bracket'
+}
+
+export interface CreateTestTournamentResult {
+  tournament_id: number
+}
+
+export interface CreateTestUsersResult {
+  created: TestUser[]
+}
+
+export interface SimulateTestRoundResult {
+  simulated_matches: number
+}
+
+export interface WipeTestDataResult {
+  deleted_tournaments: number
+  deleted_users: number
 }
 
 // --- Team Applications ---

@@ -1247,19 +1247,20 @@ async def invite_to_team_by_signup(
             return {"status": "auto_accepted"}
 
         await db.commit()
-    try:
-        await notify_users(
-            [signup["discord_id"]],
-            "team_invite",
-            f"Du wurdest von `{team['name']}` für `{tournament['name']}` eingeladen.",
-        )
-    except Exception:
-        logger.exception(
-            "Signup invite notification failed (tournament=%s team=%s signup=%s)",
-            tournament_id,
-            team_id,
-            signup_id,
-        )
+    if not bool(tournament["is_test"]):
+        try:
+            await notify_users(
+                [signup["discord_id"]],
+                "team_invite",
+                f"Du wurdest von `{team['name']}` für `{tournament['name']}` eingeladen.",
+            )
+        except Exception:
+            logger.exception(
+                "Signup invite notification failed (tournament=%s team=%s signup=%s)",
+                tournament_id,
+                team_id,
+                signup_id,
+            )
     return {"status": "invited"}
 
 
@@ -2031,19 +2032,20 @@ async def invite_to_team(
 
         await db.commit()
 
-    try:
-        await notify_users(
-            [target_discord_id],
-            "team_invite",
-            f"Du wurdest zu `{team['name']}` für `{tournament['name']}` eingeladen.",
-        )
-    except Exception:
-        logger.exception(
-            "Team invite notification failed (tournament=%s team=%s target=%s)",
-            tournament_id,
-            team_id,
-            target_discord_id,
-        )
+    if not bool(tournament["is_test"]):
+        try:
+            await notify_users(
+                [target_discord_id],
+                "team_invite",
+                f"Du wurdest zu `{team['name']}` für `{tournament['name']}` eingeladen.",
+            )
+        except Exception:
+            logger.exception(
+                "Team invite notification failed (tournament=%s team=%s target=%s)",
+                tournament_id,
+                team_id,
+                target_discord_id,
+            )
 
     return Team(**{**dict(team_row), "members": members})
 

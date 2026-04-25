@@ -173,6 +173,7 @@ async def _create_lobby_for_match(
     participant_rows = await _load_match_participants(match_type, tournament_id, match_id)
     participant_discord_ids = [str(row["discord_id"]) for row in participant_rows if row["discord_id"]]
     steam_ids = [str(row["steam_id"]).strip() for row in participant_rows if row["steam_id"]]
+    is_test_tournament = await _is_test_tournament(tournament_id)
     mode_payload = await prepare_match_assignments(tournament_id, match_type, match_id)
     merged_convars = dict(lobby_settings or {})
     merged_convars.update(mode_payload["convars"])
@@ -227,55 +228,56 @@ async def _create_lobby_for_match(
     invite_result = await _invite_match_participants_to_lobby(party_id, steam_ids)
 
     discord_channel_id: str | None = None
-    try:
-        discord_channel_id = await create_match_channel(
-            match_id,
-            match_context["team1_name"],
-            match_context["team2_name"],
-        )
-        async with get_db() as db:
-            await db.execute(
-                f"UPDATE {_match_table(match_type)} SET discord_channel_id = ? "
-                f"WHERE id = ? AND {_match_scope_column(match_type)} = ?",
-                (discord_channel_id, match_id, _match_scope_value(match_type, match)),
-            )
-            await db.commit()
-        await send_match_lobby_info(discord_channel_id, str(party_code), participant_discord_ids)
-        caster_ids = await _load_match_casters(match_type, match_id)
-        if caster_ids:
-            await notify_casters_match_created(match_id, discord_channel_id, caster_ids)
-        team1_ids = [
-            str(row["discord_id"])
-            for row in participant_rows
-            if row["discord_id"] and row["team_id"] == match.get("team1_id")
-        ]
-        team2_ids = [
-            str(row["discord_id"])
-            for row in participant_rows
-            if row["discord_id"] and row["team_id"] == match.get("team2_id")
-        ]
+    if not is_test_tournament:
         try:
-            await send_lobby_announcement(
-                match_id=match_id,
-                party_code=str(party_code),
-                team1_name=match_context["team1_name"],
-                team2_name=match_context["team2_name"],
-                team1_discord_ids=team1_ids,
-                team2_discord_ids=team2_ids,
-                hero_assignments_text=hero_assignments_text or None,
+            discord_channel_id = await create_match_channel(
+                match_id,
+                match_context["team1_name"],
+                match_context["team2_name"],
             )
+            async with get_db() as db:
+                await db.execute(
+                    f"UPDATE {_match_table(match_type)} SET discord_channel_id = ? "
+                    f"WHERE id = ? AND {_match_scope_column(match_type)} = ?",
+                    (discord_channel_id, match_id, _match_scope_value(match_type, match)),
+                )
+                await db.commit()
+            await send_match_lobby_info(discord_channel_id, str(party_code), participant_discord_ids)
+            caster_ids = await _load_match_casters(match_type, match_id)
+            if caster_ids:
+                await notify_casters_match_created(match_id, discord_channel_id, caster_ids)
+            team1_ids = [
+                str(row["discord_id"])
+                for row in participant_rows
+                if row["discord_id"] and row["team_id"] == match.get("team1_id")
+            ]
+            team2_ids = [
+                str(row["discord_id"])
+                for row in participant_rows
+                if row["discord_id"] and row["team_id"] == match.get("team2_id")
+            ]
+            try:
+                await send_lobby_announcement(
+                    match_id=match_id,
+                    party_code=str(party_code),
+                    team1_name=match_context["team1_name"],
+                    team2_name=match_context["team2_name"],
+                    team1_discord_ids=team1_ids,
+                    team2_discord_ids=team2_ids,
+                    hero_assignments_text=hero_assignments_text or None,
+                )
+            except Exception:
+                logger.exception(
+                    "Lobby-Announcement für Match %s fehlgeschlagen (non-critical)",
+                    match_id,
+                )
         except Exception:
             logger.exception(
-                "Lobby-Announcement für Match %s fehlgeschlagen (non-critical)",
+                "Discord match channel setup failed (tournament=%s match=%s)",
+                tournament_id,
                 match_id,
             )
-    except Exception:
-        logger.exception(
-            "Discord match channel setup failed (tournament=%s match=%s)",
-            tournament_id,
-            match_id,
-        )
-        discord_channel_id = None
+            discord_channel_id = None
 
     normalized_result = dict(result)
     normalized_result.update(
@@ -357,24 +359,26 @@ async def _start_match_for_match(
 
     participant_rows = await _load_match_participants(match_type, tournament_id, match_id)
     participant_discord_ids = [str(row["discord_id"]) for row in participant_rows if row["discord_id"]]
-    try:
-        await notify_users(
-            participant_discord_ids,
-            "match_start",
-            (
-                f"Euer Match zwischen {match_context['team1_name']} und {match_context['team2_name']} "
-                f"läuft jetzt. Lobby-Code: {match['party_code'] or match['steam_party_id']}"
-            ),
-        )
-    except Exception:
-        logger.exception(
-            "Match start notification failed (tournament=%s match=%s)",
-            tournament_id,
-            match_id,
-        )
+    is_test_tournament = await _is_test_tournament(tournament_id)
+    if not is_test_tournament:
+        try:
+            await notify_users(
+                participant_discord_ids,
+                "match_start",
+                (
+                    f"Euer Match zwischen {match_context['team1_name']} und {match_context['team2_name']} "
+                    f"läuft jetzt. Lobby-Code: {match['party_code'] or match['steam_party_id']}"
+                ),
+            )
+        except Exception:
+            logger.exception(
+                "Match start notification failed (tournament=%s match=%s)",
+                tournament_id,
+                match_id,
+            )
 
     caster_ids = await _load_match_casters(match_type, match_id)
-    if caster_ids:
+    if caster_ids and not is_test_tournament:
         try:
             await move_users_to_voice_channel(
                 caster_ids,
@@ -412,6 +416,38 @@ async def _start_match_for_match(
 
 async def _load_match_casters(match_type: str, match_id: int) -> list[str]:
     async with get_db() as db:
+        if match_type == "group":
+            cursor = await db.execute(
+                """
+                SELECT g.tournament_id
+                FROM group_matches gm
+                JOIN groups g ON g.id = gm.group_id
+                WHERE gm.id = ?
+                """,
+                (match_id,),
+            )
+        else:
+            cursor = await db.execute(
+                "SELECT tournament_id FROM bracket_matches WHERE id = ?",
+                (match_id,),
+            )
+        row = await cursor.fetchone()
+        tournament_id = int(row["tournament_id"]) if row and row["tournament_id"] is not None else None
+
+        if tournament_id is not None:
+            cursor = await db.execute(
+                """
+                SELECT discord_id
+                FROM tournament_casters
+                WHERE tournament_id = ?
+                ORDER BY assigned_at, discord_id
+                """,
+                (tournament_id,),
+            )
+            tournament_rows = await cursor.fetchall()
+            if tournament_rows:
+                return [str(caster_row["discord_id"]) for caster_row in tournament_rows if caster_row["discord_id"]]
+
         cursor = await db.execute(
             "SELECT discord_id FROM match_casters WHERE match_type = ? AND match_id = ? ORDER BY assigned_at, discord_id",
             (match_type, match_id),
@@ -669,6 +705,16 @@ async def _get_tournament_lobby_settings(tournament_id: int) -> dict[str, Any]:
     if not isinstance(parsed, dict):
         raise SteamTaskError("lobby_settings muss ein JSON-Objekt sein")
     return parsed
+
+
+async def _is_test_tournament(tournament_id: int) -> bool:
+    async with get_db() as db:
+        cursor = await db.execute(
+            "SELECT is_test FROM tournaments WHERE id = ?",
+            (tournament_id,),
+        )
+        row = await cursor.fetchone()
+    return bool(row["is_test"]) if row else False
 
 
 async def _invite_match_participants_to_lobby(

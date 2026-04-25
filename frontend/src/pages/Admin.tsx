@@ -5,6 +5,8 @@ import {
   useDeleteTournament,
 } from '@/hooks/useTournament'
 import Card from '@/components/ui/Card'
+import Badge from '@/components/ui/Badge'
+import Button from '@/components/ui/Button'
 import LoadingSpinner from '@/components/ui/LoadingSpinner'
 import CreateTournamentForm from '@/components/admin/CreateTournamentForm'
 import TournamentManager from '@/components/admin/TournamentManager'
@@ -14,7 +16,9 @@ import MatchAdminPanel from '@/components/admin/MatchAdminPanel'
 import MatchEventPanel from '@/components/admin/MatchEventPanel'
 import GroupMatchAdminPanel from '@/components/admin/GroupMatchAdminPanel'
 import VoiceChannelPanel from '@/components/admin/VoiceChannelPanel'
-import AdminTournamentSidebar from '@/components/admin/AdminTournamentSidebar'
+import TournamentCasterPanel from '@/components/admin/TournamentCasterPanel'
+import ArchivedTournamentView from '@/components/admin/ArchivedTournamentView'
+import TestModePanel from '@/components/admin/TestModePanel'
 import AdminPhaseNav, {
   defaultPhaseFor,
   type AdminPhase,
@@ -23,114 +27,133 @@ import GroupStandings from '@/components/groups/GroupStandings'
 import BracketView from '@/components/bracket/BracketView'
 import MiniGroupPanel from '@/components/bracket/MiniGroupPanel'
 import AutoLobbyButton from '@/components/admin/AutoLobbyButton'
-import { Settings, Sparkles } from 'lucide-react'
+import {
+  Archive,
+  FlaskConical,
+  Plus,
+  Radio,
+  Settings,
+  Sparkles,
+  Trash2,
+  Trophy,
+} from 'lucide-react'
 
+type AdminMode = 'live' | 'archive' | 'test'
 type BracketSubTab = 'matches' | 'events' | 'overview'
+
+const MODE_TABS: { key: AdminMode; label: string; icon: typeof Trophy }[] = [
+  { key: 'live', label: 'Live', icon: Radio },
+  { key: 'archive', label: 'Archiv', icon: Archive },
+  { key: 'test', label: 'Test-Modus', icon: FlaskConical },
+]
 
 export default function Admin() {
   const { data: tournaments, isLoading } = useAdminTournaments()
-  const [selectedTournamentId, setSelectedTournamentId] = useState<number | null>(null)
+  const [adminMode, setAdminMode] = useState<AdminMode>('live')
+  const [selectedLiveId, setSelectedLiveId] = useState<number | null>(null)
+  const [selectedArchiveId, setSelectedArchiveId] = useState<number | null>(null)
   const [showCreateForm, setShowCreateForm] = useState(false)
   const [activePhase, setActivePhase] = useState<AdminPhase | null>(null)
   const [bracketSubTab, setBracketSubTab] = useState<BracketSubTab>('overview')
   const deleteMutation = useDeleteTournament()
 
-  const activeTournament = useMemo(
+  const liveTournaments = useMemo(
     () =>
-      tournaments?.find((tournament) =>
-        ['draft', 'registration', 'checkin', 'group_phase', 'bracket'].includes(tournament.status),
-      ) ?? null,
+      (tournaments ?? []).filter(
+        (t) =>
+          ['draft', 'registration', 'checkin', 'group_phase', 'bracket'].includes(t.status) &&
+          !t.is_test,
+      ),
     [tournaments],
   )
-
-  const archived = useMemo(
+  const archivedTournaments = useMemo(
     () =>
-      (tournaments ?? []).filter((tournament) =>
-        ['completed', 'archived'].includes(tournament.status),
+      (tournaments ?? []).filter(
+        (t) => ['completed', 'archived'].includes(t.status) && !t.is_test,
       ),
     [tournaments],
   )
 
-  const fallbackTournamentId =
-    activeTournament?.id ?? archived[0]?.id ?? tournaments?.[0]?.id ?? null
-  const resolvedSelectedTournamentId =
-    (selectedTournamentId &&
-    tournaments?.some((tournament) => tournament.id === selectedTournamentId)
-      ? selectedTournamentId
-      : fallbackTournamentId) ?? null
+  const activeLiveTournament = liveTournaments[0] ?? null
+  const liveSelectedId =
+    (selectedLiveId && liveTournaments.some((t) => t.id === selectedLiveId)
+      ? selectedLiveId
+      : activeLiveTournament?.id) ?? null
+  const archiveSelectedId =
+    selectedArchiveId && archivedTournaments.some((t) => t.id === selectedArchiveId)
+      ? selectedArchiveId
+      : null
 
   const {
-    data: selectedDetail,
-    isLoading: isLoadingDetail,
-    refetch: refetchSelectedDetail,
-  } = useAdminTournament(resolvedSelectedTournamentId ?? 0)
+    data: liveDetail,
+    isLoading: loadingLiveDetail,
+    refetch: refetchLiveDetail,
+  } = useAdminTournament(adminMode === 'live' && liveSelectedId ? liveSelectedId : 0)
 
-  const hasGroups = Boolean(selectedDetail?.groups.some((group) => group.matches.length > 0))
-  const hasBracket = Boolean(selectedDetail?.bracket_matches.length)
+  const { data: archiveDetail, isLoading: loadingArchiveDetail } = useAdminTournament(
+    adminMode === 'archive' && archiveSelectedId ? archiveSelectedId : 0,
+  )
 
-  // Phase auto-anwählen wenn Turnier wechselt oder Daten reinkommen
+  const hasGroups = Boolean(liveDetail?.groups.some((g) => g.matches.length > 0))
+  const hasBracket = Boolean(liveDetail?.bracket_matches.length)
+
   useEffect(() => {
-    if (!selectedDetail) {
+    if (!liveDetail) {
       setActivePhase(null)
       return
     }
     setActivePhase((current) => {
-      const fallback = defaultPhaseFor(selectedDetail.status, hasGroups, hasBracket)
+      const fallback = defaultPhaseFor(liveDetail.status, hasGroups, hasBracket)
       return current ?? fallback
     })
-  }, [selectedDetail, hasGroups, hasBracket])
+  }, [liveDetail, hasGroups, hasBracket])
 
-  // Wenn ein anderes Turnier selektiert wird, Phase zurücksetzen
   useEffect(() => {
     setActivePhase(null)
-  }, [resolvedSelectedTournamentId])
+  }, [liveSelectedId])
 
   if (isLoading) return <LoadingSpinner />
 
-  const teamCount = selectedDetail?.teams.length ?? 0
+  const teamCount = liveDetail?.teams.length ?? 0
   const playerCount =
-    selectedDetail?.teams.reduce((sum, team) => sum + team.members.length, 0) ?? 0
+    liveDetail?.teams.reduce((sum, t) => sum + t.members.length, 0) ?? 0
   const matchCount =
-    (selectedDetail?.bracket_matches.length ?? 0) +
-    (selectedDetail?.groups.reduce((sum, group) => sum + group.matches.length, 0) ?? 0)
-  const groupMatchesStarted = selectedDetail
-    ? selectedDetail.groups.some((group) =>
-        group.matches.some(
-          (match) =>
-            match.status !== 'pending' || match.winner_id !== null || match.played_at !== null,
+    (liveDetail?.bracket_matches.length ?? 0) +
+    (liveDetail?.groups.reduce((sum, g) => sum + g.matches.length, 0) ?? 0)
+  const groupMatchesStarted = liveDetail
+    ? liveDetail.groups.some((g) =>
+        g.matches.some(
+          (m) => m.status !== 'pending' || m.winner_id !== null || m.played_at !== null,
         ),
       )
     : false
-  const canChangeTournamentMode = selectedDetail
-    ? selectedDetail.status === 'draft' ||
-      selectedDetail.status === 'checkin' ||
-      (selectedDetail.status === 'group_phase' && !groupMatchesStarted)
+  const canChangeTournamentMode = liveDetail
+    ? liveDetail.status === 'draft' ||
+      liveDetail.status === 'checkin' ||
+      (liveDetail.status === 'group_phase' && !groupMatchesStarted)
     : false
-  const canManageParticipants = selectedDetail
+  const canManageParticipants = liveDetail
     ? ['draft', 'registration', 'checkin', 'group_phase', 'bracket'].includes(
-        selectedDetail.status,
+        liveDetail.status,
       )
     : false
-  const allowManualOverride = selectedDetail
-    ? ['completed', 'archived'].includes(selectedDetail.status)
+  const allowManualOverride = liveDetail
+    ? ['completed', 'archived'].includes(liveDetail.status)
     : false
   const currentBracketMatchId =
-    selectedDetail?.bracket_matches.find(
-      (match) => !['completed', 'forfeit', 'cancelled'].includes(match.status),
+    liveDetail?.bracket_matches.find(
+      (m) => !['completed', 'forfeit', 'cancelled'].includes(m.status),
     )?.id ?? null
 
   const handleDeleteArchived = (id: number, name: string) => {
     if (!window.confirm(`Turnier "${name}" endgültig löschen?`)) return
     deleteMutation.mutate(id)
+    if (selectedArchiveId === id) setSelectedArchiveId(null)
   }
 
-  const handleSelectTournament = (id: number) => {
-    setSelectedTournamentId(id)
+  const handleSelectLive = (id: number) => {
+    setSelectedLiveId(id)
     setShowCreateForm(false)
-  }
-
-  const handleCreateClick = () => {
-    setShowCreateForm(true)
   }
 
   return (
@@ -138,234 +161,382 @@ export default function Admin() {
       <header className="flex flex-col gap-2">
         <h1 className="text-2xl font-bold text-foreground">Turnier-Verwaltung</h1>
         <p className="text-sm text-muted">
-          Wähle links ein Turnier und navigiere oben zwischen Setup, Teilnehmern,
-          Check-in, Gruppenphase, Bracket und Voice/Caster-Steuerung.
+          Live-Turniere steuern, Archiv einsehen oder im Test-Modus trockene Probeläufe
+          fahren.
         </p>
       </header>
 
-      <div className="grid gap-6 lg:grid-cols-[260px_1fr]">
-        <div className="lg:sticky lg:top-4 lg:self-start lg:max-h-[calc(100vh-2rem)] lg:overflow-y-auto">
-          <AdminTournamentSidebar
-          activeTournament={activeTournament}
-          archivedTournaments={archived}
-          selectedTournamentId={resolvedSelectedTournamentId}
-          onSelectTournament={handleSelectTournament}
-          onCreateClick={handleCreateClick}
-          onDeleteArchived={handleDeleteArchived}
-          deleteDisabled={deleteMutation.isPending}
-        />
-        </div>
+      <div role="tablist" className="flex gap-1 border-b border-border">
+        {MODE_TABS.map((tab) => {
+          const Icon = tab.icon
+          const isActive = adminMode === tab.key
+          const count =
+            tab.key === 'live'
+              ? liveTournaments.length
+              : tab.key === 'archive'
+                ? archivedTournaments.length
+                : (tournaments ?? []).filter((t) => t.is_test).length
+          return (
+            <button
+              key={tab.key}
+              role="tab"
+              aria-selected={isActive}
+              onClick={() => setAdminMode(tab.key)}
+              className={`flex items-center gap-2 border-b-2 px-4 py-2.5 text-sm font-medium transition-colors ${
+                isActive
+                  ? 'border-primary text-primary'
+                  : 'border-transparent text-muted hover:text-foreground'
+              }`}
+            >
+              <Icon size={14} />
+              {tab.label}
+              <span
+                className={`rounded-full px-2 py-0.5 text-[10px] ${
+                  isActive ? 'bg-primary/20 text-primary' : 'bg-muted/20 text-muted'
+                }`}
+              >
+                {count}
+              </span>
+            </button>
+          )
+        })}
+      </div>
 
-        <main className="min-w-0 space-y-6">
-          {showCreateForm ? (
-            <section className="space-y-3">
+      {adminMode === 'live' && (
+        <div className="grid gap-6 lg:grid-cols-[260px_1fr]">
+          <aside className="lg:sticky lg:top-4 lg:self-start lg:max-h-[calc(100vh-2rem)] lg:overflow-y-auto">
+            <Card className="space-y-3 p-4">
               <div className="flex items-center justify-between">
-                <h2 className="flex items-center gap-2 text-lg font-semibold text-foreground">
-                  <Sparkles size={18} className="text-primary" />
-                  Neues Turnier anlegen
+                <h2 className="text-sm font-semibold uppercase tracking-wider text-muted">
+                  Aktiv
                 </h2>
-                {selectedDetail && (
+                <Button
+                  variant="primary"
+                  size="sm"
+                  onClick={() => setShowCreateForm(true)}
+                >
+                  <Plus size={14} />
+                  Neu
+                </Button>
+              </div>
+
+              {liveTournaments.length === 0 ? (
+                <p className="rounded-lg border border-dashed border-border px-3 py-4 text-center text-xs text-muted">
+                  Kein aktives Turnier
+                </p>
+              ) : (
+                <ul className="space-y-2">
+                  {liveTournaments.map((t) => (
+                    <li key={t.id}>
+                      <button
+                        type="button"
+                        onClick={() => handleSelectLive(t.id)}
+                        className={`w-full rounded-lg border p-3 text-left transition-colors ${
+                          liveSelectedId === t.id
+                            ? 'border-primary/60 bg-primary/10'
+                            : 'border-border hover:bg-card-hover'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="flex items-center gap-2 truncate font-medium text-foreground">
+                            <Trophy size={14} className="shrink-0 text-primary" />
+                            <span className="truncate">{t.name}</span>
+                          </span>
+                          <span className="inline-block h-2 w-2 shrink-0 rounded-full bg-green-400" />
+                        </div>
+                        <div className="mt-2 flex items-center gap-2">
+                          <Badge status={t.status} />
+                          <span className="text-[10px] text-muted">
+                            {new Date(t.created_at).toLocaleDateString('de-DE')}
+                          </span>
+                        </div>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </Card>
+          </aside>
+
+          <main className="min-w-0 space-y-6">
+            {showCreateForm ? (
+              <section className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <h2 className="flex items-center gap-2 text-lg font-semibold text-foreground">
+                    <Sparkles size={18} className="text-primary" />
+                    Neues Turnier anlegen
+                  </h2>
                   <button
                     type="button"
                     onClick={() => setShowCreateForm(false)}
                     className="text-xs text-muted hover:text-foreground"
                   >
-                    Zurück zum ausgewählten Turnier
+                    Abbrechen
                   </button>
+                </div>
+                {activeLiveTournament && (
+                  <Card className="p-4">
+                    <p className="text-sm text-warning">
+                      Solange ein aktives Turnier existiert, blockiert der Server das
+                      Anlegen eines weiteren.
+                    </p>
+                  </Card>
                 )}
-              </div>
-              {activeTournament && (
-                <Card className="p-4">
-                  <p className="text-sm text-warning">
-                    Solange ein aktives Turnier existiert, blockiert der Server das Anlegen
-                    eines weiteren.
-                  </p>
-                </Card>
-              )}
-              <CreateTournamentForm />
-            </section>
-          ) : isLoadingDetail && resolvedSelectedTournamentId ? (
-            <LoadingSpinner />
-          ) : selectedDetail && activePhase ? (
-            <>
-              <AdminPhaseNav
-                status={selectedDetail.status}
-                hasGroups={hasGroups}
-                hasBracket={hasBracket}
-                activePhase={activePhase}
-                onChange={setActivePhase}
-              />
-
-              {activePhase === 'setup' && (
-                <TournamentManager
-                  key={`${selectedDetail.id}-${selectedDetail.updated_at}`}
-                  tournament={selectedDetail}
-                  teamCount={teamCount}
-                  playerCount={playerCount}
-                  matchCount={matchCount}
-                  canChangeTournamentMode={canChangeTournamentMode}
+                <CreateTournamentForm />
+              </section>
+            ) : loadingLiveDetail && liveSelectedId ? (
+              <LoadingSpinner />
+            ) : liveDetail && activePhase ? (
+              <>
+                <AdminPhaseNav
+                  status={liveDetail.status}
+                  hasGroups={hasGroups}
+                  hasBracket={hasBracket}
+                  activePhase={activePhase}
+                  onChange={setActivePhase}
                 />
-              )}
 
-              {activePhase === 'participants' && canManageParticipants && (
-                <ParticipantManager
-                  tournamentId={selectedDetail.id}
-                  tournamentStatus={selectedDetail.status}
-                  teamSize={selectedDetail.team_size}
-                  teams={selectedDetail.teams}
-                  signups={selectedDetail.signups}
-                />
-              )}
-
-              {activePhase === 'checkin' && selectedDetail.status === 'checkin' && (
-                <CheckinManager
-                  tournamentId={selectedDetail.id}
-                  teamSize={selectedDetail.team_size}
-                  teams={selectedDetail.teams}
-                  signups={selectedDetail.signups}
-                />
-              )}
-
-              {activePhase === 'group_phase' && hasGroups && (
-                <section className="space-y-4">
-                  <header>
-                    <h2 className="text-lg font-semibold text-foreground">Gruppenphase</h2>
-                    <p className="mt-1 text-sm text-muted">
-                      Tabellen einsehen, Gruppenspiele steuern und fehlende Ergebnisse
-                      nachtragen.
-                    </p>
-                  </header>
-                  <GroupStandings
-                    groups={selectedDetail.groups}
-                    teams={selectedDetail.teams}
+                {activePhase === 'setup' && (
+                  <TournamentManager
+                    key={`${liveDetail.id}-${liveDetail.updated_at}`}
+                    tournament={liveDetail}
+                    teamCount={teamCount}
+                    playerCount={playerCount}
+                    matchCount={matchCount}
+                    canChangeTournamentMode={canChangeTournamentMode}
                   />
-                  <GroupMatchAdminPanel
-                    tournamentId={selectedDetail.id}
-                    groups={selectedDetail.groups}
-                    teams={selectedDetail.teams}
-                    onRefresh={() => void refetchSelectedDetail()}
+                )}
+
+                {activePhase === 'participants' && canManageParticipants && (
+                  <ParticipantManager
+                    tournamentId={liveDetail.id}
+                    tournamentStatus={liveDetail.status}
+                    teamSize={liveDetail.team_size}
+                    teams={liveDetail.teams}
+                    signups={liveDetail.signups}
                   />
-                </section>
-              )}
+                )}
 
-              {activePhase === 'bracket' && hasBracket && (
-                <section className="space-y-4">
-                  <header>
-                    <h2 className="text-lg font-semibold text-foreground">Bracket</h2>
-                    <p className="mt-1 text-sm text-muted">
-                      Live-Übersicht, Match-Steuerung und Match-Events ohne Hexenwerk.
-                    </p>
-                  </header>
+                {activePhase === 'checkin' && liveDetail.status === 'checkin' && (
+                  <CheckinManager
+                    tournamentId={liveDetail.id}
+                    teamSize={liveDetail.team_size}
+                    teams={liveDetail.teams}
+                    signups={liveDetail.signups}
+                  />
+                )}
 
-                  <div role="tablist" className="flex border-b border-border">
-                    <button
-                      role="tab"
-                      aria-selected={bracketSubTab === 'overview'}
-                      onClick={() => setBracketSubTab('overview')}
-                      className={`border-b-2 px-4 py-2.5 text-sm font-medium transition-colors ${
-                        bracketSubTab === 'overview'
-                          ? 'border-primary text-primary'
-                          : 'border-transparent text-muted hover:text-foreground'
-                      }`}
-                    >
-                      Übersicht
-                    </button>
-                    <button
-                      role="tab"
-                      aria-selected={bracketSubTab === 'matches'}
-                      onClick={() => setBracketSubTab('matches')}
-                      className={`border-b-2 px-4 py-2.5 text-sm font-medium transition-colors ${
-                        bracketSubTab === 'matches'
-                          ? 'border-primary text-primary'
-                          : 'border-transparent text-muted hover:text-foreground'
-                      }`}
-                    >
-                      Match-Steuerung
-                    </button>
-                    <button
-                      role="tab"
-                      aria-selected={bracketSubTab === 'events'}
-                      onClick={() => setBracketSubTab('events')}
-                      className={`border-b-2 px-4 py-2.5 text-sm font-medium transition-colors ${
-                        bracketSubTab === 'events'
-                          ? 'border-primary text-primary'
-                          : 'border-transparent text-muted hover:text-foreground'
-                      }`}
-                    >
-                      Match-Events
-                    </button>
-                  </div>
-
-                  {bracketSubTab === 'overview' && (
-                    <div className="space-y-4">
-                      {selectedDetail.mini_groups.length > 0 && (
-                        <MiniGroupPanel
-                          miniGroups={selectedDetail.mini_groups}
-                          matches={selectedDetail.bracket_matches}
-                          teams={selectedDetail.teams}
-                        />
-                      )}
-                      <BracketView
-                        matches={selectedDetail.bracket_matches}
-                        teams={selectedDetail.teams}
-                      />
-                    </div>
-                  )}
-
-                  {bracketSubTab === 'matches' && (
-                    <div className="space-y-4">
-                      <AutoLobbyButton
-                        tournamentId={selectedDetail.id}
-                        enabled={selectedDetail.auto_lobby_enabled}
-                      />
-                      <MatchAdminPanel
-                        tournamentId={selectedDetail.id}
-                        matches={selectedDetail.bracket_matches}
-                        teams={selectedDetail.teams}
-                        onRefresh={() => void refetchSelectedDetail()}
-                        allowManualOverride={allowManualOverride}
-                      />
-                    </div>
-                  )}
-
-                  {bracketSubTab === 'events' && (
-                    <MatchEventPanel
-                      tournamentId={selectedDetail.id}
-                      matches={selectedDetail.bracket_matches}
-                      teams={selectedDetail.teams}
-                      onRefresh={() => void refetchSelectedDetail()}
+                {activePhase === 'group_phase' && hasGroups && (
+                  <section className="space-y-4">
+                    <header>
+                      <h2 className="text-lg font-semibold text-foreground">Gruppenphase</h2>
+                      <p className="mt-1 text-sm text-muted">
+                        Tabellen einsehen, Gruppenspiele steuern und fehlende Ergebnisse
+                        nachtragen.
+                      </p>
+                    </header>
+                    <GroupStandings
+                      groups={liveDetail.groups}
+                      teams={liveDetail.teams}
                     />
-                  )}
-                </section>
-              )}
+                    <GroupMatchAdminPanel
+                      tournamentId={liveDetail.id}
+                      groups={liveDetail.groups}
+                      teams={liveDetail.teams}
+                      onRefresh={() => void refetchLiveDetail()}
+                    />
+                  </section>
+                )}
 
-              {activePhase === 'voice' && hasBracket && (
-                <section className="space-y-4">
-                  <header>
-                    <h2 className="text-lg font-semibold text-foreground">
-                      Voice & Caster
-                    </h2>
-                    <p className="mt-1 text-sm text-muted">
-                      Voice-Channel-Splits und Caster-Verwaltung für laufende Matches.
-                    </p>
-                  </header>
-                  <VoiceChannelPanel
-                    tournamentId={selectedDetail.id}
-                    currentMatchId={currentBracketMatchId}
-                  />
-                </section>
+                {activePhase === 'bracket' && hasBracket && (
+                  <section className="space-y-4">
+                    <header>
+                      <h2 className="text-lg font-semibold text-foreground">Bracket</h2>
+                      <p className="mt-1 text-sm text-muted">
+                        Live-Übersicht, Match-Steuerung und Match-Events ohne Hexenwerk.
+                      </p>
+                    </header>
+
+                    <div role="tablist" className="flex border-b border-border">
+                      {(['overview', 'matches', 'events'] as BracketSubTab[]).map(
+                        (tab) => (
+                          <button
+                            key={tab}
+                            role="tab"
+                            aria-selected={bracketSubTab === tab}
+                            onClick={() => setBracketSubTab(tab)}
+                            className={`border-b-2 px-4 py-2.5 text-sm font-medium transition-colors ${
+                              bracketSubTab === tab
+                                ? 'border-primary text-primary'
+                                : 'border-transparent text-muted hover:text-foreground'
+                            }`}
+                          >
+                            {tab === 'overview'
+                              ? 'Übersicht'
+                              : tab === 'matches'
+                                ? 'Match-Steuerung'
+                                : 'Match-Events'}
+                          </button>
+                        ),
+                      )}
+                    </div>
+
+                    {bracketSubTab === 'overview' && (
+                      <div className="space-y-4">
+                        {liveDetail.mini_groups.length > 0 && (
+                          <MiniGroupPanel
+                            miniGroups={liveDetail.mini_groups}
+                            matches={liveDetail.bracket_matches}
+                            teams={liveDetail.teams}
+                          />
+                        )}
+                        <BracketView
+                          matches={liveDetail.bracket_matches}
+                          teams={liveDetail.teams}
+                        />
+                      </div>
+                    )}
+
+                    {bracketSubTab === 'matches' && (
+                      <div className="space-y-4">
+                        <AutoLobbyButton
+                          tournamentId={liveDetail.id}
+                          enabled={liveDetail.auto_lobby_enabled}
+                        />
+                        <MatchAdminPanel
+                          tournamentId={liveDetail.id}
+                          matches={liveDetail.bracket_matches}
+                          teams={liveDetail.teams}
+                          onRefresh={() => void refetchLiveDetail()}
+                          allowManualOverride={allowManualOverride}
+                        />
+                      </div>
+                    )}
+
+                    {bracketSubTab === 'events' && (
+                      <MatchEventPanel
+                        tournamentId={liveDetail.id}
+                        matches={liveDetail.bracket_matches}
+                        teams={liveDetail.teams}
+                        onRefresh={() => void refetchLiveDetail()}
+                      />
+                    )}
+                  </section>
+                )}
+
+                {activePhase === 'voice' && (
+                  <section className="space-y-4">
+                    <header>
+                      <h2 className="text-lg font-semibold text-foreground">
+                        Voice & Caster
+                      </h2>
+                      <p className="mt-1 text-sm text-muted">
+                        Caster-Liste fürs gesamte Turnier pflegen und Voice-Channel-Splits
+                        für laufende Matches steuern.
+                      </p>
+                    </header>
+                    <TournamentCasterPanel tournamentId={liveDetail.id} />
+                    {hasBracket && (
+                      <VoiceChannelPanel
+                        tournamentId={liveDetail.id}
+                        currentMatchId={currentBracketMatchId}
+                      />
+                    )}
+                  </section>
+                )}
+              </>
+            ) : (
+              <Card className="p-8 text-center">
+                <Settings size={32} className="mx-auto mb-3 text-muted" />
+                <p className="text-muted">
+                  Kein Turnier ausgewählt — links auswählen oder ein neues anlegen.
+                </p>
+              </Card>
+            )}
+          </main>
+        </div>
+      )}
+
+      {adminMode === 'archive' && (
+        <div className="grid gap-6 lg:grid-cols-[320px_1fr]">
+          <aside className="lg:sticky lg:top-4 lg:self-start lg:max-h-[calc(100vh-2rem)] lg:overflow-y-auto">
+            <Card className="space-y-3 p-4">
+              <h2 className="flex items-center gap-2 text-sm font-semibold uppercase tracking-wider text-muted">
+                <Archive size={14} />
+                Archiv ({archivedTournaments.length})
+              </h2>
+              {archivedTournaments.length === 0 ? (
+                <p className="rounded-lg border border-dashed border-border px-3 py-4 text-center text-xs text-muted">
+                  Keine archivierten Turniere
+                </p>
+              ) : (
+                <ul className="space-y-2">
+                  {archivedTournaments.map((t) => (
+                    <li key={t.id}>
+                      <div
+                        className={`group rounded-lg border transition-colors ${
+                          archiveSelectedId === t.id
+                            ? 'border-primary/60 bg-primary/10'
+                            : 'border-border hover:bg-card-hover'
+                        }`}
+                      >
+                        <button
+                          type="button"
+                          onClick={() => setSelectedArchiveId(t.id)}
+                          className="block w-full p-3 text-left"
+                        >
+                          <div className="truncate text-sm font-medium text-foreground">
+                            {t.name}
+                          </div>
+                          <div className="mt-1 flex items-center gap-2">
+                            <Badge status={t.status} />
+                            <span className="text-[10px] text-muted">
+                              {new Date(t.created_at).toLocaleDateString('de-DE')}
+                            </span>
+                          </div>
+                        </button>
+                        <div className="border-t border-border/40 px-2 py-1.5 opacity-0 transition-opacity group-hover:opacity-100">
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteArchived(t.id, t.name)}
+                            disabled={deleteMutation.isPending}
+                            className="flex w-full items-center justify-center gap-1.5 rounded px-2 py-1 text-[11px] text-red-300 hover:bg-red-500/10 disabled:opacity-50"
+                          >
+                            <Trash2 size={11} />
+                            Endgültig löschen
+                          </button>
+                        </div>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
               )}
-            </>
-          ) : (
-            <Card className="p-8 text-center">
-              <Settings size={32} className="mx-auto mb-3 text-muted" />
-              <p className="text-muted">
-                Wähle links ein Turnier, um Details zu öffnen — oder lege ein neues an.
-              </p>
             </Card>
-          )}
-        </main>
-      </div>
+          </aside>
+
+          <main className="min-w-0 space-y-6">
+            {!archiveSelectedId ? (
+              <Card className="p-8 text-center">
+                <Archive size={32} className="mx-auto mb-3 text-muted" />
+                <p className="text-muted">
+                  Wähle links ein archiviertes Turnier, um Bracket, Teams und Caster-Liste
+                  einzusehen. Read-Only — keine Bearbeitung möglich.
+                </p>
+              </Card>
+            ) : loadingArchiveDetail ? (
+              <LoadingSpinner />
+            ) : archiveDetail ? (
+              <ArchivedTournamentView tournament={archiveDetail} />
+            ) : (
+              <Card className="p-8 text-center">
+                <p className="text-muted">Turnier konnte nicht geladen werden.</p>
+              </Card>
+            )}
+          </main>
+        </div>
+      )}
+
+      {adminMode === 'test' && <TestModePanel />}
     </div>
   )
 }

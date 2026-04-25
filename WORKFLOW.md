@@ -2,6 +2,60 @@
 
 ---
 
+## Neue Aufgabe (2026-04-25, Teil 2): Tournament-Caster, Live/Archiv-Trennung, Test-Modus
+
+### Ziel
+- **Caster pro Turnier statt pro Match**: Pool kommt bereits aus Discord-Rolle `1495154811799077067` (`DISCORD_CASTER_ROLE_ID`), Zuweisung wird auf Turnier-Ebene gehoben. Wer fürs Turnier eingetragen ist, wird automatisch in jedes Match übernommen.
+- **Admin-Übersicht entwirren**: Live und Archiv klar getrennt, abgeschlossene Turniere mischen sich nicht mehr in die aktive Verwaltung. Read-Only-Detailansicht für archivierte Turniere.
+- **Test-Modus**: `is_test`-Flag pro Turnier; Endpoints zum Erstellen von Test-Usern, Test-Turnieren, Match-Ergebnis-Simulation und Wipe. UI-Section, in der Test-Daten generiert/gelöscht werden.
+
+### Status (2026-04-25)
+→ **In Arbeit** — Backend-Implementierung durch GPT-Worker läuft
+
+### Scope (Backend, an GPT delegiert)
+1. **`backend/db.py`**:
+   - Neue Tabelle `tournament_casters (tournament_id, discord_id, assigned_at, assigned_by, UNIQUE(tournament_id, discord_id))` + Migration in `_ensure_schema_upgrades`.
+   - Neue Spalte `tournaments.is_test INTEGER NOT NULL DEFAULT 0` + Migration.
+2. **Caster-Layer (`backend/tournament/admin_routes.py` + `backend/match/manager.py`)**:
+   - Neue Endpoints: `GET/POST /admin/tournaments/{id}/casters`, `DELETE /admin/tournaments/{id}/casters/{discord_id}`.
+   - Per-Match-Endpoints (`/tournaments/{id}/matches/{match_id}/casters`) als Read-Only erhalten — sie geben zukünftig die Tournament-Caster zurück (Backwards-Compat fürs Frontend übergangsweise).
+   - `_load_match_casters(match_type, match_id)` in `manager.py`: Lookup tournament_id über match → liest aus `tournament_casters`. Falls Tournament-Liste leer, fallback auf alte `match_casters`-Einträge (Backwards-Compat).
+   - Audit-Log-Einträge `tournament_caster_assign` / `tournament_caster_remove`.
+3. **Test-Modus (`backend/admin/test_mode.py` neu, eingebunden in `main.py`)**:
+   - `is_test` in `TournamentCreate/Update/TournamentDetailPublic` Pydantic-Modellen.
+   - Neue Module-Routen `POST /admin/test/users` (body `{count}`), `GET /admin/test/users`, `DELETE /admin/test/users` — erzeugt/löscht User mit Discord-IDs `test_<6-stellig>` in `user_profiles` + simulierter `rank_cache`-Eintrag.
+   - `POST /admin/test/tournaments` (body `{name, team_size, num_teams, mode, game_mode}`) — erstellt komplettes Test-Turnier mit `is_test=1`, Teams + Members aus Test-User-Pool, Captain-Naming, optional auto-checkin → Status auf `bracket` setzen für sofortigen Test.
+   - `POST /admin/test/tournaments/{id}/simulate-round` — würfelt Ergebnisse für alle offenen Matches der aktuellen Runde, ruft `apply_bracket_match_result` / `apply_group_match_result`.
+   - `DELETE /admin/test/wipe` — löscht alle Test-User + alle `is_test=1` Turniere + abhängige Daten (signups, teams, matches, mini_groups …).
+   - Endpoints alle `require_owner` (oder `require_mod` wenn keine Owner-Trennung existiert).
+4. **Tests**: Smoke-Test pro neuem Endpoint via `httpx.AsyncClient` (falls pytest-Setup vorhanden).
+
+### Fortschritt GPT-Worker Backend (2026-04-25)
+- Relevante Backend-Stellen geprüft: `db.py`, `tournament/models.py`, `tournament/admin_routes.py`, `tournament/routes.py`, `tournament/engine.py`, `match/manager.py`, `match/auto_lobby.py`, `notifications/discord_notifier.py`, `main.py`, `auth/permissions.py`
+- Architekturentscheidung bestätigt: kein `require_owner` vorhanden, daher neuer Test-Mode-Router mit `require_mod`
+- Umsetzung läuft in drei Blöcken: Schema/`is_test`-Propagation, Tournament-Caster-Layer mit Legacy-Fallback, neuer `admin/test_mode.py`-Router inkl. Simulationslogik
+- Implementiert: DB-Migration für `tournament_casters` + `tournaments.is_test`, neue Turnier-Caster-Endpoints, Legacy-Fallback in `match.manager`, neue `backend/admin/test_mode.py`-Routen, Test-Mode-Skips für Auto-Lobby/Discord-Benachrichtigungen
+- Verifikation gelaufen: `.venv/bin/python -m py_compile $(git ls-files 'backend/**/*.py')`, zusätzlicher Compile für neue untracked Dateien `backend/admin/test_mode.py` + `backend/__init__.py`, `.venv/bin/python -c "from backend import main; print('imports ok')"`, `.venv/bin/python -c "import asyncio; from backend.db import init_db; asyncio.run(init_db())"`
+- Umgebungshinweis: `pytest` ist in `.venv` aktuell nicht verfügbar; `init_db()` hat ein lokales `data/`-Artefakt gemäß aktueller Config erzeugt
+
+### Scope (Frontend, von Claude)
+1. **`frontend/src/types/tournament.ts`**: `is_test`, `tournamentCasters`-Modelle.
+2. **`frontend/src/api/client.ts` + `hooks/useTournament.ts`**: `useTournamentCasters`, `useAssignTournamentCaster`, `useRemoveTournamentCaster`, `useTestUsers`, `useCreateTestUsers`, `useWipeTestUsers`, `useCreateTestTournament`, `useSimulateRound`, `useWipeTestData`.
+3. **`pages/Admin.tsx`**: Top-Level-Mode-State `'live' | 'archive' | 'test'` als Tabs oben; Sidebar zeigt nur passende Liste; Archiv-Detail-View mit Banner "Read-Only" und reduzierten Phase-Tabs; Test-Tab mit Test-Mode-Tools-Panel.
+4. **Neue Komponenten**:
+   - `TournamentCasterPanel` — wird in der Voice/Caster-Phase angezeigt (Live + Archiv), Multi-Select aus Discord-Rollen-Pool.
+   - `ArchivedTournamentView` — gedimmter Read-Only-Container für archivierte Turniere.
+   - `TestModePanel` — Buttons: Seed N Users, Erstelle Test-Turnier, Simuliere Runde, Wipe.
+5. **`MatchAdminPanel.tsx`**: Per-Match-`CasterPanel` entfernen oder als Read-Only-Anzeige der Tournament-Caster lassen (Default: entfernen).
+
+### Verifikation
+- `cd backend && .venv/bin/python -m py_compile $(git ls-files 'backend/**/*.py')`
+- `cd frontend && node_modules/.bin/tsc --noEmit -p tsconfig.app.json && node_modules/.bin/vite build`
+- Bot-Restart `systemctl --user restart deadlock-turniere.service`
+- Manueller Test: Test-Turnier mit 5 Test-Usern erstellen → Mini-RR + Caster-Auswahl + Round-Simulation prüfen.
+
+---
+
 ## Neue Aufgabe (2026-04-25): Mini-RR-Bracket, Captain-Teamnamen, Game-Modes, Auto-Lobby
 
 ### Ziel

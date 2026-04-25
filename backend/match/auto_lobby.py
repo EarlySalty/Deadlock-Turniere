@@ -10,11 +10,11 @@ logger = logging.getLogger(__name__)
 async def schedule_auto_lobbies_for_tournament(tournament_id: int) -> None:
     async with get_db() as db:
         cursor = await db.execute(
-            "SELECT auto_lobby_enabled FROM tournaments WHERE id = ?",
+            "SELECT auto_lobby_enabled, is_test FROM tournaments WHERE id = ?",
             (tournament_id,),
         )
         tournament = await cursor.fetchone()
-        if not tournament or not bool(tournament["auto_lobby_enabled"]):
+        if not tournament or bool(tournament["is_test"]) or not bool(tournament["auto_lobby_enabled"]):
             return
 
         cursor = await db.execute(
@@ -79,11 +79,11 @@ async def schedule_auto_lobby_for_next_round(
 ) -> None:
     async with get_db() as db:
         cursor = await db.execute(
-            "SELECT auto_lobby_enabled FROM tournaments WHERE id = ?",
+            "SELECT auto_lobby_enabled, is_test FROM tournaments WHERE id = ?",
             (tournament_id,),
         )
         tournament = await cursor.fetchone()
-        if not tournament or not bool(tournament["auto_lobby_enabled"]):
+        if not tournament or bool(tournament["is_test"]) or not bool(tournament["auto_lobby_enabled"]):
             return
 
         cursor = await db.execute(

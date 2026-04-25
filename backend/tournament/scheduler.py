@@ -106,6 +106,7 @@ async def _has_other_active_tournament(db, tournament_id: int) -> bool:  # noqa:
     cursor = await db.execute(
         "SELECT 1 FROM tournaments "
         "WHERE id != ? AND status IN ('registration', 'checkin', 'group_phase', 'bracket') "
+        "AND is_test = 0 "
         "LIMIT 1",
         (tournament_id,),
     )
@@ -243,6 +244,8 @@ async def _advance_due_tournament(tournament_row: Any, now: datetime) -> bool:
     )
 
     try:
+        if bool(tournament_row["is_test"]):
+            return True
         if next_status == "checkin":
             async with get_db() as db:
                 participant_ids = await _load_tournament_participant_ids(db, tournament_id)
@@ -294,7 +297,7 @@ async def _check_and_advance_tournaments() -> None:
 async def _check_and_send_registration_reminders() -> None:
     async with get_db() as db:
         cursor = await db.execute(
-            "SELECT id, name, status, registration_end, reminder_offsets "
+            "SELECT id, name, status, registration_end, reminder_offsets, is_test "
             "FROM tournaments "
             "WHERE status IN ('draft', 'registration') AND registration_end IS NOT NULL "
             "ORDER BY id"
@@ -305,6 +308,8 @@ async def _check_and_send_registration_reminders() -> None:
         tolerance_end = now + timedelta(minutes=5)
 
         for tournament in tournaments:
+            if bool(tournament["is_test"]):
+                continue
             registration_end = _parse_timestamp(tournament["registration_end"])
             if registration_end is None:
                 continue

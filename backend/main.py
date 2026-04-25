@@ -11,6 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from auth.discord_oauth import router as auth_router
+from admin.test_mode import router as admin_test_router
 from auth.middleware import get_current_user
 from config import settings
 from db import init_db
@@ -60,6 +61,7 @@ app.add_middleware(TrustedHostMiddleware, allowed_hosts=settings.allowed_hosts)
 app.include_router(auth_router)
 app.include_router(tournament_router)
 app.include_router(admin_router)
+app.include_router(admin_test_router)
 app.include_router(consent_router)
 app.include_router(leaderboard_router)
 app.include_router(draft_router)

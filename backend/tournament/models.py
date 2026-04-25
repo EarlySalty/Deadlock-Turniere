@@ -115,7 +115,11 @@ class UserSession(BaseModel):
 
 # --- Tournament ---
 
-class TournamentCreate(BaseModel):
+class TournamentBase(BaseModel):
+    is_test: bool = False
+
+
+class TournamentCreate(TournamentBase):
     name: str
     description: Optional[str] = None
     team_size: int = 6
@@ -172,6 +176,7 @@ class TournamentUpdate(BaseModel):
     tournament_game_mode: Optional[TournamentGameMode] = None
     auto_lobby_enabled: Optional[bool] = None
     exclude_from_leaderboard: Optional[bool] = None
+    is_test: Optional[bool] = None
     reminder_offsets: Optional[list[int]] = None
 
     @field_validator("series_format")
@@ -204,7 +209,7 @@ class TournamentSignup(BaseModel):
     signed_up_at: str
 
 
-class Tournament(BaseModel):
+class Tournament(TournamentBase):
     id: int
     name: str
     status: TournamentStatus
@@ -445,7 +450,7 @@ class TournamentSignupPublic(BaseModel):
     signed_up_at: str
 
 
-class TournamentDetailPublic(BaseModel):
+class TournamentDetailPublic(TournamentBase):
     id: int
     name: str
     status: TournamentStatus

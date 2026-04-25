@@ -27,6 +27,7 @@ CREATE TABLE IF NOT EXISTS tournaments(
     tournament_game_mode TEXT NOT NULL DEFAULT 'standard',
     auto_lobby_enabled INTEGER NOT NULL DEFAULT 1,
     exclude_from_leaderboard INTEGER NOT NULL DEFAULT 0,
+    is_test INTEGER NOT NULL DEFAULT 0,
     reminder_offsets TEXT DEFAULT '[1440,120,15]',
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -337,6 +338,16 @@ CREATE TABLE IF NOT EXISTS match_casters(
     assigned_by TEXT,
     UNIQUE(match_id, match_type, discord_id)
 );
+
+CREATE TABLE IF NOT EXISTS tournament_casters(
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tournament_id INTEGER NOT NULL,
+    discord_id TEXT NOT NULL,
+    assigned_at TEXT NOT NULL DEFAULT (datetime('now')),
+    assigned_by TEXT,
+    UNIQUE(tournament_id, discord_id),
+    FOREIGN KEY (tournament_id) REFERENCES tournaments(id) ON DELETE CASCADE
+);
 """
 
 
@@ -449,6 +460,14 @@ async def _ensure_schema_upgrades(db: aiosqlite.Connection) -> None:
         "INTEGER NOT NULL DEFAULT 1",
     )
 
+    try:
+        await db.execute(
+            "ALTER TABLE tournaments ADD COLUMN is_test INTEGER NOT NULL DEFAULT 0"
+        )
+    except aiosqlite.OperationalError as exc:
+        if "duplicate column" not in str(exc).lower():
+            raise
+
     # series_format
     try:
         await db.execute(
@@ -547,6 +566,17 @@ async def _ensure_schema_upgrades(db: aiosqlite.Connection) -> None:
             assigned_at TEXT NOT NULL DEFAULT (datetime('now')),
             assigned_by TEXT,
             UNIQUE(match_id, match_type, discord_id)
+        )
+    """)
+    await db.execute("""
+        CREATE TABLE IF NOT EXISTS tournament_casters (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            tournament_id INTEGER NOT NULL,
+            discord_id TEXT NOT NULL,
+            assigned_at TEXT NOT NULL DEFAULT (datetime('now')),
+            assigned_by TEXT,
+            UNIQUE(tournament_id, discord_id),
+            FOREIGN KEY (tournament_id) REFERENCES tournaments(id) ON DELETE CASCADE
         )
     """)
 
