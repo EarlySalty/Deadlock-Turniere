@@ -16,11 +16,20 @@ import ConsentModal from '@/components/ConsentModal'
 import GroupStandings from '@/components/groups/GroupStandings'
 import GroupMatchList from '@/components/groups/GroupMatchList'
 import BracketView from '@/components/bracket/BracketView'
+import MiniGroupPanel from '@/components/bracket/MiniGroupPanel'
 import {
   Trophy, Users, LayoutGrid, GitBranch, Plus, UserPlus, AlertCircle, Shield, X, Info,
   ChevronDown, ChevronUp, ScrollText, CheckCircle2, ClipboardCheck, Mail, UserCheck, BarChart2,
 } from 'lucide-react'
-import type { TeamPublic, BracketMatch, GroupMatch } from '@/types/tournament'
+import type { TeamPublic, BracketMatch, GroupMatch, TournamentGameMode } from '@/types/tournament'
+
+const GAME_MODE_LABEL: Record<TournamentGameMode, string> = {
+  standard: 'Standard',
+  mirror: 'Mirror Match',
+  all_same: 'All Same Hero',
+  random_heroes: 'Random Heroes',
+  single_lane: 'Single Lane Battle',
+}
 import { ApiError } from '@/api/client'
 
 type Tab = 'übersicht' | 'gruppen' | 'bracket' | 'teams' | 'ergebnisse' | 'rangliste'
@@ -400,10 +409,15 @@ export default function Tournament() {
         {tournament.description && (
           <p className="text-muted">{tournament.description}</p>
         )}
-        <div className="flex items-center gap-4 mt-3 text-sm text-muted">
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2 mt-3 text-sm text-muted">
           <span>{tournament.team_size}er Teams</span>
           <span>{tournament.teams.length} Teams</span>
           <span>{tournament.bracket_format === 'single_elimination' ? 'Single Elimination' : 'Double Elimination'}</span>
+          {tournament.tournament_game_mode !== 'standard' && (
+            <span className="rounded-full bg-primary/15 px-2.5 py-0.5 text-xs font-medium text-primary">
+              {GAME_MODE_LABEL[tournament.tournament_game_mode]}
+            </span>
+          )}
         </div>
       </div>
 
@@ -928,13 +942,22 @@ export default function Tournament() {
 
         {activeTab === 'gruppen' && (
           <div className="space-y-6">
-            <GroupStandings groups={tournament.groups} />
+            <GroupStandings groups={tournament.groups} teams={tournament.teams} />
             <GroupMatchList groups={tournament.groups} teams={tournament.teams} />
           </div>
         )}
 
         {activeTab === 'bracket' && (
-          <BracketView matches={tournament.bracket_matches} teams={tournament.teams} />
+          <div className="space-y-4">
+            {tournament.mini_groups.length > 0 && (
+              <MiniGroupPanel
+                miniGroups={tournament.mini_groups}
+                matches={tournament.bracket_matches}
+                teams={tournament.teams}
+              />
+            )}
+            <BracketView matches={tournament.bracket_matches} teams={tournament.teams} />
+          </div>
         )}
 
         {activeTab === 'rangliste' && (() => {

@@ -1,6 +1,7 @@
 export type TournamentStatus = 'draft' | 'registration' | 'checkin' | 'group_phase' | 'bracket' | 'completed' | 'archived'
 export type BracketFormat = 'single_elimination' | 'double_elimination'
 export type TournamentMode = 'group_stage' | 'bracket_only'
+export type TournamentGameMode = 'standard' | 'mirror' | 'all_same' | 'random_heroes' | 'single_lane'
 export type MatchStatus = 'pending' | 'checkin' | 'lobby_created' | 'in_progress' | 'completed' | 'forfeit' | 'cancelled'
 export type RecruitmentStatus = 'open' | 'application' | 'closed'
 export type InviteMode = 'always' | 'window' | 'never'
@@ -44,6 +45,8 @@ export interface Tournament {
   bracket_start: string | null
   bracket_format: BracketFormat
   tournament_mode: TournamentMode
+  tournament_game_mode: TournamentGameMode
+  auto_lobby_enabled: boolean
   invite_mode: InviteMode
   invite_window_start: string | null
   invite_window_end: string | null
@@ -96,7 +99,19 @@ export interface TournamentDetail extends Tournament {
   teams: Team[]
   groups: Group[]
   bracket_matches: BracketMatch[]
+  mini_groups: BracketMiniGroup[]
   signups: TournamentSignup[]
+}
+
+export interface BracketMiniGroup {
+  id: number
+  tournament_id: number
+  round: number
+  position: number
+  advances_to_match_id: number | null
+  advances_to_slot: 1 | 2 | null
+  team_ids: number[]
+  match_ids: number[]
 }
 
 // --- Public types (no discord_id, for /api/tournaments/{id}) ---
@@ -137,6 +152,7 @@ export interface TournamentDetailPublic extends Tournament {
   teams: TeamPublic[]
   groups: Group[]
   bracket_matches: BracketMatch[]
+  mini_groups: BracketMiniGroup[]
   signups: TournamentSignupPublic[]
 }
 
@@ -204,6 +220,7 @@ export interface GroupMatch {
   deadlock_match_id: string | null
   match_duration_s: number | null
   match_stats: string | null
+  hero_assignments: Record<string, unknown> | null
   scheduled_at: string | null
   played_at: string | null
 }
@@ -240,6 +257,8 @@ export interface BracketMatch {
   series_wins_team1: number
   series_wins_team2: number
   games: MatchGame[]
+  mini_group_id: number | null
+  hero_assignments: Record<string, unknown> | null
   scheduled_at: string | null
   played_at: string | null
 }
@@ -275,6 +294,8 @@ export interface TournamentCreate {
   invite_window_end?: string
   lobby_settings_preset?: LobbySettingsPreset
   lobby_settings?: Record<string, unknown>
+  tournament_game_mode?: TournamentGameMode
+  auto_lobby_enabled?: boolean
   exclude_from_leaderboard?: boolean
   reminder_offsets?: number[]
 }
@@ -286,6 +307,8 @@ export interface TournamentUpdate {
   team_size?: number
   bracket_format?: BracketFormat
   force_tournament_mode?: TournamentMode
+  tournament_game_mode?: TournamentGameMode
+  auto_lobby_enabled?: boolean
   series_format?: 1 | 3 | 5
   registration_start?: string
   registration_end?: string

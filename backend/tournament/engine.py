@@ -2,8 +2,10 @@
 from __future__ import annotations
 
 from collections import deque
+from dataclasses import dataclass
 import hashlib
 import json
+import logging
 import math
 import random
 
@@ -28,6 +30,14 @@ VALID_STATUS_TRANSITIONS: dict[str, list[str]] = {
 
 # Auto Tournament Mode: >= 12 Teams = Group Stage, < 12 Teams = Bracket Only
 AUTO_GROUP_STAGE_THRESHOLD = 12
+logger = logging.getLogger(__name__)
+
+
+@dataclass(slots=True)
+class _BracketEntryRef:
+    team_id: int | None = None
+    source_match_id: int | None = None
+    source_mini_group_id: int | None = None
 
 
 def determine_tournament_mode(
@@ -72,6 +82,21 @@ def _available_team_names(existing_keys: set[str]) -> list[str]:
     return [name for name in TEAM_NAMES if f"team {name.lower()}" not in existing_keys]
 
 
+def _reserve_team_name(base_name: str, existing_keys: set[str]) -> str:
+    candidate = (base_name or "").strip()
+    if not candidate:
+        return _next_team_name(existing_keys)
+
+    suffix = 1
+    team_name = candidate
+    while team_name.casefold() in existing_keys:
+        suffix += 1
+        team_name = f"{candidate} ({suffix})"
+
+    existing_keys.add(team_name.casefold())
+    return team_name
+
+
 def _next_team_name(existing_keys: set[str], ordinal_hint: int = 1) -> str:
     available_names = _available_team_names(existing_keys)
     if available_names:
@@ -85,6 +110,43 @@ def _next_team_name(existing_keys: set[str], ordinal_hint: int = 1) -> str:
 
     existing_keys.add(team_name.casefold())
     return team_name
+
+
+async def _team_name_from_captain(
+    db,
+    tournament_id: int,
+    captain_discord_id: str,
+    existing_keys: set[str],
+) -> str:  # noqa: ANN001
+    cursor = await db.execute(
+        """
+        SELECT discord_name
+        FROM team_members
+        WHERE discord_id = ? AND discord_name IS NOT NULL AND TRIM(discord_name) != ''
+        ORDER BY joined_at DESC, id DESC
+        LIMIT 1
+        """,
+        (captain_discord_id,),
+    )
+    row = await cursor.fetchone()
+    if not row:
+        cursor = await db.execute(
+            """
+            SELECT discord_name
+            FROM tournament_signups
+            WHERE tournament_id = ? AND discord_id = ? AND discord_name IS NOT NULL AND TRIM(discord_name) != ''
+            ORDER BY signed_up_at DESC, id DESC
+            LIMIT 1
+            """,
+            (tournament_id, captain_discord_id),
+        )
+        row = await cursor.fetchone()
+
+    captain_name = str(row["discord_name"]).strip() if row and row["discord_name"] else ""
+    if captain_name and not captain_name.isdigit():
+        return _reserve_team_name(f"{captain_name} Team", existing_keys)
+
+    return _next_team_name(existing_keys)
 
 
 async def assign_random_teams(tournament_id: int, team_size: int) -> int:
@@ -117,24 +179,19 @@ async def assign_random_teams(tournament_id: int, team_size: int) -> int:
         )
         existing_keys = {row["name_key"] for row in await cursor.fetchall()}
 
-        # Verfügbare Team-Namen filtern
-        available_names = [
-            n for n in TEAM_NAMES if f"team {n.lower()}" not in existing_keys
-        ]
-
         # Teams erstellen und Spieler zuweisen
         teams_created = 0
         for chunk_idx in range(0, len(signup_list), team_size):
             chunk = signup_list[chunk_idx : chunk_idx + team_size]
 
-            # Team-Name generieren
-            if chunk_idx // team_size < len(available_names):
-                team_name = f"Team {available_names[chunk_idx // team_size]}"
-            else:
-                team_name = f"Team {teams_created + len(existing_keys) + 1}"
-
-            name_key = team_name.casefold()
             captain_discord_id = chunk[0]["discord_id"]
+            team_name = await _team_name_from_captain(
+                db,
+                tournament_id,
+                captain_discord_id,
+                existing_keys,
+            )
+            name_key = team_name.casefold()
 
             # Team erstellen
             cursor = await db.execute(
@@ -405,11 +462,14 @@ async def finalize_checkin(
                 )
 
         existing_keys = await _existing_team_name_keys(db, tournament_id)
-        ordinal_hint = len(existing_keys) + 1
         while len(pool) >= team_size:
-            team_name = _next_team_name(existing_keys, ordinal_hint)
-            ordinal_hint += 1
             chunk = [pool.popleft() for _ in range(team_size)]
+            team_name = await _team_name_from_captain(
+                db,
+                tournament_id,
+                chunk[0]["discord_id"],
+                existing_keys,
+            )
             created_teams.append(
                 {
                     "name": team_name,
@@ -569,10 +629,7 @@ async def finalize_checkin(
                         (tournament_id,),
                     )
                 else:
-                    await db.execute(
-                        "DELETE FROM bracket_matches WHERE tournament_id = ?",
-                        (tournament_id,),
-                    )
+                    await _clear_bracket_tree(db, tournament_id)
                     cursor = await db.execute(
                         "SELECT id FROM teams WHERE tournament_id = ? ORDER BY created_at, id",
                         (tournament_id,),
@@ -608,6 +665,17 @@ async def finalize_checkin(
                     }
                 ),
             )
+
+            if advance_to_group_phase and (groups_created > 0 or matches_created > 0):
+                try:
+                    from match.auto_lobby import schedule_auto_lobbies_for_tournament
+
+                    await schedule_auto_lobbies_for_tournament(tournament_id)
+                except Exception:
+                    logger.exception(
+                        "Auto-Lobby-Scheduling nach finalize_checkin fehlgeschlagen (tournament=%s)",
+                        tournament_id,
+                    )
 
         result = {
             "warnings": warnings,
@@ -792,8 +860,7 @@ async def generate_bracket(tournament_id: int, bracket_format: str = "single_eli
     Returns: Anzahl generierter Bracket-Matches.
     """
     async with get_db() as db:
-        # Bestehende Bracket-Matches löschen
-        await db.execute("DELETE FROM bracket_matches WHERE tournament_id = ?", (tournament_id,))
+        await _clear_bracket_tree(db, tournament_id)
 
         # Gruppen-Standings laden (Top 2 pro Gruppe)
         cursor = await db.execute(
@@ -844,6 +911,39 @@ async def generate_bracket(tournament_id: int, bracket_format: str = "single_eli
     return match_count
 
 
+async def _clear_bracket_tree(db, tournament_id: int) -> None:  # noqa: ANN001
+    await db.execute(
+        "UPDATE bracket_mini_groups SET advances_to_match_id = NULL WHERE tournament_id = ?",
+        (tournament_id,),
+    )
+    await db.execute(
+        """
+        UPDATE bracket_mini_group_teams
+        SET source_match_id = NULL
+        WHERE mini_group_id IN (
+            SELECT id FROM bracket_mini_groups WHERE tournament_id = ?
+        )
+        """,
+        (tournament_id,),
+    )
+    await db.execute("DELETE FROM bracket_matches WHERE tournament_id = ?", (tournament_id,))
+    cursor = await db.execute(
+        "SELECT id FROM bracket_mini_groups WHERE tournament_id = ?",
+        (tournament_id,),
+    )
+    mini_group_ids = [row["id"] for row in await cursor.fetchall()]
+    if mini_group_ids:
+        placeholders = ", ".join("?" for _ in mini_group_ids)
+        await db.execute(
+            f"DELETE FROM bracket_mini_group_teams WHERE mini_group_id IN ({placeholders})",  # noqa: S608
+            mini_group_ids,
+        )
+        await db.execute(
+            f"DELETE FROM bracket_mini_groups WHERE id IN ({placeholders})",  # noqa: S608
+            mini_group_ids,
+        )
+
+
 async def _build_seeded_bracket(
     db,
     tournament_id: int,
@@ -853,61 +953,188 @@ async def _build_seeded_bracket(
     if num_teams < 2:
         raise ValueError("Mindestens 2 Teams für Bracket benötigt")
 
-    match_count = 0
-    current_round = 1
+    normalized_entries = [_normalize_bracket_entry(entry) for entry in seeded_entries]
+    return await _build_bracket_round(db, tournament_id, normalized_entries, current_round=1)
 
-    if _is_power_of_two(num_teams):
-        current_entries = seeded_entries
-    else:
-        main_size = _highest_power_of_two_below(num_teams)
-        play_in_matches = num_teams - main_size
-        bye_entries = seeded_entries[: 2 * main_size - num_teams]
-        play_in_pool = seeded_entries[len(bye_entries) :]
 
-        play_in_entries: list[dict] = []
-        for idx in range(play_in_matches):
-            left_entry = play_in_pool[idx]
-            right_entry = play_in_pool[-1 - idx]
-            match_id = await _insert_bracket_match(
-                db,
-                tournament_id,
-                round_num=current_round,
-                position=idx,
-                team1_id=left_entry["team_id"],
-                team2_id=right_entry["team_id"],
-            )
-            play_in_entries.append({"source_match_id": match_id})
-            match_count += 1
+def _normalize_bracket_entry(entry: dict | _BracketEntryRef) -> _BracketEntryRef:
+    if isinstance(entry, _BracketEntryRef):
+        return entry
+    return _BracketEntryRef(
+        team_id=entry.get("team_id"),
+        source_match_id=entry.get("source_match_id"),
+        source_mini_group_id=entry.get("source_mini_group_id"),
+    )
 
-        current_entries = bye_entries + play_in_entries
-        current_round += 1
 
-    while len(current_entries) >= 2:
-        seed_order = _seed_slot_order(len(current_entries))
-        slot_entries = [current_entries[seed_num - 1] for seed_num in seed_order]
+async def _build_bracket_round(
+    db,
+    tournament_id: int,
+    entries: list[_BracketEntryRef],
+    *,
+    current_round: int,
+) -> int:  # noqa: ANN001
+    if len(entries) < 2:
+        raise ValueError("Mindestens 2 Teams für Bracket benötigt")
 
-        next_round_entries: list[dict] = []
-        for position, slot_idx in enumerate(range(0, len(slot_entries), 2)):
-            left_entry = slot_entries[slot_idx]
-            right_entry = slot_entries[slot_idx + 1]
-
+    if _is_power_of_two(len(entries)):
+        ordered_entries = [entries[seed_num - 1] for seed_num in _seed_slot_order(len(entries))]
+        next_entries: list[_BracketEntryRef] = []
+        match_count = 0
+        for position, slot_idx in enumerate(range(0, len(ordered_entries), 2)):
+            left_entry = ordered_entries[slot_idx]
+            right_entry = ordered_entries[slot_idx + 1]
             match_id = await _insert_bracket_match(
                 db,
                 tournament_id,
                 round_num=current_round,
                 position=position,
-                team1_id=left_entry.get("team_id"),
-                team2_id=right_entry.get("team_id"),
-                source_match1_id=left_entry.get("source_match_id"),
-                source_match2_id=right_entry.get("source_match_id"),
+                entry1=left_entry,
+                entry2=right_entry,
             )
-            next_round_entries.append({"source_match_id": match_id})
+            next_entries.append(_BracketEntryRef(source_match_id=match_id))
             match_count += 1
 
-        current_entries = next_round_entries
-        current_round += 1
+        if len(next_entries) == 1:
+            return match_count
+        return match_count + await _build_bracket_round(
+            db,
+            tournament_id,
+            next_entries,
+            current_round=current_round + 1,
+        )
 
-    return match_count
+    slot_sizes = _slot_sizes_for_round(len(entries))
+    slot_entries = _distribute_entries_across_slots(entries, slot_sizes)
+
+    next_round_entries: list[_BracketEntryRef] = []
+    match_position = 0
+    match_count = 0
+    for slot_position, slot in enumerate(slot_entries):
+        if len(slot) == 2:
+            match_id = await _insert_bracket_match(
+                db,
+                tournament_id,
+                round_num=current_round,
+                position=match_position,
+                entry1=slot[0],
+                entry2=slot[1],
+            )
+            next_round_entries.append(_BracketEntryRef(source_match_id=match_id))
+            match_position += 1
+            match_count += 1
+            continue
+
+        mini_group_id, mini_group_match_count = await _insert_mini_group(
+            db,
+            tournament_id,
+            round_num=current_round,
+            position=slot_position,
+            match_position_start=match_position,
+            entries=slot,
+        )
+        next_round_entries.append(_BracketEntryRef(source_mini_group_id=mini_group_id))
+        match_position += mini_group_match_count
+        match_count += mini_group_match_count
+
+    if len(next_round_entries) == 1:
+        return match_count
+    return match_count + await _build_bracket_round(
+        db,
+        tournament_id,
+        next_round_entries,
+        current_round=current_round + 1,
+    )
+
+
+def _slot_sizes_for_round(num_entries: int) -> list[int]:
+    slot_count = num_entries // 2
+    base_size = num_entries // slot_count
+    remainder = num_entries % slot_count
+    sizes = [base_size for _ in range(slot_count)]
+    for offset in range(remainder):
+        sizes[-1 - offset] += 1
+    return sizes
+
+
+def _distribute_entries_across_slots(
+    entries: list[_BracketEntryRef],
+    slot_sizes: list[int],
+) -> list[list[_BracketEntryRef]]:
+    slots: list[list[_BracketEntryRef]] = [[] for _ in slot_sizes]
+    entry_index = 0
+    reverse = False
+    while entry_index < len(entries):
+        active_indices = [
+            slot_index
+            for slot_index, slot_size in enumerate(slot_sizes)
+            if len(slots[slot_index]) < slot_size
+        ]
+        if reverse:
+            active_indices.reverse()
+        for slot_index in active_indices:
+            if entry_index >= len(entries):
+                break
+            slots[slot_index].append(entries[entry_index])
+            entry_index += 1
+        reverse = not reverse
+    return slots
+
+
+async def _insert_mini_group(
+    db,
+    tournament_id: int,
+    *,
+    round_num: int,
+    position: int,
+    match_position_start: int,
+    entries: list[_BracketEntryRef],
+) -> tuple[int, int]:  # noqa: ANN001
+    cursor = await db.execute(
+        """
+        INSERT INTO bracket_mini_groups (
+            tournament_id, round, position, advances_to_match_id, advances_to_slot
+        )
+        VALUES (?, ?, ?, NULL, NULL)
+        """,
+        (tournament_id, round_num, position),
+    )
+    mini_group_id = int(cursor.lastrowid)
+
+    for seed_order, entry in enumerate(entries):
+        await db.execute(
+            """
+            INSERT INTO bracket_mini_group_teams (
+                mini_group_id, team_id, seed_order, source_match_id, source_mini_group_id
+            )
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (
+                mini_group_id,
+                entry.team_id,
+                seed_order,
+                entry.source_match_id,
+                entry.source_mini_group_id,
+            ),
+        )
+
+    match_count = 0
+    match_position = match_position_start
+    for left_index in range(len(entries)):
+        for right_index in range(left_index + 1, len(entries)):
+            await _insert_bracket_match(
+                db,
+                tournament_id,
+                round_num=round_num,
+                position=match_position,
+                entry1=entries[left_index],
+                entry2=entries[right_index],
+                mini_group_id=mini_group_id,
+            )
+            match_position += 1
+            match_count += 1
+
+    return mini_group_id, match_count
 
 
 def _is_power_of_two(value: int) -> bool:
@@ -940,32 +1167,80 @@ async def _insert_bracket_match(
     *,
     round_num: int,
     position: int,
-    team1_id: int | None = None,
-    team2_id: int | None = None,
-    source_match1_id: int | None = None,
-    source_match2_id: int | None = None,
+    entry1: _BracketEntryRef,
+    entry2: _BracketEntryRef,
+    mini_group_id: int | None = None,
 ) -> int:  # noqa: ANN001
     cursor = await db.execute(
         "INSERT INTO bracket_matches "
-        "(tournament_id, round, position, bracket_type, team1_id, team2_id, source_match1_id, source_match2_id, status) "
-        "VALUES (?, ?, ?, 'winners', ?, ?, ?, ?, 'pending')",
-        (tournament_id, round_num, position, team1_id, team2_id, source_match1_id, source_match2_id),
+        "("
+        "tournament_id, round, position, bracket_type, mini_group_id, "
+        "team1_id, team2_id, source_match1_id, source_match2_id, "
+        "source_mini_group1_id, source_mini_group2_id, status"
+        ") "
+        "VALUES (?, ?, ?, 'winners', ?, ?, ?, ?, ?, ?, ?, 'pending')",
+        (
+            tournament_id,
+            round_num,
+            position,
+            mini_group_id,
+            entry1.team_id,
+            entry2.team_id,
+            entry1.source_match_id,
+            entry2.source_match_id,
+            entry1.source_mini_group_id,
+            entry2.source_mini_group_id,
+        ),
     )
-    return int(cursor.lastrowid)
+    match_id = int(cursor.lastrowid)
+    if mini_group_id is None and entry1.source_mini_group_id is not None:
+        await db.execute(
+            "UPDATE bracket_mini_groups SET advances_to_match_id = ?, advances_to_slot = 1 WHERE id = ?",
+            (match_id, entry1.source_mini_group_id),
+        )
+    if mini_group_id is None and entry2.source_mini_group_id is not None:
+        await db.execute(
+            "UPDATE bracket_mini_groups SET advances_to_match_id = ?, advances_to_slot = 2 WHERE id = ?",
+            (match_id, entry2.source_mini_group_id),
+        )
+    return match_id
 
 
-async def _propagate_byes(db, tournament_id: int) -> None:  # noqa: ANN001
-    """Propagiert historische BYE-Gewinner automatisch in die nächste Runde."""
-    cursor = await db.execute(
-        "SELECT * FROM bracket_matches "
-        "WHERE tournament_id = ? AND status = 'completed' AND winner_id IS NOT NULL "
-        "ORDER BY round, position",
-        (tournament_id,),
-    )
-    completed = await cursor.fetchall()
+async def _propagate_resolved_entry(
+    db,
+    *,
+    winner_id: int,
+    source_match_id: int | None = None,
+    source_mini_group_id: int | None = None,
+) -> None:  # noqa: ANN001
+    if source_match_id is not None:
+        await db.execute(
+            "UPDATE bracket_matches SET team1_id = ? WHERE source_match1_id = ?",
+            (winner_id, source_match_id),
+        )
+        await db.execute(
+            "UPDATE bracket_matches SET team2_id = ? WHERE source_match2_id = ?",
+            (winner_id, source_match_id),
+        )
+        await db.execute(
+            "UPDATE bracket_mini_group_teams SET team_id = ? WHERE source_match_id = ?",
+            (winner_id, source_match_id),
+        )
+        return
 
-    for match in completed:
-        await _advance_bracket_winner_in_db(db, tournament_id, dict(match), int(match["winner_id"]))
+    if source_mini_group_id is not None:
+        await db.execute(
+            "UPDATE bracket_matches SET team1_id = ? WHERE source_mini_group1_id = ?",
+            (winner_id, source_mini_group_id),
+        )
+        await db.execute(
+            "UPDATE bracket_matches SET team2_id = ? WHERE source_mini_group2_id = ?",
+            (winner_id, source_mini_group_id),
+        )
+        await db.execute(
+            "UPDATE bracket_mini_group_teams SET team_id = ? WHERE source_mini_group_id = ?",
+            (winner_id, source_mini_group_id),
+        )
 
 
 async def advance_bracket_winner(tournament_id: int, match_id: int, winner_id: int) -> None:
@@ -986,6 +1261,12 @@ async def _advance_bracket_winner_in_db(
     match: dict,
     winner_id: int,
 ) -> None:  # noqa: ANN001
+    await _propagate_resolved_entry(
+        db,
+        winner_id=winner_id,
+        source_match_id=int(match["id"]),
+    )
+
     cursor = await db.execute(
         "SELECT id, source_match1_id, source_match2_id "
         "FROM bracket_matches "
@@ -995,16 +1276,6 @@ async def _advance_bracket_winner_in_db(
     )
     next_match = await cursor.fetchone()
     if next_match:
-        if next_match["source_match1_id"] == match["id"]:
-            await db.execute(
-                "UPDATE bracket_matches SET team1_id = ? WHERE id = ?",
-                (winner_id, next_match["id"]),
-            )
-        elif next_match["source_match2_id"] == match["id"]:
-            await db.execute(
-                "UPDATE bracket_matches SET team2_id = ? WHERE id = ?",
-                (winner_id, next_match["id"]),
-            )
         return
 
     # Fallback für ältere Brackets ohne Source-Mapping.

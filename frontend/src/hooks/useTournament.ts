@@ -7,6 +7,7 @@ import {
   createTeam, joinTeam, signupSolo, checkinPlayer, getCheckinStatus,
   withdrawSolo, kickMember, inviteBySignup, leaveTeam,
   generateGroups, generateBracket,
+  triggerAutoLobby, fetchMiniGroups,
   createLobby, startMatch, fetchMatchResult, leaveLobby, submitMatchResult,
   createGroupLobby, startGroupMatch, fetchGroupMatchResult, leaveGroupLobby,
   resetMatch, setManualMatchLobby, resetGroupMatch, setManualGroupMatchLobby,
@@ -243,6 +244,24 @@ export function useGenerateBracket() {
     onSuccess: (_data, tournamentId) => {
       invalidateTournamentCaches(qc, tournamentId)
     },
+  })
+}
+
+export function useTriggerAutoLobby() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (tournamentId: number) => triggerAutoLobby(tournamentId),
+    onSuccess: (_data, tournamentId) => {
+      invalidateTournamentCaches(qc, tournamentId)
+    },
+  })
+}
+
+export function useMiniGroups(tournamentId: number) {
+  return useQuery({
+    queryKey: ['admin', 'tournaments', tournamentId, 'mini-groups'],
+    queryFn: () => fetchMiniGroups(tournamentId),
+    enabled: tournamentId > 0,
   })
 }
 

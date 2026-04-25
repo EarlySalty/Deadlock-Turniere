@@ -13,7 +13,12 @@ import {
   useRevertCheckin,
   useUpdateTournament,
 } from '@/hooks/useTournament'
-import type { Tournament, TournamentMode, TournamentUpdate } from '@/types/tournament'
+import type {
+  Tournament,
+  TournamentGameMode,
+  TournamentMode,
+  TournamentUpdate,
+} from '@/types/tournament'
 import {
   AlertCircle,
   ArrowRight,
@@ -22,10 +27,19 @@ import {
   GitBranch,
   PencilLine,
   Shuffle,
+  Swords,
   Trash2,
   Trophy,
   Users,
 } from 'lucide-react'
+
+const GAME_MODE_LABELS: Record<TournamentGameMode, string> = {
+  standard: 'Standard',
+  mirror: 'Mirror Match',
+  all_same: 'All Same Hero',
+  random_heroes: 'Random Heroes',
+  single_lane: 'Single Lane Battle',
+}
 
 interface TournamentManagerProps {
   tournament: Tournament
@@ -81,6 +95,8 @@ export default function TournamentManager({
     team_size: tournament.team_size,
     bracket_format: tournament.bracket_format,
     tournament_mode: tournament.tournament_mode,
+    tournament_game_mode: tournament.tournament_game_mode,
+    auto_lobby_enabled: tournament.auto_lobby_enabled,
     registration_start: toInputDateTime(tournament.registration_start),
     registration_end: toInputDateTime(tournament.registration_end),
     checkin_start: toInputDateTime(tournament.checkin_start ?? null),
@@ -131,6 +147,8 @@ export default function TournamentManager({
       description: form.description.trim() || undefined,
       team_size: form.team_size,
       bracket_format: form.bracket_format,
+      tournament_game_mode: form.tournament_game_mode,
+      auto_lobby_enabled: form.auto_lobby_enabled,
       registration_start: form.registration_start || undefined,
       registration_end: form.registration_end || undefined,
       checkin_start: form.checkin_start || undefined,
@@ -324,6 +342,47 @@ export default function TournamentManager({
               Änderbar in Check-in oder in der Gruppenphase, solange noch kein Gruppenmatch gespielt wurde.
             </p>
           </div>
+
+          <div>
+            <label htmlFor="admin-game-mode" className="mb-1.5 block text-sm font-medium text-foreground">
+              <Swords size={14} className="mr-1 inline text-primary" />
+              Game-Modus
+            </label>
+            <select
+              id="admin-game-mode"
+              value={form.tournament_game_mode}
+              onChange={(event) =>
+                handleChange('tournament_game_mode', event.target.value as TournamentGameMode)
+              }
+              className="w-full rounded-lg border border-border bg-background px-3 py-2 text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
+            >
+              {(Object.keys(GAME_MODE_LABELS) as TournamentGameMode[]).map((mode) => (
+                <option key={mode} value={mode}>
+                  {GAME_MODE_LABELS[mode]}
+                </option>
+              ))}
+            </select>
+            <p className="mt-1 text-xs text-muted">
+              Hero-Auswahl-Logik (Mirror, AllSame, Random) bzw. Single-Lane-Battle. Änderungen wirken
+              auf alle ab jetzt erstellten Lobbys.
+            </p>
+          </div>
+
+          <label className="flex items-start gap-3 rounded-lg border border-border px-3 py-2 cursor-pointer sm:col-span-2">
+            <input
+              type="checkbox"
+              checked={form.auto_lobby_enabled}
+              onChange={(event) => handleChange('auto_lobby_enabled', event.target.checked)}
+              className="mt-0.5 h-4 w-4 accent-primary"
+            />
+            <div>
+              <div className="text-sm font-medium text-foreground">Lobbys automatisch erstellen</div>
+              <div className="text-xs text-muted">
+                Wenn an: Bot legt Lobbys nach Bracket-/Gruppen-Generierung und nach jedem Match-Ergebnis
+                automatisch an. Aus = nur manuell per „Lobby erstellen".
+              </div>
+            </div>
+          </label>
 
           <div>
             <label htmlFor="admin-reg-start" className="mb-1.5 block text-sm font-medium text-foreground">

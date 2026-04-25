@@ -4,8 +4,45 @@ import Card from '@/components/ui/Card'
 import Button from '@/components/ui/Button'
 import DateTimeInput from '@/components/ui/DateTimeInput'
 import { useCreateTournament } from '@/hooks/useTournament'
-import type { BracketFormat, InviteMode, LobbySettingsPreset } from '@/types/tournament'
-import { Trophy, AlertCircle, CheckCircle, SlidersHorizontal } from 'lucide-react'
+import type {
+  BracketFormat,
+  InviteMode,
+  LobbySettingsPreset,
+  TournamentGameMode,
+} from '@/types/tournament'
+import { Trophy, AlertCircle, CheckCircle, SlidersHorizontal, Swords } from 'lucide-react'
+
+const GAME_MODE_OPTIONS: {
+  value: TournamentGameMode
+  label: string
+  description: string
+}[] = [
+  {
+    value: 'standard',
+    label: 'Standard',
+    description: 'Normales Match — Spieler wählen ihren Helden frei.',
+  },
+  {
+    value: 'mirror',
+    label: 'Mirror Match',
+    description: 'Bot würfelt pro Team einen Hero. Beide Teams spielen denselben Hero (z.B. 6× Yamato vs 6× Calico).',
+  },
+  {
+    value: 'all_same',
+    label: 'All Same Hero',
+    description: 'Alle 12 Spieler spielen exakt denselben zufälligen Hero.',
+  },
+  {
+    value: 'random_heroes',
+    label: 'Random Heroes',
+    description: 'Jedem Spieler wird ein zufälliger Hero zugewiesen — unique solange Pool reicht.',
+  },
+  {
+    value: 'single_lane',
+    label: 'Single Lane Battle',
+    description: '6v6 nur auf einer Lane. Heldenwahl frei. (In Vorbereitung.)',
+  },
+]
 
 // ---------------------------------------------------------------------------
 // Preset-Metadaten (spiegeln das Backend)
@@ -170,6 +207,9 @@ export default function CreateTournamentForm() {
   const [customJson, setCustomJson] = useState('')
   const [customJsonError, setCustomJsonError] = useState('')
   const [excludeFromLeaderboard, setExcludeFromLeaderboard] = useState(false)
+  const [tournamentGameMode, setTournamentGameMode] =
+    useState<TournamentGameMode>('standard')
+  const [autoLobbyEnabled, setAutoLobbyEnabled] = useState(true)
   const [reminderOffsets, setReminderOffsets] = useState('1440, 120, 15')
   const [sliders, setSliders] = useState<Record<string, SliderState>>(initSliders)
   const [successMsg, setSuccessMsg] = useState('')
@@ -225,6 +265,8 @@ export default function CreateTournamentForm() {
         invite_window_end: inviteMode === 'window' ? inviteWindowEnd || undefined : undefined,
         lobby_settings_preset: finalPreset,
         lobby_settings: finalSettings,
+        tournament_game_mode: tournamentGameMode,
+        auto_lobby_enabled: autoLobbyEnabled,
         exclude_from_leaderboard: excludeFromLeaderboard,
         reminder_offsets: parseReminderOffsets(reminderOffsets),
       },
@@ -245,6 +287,8 @@ export default function CreateTournamentForm() {
           setLobbyPreset('standard')
           setCustomJson('')
           setExcludeFromLeaderboard(false)
+          setTournamentGameMode('standard')
+          setAutoLobbyEnabled(true)
           setReminderOffsets('1440, 120, 15')
           setSliders(initSliders())
         },
@@ -457,10 +501,54 @@ export default function CreateTournamentForm() {
           </div>
         )}
 
+        {/* Spielmodus + Auto-Lobby */}
+        <div className="rounded-lg border border-border overflow-hidden">
+          <div className="flex items-center gap-2 px-4 py-3 bg-surface border-b border-border">
+            <Swords size={15} className="text-primary" />
+            <span className="text-sm font-medium text-foreground">Spielmodus & Lobby-Automatik</span>
+          </div>
+          <div className="space-y-4 px-4 py-4">
+            <div>
+              <label htmlFor="tournament-game-mode" className="block text-sm font-medium text-foreground mb-1.5">
+                Game-Modus für alle Matches
+              </label>
+              <select
+                id="tournament-game-mode"
+                value={tournamentGameMode}
+                onChange={(event) => setTournamentGameMode(event.target.value as TournamentGameMode)}
+                className="w-full bg-background border border-border rounded-lg px-3 py-2 text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
+              >
+                {GAME_MODE_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+              </select>
+              <p className="mt-1 text-xs text-muted">
+                {GAME_MODE_OPTIONS.find((option) => option.value === tournamentGameMode)?.description}
+              </p>
+            </div>
+
+            <label className="flex items-start gap-3 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={autoLobbyEnabled}
+                onChange={(event) => setAutoLobbyEnabled(event.target.checked)}
+                className="mt-0.5 h-4 w-4 accent-primary"
+              />
+              <div>
+                <div className="text-sm font-medium text-foreground">Lobbys automatisch erstellen</div>
+                <div className="text-xs text-muted">
+                  Sobald Bracket/Gruppen generiert sind oder ein Match-Ergebnis eingetragen wird, legt der
+                  Bot die nächsten Lobbys ohne Klick an.
+                </div>
+              </div>
+            </label>
+          </div>
+        </div>
+
         {/* Match-Modus Preset */}
         <div>
           <label htmlFor="lobby-preset" className="block text-sm font-medium text-foreground mb-1.5">
-            Match-Modus
+            Lobby-ConVars-Preset
           </label>
           <select
             id="lobby-preset"

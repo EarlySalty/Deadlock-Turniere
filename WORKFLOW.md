@@ -2,6 +2,29 @@
 
 ---
 
+## Neue Aufgabe (2026-04-25): Mini-RR-Bracket, Captain-Teamnamen, Game-Modes, Auto-Lobby
+
+### Ziel
+- BYE-freies Single-Elimination-Bracket via rekursiven Mini-Round-Robin-Slots
+- Auto-generierte Teams nach Captain benennen statt Phonetic-Fallback
+- Turnierweite Game-Modes mit Hero-Zuteilung und Lobby-Ankündigung
+- Auto-Lobby-Erstellung nach Bracket-/Gruppen-Generierung und beim Advance
+- API/Modelle/Tests für Mini-Groups und neue Match-Metadaten
+
+### Status (2026-04-25)
+→ **In Arbeit** — Backend-Refactor läuft
+
+### Fortschritt
+- Plan-Datei `/home/naniadm/.claude/plans/wir-m-ssen-den-turnier-sprightly-lemon.md` vollständig gelesen
+- Relevante Backend-Dateien geprüft: `db.py`, `engine.py`, `models.py`, `manager.py`, `result_processor.py`, `scheduler.py`, `admin_routes.py`, `routes.py`, `discord_notifier.py`
+- Umsetzung startet mit Schema-/Modell-Änderungen, danach Engine/Mini-Groups, dann Match-Flow/Routes/Tests
+- Backend umgesetzt: DB-Migrationen, Mini-RR-Bracket, Captain-Teamnamen, Mini-Group-Resolver, Game-Modes, Auto-Lobby, Admin/Public-Routen
+- Neue Backend-Dateien: `backend/tournament/mini_groups.py`, `backend/match/game_modes.py`, `backend/match/heroes.py`, `backend/match/auto_lobby.py`
+- Neue Tests ergänzt: `test_engine_mini_group_seeding.py`, `test_engine_team_naming.py`, `test_auto_lobby_hooks.py`, `test_game_modes.py`
+- Verifikation: `.venv/bin/python -m py_compile` für Ziel-Dateien + neue Tests erfolgreich; `.venv/bin/pytest` in dieser Umgebung nicht vorhanden
+
+---
+
 ## Neue Aufgabe (2026-04-18): Feature-Erweiterungen — Voice, Bo3, Draft, Stats, Lobby
 
 ### Ziel

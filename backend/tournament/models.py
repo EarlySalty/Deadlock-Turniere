@@ -45,6 +45,14 @@ class TournamentMode(str, Enum):
     bracket_only = "bracket_only"  # Nur Bracket (< 12 Teams)
 
 
+class TournamentGameMode(str, Enum):
+    standard = "standard"
+    mirror = "mirror"
+    all_same = "all_same"
+    random_heroes = "random_heroes"
+    single_lane = "single_lane"
+
+
 class LobbySettingsPreset(str, Enum):
     standard = "standard"
     fast_mode = "fast_mode"
@@ -124,6 +132,8 @@ class TournamentCreate(BaseModel):
     lobby_settings_preset: LobbySettingsPreset = LobbySettingsPreset.standard
     lobby_settings: Optional[dict[str, Any]] = None
     force_tournament_mode: Optional[TournamentMode] = None  # Admin-Override: erzwingt group_stage oder bracket_only
+    tournament_game_mode: TournamentGameMode = TournamentGameMode.standard
+    auto_lobby_enabled: bool = True
     exclude_from_leaderboard: bool = False
     reminder_offsets: list[int] = Field(default_factory=lambda: [1440, 120, 15])
 
@@ -159,6 +169,8 @@ class TournamentUpdate(BaseModel):
     lobby_settings_preset: Optional[LobbySettingsPreset] = None
     lobby_settings: Optional[dict[str, Any]] = None
     force_tournament_mode: Optional[TournamentMode] = None  # Admin-Override: erzwingt group_stage oder bracket_only
+    tournament_game_mode: Optional[TournamentGameMode] = None
+    auto_lobby_enabled: Optional[bool] = None
     exclude_from_leaderboard: Optional[bool] = None
     reminder_offsets: Optional[list[int]] = None
 
@@ -206,6 +218,8 @@ class Tournament(BaseModel):
     bracket_start: Optional[str] = None
     bracket_format: str = "single_elimination"
     tournament_mode: TournamentMode  # Auto-determined oder admin-override
+    tournament_game_mode: TournamentGameMode = TournamentGameMode.standard
+    auto_lobby_enabled: bool = True
     created_by: str
     created_at: str
     updated_at: str
@@ -311,8 +325,26 @@ class GroupMatch(BaseModel):
     deadlock_match_id: Optional[str] = None
     match_duration_s: Optional[int] = None
     match_stats: Optional[str] = None
+    hero_assignments: Optional[dict[str, Any]] = None
     scheduled_at: Optional[str] = None
     played_at: Optional[str] = None
+
+    @field_validator("hero_assignments", mode="before")
+    @classmethod
+    def parse_group_match_hero_assignments(cls, value: Any) -> Optional[dict[str, Any]]:
+        if value in (None, "", "null"):
+            return None
+        if isinstance(value, dict):
+            return value
+        if isinstance(value, str):
+            import json
+
+            try:
+                parsed = json.loads(value)
+            except ValueError:
+                return None
+            return parsed if isinstance(parsed, dict) else None
+        return None
 
 
 class Group(BaseModel):
@@ -332,6 +364,7 @@ class BracketMatch(BaseModel):
     round: int
     position: int
     bracket_type: BracketType = BracketType.winners
+    mini_group_id: Optional[int] = None
     team1_id: Optional[int] = None
     team2_id: Optional[int] = None
     winner_id: Optional[int] = None
@@ -341,11 +374,29 @@ class BracketMatch(BaseModel):
     deadlock_match_id: Optional[str] = None
     match_duration_s: Optional[int] = None
     match_stats: Optional[str] = None
+    hero_assignments: Optional[dict[str, Any]] = None
     series_wins_team1: int = 0
     series_wins_team2: int = 0
     games: list["MatchGame"] = []
     scheduled_at: Optional[str] = None
     played_at: Optional[str] = None
+
+    @field_validator("hero_assignments", mode="before")
+    @classmethod
+    def parse_bracket_match_hero_assignments(cls, value: Any) -> Optional[dict[str, Any]]:
+        if value in (None, "", "null"):
+            return None
+        if isinstance(value, dict):
+            return value
+        if isinstance(value, str):
+            import json
+
+            try:
+                parsed = json.loads(value)
+            except ValueError:
+                return None
+            return parsed if isinstance(parsed, dict) else None
+        return None
 
 
 class MatchGame(BaseModel):
@@ -365,11 +416,23 @@ class MatchGame(BaseModel):
 
 # --- Match Result ---
 
+class BracketMiniGroup(BaseModel):
+    id: int
+    tournament_id: int
+    round: int
+    position: int
+    advances_to_match_id: Optional[int] = None
+    advances_to_slot: Optional[int] = None
+    team_ids: list[int] = Field(default_factory=list)
+    match_ids: list[int] = Field(default_factory=list)
+
+
 class TournamentDetail(Tournament):
-    teams: list[Team] = []
-    groups: list[Group] = []
-    bracket_matches: list[BracketMatch] = []
-    signups: list[TournamentSignup] = []
+    teams: list[Team] = Field(default_factory=list)
+    groups: list[Group] = Field(default_factory=list)
+    bracket_matches: list[BracketMatch] = Field(default_factory=list)
+    mini_groups: list[BracketMiniGroup] = Field(default_factory=list)
+    signups: list[TournamentSignup] = Field(default_factory=list)
 
 
 class TournamentSignupPublic(BaseModel):
@@ -395,6 +458,8 @@ class TournamentDetailPublic(BaseModel):
     bracket_start: Optional[str] = None
     bracket_format: str = "single_elimination"
     tournament_mode: TournamentMode  # Auto-determined oder admin-override
+    tournament_game_mode: TournamentGameMode = TournamentGameMode.standard
+    auto_lobby_enabled: bool = True
     created_by: str
     created_at: str
     updated_at: str
@@ -402,10 +467,11 @@ class TournamentDetailPublic(BaseModel):
     invite_window_start: Optional[str] = None
     invite_window_end: Optional[str] = None
     lobby_settings: Optional[str] = None
-    teams: list[TeamPublic] = []
-    groups: list[Group] = []
-    bracket_matches: list[BracketMatch] = []
-    signups: list[TournamentSignupPublic] = []
+    teams: list[TeamPublic] = Field(default_factory=list)
+    groups: list[Group] = Field(default_factory=list)
+    bracket_matches: list[BracketMatch] = Field(default_factory=list)
+    mini_groups: list[BracketMiniGroup] = Field(default_factory=list)
+    signups: list[TournamentSignupPublic] = Field(default_factory=list)
 
 
 class MatchResult(BaseModel):

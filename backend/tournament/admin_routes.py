@@ -11,6 +11,7 @@ from auth.permissions import require_admin, require_mod
 from config import settings
 from db import get_db
 from match import manager as match_manager
+from match.auto_lobby import schedule_auto_lobbies_for_tournament
 from match.series_manager import ensure_game_exists, get_series_games, record_game_result
 from notifications.discord_notifier import (
     delete_match_channel,
@@ -28,6 +29,7 @@ from match.result_processor import (
 )
 from tournament.engine import (
     _build_seeded_bracket,
+    _clear_bracket_tree,
     CheckinSnapshotMismatchError,
     VALID_STATUS_TRANSITIONS,
     assign_random_teams,
@@ -39,6 +41,8 @@ from tournament.engine import (
 )
 from tournament.models import (
     ApplicationStatus,
+    BracketMiniGroup,
+    BracketMatch,
     RecruitmentStatus,
     LobbySettingsPreset,
     Team,
@@ -55,6 +59,7 @@ from tournament.models import (
 from tournament.routes import (
     _enrich_rank_data,
     _load_bracket_matches,
+    _load_mini_groups_for_tournament,
     _load_groups_for_tournament,
     _load_signups_for_tournament,
     _load_teams_for_tournament,
@@ -598,10 +603,7 @@ async def _delete_tournament_tree(db, tournament_id: int) -> None:  # noqa: ANN0
         "(SELECT id FROM bracket_matches WHERE tournament_id = ?)",
         (tournament_id,),
     )
-    await db.execute(
-        "DELETE FROM bracket_matches WHERE tournament_id = ?",
-        (tournament_id,),
-    )
+    await _clear_bracket_tree(db, tournament_id)
     await db.execute(
         "DELETE FROM team_members WHERE team_id IN (SELECT id FROM teams WHERE tournament_id = ?)",
         (tournament_id,),
@@ -714,6 +716,7 @@ async def get_tournament_admin(
         teams = await _load_teams_for_tournament(db, tournament_id)
         groups = await _load_groups_for_tournament(db, tournament_id)
         bracket_matches = await _load_bracket_matches(db, tournament_id)
+        mini_groups = await _load_mini_groups_for_tournament(db, tournament_id)
         signups = await _load_signups_for_tournament(db, tournament_id)
 
     return TournamentDetail(
@@ -721,8 +724,46 @@ async def get_tournament_admin(
         teams=teams,
         groups=groups,
         bracket_matches=bracket_matches,
+        mini_groups=mini_groups,
         signups=signups,
     )
+
+
+@router.get("/tournaments/{tournament_id}/mini-groups", response_model=list[dict])
+async def get_tournament_mini_groups_admin(
+    tournament_id: int,
+    user: UserSession = Depends(require_mod),
+) -> list[dict]:
+    async with get_db() as db:
+        await _load_tournament_or_404(db, tournament_id)
+        mini_groups = await _load_mini_groups_for_tournament(db, tournament_id)
+        bracket_matches = await _load_bracket_matches(db, tournament_id)
+
+    matches_by_mini_group: dict[int, list[BracketMatch]] = {}
+    for match in bracket_matches:
+        if match.mini_group_id is None:
+            continue
+        matches_by_mini_group.setdefault(int(match.mini_group_id), []).append(match)
+
+    return [
+        {
+            **mini_group.model_dump(),
+            "matches": [match.model_dump() for match in matches_by_mini_group.get(mini_group.id, [])],
+        }
+        for mini_group in mini_groups
+    ]
+
+
+@router.post("/tournaments/{tournament_id}/auto-lobby/run")
+async def trigger_auto_lobby_for_tournament(
+    tournament_id: int,
+    user: UserSession = Depends(require_mod),
+) -> dict:
+    async with get_db() as db:
+        await _load_tournament_or_404(db, tournament_id)
+
+    await schedule_auto_lobbies_for_tournament(tournament_id)
+    return {"ok": True, "tournament_id": tournament_id}
 
 
 # ---------------------------------------------------------------------------
@@ -753,8 +794,8 @@ async def create_tournament(
             "(name, description, team_size, bracket_format, registration_start, "
             "registration_end, checkin_start, group_phase_start, bracket_start, "
             "created_by, invite_mode, invite_window_start, invite_window_end, tournament_mode, "
-            "exclude_from_leaderboard, reminder_offsets) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "tournament_game_mode, auto_lobby_enabled, exclude_from_leaderboard, reminder_offsets) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 body.name,
                 body.description,
@@ -770,6 +811,8 @@ async def create_tournament(
                 body.invite_window_start,
                 body.invite_window_end,
                 tournament_mode.value,
+                body.tournament_game_mode.value,
+                1 if body.auto_lobby_enabled else 0,
                 1 if body.exclude_from_leaderboard else 0,
                 _serialize_reminder_offsets(body.reminder_offsets),
             ),
@@ -888,6 +931,10 @@ async def update_tournament(
             update_data["invite_mode"] = body.invite_mode.value
         if body.exclude_from_leaderboard is not None:
             update_data["exclude_from_leaderboard"] = 1 if body.exclude_from_leaderboard else 0
+        if body.auto_lobby_enabled is not None:
+            update_data["auto_lobby_enabled"] = 1 if body.auto_lobby_enabled else 0
+        if body.tournament_game_mode is not None:
+            update_data["tournament_game_mode"] = body.tournament_game_mode.value
         if body.reminder_offsets is not None:
             update_data["reminder_offsets"] = _serialize_reminder_offsets(body.reminder_offsets)
         if "invite_window_start" in body.model_fields_set:
@@ -931,10 +978,7 @@ async def update_tournament(
 
         if existing["status"] == "group_phase" and mode_changed_to_bracket_only:
             await _delete_group_phase_tree(db, tournament_id)
-            await db.execute(
-                "DELETE FROM bracket_matches WHERE tournament_id = ?",
-                (tournament_id,),
-            )
+            await _clear_bracket_tree(db, tournament_id)
             cursor = await db.execute(
                 "SELECT id FROM teams WHERE tournament_id = ? ORDER BY created_at, id",
                 (tournament_id,),

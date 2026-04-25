@@ -33,6 +33,7 @@ import type {
   TeamInvitation,
   LeaderboardEntry,
   PlayerProfile,
+  BracketMiniGroup,
 } from '@/types/tournament'
 
 const API_BASE = '/turnier/api'
@@ -315,6 +316,16 @@ export const generateBracket = (tournamentId: number) =>
     `/admin/tournaments/${tournamentId}/bracket/generate`,
     { method: 'POST' }
   )
+
+// Auto-Lobby + Mini-Groups
+export const triggerAutoLobby = (tournamentId: number) =>
+  request<{ created: number; skipped: number; failed: number }>(
+    `/admin/tournaments/${tournamentId}/auto-lobby/run`,
+    { method: 'POST' },
+  )
+
+export const fetchMiniGroups = (tournamentId: number) =>
+  request<BracketMiniGroup[]>(`/admin/tournaments/${tournamentId}/mini-groups`)
 
 // Solo Signup
 export const signupSolo = (tournamentId: number) =>

@@ -8,6 +8,7 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from db import get_db
+from match.auto_lobby import schedule_auto_lobbies_for_tournament
 from notifications.discord_notifier import notify_users
 from tournament.points import recalculate_player_points
 from tournament.engine import (
@@ -182,6 +183,16 @@ async def advance_tournament_status(
                 await recalculate_player_points(db, tournament_id)
 
         await db.commit()
+
+    if next_status in {"group_phase", "bracket"}:
+        try:
+            await schedule_auto_lobbies_for_tournament(tournament_id)
+        except Exception:
+            logger.exception(
+                "Auto-Lobby-Scheduling nach Statuswechsel fehlgeschlagen (tournament=%s status=%s)",
+                tournament_id,
+                next_status,
+            )
 
     return metadata
 

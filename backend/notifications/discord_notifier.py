@@ -367,6 +367,7 @@ async def send_lobby_announcement(
     team2_name: str,
     team1_discord_ids: list[str],
     team2_discord_ids: list[str],
+    hero_assignments_text: list[str] | None = None,
 ) -> dict[str, Any]:
     """Postet Lobby-Code + Team-Zuordnung in den zentralen Turnier-Kanal."""
     import secrets as _sec
@@ -384,6 +385,14 @@ async def send_lobby_announcement(
             {"name": f"🔴 {team2_name}", "value": team2_mentions, "inline": True},
         ],
     }
+    if hero_assignments_text:
+        embed["fields"].append(
+            {
+                "name": "Hero-Zuteilung",
+                "value": "\n".join(hero_assignments_text[:20]),
+                "inline": False,
+            }
+        )
     content = " ".join(f"<@{uid}>" for uid in team1_discord_ids + team2_discord_ids if uid) or None
 
     payload = {

@@ -7,6 +7,7 @@ from typing import Any
 
 from config import settings
 from db import get_db
+from match.game_modes import prepare_match_assignments
 from match import steam_bridge
 from notifications.discord_notifier import (
     create_match_channel,
@@ -172,6 +173,12 @@ async def _create_lobby_for_match(
     participant_rows = await _load_match_participants(match_type, tournament_id, match_id)
     participant_discord_ids = [str(row["discord_id"]) for row in participant_rows if row["discord_id"]]
     steam_ids = [str(row["steam_id"]).strip() for row in participant_rows if row["steam_id"]]
+    mode_payload = await prepare_match_assignments(tournament_id, match_type, match_id)
+    merged_convars = dict(lobby_settings or {})
+    merged_convars.update(mode_payload["convars"])
+    hero_assignments = mode_payload["hero_assignments"]
+    hero_assignments_text = mode_payload["announcement_lines"]
+    hero_assignments_json = json.dumps(hero_assignments) if hero_assignments else None
 
     create_payload: dict[str, Any] = {
         "tournament_id": tournament_id,
@@ -180,8 +187,8 @@ async def _create_lobby_for_match(
         "game_mode": game_mode,
         "region_mode": region_mode,
     }
-    if lobby_settings:
-        create_payload["convars"] = lobby_settings
+    if merged_convars:
+        create_payload["convars"] = merged_convars
 
     result = await _run_steam_task(
         action="Lobby-Erstellung",
@@ -204,10 +211,16 @@ async def _create_lobby_for_match(
         await db.execute(
             f"""
             UPDATE {_match_table(match_type)}
-            SET steam_party_id = ?, party_code = ?, status = 'lobby_created'
+            SET steam_party_id = ?, party_code = ?, status = 'lobby_created', hero_assignments = ?
             WHERE id = ? AND {_match_scope_column(match_type)} = ?
             """,
-            (party_id, str(party_code), match_id, _match_scope_value(match_type, match)),
+            (
+                party_id,
+                str(party_code),
+                hero_assignments_json,
+                match_id,
+                _match_scope_value(match_type, match),
+            ),
         )
         await db.commit()
 
@@ -249,6 +262,7 @@ async def _create_lobby_for_match(
                 team2_name=match_context["team2_name"],
                 team1_discord_ids=team1_ids,
                 team2_discord_ids=team2_ids,
+                hero_assignments_text=hero_assignments_text or None,
             )
         except Exception:
             logger.exception(
@@ -270,7 +284,8 @@ async def _create_lobby_for_match(
             "party_id": party_id,
             "party_code": str(party_code),
             "join_code": str(join_code),
-            "lobby_settings": lobby_settings,
+            "lobby_settings": merged_convars,
+            "hero_assignments": hero_assignments,
             "invite_result": invite_result,
             "discord_channel_id": discord_channel_id,
         }

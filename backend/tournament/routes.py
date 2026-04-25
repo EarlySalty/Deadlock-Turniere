@@ -13,6 +13,7 @@ from db import get_db
 from rank_reader import get_player_rank_profile
 from notifications.discord_notifier import notify_users
 from tournament.models import (
+    BracketMiniGroup,
     BracketMatch,
     Group,
     GroupMatch,
@@ -243,6 +244,50 @@ async def _load_bracket_matches(db, tournament_id: int) -> list[BracketMatch]:  
     )
     rows = await cursor.fetchall()
     return [BracketMatch(**dict(r)) for r in rows]
+
+
+async def _load_mini_groups_for_tournament(db, tournament_id: int) -> list[BracketMiniGroup]:  # noqa: ANN001
+    cursor = await db.execute(
+        """
+        SELECT id, tournament_id, round, position, advances_to_match_id, advances_to_slot
+        FROM bracket_mini_groups
+        WHERE tournament_id = ?
+        ORDER BY round, position, id
+        """,
+        (tournament_id,),
+    )
+    mini_group_rows = await cursor.fetchall()
+    mini_groups: list[BracketMiniGroup] = []
+    for row in mini_group_rows:
+        mini_group_id = int(row["id"])
+        cursor = await db.execute(
+            """
+            SELECT team_id
+            FROM bracket_mini_group_teams
+            WHERE mini_group_id = ? AND team_id IS NOT NULL
+            ORDER BY seed_order, id
+            """,
+            (mini_group_id,),
+        )
+        team_ids = [int(team_row["team_id"]) for team_row in await cursor.fetchall()]
+        cursor = await db.execute(
+            """
+            SELECT id
+            FROM bracket_matches
+            WHERE mini_group_id = ?
+            ORDER BY round, position, id
+            """,
+            (mini_group_id,),
+        )
+        match_ids = [int(match_row["id"]) for match_row in await cursor.fetchall()]
+        mini_groups.append(
+            BracketMiniGroup(
+                **dict(row),
+                team_ids=team_ids,
+                match_ids=match_ids,
+            )
+        )
+    return mini_groups
 
 
 async def _load_signups_for_tournament(db, tournament_id: int) -> list[TournamentSignup]:  # noqa: ANN001
@@ -642,6 +687,7 @@ async def get_tournament(tournament_id: int) -> TournamentDetailPublic:
         teams = await _load_teams_public(db, tournament_id)
         groups = await _load_groups_for_tournament(db, tournament_id)
         bracket_matches = await _load_bracket_matches(db, tournament_id)
+        mini_groups = await _load_mini_groups_for_tournament(db, tournament_id)
         signups = await _load_signups_public(db, tournament_id)
 
     return TournamentDetailPublic(
@@ -649,6 +695,7 @@ async def get_tournament(tournament_id: int) -> TournamentDetailPublic:
         teams=teams,
         groups=groups,
         bracket_matches=bracket_matches,
+        mini_groups=mini_groups,
         signups=signups,
     )
 

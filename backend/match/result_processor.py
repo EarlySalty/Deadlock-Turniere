@@ -3,12 +3,20 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from typing import Any
 
 from config import settings
 from db import get_db
+from match.auto_lobby import (
+    schedule_auto_lobbies_for_tournament,
+    schedule_auto_lobby_for_next_round,
+)
 from notifications.discord_notifier import delete_match_channel_later
 from tournament.engine import advance_bracket_winner
+from tournament.mini_groups import complete_mini_group_round_robin
+
+logger = logging.getLogger(__name__)
 
 
 class MatchResultError(RuntimeError):
@@ -46,7 +54,7 @@ async def apply_bracket_match_result(
         cursor = await db.execute(
             """
             SELECT id, round, position, team1_id, team2_id, winner_id, status,
-                   source_match1_id, source_match2_id, match_duration_s, match_stats,
+                   source_match1_id, source_match2_id, mini_group_id, match_duration_s, match_stats,
                    discord_channel_id
             FROM bracket_matches
             WHERE id = ? AND tournament_id = ?
@@ -165,6 +173,33 @@ async def apply_bracket_match_result(
         )
 
     await advance_bracket_winner(tournament_id, match_id, winner_id_value)
+    mini_group_winner_id: int | None = None
+    if match_row.get("mini_group_id") is not None:
+        async with get_db() as db:
+            mini_group_winner_id = await complete_mini_group_round_robin(
+                db,
+                int(match_row["mini_group_id"]),
+            )
+            await db.commit()
+
+    try:
+        await schedule_auto_lobby_for_next_round(tournament_id, match_id)
+    except Exception:
+        logger.exception(
+            "Auto-Lobby für Folge-Match fehlgeschlagen (tournament=%s match=%s)",
+            tournament_id,
+            match_id,
+        )
+
+    if mini_group_winner_id is not None:
+        try:
+            await schedule_auto_lobbies_for_tournament(tournament_id)
+        except Exception:
+            logger.exception(
+                "Auto-Lobby nach Mini-Group-Abschluss fehlgeschlagen (tournament=%s mini_group=%s)",
+                tournament_id,
+                match_row.get("mini_group_id"),
+            )
 
     # Stats in Discord-Match-Channel posten (non-blocking)
     if discord_channel_id and players:

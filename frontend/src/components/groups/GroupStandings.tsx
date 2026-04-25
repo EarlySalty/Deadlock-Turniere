@@ -1,13 +1,15 @@
 import { motion } from 'framer-motion'
 import { Trophy, LayoutGrid } from 'lucide-react'
 import Card from '@/components/ui/Card'
-import type { Group } from '@/types/tournament'
+import TeamRosterTooltip from '@/components/ui/TeamRosterTooltip'
+import type { Group, TeamPublic } from '@/types/tournament'
 
 interface Props {
   groups: Group[]
+  teams?: TeamPublic[]
 }
 
-export default function GroupStandings({ groups }: Props) {
+export default function GroupStandings({ groups, teams = [] }: Props) {
   if (groups.length === 0) {
     return (
       <Card className="p-6 text-center">
@@ -15,6 +17,11 @@ export default function GroupStandings({ groups }: Props) {
         <p className="text-muted">Gruppenphase noch nicht gestartet</p>
       </Card>
     )
+  }
+
+  const teamById = new Map<number, TeamPublic>()
+  for (const team of teams) {
+    teamById.set(team.id, team)
   }
 
   return (
@@ -51,6 +58,7 @@ export default function GroupStandings({ groups }: Props) {
                   <tbody>
                     {sortedTeams.map((team, index) => {
                       const isQualified = index < 2
+                      const fullTeam = teamById.get(team.team_id)
                       return (
                         <tr
                           key={team.team_id}
@@ -68,15 +76,21 @@ export default function GroupStandings({ groups }: Props) {
                             </span>
                           </td>
                           <td className="px-4 py-2.5">
-                            <span
-                              className={`${
-                                isQualified
-                                  ? 'font-semibold text-foreground'
-                                  : 'text-foreground'
-                              }`}
+                            <TeamRosterTooltip
+                              teamName={team.team_name}
+                              members={fullTeam?.members ?? []}
+                              align="left"
                             >
-                              {team.team_name}
-                            </span>
+                              <span
+                                className={`cursor-help underline-offset-2 hover:underline ${
+                                  isQualified
+                                    ? 'font-semibold text-foreground'
+                                    : 'text-foreground'
+                                }`}
+                              >
+                                {team.team_name}
+                              </span>
+                            </TeamRosterTooltip>
                           </td>
                           <td className="text-center px-4 py-2.5 text-muted">
                             {team.wins}

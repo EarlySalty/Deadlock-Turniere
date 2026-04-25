@@ -24,6 +24,8 @@ CREATE TABLE IF NOT EXISTS tournaments(
     bracket_format TEXT NOT NULL DEFAULT 'single_elimination',
     created_by TEXT NOT NULL,
     lobby_settings TEXT,
+    tournament_game_mode TEXT NOT NULL DEFAULT 'standard',
+    auto_lobby_enabled INTEGER NOT NULL DEFAULT 1,
     exclude_from_leaderboard INTEGER NOT NULL DEFAULT 0,
     reminder_offsets TEXT DEFAULT '[1440,120,15]',
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -96,8 +98,30 @@ CREATE TABLE IF NOT EXISTS group_matches(
     discord_channel_id TEXT,
     match_duration_s INTEGER,
     match_stats TEXT,
+    hero_assignments TEXT,
     scheduled_at TEXT,
     played_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS bracket_mini_groups(
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tournament_id INTEGER NOT NULL REFERENCES tournaments(id),
+    round INTEGER NOT NULL,
+    position INTEGER NOT NULL,
+    advances_to_match_id INTEGER REFERENCES bracket_matches(id),
+    advances_to_slot INTEGER,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS bracket_mini_group_teams(
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    mini_group_id INTEGER NOT NULL REFERENCES bracket_mini_groups(id) ON DELETE CASCADE,
+    team_id INTEGER REFERENCES teams(id),
+    seed_order INTEGER NOT NULL,
+    source_match_id INTEGER REFERENCES bracket_matches(id),
+    source_mini_group_id INTEGER REFERENCES bracket_mini_groups(id),
+    UNIQUE(mini_group_id, seed_order),
+    UNIQUE(mini_group_id, team_id)
 );
 
 CREATE TABLE IF NOT EXISTS bracket_matches(
@@ -106,10 +130,13 @@ CREATE TABLE IF NOT EXISTS bracket_matches(
     round INTEGER NOT NULL,
     position INTEGER NOT NULL,
     bracket_type TEXT NOT NULL DEFAULT 'winners',
+    mini_group_id INTEGER REFERENCES bracket_mini_groups(id),
     team1_id INTEGER REFERENCES teams(id),
     team2_id INTEGER REFERENCES teams(id),
     source_match1_id INTEGER REFERENCES bracket_matches(id),
     source_match2_id INTEGER REFERENCES bracket_matches(id),
+    source_mini_group1_id INTEGER REFERENCES bracket_mini_groups(id),
+    source_mini_group2_id INTEGER REFERENCES bracket_mini_groups(id),
     winner_id INTEGER REFERENCES teams(id),
     status TEXT NOT NULL DEFAULT 'pending',
     steam_party_id TEXT,
@@ -118,6 +145,7 @@ CREATE TABLE IF NOT EXISTS bracket_matches(
     discord_channel_id TEXT,
     match_duration_s INTEGER,
     match_stats TEXT,
+    hero_assignments TEXT,
     scheduled_at TEXT,
     played_at TEXT
 );
@@ -344,13 +372,18 @@ async def _ensure_schema_upgrades(db: aiosqlite.Connection) -> None:
     await _ensure_column(db, "bracket_matches", "match_stats", "TEXT")
     await _ensure_column(db, "bracket_matches", "source_match1_id", "INTEGER")
     await _ensure_column(db, "bracket_matches", "source_match2_id", "INTEGER")
+    await _ensure_column(db, "bracket_matches", "mini_group_id", "INTEGER")
+    await _ensure_column(db, "bracket_matches", "source_mini_group1_id", "INTEGER")
+    await _ensure_column(db, "bracket_matches", "source_mini_group2_id", "INTEGER")
     await _ensure_column(db, "bracket_matches", "discord_channel_id", "TEXT")
+    await _ensure_column(db, "bracket_matches", "hero_assignments", "TEXT")
     await _ensure_column(db, "group_matches", "discord_channel_id", "TEXT")
     await _ensure_column(db, "group_matches", "steam_party_id", "TEXT")
     await _ensure_column(db, "group_matches", "party_code", "TEXT")
     await _ensure_column(db, "group_matches", "deadlock_match_id", "TEXT")
     await _ensure_column(db, "group_matches", "match_duration_s", "INTEGER")
     await _ensure_column(db, "group_matches", "match_stats", "TEXT")
+    await _ensure_column(db, "group_matches", "hero_assignments", "TEXT")
     await _ensure_column(db, "tournament_signups", "discord_name", "TEXT")
     await _ensure_column(
         db, "teams", "recruitment_status", "TEXT NOT NULL DEFAULT 'open'"
@@ -396,6 +429,12 @@ async def _ensure_schema_upgrades(db: aiosqlite.Connection) -> None:
     await _ensure_column(db, "tournaments", "checkin_start", "TEXT")
     await _ensure_column(
         db, "tournaments", "tournament_mode", "TEXT NOT NULL DEFAULT 'group_stage'"
+    )
+    await _ensure_column(
+        db, "tournaments", "tournament_game_mode", "TEXT NOT NULL DEFAULT 'standard'"
+    )
+    await _ensure_column(
+        db, "tournaments", "auto_lobby_enabled", "INTEGER NOT NULL DEFAULT 1"
     )
     await _ensure_column(
         db, "tournaments", "exclude_from_leaderboard", "INTEGER NOT NULL DEFAULT 0"
@@ -465,6 +504,29 @@ async def _ensure_schema_upgrades(db: aiosqlite.Connection) -> None:
             taken_by TEXT,
             taken_at TEXT,
             is_admin_forced INTEGER NOT NULL DEFAULT 0
+        )
+    """)
+    await db.execute("""
+        CREATE TABLE IF NOT EXISTS bracket_mini_groups (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            tournament_id INTEGER NOT NULL REFERENCES tournaments(id),
+            round INTEGER NOT NULL,
+            position INTEGER NOT NULL,
+            advances_to_match_id INTEGER REFERENCES bracket_matches(id),
+            advances_to_slot INTEGER,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    await db.execute("""
+        CREATE TABLE IF NOT EXISTS bracket_mini_group_teams (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            mini_group_id INTEGER NOT NULL REFERENCES bracket_mini_groups(id) ON DELETE CASCADE,
+            team_id INTEGER REFERENCES teams(id),
+            seed_order INTEGER NOT NULL,
+            source_match_id INTEGER REFERENCES bracket_matches(id),
+            source_mini_group_id INTEGER REFERENCES bracket_mini_groups(id),
+            UNIQUE(mini_group_id, seed_order),
+            UNIQUE(mini_group_id, team_id)
         )
     """)
     await db.execute("""
