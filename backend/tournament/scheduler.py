@@ -342,7 +342,7 @@ async def _check_and_send_registration_reminders() -> None:
                     await notify_users(
                         profile_ids,
                         "registration_reminder",
-                        f"Anmeldeschluss für Turnier '{tournament['name']}' in {offset_label}!",
+                        f"Turnier '{tournament['name']}' startet in {offset_label} — letzte Chance zur Anmeldung!",
                     )
                 except Exception:
                     logger.exception(

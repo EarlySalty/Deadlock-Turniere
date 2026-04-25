@@ -398,7 +398,7 @@ export default function TournamentManager({
 
           <div>
             <label htmlFor="admin-reg-end" className="mb-1.5 block text-sm font-medium text-foreground">
-              Anmeldung Ende
+              Turnier-Start
             </label>
             <DateTimeInput
               id="admin-reg-end"
@@ -406,6 +406,9 @@ export default function TournamentManager({
               onChange={(event) => handleChange('registration_end', event.target.value)}
               className="w-full rounded-lg border border-border bg-background px-3 py-2 text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
             />
+            <p className="mt-1 text-xs text-muted">
+              Anmeldeschluss = Turnier-Start. Reminder werden vor diesem Zeitpunkt verschickt.
+            </p>
           </div>
 
           <div>
@@ -419,7 +422,7 @@ export default function TournamentManager({
               className="w-full rounded-lg border border-border bg-background px-3 py-2 text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
             />
             <p className="mt-1 text-xs text-muted">
-              Falls leer: Check-in startet automatisch mit Anmeldeschluss.
+              Falls leer: Check-in startet automatisch mit Turnier-Start.
             </p>
           </div>
 
@@ -437,7 +440,7 @@ export default function TournamentManager({
 
           <div>
             <label htmlFor="admin-reminder-offsets" className="mb-1.5 block text-sm font-medium text-foreground">
-              Reminder vor Anmeldeschluss
+              Reminder vor Turnier-Start
             </label>
             <input
               id="admin-reminder-offsets"

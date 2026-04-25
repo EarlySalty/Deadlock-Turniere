@@ -583,7 +583,7 @@ export default function Tournament() {
                 )}
                 {tournament.registration_end && (
                   <div>
-                    <span className="text-muted">Anmeldung Ende:</span>
+                    <span className="text-muted">Turnier-Start:</span>
                     <span className="ml-2 text-foreground">
                       {new Date(tournament.registration_end).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
                     </span>

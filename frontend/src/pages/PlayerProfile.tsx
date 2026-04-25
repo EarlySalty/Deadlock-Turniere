@@ -393,8 +393,8 @@ export default function PlayerProfile() {
                 <div className="flex items-center gap-2">
                   <Bell size={14} className="text-muted" />
                   <div>
-                    <div className="text-sm font-medium text-foreground">Reminder vor Anmeldeschluss</div>
-                    <div className="text-xs text-muted">DM 1 Tag, 2 Stunden oder 15 Minuten vor Anmeldeschluss</div>
+                    <div className="text-sm font-medium text-foreground">Reminder vor Turnier-Start</div>
+                    <div className="text-xs text-muted">DM 1 Tag, 2 Stunden oder 15 Minuten bevor das Turnier startet</div>
                   </div>
                 </div>
               </label>

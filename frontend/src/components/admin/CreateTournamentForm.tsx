@@ -399,7 +399,7 @@ export default function CreateTournamentForm() {
           </div>
           <div>
             <label htmlFor="reg-end" className="block text-sm font-medium text-foreground mb-1.5">
-              Anmeldung Ende
+              Turnier-Start
             </label>
             <DateTimeInput
               id="reg-end"
@@ -407,6 +407,9 @@ export default function CreateTournamentForm() {
               onChange={(e) => setRegEnd(e.target.value)}
               className="w-full bg-background border border-border rounded-lg px-3 py-2 text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
             />
+            <p className="text-xs text-muted mt-1">
+              Anmeldeschluss = Turnier-Start. Reminder werden vor diesem Zeitpunkt verschickt.
+            </p>
           </div>
           <div>
             <label htmlFor="checkin-start" className="block text-sm font-medium text-foreground mb-1.5">
@@ -418,14 +421,14 @@ export default function CreateTournamentForm() {
               onChange={(e) => setCheckinStart(e.target.value)}
               className="w-full bg-background border border-border rounded-lg px-3 py-2 text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
             />
-            <p className="text-xs text-muted mt-1">Leer = Check-in startet automatisch mit Anmeldeschluss.</p>
+            <p className="text-xs text-muted mt-1">Leer = Check-in startet automatisch mit Turnier-Start.</p>
           </div>
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
             <label htmlFor="reminder-offsets" className="block text-sm font-medium text-foreground mb-1.5">
-              Reminder vor Anmeldeschluss
+              Reminder vor Turnier-Start
             </label>
             <input
               id="reminder-offsets"
