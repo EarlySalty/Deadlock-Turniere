@@ -38,6 +38,7 @@ export interface Tournament {
   description: string | null
   team_size: number
   series_format: 1 | 3 | 5
+  final_series_format: 1 | 3 | 5 | null
   registration_start: string | null
   registration_end: string | null
   checkin_start: string | null
@@ -288,6 +289,7 @@ export interface TournamentCreate {
   team_size: number
   bracket_format: BracketFormat
   series_format?: 1 | 3 | 5
+  final_series_format?: 1 | 3 | 5
   registration_start?: string
   registration_end?: string
   checkin_start?: string | null
@@ -314,6 +316,7 @@ export interface TournamentUpdate {
   tournament_game_mode?: TournamentGameMode
   auto_lobby_enabled?: boolean
   series_format?: 1 | 3 | 5
+  final_series_format?: 1 | 3 | 5 | null
   registration_start?: string
   registration_end?: string
   checkin_start?: string | null

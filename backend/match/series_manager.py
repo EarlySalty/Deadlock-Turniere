@@ -107,7 +107,10 @@ async def record_game_result(
 
         cursor = await db.execute(
             """
-            SELECT t.series_format
+            SELECT t.series_format, t.final_series_format,
+                   bm.bracket_type, bm.round,
+                   (SELECT MAX(round) FROM bracket_matches
+                    WHERE tournament_id = t.id AND bracket_type = 'winners') AS max_winners_round
             FROM tournaments t
             JOIN bracket_matches bm ON bm.tournament_id = t.id
             WHERE bm.id = ?
@@ -116,7 +119,19 @@ async def record_game_result(
         )
         fmt_row = await cursor.fetchone()
 
-    series_format = int(fmt_row["series_format"]) if fmt_row else 1
+    if fmt_row:
+        is_final = (
+            fmt_row["bracket_type"] == "grand_final"
+            or (
+                fmt_row["bracket_type"] == "winners"
+                and fmt_row["round"] == fmt_row["max_winners_round"]
+            )
+        )
+        final_fmt = fmt_row["final_series_format"]
+        base_fmt = int(fmt_row["series_format"])
+        series_format = int(final_fmt) if (is_final and final_fmt is not None) else base_fmt
+    else:
+        series_format = 1
     wins_needed = (series_format // 2) + 1
     wins1 = sum(1 for row in rows if row["winner_team"] == 1)
     wins2 = sum(1 for row in rows if row["winner_team"] == 2)

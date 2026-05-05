@@ -841,8 +841,9 @@ async def create_tournament(
             "(name, description, team_size, bracket_format, registration_start, "
             "registration_end, checkin_start, group_phase_start, bracket_start, "
             "created_by, invite_mode, invite_window_start, invite_window_end, tournament_mode, "
-            "tournament_game_mode, auto_lobby_enabled, exclude_from_leaderboard, is_test, reminder_offsets, rules) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "tournament_game_mode, auto_lobby_enabled, exclude_from_leaderboard, is_test, reminder_offsets, rules, "
+            "series_format, final_series_format) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 body.name,
                 body.description,
@@ -864,6 +865,8 @@ async def create_tournament(
                 1 if body.is_test else 0,
                 _serialize_reminder_offsets(body.reminder_offsets),
                 body.rules,
+                body.series_format,
+                body.final_series_format,
             ),
         )
         await db.execute(

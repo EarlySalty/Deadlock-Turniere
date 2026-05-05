@@ -125,6 +125,7 @@ class TournamentCreate(TournamentBase):
     team_size: int = 6
     bracket_format: BracketFormat = BracketFormat.single_elimination
     series_format: int = Field(default=1)
+    final_series_format: Optional[int] = None
     registration_start: Optional[str] = None
     registration_end: Optional[str] = None
     checkin_start: Optional[str] = None
@@ -149,6 +150,15 @@ class TournamentCreate(TournamentBase):
             raise ValueError("series_format muss 1, 3 oder 5 sein")
         return v
 
+    @field_validator("final_series_format")
+    @classmethod
+    def validate_final_series_format(cls, v: Optional[int]) -> Optional[int]:
+        if v is None:
+            return v
+        if v not in (1, 3, 5):
+            raise ValueError("final_series_format muss 1, 3 oder 5 sein")
+        return v
+
     @field_validator("reminder_offsets")
     @classmethod
     def validate_reminder_offsets(cls, value: list[int]) -> list[int]:
@@ -163,6 +173,7 @@ class TournamentUpdate(BaseModel):
     team_size: Optional[int] = None
     bracket_format: Optional[BracketFormat] = None
     series_format: int | None = Field(default=None)
+    final_series_format: int | None = Field(default=None)
     registration_start: Optional[str] = None
     registration_end: Optional[str] = None
     checkin_start: Optional[str] = None
@@ -188,6 +199,15 @@ class TournamentUpdate(BaseModel):
             return v
         if v not in (1, 3, 5):
             raise ValueError("series_format muss 1, 3 oder 5 sein")
+        return v
+
+    @field_validator("final_series_format")
+    @classmethod
+    def validate_final_series_format(cls, v: int | None) -> int | None:
+        if v is None:
+            return v
+        if v not in (1, 3, 5):
+            raise ValueError("final_series_format muss 1, 3 oder 5 sein")
         return v
 
     @field_validator("reminder_offsets")
@@ -218,6 +238,7 @@ class Tournament(TournamentBase):
     description: Optional[str] = None
     team_size: int = 6
     series_format: int = 1
+    final_series_format: Optional[int] = None
     registration_start: Optional[str] = None
     registration_end: Optional[str] = None
     checkin_start: Optional[str] = None
@@ -460,6 +481,7 @@ class TournamentDetailPublic(TournamentBase):
     description: Optional[str] = None
     team_size: int = 6
     series_format: int = 1
+    final_series_format: Optional[int] = None
     registration_start: Optional[str] = None
     registration_end: Optional[str] = None
     group_phase_start: Optional[str] = None

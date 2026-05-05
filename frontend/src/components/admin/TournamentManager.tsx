@@ -93,6 +93,8 @@ export default function TournamentManager({
     name: tournament.name,
     description: tournament.description ?? '',
     team_size: tournament.team_size,
+    series_format: tournament.series_format as 1 | 3 | 5,
+    final_series_format: tournament.final_series_format as 1 | 3 | 5 | null,
     bracket_format: tournament.bracket_format,
     tournament_mode: tournament.tournament_mode,
     tournament_game_mode: tournament.tournament_game_mode,
@@ -137,7 +139,7 @@ export default function TournamentManager({
 
   const handleChange = (
     key: keyof typeof form,
-    value: string | number | boolean
+    value: string | number | boolean | null
   ) => {
     setForm((current) => ({ ...current, [key]: value }))
   }
@@ -147,6 +149,8 @@ export default function TournamentManager({
       name: form.name.trim(),
       description: form.description.trim() || undefined,
       team_size: form.team_size,
+      series_format: form.series_format as 1 | 3 | 5,
+      final_series_format: (form.final_series_format as 1 | 3 | 5 | null) ?? null,
       bracket_format: form.bracket_format,
       tournament_game_mode: form.tournament_game_mode,
       auto_lobby_enabled: form.auto_lobby_enabled,
@@ -337,6 +341,43 @@ export default function TournamentManager({
               <option value="single_elimination">Single Elimination</option>
               <option value="double_elimination">Double Elimination</option>
             </select>
+          </div>
+
+          <div>
+            <label htmlFor="admin-series-format" className="mb-1.5 block text-sm font-medium text-foreground">
+              Serienformat (Standard)
+            </label>
+            <select
+              id="admin-series-format"
+              value={form.series_format}
+              onChange={(event) => handleChange('series_format', Number(event.target.value) as 1 | 3 | 5)}
+              className="w-full rounded-lg border border-border bg-background px-3 py-2 text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
+            >
+              <option value={1}>Bo1</option>
+              <option value={3}>Bo3</option>
+              <option value={5}>Bo5</option>
+            </select>
+          </div>
+
+          <div>
+            <label htmlFor="admin-final-series-format" className="mb-1.5 block text-sm font-medium text-foreground">
+              Finale Match Format
+            </label>
+            <select
+              id="admin-final-series-format"
+              value={form.final_series_format ?? 'same'}
+              onChange={(event) => {
+                const v = event.target.value
+                handleChange('final_series_format', v === 'same' ? null : Number(v))
+              }}
+              className="w-full rounded-lg border border-border bg-background px-3 py-2 text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
+            >
+              <option value="same">Wie Serienformat</option>
+              <option value={1}>Bo1</option>
+              <option value={3}>Bo3</option>
+              <option value={5}>Bo5</option>
+            </select>
+            <p className="mt-1 text-xs text-muted">Überschreibt das Format nur für das Finale.</p>
           </div>
 
           <div>

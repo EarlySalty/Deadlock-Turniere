@@ -1115,6 +1115,40 @@ async def solo_signup(
             "VALUES (?, ?, ?, ?, ?, ?)",
             (tournament_id, user.discord_id, user.discord_name, steam_id, rank, score),
         )
+
+        if tournament["team_size"] == 1:
+            # Bei 1vs1 ist jeder Teilnehmer sein eigenes Team — direkt anlegen
+            resolved_name = _sanitize_discord_name(user.discord_name, discord_id=user.discord_id) or user.discord_id
+            team_name = resolved_name[:32]
+            base_key = team_name.casefold()
+            name_key = base_key
+            suffix = 1
+            while True:
+                cur2 = await db.execute(
+                    "SELECT id FROM teams WHERE tournament_id = ? AND name_key = ?",
+                    (tournament_id, name_key),
+                )
+                if not await cur2.fetchone():
+                    break
+                suffix += 1
+                name_key = f"{base_key}{suffix}"
+                team_name = f"{resolved_name}{suffix}"[:32]
+
+            cur2 = await db.execute(
+                "INSERT INTO teams (tournament_id, name, name_key, captain_discord_id) VALUES (?, ?, ?, ?)",
+                (tournament_id, team_name, name_key, user.discord_id),
+            )
+            team_id = cur2.lastrowid
+            await db.execute(
+                "INSERT INTO team_members (team_id, discord_id, discord_name, steam_id, rank, rank_score, role) "
+                "VALUES (?, ?, ?, ?, ?, ?, 'captain')",
+                (team_id, user.discord_id, resolved_name, steam_id, rank, score),
+            )
+            await db.execute(
+                "UPDATE tournament_signups SET team_id = ? WHERE tournament_id = ? AND discord_id = ?",
+                (team_id, tournament_id, user.discord_id),
+            )
+
         await db.commit()
 
     return {"status": "angemeldet", "tournament_id": tournament_id}

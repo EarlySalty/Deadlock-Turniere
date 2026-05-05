@@ -198,6 +198,7 @@ export default function CreateTournamentForm() {
   const [teamSize, setTeamSize] = useState(6)
   const [bracketFormat, setBracketFormat] = useState<BracketFormat>('single_elimination')
   const [seriesFormat, setSeriesFormat] = useState<1 | 3 | 5>(1)
+  const [finalSeriesFormat, setFinalSeriesFormat] = useState<1 | 3 | 5 | null>(null)
   const [regStart, setRegStart] = useState('')
   const [regEnd, setRegEnd] = useState('')
   const [checkinStart, setCheckinStart] = useState('')
@@ -258,6 +259,7 @@ export default function CreateTournamentForm() {
         team_size: teamSize,
         bracket_format: bracketFormat,
         series_format: seriesFormat,
+        final_series_format: finalSeriesFormat ?? undefined,
         registration_start: regStart || undefined,
         registration_end: regEnd || undefined,
         checkin_start: checkinStart || undefined,
@@ -293,6 +295,7 @@ export default function CreateTournamentForm() {
           setTournamentGameMode('standard')
           setAutoLobbyEnabled(true)
           setReminderOffsets('1440, 120, 15')
+          setFinalSeriesFormat(null)
           setSliders(initSliders())
         },
       }
@@ -387,20 +390,43 @@ export default function CreateTournamentForm() {
           </div>
         </div>
 
-        <div>
-          <label htmlFor="series-format" className="block text-sm font-medium text-foreground mb-1.5">
-            Serienformat
-          </label>
-          <select
-            id="series-format"
-            value={seriesFormat}
-            onChange={(e) => setSeriesFormat(Number(e.target.value) as 1 | 3 | 5)}
-            className="w-full bg-background border border-border rounded-lg px-3 py-2 text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
-          >
-            <option value={1}>Bo1</option>
-            <option value={3}>Bo3</option>
-            <option value={5}>Bo5</option>
-          </select>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div>
+            <label htmlFor="series-format" className="block text-sm font-medium text-foreground mb-1.5">
+              Serienformat (Standard)
+            </label>
+            <select
+              id="series-format"
+              value={seriesFormat}
+              onChange={(e) => setSeriesFormat(Number(e.target.value) as 1 | 3 | 5)}
+              className="w-full bg-background border border-border rounded-lg px-3 py-2 text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
+            >
+              <option value={1}>Bo1</option>
+              <option value={3}>Bo3</option>
+              <option value={5}>Bo5</option>
+            </select>
+          </div>
+
+          <div>
+            <label htmlFor="final-series-format" className="block text-sm font-medium text-foreground mb-1.5">
+              Finale Match Format
+            </label>
+            <select
+              id="final-series-format"
+              value={finalSeriesFormat ?? 'same'}
+              onChange={(e) => {
+                const v = e.target.value
+                setFinalSeriesFormat(v === 'same' ? null : Number(v) as 1 | 3 | 5)
+              }}
+              className="w-full bg-background border border-border rounded-lg px-3 py-2 text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
+            >
+              <option value="same">Wie Serienformat</option>
+              <option value={1}>Bo1</option>
+              <option value={3}>Bo3</option>
+              <option value={5}>Bo5</option>
+            </select>
+            <p className="mt-1 text-xs text-muted">Überschreibt das Format nur für das Finale.</p>
+          </div>
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">

@@ -760,6 +760,45 @@ export default function Tournament() {
 
               {/* Team List */}
               <div className="lg:col-span-2 space-y-6">
+                {/* Registered players overview */}
+                {tournament.signups.length > 0 && (
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <h3 className="text-sm font-bold uppercase tracking-widest text-muted">Eingetragene Spieler</h3>
+                      <span className="text-xs font-bold text-foreground bg-white/5 px-2 py-1 rounded-lg border border-white/5">
+                        {tournament.signups.length}
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      {tournament.signups.map((signup) => {
+                        const teamName = signup.team_id != null
+                          ? tournament.teams.find((t) => t.id === signup.team_id)?.name
+                          : null
+                        return (
+                          <div
+                            key={signup.id}
+                            className="flex items-center gap-3 p-2.5 rounded-lg bg-white/5 border border-white/5"
+                          >
+                            <User size={13} className="text-muted shrink-0" />
+                            <span className="text-sm text-foreground font-medium truncate flex-1">
+                              {safePublicName(signup.discord_name)}
+                            </span>
+                            {teamName ? (
+                              <span className="text-[10px] font-bold text-primary uppercase tracking-wide shrink-0">
+                                {teamName}
+                              </span>
+                            ) : (
+                              <span className="text-[10px] font-bold text-muted uppercase tracking-wide shrink-0">
+                                Solo
+                              </span>
+                            )}
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+                )}
+
                 <div className="flex items-center justify-between">
                   <h3 className="text-sm font-bold uppercase tracking-widest text-muted">Gemeldete Legionen</h3>
                   <span className="text-xs font-bold text-foreground bg-white/5 px-2 py-1 rounded-lg border border-white/5">
