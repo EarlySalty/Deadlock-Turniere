@@ -104,6 +104,7 @@ export default function TournamentManager({
     bracket_start: toInputDateTime(tournament.bracket_start),
     exclude_from_leaderboard: tournament.exclude_from_leaderboard,
     reminder_offsets: toReminderOffsetString(tournament.reminder_offsets),
+    rules: tournament.rules ?? '',
   })
   const [successMessage, setSuccessMessage] = useState('')
   const [deleteConfirmed, setDeleteConfirmed] = useState(false)
@@ -156,6 +157,7 @@ export default function TournamentManager({
       bracket_start: form.bracket_start || undefined,
       exclude_from_leaderboard: form.exclude_from_leaderboard,
       reminder_offsets: parseReminderOffsets(form.reminder_offsets),
+      rules: form.rules.trim() || null,
     }
     if (canChangeTournamentMode && form.tournament_mode !== tournament.tournament_mode) {
       payload.force_tournament_mode = form.tournament_mode as TournamentMode
@@ -288,6 +290,19 @@ export default function TournamentManager({
               rows={4}
               value={form.description}
               onChange={(event) => handleChange('description', event.target.value)}
+              className="w-full rounded-lg border border-border bg-background px-3 py-2 text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
+            />
+          </div>
+
+          <div>
+            <label htmlFor="admin-tournament-rules" className="mb-1.5 block text-sm font-medium text-foreground">
+              Regelwerk (Markdown unterstützt)
+            </label>
+            <textarea
+              id="admin-tournament-rules"
+              rows={10}
+              value={form.rules}
+              onChange={(event) => handleChange('rules', event.target.value)}
               className="w-full rounded-lg border border-border bg-background px-3 py-2 text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
             />
           </div>

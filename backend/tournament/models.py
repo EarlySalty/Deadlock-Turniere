@@ -140,6 +140,7 @@ class TournamentCreate(TournamentBase):
     auto_lobby_enabled: bool = True
     exclude_from_leaderboard: bool = False
     reminder_offsets: list[int] = Field(default_factory=lambda: [1440, 120, 15])
+    rules: Optional[str] = None
 
     @field_validator("series_format")
     @classmethod
@@ -178,6 +179,7 @@ class TournamentUpdate(BaseModel):
     exclude_from_leaderboard: Optional[bool] = None
     is_test: Optional[bool] = None
     reminder_offsets: Optional[list[int]] = None
+    rules: Optional[str] = None
 
     @field_validator("series_format")
     @classmethod
@@ -234,6 +236,7 @@ class Tournament(TournamentBase):
     lobby_settings: Optional[str] = None
     exclude_from_leaderboard: bool = False
     reminder_offsets: list[int] = Field(default_factory=lambda: [1440, 120, 15])
+    rules: Optional[str] = None
 
     @field_validator("reminder_offsets", mode="before")
     @classmethod
@@ -472,6 +475,7 @@ class TournamentDetailPublic(TournamentBase):
     invite_window_start: Optional[str] = None
     invite_window_end: Optional[str] = None
     lobby_settings: Optional[str] = None
+    rules: Optional[str] = None
     teams: list[TeamPublic] = Field(default_factory=list)
     groups: list[Group] = Field(default_factory=list)
     bracket_matches: list[BracketMatch] = Field(default_factory=list)

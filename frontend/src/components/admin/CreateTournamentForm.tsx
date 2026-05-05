@@ -194,6 +194,7 @@ function parseReminderOffsets(value: string): number[] {
 export default function CreateTournamentForm() {
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
+  const [rules, setRules] = useState('')
   const [teamSize, setTeamSize] = useState(6)
   const [bracketFormat, setBracketFormat] = useState<BracketFormat>('single_elimination')
   const [seriesFormat, setSeriesFormat] = useState<1 | 3 | 5>(1)
@@ -269,12 +270,14 @@ export default function CreateTournamentForm() {
         auto_lobby_enabled: autoLobbyEnabled,
         exclude_from_leaderboard: excludeFromLeaderboard,
         reminder_offsets: parseReminderOffsets(reminderOffsets),
+        rules: rules.trim() || undefined,
       },
       {
         onSuccess: (tournament) => {
           setSuccessMsg(`Turnier "${tournament.name}" wurde erfolgreich erstellt!`)
           setName('')
           setDescription('')
+          setRules('')
           setTeamSize(6)
           setBracketFormat('single_elimination')
           setSeriesFormat(1)
@@ -332,6 +335,21 @@ export default function CreateTournamentForm() {
             rows={3}
             placeholder="Optionale Beschreibung des Turniers..."
             className="w-full bg-background border border-border rounded-lg px-3 py-2 text-foreground placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-primary/50 resize-none"
+          />
+        </div>
+
+        {/* Regelwerk */}
+        <div>
+          <label htmlFor="tournament-rules" className="block text-sm font-medium text-foreground mb-1.5">
+            Regelwerk (Markdown unterstützt)
+          </label>
+          <textarea
+            id="tournament-rules"
+            value={rules}
+            onChange={(e) => setRules(e.target.value)}
+            rows={8}
+            placeholder="Die Gesetze der Arena..."
+            className="w-full bg-background border border-border rounded-lg px-3 py-2 text-foreground placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-primary/50"
           />
         </div>
 

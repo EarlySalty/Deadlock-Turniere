@@ -1,10 +1,12 @@
 import { useRef, useState, type ChangeEvent } from 'react'
 import { useParams, Link } from 'react-router-dom'
+import { motion } from 'framer-motion'
 import {
-  User, Trophy, Swords, Target, Star, Edit2, Check, X, Bell, UserCheck, Camera,
+  User, Trophy, Swords, Target, Star, Edit2, Check, X, Camera,
+  ScrollText, Settings, ArrowUpRight
 } from 'lucide-react'
 import {
-  usePlayerProfile, useMyProfile, useUpdateMyProfile, useConsent, useUploadProfileAvatar, useRevokeConsent,
+  usePlayerProfile, useMyProfile, useUpdateMyProfile, useUploadProfileAvatar, useRevokeConsent,
 } from '@/hooks/useTournament'
 import { useAuth } from '@/hooks/useAuth'
 import Card from '@/components/ui/Card'
@@ -12,7 +14,7 @@ import Button from '@/components/ui/Button'
 import LoadingSpinner from '@/components/ui/LoadingSpinner'
 
 function placementLabel(placement: number | null): string {
-  if (!placement) return 'Noch kein Turnier'
+  if (!placement) return 'Keine Platzierung'
   if (placement === 1) return 'Turniersieger'
   if (placement === 2) return 'Finalist'
   if (placement <= 4) return 'Halbfinalist'
@@ -29,13 +31,11 @@ export default function PlayerProfile() {
 
   const { data: profile, isLoading, isError } = usePlayerProfile(username ?? '')
   const { data: myProfile } = useMyProfile()
-  const { data: consent } = useConsent()
   const updateProfile = useUpdateMyProfile()
   const revokeConsent = useRevokeConsent()
 
   const [editBio, setEditBio] = useState(false)
   const [bioValue, setBioValue] = useState('')
-  const [showSettings, setShowSettings] = useState(false)
   const [settingsSaved, setSettingsSaved] = useState(false)
   const uploadAvatar = useUploadProfileAvatar()
   const [editName, setEditName] = useState(false)
@@ -44,17 +44,17 @@ export default function PlayerProfile() {
   const avatarInputRef = useRef<HTMLInputElement>(null)
 
   if (!username) {
-    return <Card className="text-center py-10"><p className="text-muted">Kein Benutzername angegeben.</p></Card>
+    return <Card className="text-center py-20 opacity-60"><p className="text-muted italic">Kein Benutzername im Archiv gefunden.</p></Card>
   }
 
   if (isLoading) return <LoadingSpinner />
 
   if (isError || !profile) {
     return (
-      <Card className="text-center py-10">
-        <User size={40} className="mx-auto text-muted mb-3" />
-        <p className="text-muted">Spieler nicht gefunden.</p>
-        <Link to="/" className="text-primary text-sm hover:underline mt-2 inline-block">Zur Startseite</Link>
+      <Card className="text-center py-20 opacity-60">
+        <User size={48} className="mx-auto text-muted mb-4 opacity-20" />
+        <p className="text-muted italic">Dieser Held existiert nur in Legenden.</p>
+        <Link to="/" className="text-primary text-xs font-bold uppercase tracking-widest hover:underline mt-6 inline-block">Zurück zur Arena</Link>
       </Card>
     )
   }
@@ -101,15 +101,12 @@ export default function PlayerProfile() {
   }
 
   const handleRevokeConsent = () => {
-    if (!window.confirm('Deine Turnier-Einwilligung wirklich widerrufen? Danach musst du vor einer neuen Anmeldung erneut zustimmen.')) {
+    if (!window.confirm('Deine Turnier-Einwilligung wirklich widerrufen?')) {
       return
     }
     revokeConsent.mutate(undefined, {
       onSuccess: () => {
-        setConsentMessage('Einwilligung widerrufen. Für neue Turnier-Anmeldungen ist eine erneute Zustimmung erforderlich.')
-      },
-      onError: (error) => {
-        setConsentMessage(error instanceof Error ? error.message : 'Widerruf fehlgeschlagen.')
+        setConsentMessage('Einwilligung widerrufen.')
       },
     })
   }
@@ -121,33 +118,42 @@ export default function PlayerProfile() {
     : (profile.discord_avatar ?? null)
 
   return (
-    <div className="space-y-6 max-w-2xl mx-auto">
-      {/* Header */}
-      <Card className="p-6">
-        <div className="flex items-start gap-4">
-          <div className="relative flex-shrink-0">
-            {avatarUrl ? (
-              <img
-                src={avatarUrl}
-                alt={profile.discord_name}
-                className="w-16 h-16 rounded-full border-2 border-border"
-              />
-            ) : (
-              <div className="w-16 h-16 rounded-full border-2 border-border bg-background/60 flex items-center justify-center">
-                <User size={28} className="text-muted" />
+    <motion.div
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="space-y-8 max-w-4xl mx-auto pb-20"
+    >
+      {/* Dossier Header */}
+      <Card className="p-0 overflow-hidden border-white/5 relative bg-white/[0.02]">
+        <div className="absolute top-0 left-0 w-full h-1.5 bg-gradient-to-r from-transparent via-primary/40 to-transparent" />
+        <div className="p-8 md:p-12">
+          <div className="flex flex-col md:flex-row gap-8 items-center md:items-start text-center md:text-left">
+            <div className="relative group flex-shrink-0">
+              <div className="w-32 h-32 md:w-40 md:h-40 rounded-lg overflow-hidden border-2 border-white/10 shadow-2xl relative">
+                {avatarUrl ? (
+                  <img
+                    src={avatarUrl}
+                    alt={profile.discord_name}
+                    className="w-full h-full object-cover grayscale group-hover:grayscale-0 transition-all duration-500"
+                  />
+                ) : (
+                  <div className="w-full h-full bg-white/5 flex items-center justify-center">
+                    <User size={64} className="text-muted opacity-20" />
+                  </div>
+                )}
+                {isOwnProfile && (
+                  <button
+                    type="button"
+                    onClick={() => avatarInputRef.current?.click()}
+                    disabled={uploadAvatar.isPending}
+                    className="absolute inset-0 bg-black/60 flex flex-col items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                  >
+                    <Camera size={24} className="text-primary mb-1" />
+                    <span className="text-[10px] font-bold uppercase tracking-widest text-white">Siegel ändern</span>
+                  </button>
+                )}
               </div>
-            )}
-            {isOwnProfile && (
-              <>
-                <button
-                  type="button"
-                  onClick={() => avatarInputRef.current?.click()}
-                  disabled={uploadAvatar.isPending}
-                  className="absolute inset-0 rounded-full flex items-center justify-center bg-black/50 opacity-0 hover:opacity-100 transition-opacity"
-                  title="Profilbild ändern"
-                >
-                  <Camera size={18} className="text-white" />
-                </button>
+              {isOwnProfile && (
                 <input
                   ref={avatarInputRef}
                   type="file"
@@ -155,259 +161,189 @@ export default function PlayerProfile() {
                   className="hidden"
                   onChange={handleAvatarChange}
                 />
-              </>
-            )}
-          </div>
-          <div className="flex-1 min-w-0">
-            {editName && isOwnProfile ? (
-              <div className="flex items-center gap-2">
-                <input
-                  value={nameValue}
-                  onChange={(e) => setNameValue(e.target.value)}
-                  maxLength={32}
-                  className="bg-background border border-border rounded px-2 py-1 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 w-40"
-                  autoFocus
-                />
-                <Button variant="ghost" size="sm" onClick={() => setEditName(false)}>
-                  <X size={13} />
-                </Button>
-                <Button variant="primary" size="sm" onClick={handleNameSave} disabled={updateProfile.isPending}>
-                  <Check size={13} />
-                </Button>
-              </div>
-            ) : (
-              <div className="flex items-center gap-2">
-                <h1 className="text-xl font-bold text-foreground truncate">
-                  {(isOwnProfile && myProfile?.display_name) ? myProfile.display_name : profile.discord_name}
-                </h1>
-                {isOwnProfile && (
-                  <button type="button" onClick={handleNameEdit} className="text-muted hover:text-foreground transition-colors flex-shrink-0">
-                    <Edit2 size={13} />
-                  </button>
+              )}
+            </div>
+
+            <div className="flex-1 space-y-4">
+              <div className="space-y-1">
+                <p className="text-[10px] font-bold text-primary uppercase tracking-[0.4em]">Profil-Dossier</p>
+                {editName && isOwnProfile ? (
+                  <div className="flex items-center justify-center md:justify-start gap-2">
+                    <input
+                      value={nameValue}
+                      onChange={(e) => setNameValue(e.target.value)}
+                      className="bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-xl font-bold font-display uppercase tracking-tight text-foreground focus:outline-none focus:border-primary/50"
+                      autoFocus
+                    />
+                    <Button variant="ghost" size="sm" onClick={() => setEditName(false)}><X size={14} /></Button>
+                    <Button variant="primary" size="sm" onClick={handleNameSave} disabled={updateProfile.isPending}><Check size={14} /></Button>
+                  </div>
+                ) : (
+                  <div className="flex items-center justify-center md:justify-start gap-3 group">
+                    <h1 className="text-4xl md:text-5xl font-bold font-display text-foreground tracking-tight uppercase">
+                      {(isOwnProfile && myProfile?.display_name) ? myProfile.display_name : profile.discord_name}
+                    </h1>
+                    {isOwnProfile && (
+                      <button onClick={handleNameEdit} className="text-muted hover:text-primary transition-colors opacity-0 group-hover:opacity-100">
+                        <Edit2 size={16} />
+                      </button>
+                    )}
+                  </div>
                 )}
               </div>
-            )}
-            {profile.rank && (
-              <span className="inline-block mt-1 text-xs px-2 py-0.5 rounded-full bg-primary/15 text-primary font-medium">
-                {profile.rank}
-              </span>
-            )}
-            <div className="flex items-center gap-1 mt-2">
-              <Link to="/rangliste" className="text-xs text-muted hover:text-primary transition-colors">
-                Zur Rangliste
-              </Link>
+
+              <div className="flex flex-wrap justify-center md:justify-start gap-4">
+                <div className="px-3 py-1 rounded-lg border border-primary/20 bg-primary/5 text-[10px] font-bold text-primary uppercase tracking-widest">
+                  {profile.rank ?? 'Rekrut'}
+                </div>
+                <div className="px-3 py-1 rounded-lg border border-white/10 bg-white/5 text-[10px] font-bold text-muted uppercase tracking-widest">
+                  Score: {profile.rank_score}
+                </div>
+              </div>
+
+              {/* Bio section */}
+              <div className="pt-4 border-t border-white/5 max-w-xl">
+                {editBio && isOwnProfile ? (
+                  <div className="space-y-3">
+                    <textarea
+                      value={bioValue}
+                      onChange={(e) => setBioValue(e.target.value)}
+                      className="w-full bg-white/5 border border-white/10 rounded-lg p-4 text-sm italic text-muted focus:outline-none focus:border-primary/50 min-h-[100px]"
+                      placeholder="Deine Geschichte..."
+                    />
+                    <div className="flex gap-2">
+                      <Button size="sm" onClick={handleBioSave} disabled={updateProfile.isPending}>Sichern</Button>
+                      <Button variant="ghost" size="sm" onClick={() => setEditBio(false)}>Abbruch</Button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="group relative">
+                    <p className="text-sm italic text-muted leading-relaxed">
+                      {profile.bio ? `"${profile.bio}"` : '"Noch wurde keine Legende über diesen Spieler geschrieben."'}
+                    </p>
+                    {isOwnProfile && (
+                      <button onClick={handleBioEdit} className="absolute -top-6 right-0 text-muted hover:text-primary opacity-0 group-hover:opacity-100 transition-all">
+                        <Edit2 size={14} />
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         </div>
       </Card>
 
-      {/* Stats */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <Card className="p-4 text-center">
-          <Star size={18} className="mx-auto mb-1 text-primary" />
-          <div className="text-2xl font-bold text-foreground">{profile.total_points}</div>
-          <div className="text-xs text-muted">Punkte</div>
+      {/* Stats Grid */}
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <Card className="text-center p-6 space-y-2 border-white/5">
+          <Star size={20} className="mx-auto text-primary" />
+          <p className="text-2xl font-bold text-foreground">{profile.total_points}</p>
+          <p className="text-[10px] uppercase font-bold text-muted tracking-widest">Punkte</p>
         </Card>
-        <Card className="p-4 text-center">
-          <Trophy size={18} className="mx-auto mb-1 text-yellow-400" />
-          <div className="text-2xl font-bold text-foreground">{profile.tournaments_played}</div>
-          <div className="text-xs text-muted">Turniere</div>
+        <Card className="text-center p-6 space-y-2 border-white/5">
+          <Trophy size={20} className="mx-auto text-yellow-400" />
+          <p className="text-2xl font-bold text-foreground">{profile.tournaments_played}</p>
+          <p className="text-[10px] uppercase font-bold text-muted tracking-widest">Turniere</p>
         </Card>
-        <Card className="p-4 text-center">
-          <Swords size={18} className="mx-auto mb-1 text-blue-400" />
-          <div className="text-2xl font-bold text-foreground">{profile.matches_played}</div>
-          <div className="text-xs text-muted">Matches</div>
+        <Card className="text-center p-6 space-y-2 border-white/5">
+          <Swords size={20} className="mx-auto text-blue-400" />
+          <p className="text-2xl font-bold text-foreground">{profile.matches_played}</p>
+          <p className="text-[10px] uppercase font-bold text-muted tracking-widest">Einsätze</p>
         </Card>
-        <Card className="p-4 text-center">
-          <Target size={18} className="mx-auto mb-1 text-green-400" />
-          <div className="text-2xl font-bold text-foreground">{profile.matches_won}</div>
-          <div className="text-xs text-muted">Siege</div>
+        <Card className="text-center p-6 space-y-2 border-white/5">
+          <Target size={20} className="mx-auto text-green-400" />
+          <p className="text-2xl font-bold text-foreground">{profile.matches_won}</p>
+          <p className="text-[10px] uppercase font-bold text-muted tracking-widest">Siege</p>
         </Card>
       </div>
 
-      {profile.best_placement && (
-        <Card className="p-4 flex items-center gap-3">
-          <Trophy size={18} className="text-yellow-400 flex-shrink-0" />
-          <div>
-            <span className="text-sm text-muted">Bestes Ergebnis:</span>
-            <span className="ml-2 font-medium text-foreground">{placementLabel(profile.best_placement)}</span>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+        {/* Tournament History */}
+        <div className="space-y-6">
+          <h2 className="text-xl font-bold font-display uppercase tracking-widest text-foreground flex items-center gap-3">
+            <ScrollText size={20} className="text-primary" />
+            Chroniken
+          </h2>
+          <div className="space-y-4">
+            {profile.tournament_history && profile.tournament_history.length > 0 ? (
+              profile.tournament_history.map((entry, idx) => (
+                <Card key={idx} className="p-4 border-white/5 bg-white/[0.01] hover:bg-white/[0.03] transition-all">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h3 className="font-bold text-sm uppercase tracking-tight text-foreground">{entry.tournament_name}</h3>
+                      {entry.team_name && <p className="text-[10px] text-muted uppercase tracking-widest mb-1">{entry.team_name}</p>}
+                      <p className="text-[10px] text-muted italic">{placementLabel(entry.placement)}</p>
+                    </div>
+                    <ArrowUpRight size={14} className="text-muted" />
+                  </div>
+                </Card>
+              ))
+            ) : (
+              <p className="text-sm italic text-muted">Noch keine Schlachten geschlagen.</p>
+            )}
           </div>
-        </Card>
-      )}
-
-      {/* Bio */}
-      <Card className="p-5 space-y-3">
-        <div className="flex items-center justify-between">
-          <h2 className="font-semibold text-foreground">Bio</h2>
-          {isOwnProfile && !editBio && (
-            <Button variant="ghost" size="sm" onClick={handleBioEdit}>
-              <Edit2 size={13} />
-              Bearbeiten
-            </Button>
-          )}
         </div>
 
-        {editBio ? (
-          <div className="space-y-2">
-            <textarea
-              value={bioValue}
-              onChange={(e) => setBioValue(e.target.value)}
-              maxLength={1000}
-              rows={4}
-              className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm text-foreground placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-primary/50 resize-none"
-              placeholder="Schreib etwas über dich..."
-            />
-            <div className="flex items-center justify-between">
-              <span className="text-xs text-muted">{bioValue.length}/1000</span>
-              <div className="flex gap-2">
-                <Button variant="ghost" size="sm" onClick={() => setEditBio(false)}>
-                  <X size={13} /> Abbrechen
-                </Button>
-                <Button variant="primary" size="sm" onClick={handleBioSave} disabled={updateProfile.isPending}>
-                  <Check size={13} /> Speichern
-                </Button>
-              </div>
-            </div>
+        {/* Settings / Actions for Own Profile */}
+        {isOwnProfile && (
+          <div className="space-y-6">
+            <h2 className="text-xl font-bold font-display uppercase tracking-widest text-foreground flex items-center gap-3">
+              <Settings size={20} className="text-primary" />
+              Präferenzen
+            </h2>
+            <Card className="p-6 space-y-6 border-white/5">
+               <div className="space-y-4">
+                  <div className="flex items-center justify-between gap-4 border-b border-white/5 pb-4">
+                    <div>
+                      <p className="text-sm font-bold text-foreground uppercase tracking-wide">Auto-Rekrutierung</p>
+                      <p className="text-[10px] text-muted italic">Einladungen automatisch annehmen.</p>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={myProfile?.invite_auto_accept}
+                      onChange={(e) => handleSettingsSave({ invite_auto_accept: e.target.checked })}
+                      className="accent-primary w-4 h-4"
+                    />
+                  </div>
+                  <div className="flex items-center justify-between gap-4">
+                    <div>
+                      <p className="text-sm font-bold text-foreground uppercase tracking-wide">Discord Bot-Botschaften</p>
+                      <p className="text-[10px] text-muted italic">Benachrichtigungen via DM erhalten.</p>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={myProfile?.notify_discord_dm}
+                      onChange={(e) => handleSettingsSave({ notify_discord_dm: e.target.checked })}
+                      className="accent-primary w-4 h-4"
+                    />
+                  </div>
+               </div>
+
+               {settingsSaved && (
+                 <p className="text-[10px] text-green-400 font-bold uppercase tracking-widest animate-pulse">
+                   Direktive gespeichert.
+                 </p>
+               )}
+
+               <div className="pt-6 border-t border-white/5 space-y-4">
+                 <button
+                   onClick={handleRevokeConsent}
+                   className="text-[10px] font-bold text-red-400 uppercase tracking-widest hover:text-red-300 transition-colors"
+                 >
+                   Einwilligung widerrufen
+                 </button>
+               </div>
+            </Card>
+
+            {consentMessage && (
+              <p className="text-xs italic text-amber-500 bg-amber-500/10 p-3 border border-amber-500/20 rounded-lg">
+                {consentMessage}
+              </p>
+            )}
           </div>
-        ) : (
-          <p className="text-sm text-muted">
-            {profile.bio ?? (isOwnProfile ? 'Noch keine Bio verfasst.' : 'Keine Bio vorhanden.')}
-          </p>
         )}
-      </Card>
-
-      {/* Turnier-Historie */}
-      {profile.tournament_history.length > 0 && (
-        <Card className="p-5 space-y-3">
-          <h2 className="font-semibold text-foreground">Turnier-Geschichte</h2>
-          <div className="space-y-2">
-            {profile.tournament_history.map((entry, i) => (
-              <div key={i} className="flex items-center justify-between py-2 border-b border-border/50 last:border-0">
-                <div>
-                  <div className="text-sm font-medium text-foreground">{entry.tournament_name}</div>
-                  {entry.team_name && (
-                    <div className="text-xs text-muted">{entry.team_name}</div>
-                  )}
-                </div>
-                {entry.placement && (
-                  <span className="text-xs px-2 py-0.5 rounded-full bg-background border border-border text-muted">
-                    {placementLabel(entry.placement)}
-                  </span>
-                )}
-              </div>
-            ))}
-          </div>
-        </Card>
-      )}
-
-      {/* Einstellungen (nur eigenes Profil) */}
-      {isOwnProfile && (
-        <Card className="p-5 space-y-4">
-          <button
-            className="w-full flex items-center justify-between text-left"
-            onClick={() => setShowSettings(!showSettings)}
-          >
-            <h2 className="font-semibold text-foreground">Meine Einstellungen</h2>
-            <span className="text-xs text-muted">{showSettings ? 'Ausblenden' : 'Anzeigen'}</span>
-          </button>
-
-          {showSettings && (
-            <div className="space-y-4 pt-2">
-              {consent && (
-                <div className="space-y-3 p-3 rounded-lg bg-background/60 border border-border">
-                  <div className="flex items-start gap-3">
-                    <UserCheck size={16} className={`${consent.has_consent ? 'text-green-400' : 'text-amber-400'} flex-shrink-0 mt-0.5`} />
-                    <div className="text-sm flex-1">
-                      <div className="font-medium text-foreground">Turnier-Einwilligung</div>
-                      <div className="text-muted text-xs mt-0.5">
-                        {consent.has_consent
-                          ? `Eingewilligt am ${new Date(consent.consented_at!).toLocaleDateString('de-DE')}`
-                          : consent.consent_version
-                            ? 'Einwilligung muss erneut bestätigt werden.'
-                            : 'Noch nicht eingewilligt'}
-                      </div>
-                      <div className="text-muted text-xs mt-2 leading-relaxed">
-                        Gilt für Live-Übertragungen sowie spätere Videos, Highlights und Zusammenschnitte
-                        im Turnierkontext. Ein Widerruf ist nicht möglich, solange du in einem aktiven
-                        Turnier angemeldet bist.
-                      </div>
-                    </div>
-                  </div>
-                  {consentMessage && (
-                    <div className={`text-xs ${consent.has_consent ? 'text-green-400' : 'text-muted'}`}>
-                      {consentMessage}
-                    </div>
-                  )}
-                  {consent.has_consent && (
-                    <div className="flex justify-end">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={handleRevokeConsent}
-                        disabled={revokeConsent.isPending}
-                        className="text-red-400 border border-red-500/40 hover:bg-red-500/10"
-                      >
-                        {revokeConsent.isPending ? 'Widerruft...' : 'Einwilligung widerrufen'}
-                      </Button>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              <label className="flex items-center gap-3 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={myProfile?.invite_auto_accept ?? false}
-                  onChange={(e) => handleSettingsSave({ invite_auto_accept: e.target.checked })}
-                  className="h-4 w-4 accent-primary"
-                />
-                <div>
-                  <div className="text-sm font-medium text-foreground">Einladungen automatisch annehmen</div>
-                  <div className="text-xs text-muted">Team-Einladungen werden sofort ohne Bestätigung angenommen</div>
-                </div>
-              </label>
-
-              <label className="flex items-center gap-3 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={myProfile?.notify_discord_dm ?? true}
-                  onChange={(e) => handleSettingsSave({ notify_discord_dm: e.target.checked })}
-                  className="h-4 w-4 accent-primary"
-                />
-                <div className="flex items-center gap-2">
-                  <Bell size={14} className="text-muted" />
-                  <div>
-                    <div className="text-sm font-medium text-foreground">Discord-DM-Benachrichtigungen</div>
-                    <div className="text-xs text-muted">Bei neuen Einladungen und Bewerbungen</div>
-                  </div>
-                </div>
-              </label>
-
-              <label className="flex items-center gap-3 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={myProfile?.notify_registration_reminder ?? true}
-                  onChange={(e) => handleSettingsSave({ notify_registration_reminder: e.target.checked })}
-                  className="h-4 w-4 accent-primary"
-                />
-                <div className="flex items-center gap-2">
-                  <Bell size={14} className="text-muted" />
-                  <div>
-                    <div className="text-sm font-medium text-foreground">Reminder vor Turnier-Start</div>
-                    <div className="text-xs text-muted">DM 1 Tag, 2 Stunden oder 15 Minuten bevor das Turnier startet</div>
-                  </div>
-                </div>
-              </label>
-
-              {settingsSaved && (
-                <div className="text-xs text-green-400 flex items-center gap-1">
-                  <Check size={12} /> Gespeichert
-                </div>
-              )}
-            </div>
-          )}
-        </Card>
-      )}
-    </div>
+      </div>
+    </motion.div>
   )
 }

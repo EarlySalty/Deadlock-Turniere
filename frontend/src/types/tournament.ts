@@ -56,6 +56,7 @@ export interface Tournament {
   created_by: string
   created_at: string
   updated_at: string
+  rules: string | null
 }
 
 // --- Admin types (with discord_id) ---
@@ -300,6 +301,7 @@ export interface TournamentCreate {
   exclude_from_leaderboard?: boolean
   reminder_offsets?: number[]
   is_test?: boolean
+  rules?: string | null
 }
 
 export interface TournamentUpdate {
@@ -322,6 +324,7 @@ export interface TournamentUpdate {
   invite_window_end?: string
   exclude_from_leaderboard?: boolean
   reminder_offsets?: number[]
+  rules?: string | null
 }
 
 export interface ManualResult {

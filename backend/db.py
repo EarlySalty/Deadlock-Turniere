@@ -31,7 +31,8 @@ CREATE TABLE IF NOT EXISTS tournaments(
     reminder_offsets TEXT DEFAULT '[1440,120,15]',
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now')),
-    series_format INTEGER NOT NULL DEFAULT 1
+    series_format INTEGER NOT NULL DEFAULT 1,
+    rules TEXT
 );
 
 CREATE TABLE IF NOT EXISTS teams(
@@ -459,6 +460,7 @@ async def _ensure_schema_upgrades(db: aiosqlite.Connection) -> None:
         "notify_registration_reminder",
         "INTEGER NOT NULL DEFAULT 1",
     )
+    await _ensure_column(db, "tournaments", "rules", "TEXT")
 
     try:
         await db.execute(

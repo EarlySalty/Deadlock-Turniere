@@ -67,29 +67,26 @@ def _parse_reminder_offsets(value: Any) -> list[int]:
 
 def _get_due_next_status(tournament_row: Any, now: datetime) -> str | None:
     """Ermittelt den nächsten fälligen Status basierend auf den Zeitstempeln und Turnier-Modus."""
-    current_status = tournament_row["status"]
+    row = dict(tournament_row)
+    current_status = row["status"]
 
-    if current_status == "draft" and _is_due(tournament_row["registration_start"], now):
+    if current_status == "draft" and _is_due(row["registration_start"], now):
         return "registration"
 
-    checkin_trigger = (
-        tournament_row["checkin_start"]
-        if "checkin_start" in tournament_row.keys()
-        else None
-    ) or tournament_row["registration_end"]
+    checkin_trigger = row.get("checkin_start") or row["registration_end"]
     if current_status == "registration" and _is_due(checkin_trigger, now):
         return "checkin"
 
     # Auto Tournament Mode: Wenn bracket_only, überspring group_phase
-    tournament_mode = tournament_row.get("tournament_mode")
+    tournament_mode = row.get("tournament_mode")
 
-    if current_status == "checkin" and _is_due(tournament_row["group_phase_start"], now):
+    if current_status == "checkin" and _is_due(row["group_phase_start"], now):
         if tournament_mode == "bracket_only":
             # Skip group_phase, gehe direkt zu bracket
-            return "bracket" if _is_due(tournament_row["bracket_start"], now) else None
+            return "bracket" if _is_due(row["bracket_start"], now) else None
         return "group_phase"
 
-    if current_status == "group_phase" and _is_due(tournament_row["bracket_start"], now):
+    if current_status == "group_phase" and _is_due(row["bracket_start"], now):
         return "bracket"
 
     return None

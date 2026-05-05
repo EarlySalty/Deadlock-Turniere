@@ -1,6 +1,6 @@
 import type { ButtonHTMLAttributes, ReactNode } from 'react'
 
-type ButtonVariant = 'primary' | 'secondary' | 'danger' | 'ghost'
+type ButtonVariant = 'primary' | 'secondary' | 'danger' | 'ghost' | 'outline'
 type ButtonSize = 'sm' | 'md' | 'lg'
 
 interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
@@ -10,16 +10,17 @@ interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
 }
 
 const variantStyles: Record<ButtonVariant, string> = {
-  primary: 'bg-primary hover:bg-primary-hover text-white',
-  secondary: 'bg-card hover:bg-card-hover text-foreground border border-border',
-  danger: 'bg-danger hover:bg-red-600 text-white',
-  ghost: 'bg-transparent hover:bg-card text-foreground',
+  primary: 'bg-primary hover:bg-primary-hover text-black shadow-[var(--glow-primary)]',
+  secondary: 'bg-white/5 hover:bg-white/10 text-foreground border border-white/10 backdrop-blur-sm',
+  danger: 'bg-danger/80 hover:bg-danger text-white',
+  ghost: 'bg-transparent hover:bg-white/5 text-foreground',
+  outline: 'bg-transparent border border-primary/50 text-primary hover:bg-primary/10',
 }
 
 const sizeStyles: Record<ButtonSize, string> = {
-  sm: 'px-3 py-1.5 text-sm',
-  md: 'px-4 py-2 text-sm',
-  lg: 'px-6 py-3 text-base',
+  sm: 'px-3 py-1.5 text-xs font-bold uppercase tracking-wider',
+  md: 'px-5 py-2.5 text-sm font-bold uppercase tracking-wider',
+  lg: 'px-8 py-3.5 text-base font-bold uppercase tracking-wider',
 }
 
 export default function Button({
@@ -32,7 +33,7 @@ export default function Button({
 }: ButtonProps) {
   return (
     <button
-      className={`inline-flex items-center justify-center gap-2 rounded-lg font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-primary/50 ${variantStyles[variant]} ${sizeStyles[size]} ${disabled ? 'opacity-50 cursor-not-allowed' : ''} ${className}`}
+      className={`inline-flex items-center justify-center gap-2 rounded-lg transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-primary/50 ${variantStyles[variant]} ${sizeStyles[size]} ${disabled ? 'opacity-30 cursor-not-allowed grayscale' : 'active:scale-95'} ${className}`}
       disabled={disabled}
       {...props}
     >

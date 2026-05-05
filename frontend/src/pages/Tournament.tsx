@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react'
 import type { FormEvent } from 'react'
-import { useParams, Link } from 'react-router-dom'
+import { useParams } from 'react-router-dom'
+import { motion } from 'framer-motion'
 import {
   useTournament, useMyTournamentStatus, useCreateTeam, useJoinTeam, useSignupSolo,
-  useWithdrawSolo, useLeaveTeam, useInviteBySignup, useCheckin, useCheckinStatus,
+  useWithdrawSolo, useLeaveTeam, useCheckin, useCheckinStatus,
   useMyInvitations, useAcceptInvitation, useRejectInvitation, useApplyToTeam,
   useConsent,
 } from '@/hooks/useTournament'
@@ -17,9 +18,10 @@ import GroupStandings from '@/components/groups/GroupStandings'
 import GroupMatchList from '@/components/groups/GroupMatchList'
 import BracketView from '@/components/bracket/BracketView'
 import MiniGroupPanel from '@/components/bracket/MiniGroupPanel'
+import LoginButton from '@/components/auth/LoginButton'
 import {
-  Trophy, Users, LayoutGrid, GitBranch, Plus, UserPlus, AlertCircle, Shield, X, Info,
-  ChevronDown, ChevronUp, ScrollText, CheckCircle2, ClipboardCheck, Mail, UserCheck, BarChart2,
+  Trophy, Users, LayoutGrid, GitBranch, Shield, X, Info, Book,
+  ScrollText, CheckCircle2, ClipboardCheck, Mail, BarChart2, User,
 } from 'lucide-react'
 import type { TeamPublic, BracketMatch, GroupMatch, TournamentGameMode } from '@/types/tournament'
 
@@ -31,11 +33,13 @@ const GAME_MODE_LABEL: Record<TournamentGameMode, string> = {
   single_lane: 'Single Lane Battle',
 }
 import { ApiError } from '@/api/client'
+import ReactMarkdown from 'react-markdown'
 
-type Tab = 'übersicht' | 'gruppen' | 'bracket' | 'teams' | 'ergebnisse' | 'rangliste'
+type Tab = 'übersicht' | 'kodex' | 'gruppen' | 'bracket' | 'teams' | 'ergebnisse' | 'rangliste'
 
 const ALL_TABS: { key: Tab; label: string; icon: typeof Trophy }[] = [
   { key: 'übersicht', label: 'Übersicht', icon: Trophy },
+  { key: 'kodex', label: 'Kodex', icon: Book },
   { key: 'teams', label: 'Teams', icon: Users },
   { key: 'gruppen', label: 'Gruppen', icon: LayoutGrid },
   { key: 'bracket', label: 'Bracket', icon: GitBranch },
@@ -190,7 +194,6 @@ export default function Tournament() {
   const [showCreateTeam, setShowCreateTeam] = useState(false)
   const [teamName, setTeamName] = useState('')
   const [successMsg, setSuccessMsg] = useState<string | null>(null)
-  const [showSoloTable, setShowSoloTable] = useState(false)
   const [pendingAction, setPendingAction] = useState<(() => void) | null>(null)
   const [showConsentModal, setShowConsentModal] = useState(false)
   const [pendingJoinTeam, setPendingJoinTeam] = useState<TeamPublic | null>(null)
@@ -203,7 +206,6 @@ export default function Tournament() {
   const joinTeamMutation = useJoinTeam()
   const signupSoloMutation = useSignupSolo()
   const withdrawSoloMutation = useWithdrawSolo(tournamentId)
-  const inviteBySignupMutation = useInviteBySignup(tournamentId)
   const leaveTeamMutation = useLeaveTeam(tournamentId)
   const checkinMutation = useCheckin(tournamentId)
   const acceptInviteMutation = useAcceptInvitation(tournamentId)
@@ -236,8 +238,8 @@ export default function Tournament() {
   if (isLoading) return <LoadingSpinner />
   if (!tournament) {
     return (
-      <Card className="text-center py-10">
-        <p className="text-muted">Turnier nicht gefunden</p>
+      <Card className="text-center py-20 opacity-60">
+        <p className="text-muted italic">Die Arena scheint leer zu sein...</p>
       </Card>
     )
   }
@@ -253,26 +255,9 @@ export default function Tournament() {
   const userSignupId = myStatus?.signup_id ?? null
   const userHasSoloSignup = userSignupId !== null && !myStatus?.team_id
   const isUserCaptain = myStatus?.is_captain ?? false
-  const teamIsFull = userTeam != null && userTeam.members.length >= tournament.team_size
   const isUserRegistered = Boolean(userTeam || userHasSoloSignup)
   const hasCheckedIn = myStatus?.is_checked_in ?? false
 
-  // Invite window check
-  const canInvite = (() => {
-    if (!isUserCaptain || !userTeam || teamIsFull) return false
-    const mode = tournament.invite_mode
-    if (mode === 'never') return false
-    if (mode === 'always') return true
-    if (mode === 'window') {
-      const now = Date.now()
-      const start = tournament.invite_window_start ? new Date(tournament.invite_window_start).getTime() : null
-      const end = tournament.invite_window_end ? new Date(tournament.invite_window_end).getTime() : null
-      return (!start || now >= start) && (!end || now <= end)
-    }
-    return false
-  })()
-
-  const openSoloSignups = tournament.signups.filter((s) => s.team_id === null)
   const resultEntries = tournament
     ? [
         ...buildGroupResultEntries(tournament.groups, tournament.teams),
@@ -280,21 +265,11 @@ export default function Tournament() {
       ].sort((left, right) => left.sortTime - right.sortTime || left.id.localeCompare(right.id))
     : []
 
-  const mutationError =
-    createTeamMutation.error ||
-    joinTeamMutation.error ||
-    signupSoloMutation.error ||
-    withdrawSoloMutation.error ||
-    inviteBySignupMutation.error ||
-    leaveTeamMutation.error ||
-    applyMutation.error
-
   const isMutating =
     createTeamMutation.isPending ||
     joinTeamMutation.isPending ||
     signupSoloMutation.isPending ||
     withdrawSoloMutation.isPending ||
-    inviteBySignupMutation.isPending ||
     leaveTeamMutation.isPending ||
     checkinMutation.isPending ||
     acceptInviteMutation.isPending ||
@@ -355,14 +330,6 @@ export default function Tournament() {
   const handleWithdrawSolo = () => withdrawSoloMutation.mutate()
   const handleLeaveTeam = (teamId: number) => leaveTeamMutation.mutate({ teamId })
 
-  const handleInviteBySignup = (teamId: number, signupId: number) => {
-    inviteBySignupMutation.mutate({ teamId, signupId }, {
-      onSuccess: (result) => {
-        setSuccessMsg(result.status === 'auto_accepted' ? 'Spieler wurde direkt aufgenommen!' : 'Einladung gesendet.')
-      },
-    })
-  }
-
   const handleCheckin = () => {
     checkinMutation.mutate(undefined, {
       onSuccess: (result) => {
@@ -385,7 +352,11 @@ export default function Tournament() {
   }
 
   return (
-    <div className="space-y-6">
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      className="space-y-8 pb-20"
+    >
       {/* Consent Modal */}
       {showConsentModal && (
         <ConsentModal
@@ -400,166 +371,158 @@ export default function Tournament() {
         />
       )}
 
-      {/* Header */}
-      <div>
-        <div className="flex items-center gap-3 mb-2">
-          <h1 className="text-2xl font-bold text-foreground">{tournament.name}</h1>
-          <Badge status={tournament.status} />
+      {/* Hero Header */}
+      <section className="relative overflow-hidden rounded-lg border-b border-white/5 pb-12">
+        <div className="absolute top-0 right-0 p-4">
+          <Badge status={tournament.status} className="scale-110" />
         </div>
-        {tournament.description && (
-          <p className="text-muted">{tournament.description}</p>
-        )}
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-2 mt-3 text-sm text-muted">
-          <span>{tournament.team_size}er Teams</span>
-          <span>{tournament.teams.length} Teams</span>
-          <span>{tournament.bracket_format === 'single_elimination' ? 'Single Elimination' : 'Double Elimination'}</span>
-          {tournament.tournament_game_mode !== 'standard' && (
-            <span className="rounded-full bg-primary/15 px-2.5 py-0.5 text-xs font-medium text-primary">
-              {GAME_MODE_LABEL[tournament.tournament_game_mode]}
-            </span>
+        <div className="space-y-4">
+          <div className="flex items-center gap-3">
+             <div className="p-2 rounded-lg bg-primary/10 border border-primary/20">
+                <Trophy size={20} className="text-primary" />
+             </div>
+             <p className="text-[10px] font-bold text-primary uppercase tracking-[0.3em]">Herausforderung</p>
+          </div>
+          <h1 className="text-4xl md:text-5xl font-bold text-foreground font-display tracking-tight">{tournament.name}</h1>
+          {tournament.description && (
+            <p className="text-muted italic max-w-3xl leading-relaxed">{tournament.description}</p>
           )}
-        </div>
-      </div>
 
-      {/* Success message */}
-      {successMsg && (
-        <div className="flex items-center gap-2 text-green-400 text-sm bg-green-500/10 border border-green-500/20 rounded-lg p-3">
-          <span>{successMsg}</span>
-        </div>
-      )}
-
-      {/* Pick-Window-Hinweis */}
-      {isSignupOpen && tournament.invite_mode === 'window' && (
-        <Card className="p-3 border-amber-500/20 bg-amber-500/5 text-sm text-amber-300">
-          {tournament.invite_window_start && tournament.invite_window_end ? (
-            <span>
-              Einladungen möglich:{' '}
-              {new Date(tournament.invite_window_start).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
-              {' '}–{' '}
-              {new Date(tournament.invite_window_end).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
-            </span>
-          ) : (
-            <span>Pick-Fenster aktiv — Einladungen nur in einem bestimmten Zeitraum erlaubt.</span>
-          )}
-        </Card>
-      )}
-      {isSignupOpen && tournament.invite_mode === 'never' && (
-        <Card className="p-3 border-border/30 bg-background/40 text-sm text-muted">
-          Teams werden beim Turnier-Start automatisch zusammengestellt.
-        </Card>
-      )}
-
-      {/* Checkin Banner */}
-      {isCheckinPhase && (
-        <Card className="p-5 border-amber-500/20 bg-amber-500/5">
-          <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-            <div className="space-y-2">
-              <div className="flex items-center gap-2 text-amber-300">
-                <ClipboardCheck size={18} />
-                <span className="text-sm font-semibold uppercase tracking-wide">Check-in aktiv</span>
-              </div>
-              <p className="text-sm text-foreground">
-                {checkinStatus?.total_checked_in ?? 0} von {checkinStatus?.total_registered ?? tournament.signups.length} Spielern sind eingecheckt.
-              </p>
-              {hasCheckedIn && (
-                <div className="inline-flex items-center gap-2 rounded-full bg-green-500/15 px-3 py-1 text-sm text-green-400">
-                  <CheckCircle2 size={14} />
-                  Check-in bestätigt
-                </div>
-              )}
+          <div className="flex flex-wrap items-center gap-x-8 gap-y-3 pt-4">
+            <div className="space-y-1">
+              <p className="text-[10px] uppercase font-bold text-muted tracking-widest">Team-Format</p>
+              <p className="text-sm font-bold text-foreground uppercase">{tournament.team_size} gegen {tournament.team_size}</p>
             </div>
-            {isLoggedIn && isUserRegistered ? (
-              <Button
-                variant="primary"
-                size="sm"
-                disabled={hasCheckedIn || checkinMutation.isPending}
-                onClick={handleCheckin}
-              >
-                <ClipboardCheck size={14} />
-                {hasCheckedIn ? 'Eingecheckt' : checkinMutation.isPending ? 'Checkt ein...' : 'Jetzt einchecken'}
-              </Button>
-            ) : (
-              <p className="text-sm text-muted">Nur angemeldete Spieler können sich einchecken.</p>
+            <div className="space-y-1">
+              <p className="text-[10px] uppercase font-bold text-muted tracking-widest">Kader</p>
+              <p className="text-sm font-bold text-foreground uppercase">{tournament.teams.length} Teams gemeldet</p>
+            </div>
+            <div className="space-y-1">
+              <p className="text-[10px] uppercase font-bold text-muted tracking-widest">Regelwerk</p>
+              <p className="text-sm font-bold text-foreground uppercase">{tournament.bracket_format === 'single_elimination' ? 'Single Elim.' : 'Double Elim.'}</p>
+            </div>
+            {tournament.tournament_game_mode !== 'standard' && (
+              <div className="space-y-1">
+                <p className="text-[10px] uppercase font-bold text-primary tracking-widest">Modus</p>
+                <p className="text-sm font-bold text-primary uppercase">{GAME_MODE_LABEL[tournament.tournament_game_mode]}</p>
+              </div>
             )}
           </div>
-        </Card>
-      )}
+        </div>
+      </section>
 
-      {/* Offene Einladungen */}
-      {isLoggedIn && !myStatus?.team_id && myInvitations && myInvitations.length > 0 && (
-        <Card className="p-4 border-primary/20 bg-primary/5">
-          <div className="flex items-center gap-2 mb-3">
-            <Mail size={16} className="text-primary" />
-            <h3 className="text-sm font-semibold text-foreground">Offene Einladungen</h3>
-          </div>
-          <div className="space-y-2">
-            {myInvitations.map((invite) => (
-              <div key={invite.id} className="flex items-center justify-between gap-3">
-                <div>
-                  <p className="text-sm font-medium text-foreground">{invite.team_name ?? `Team #${invite.team_id}`}</p>
-                  {invite.expires_at && (
-                    <p className="text-xs text-muted">
-                      Läuft ab: {new Date(invite.expires_at).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
-                    </p>
-                  )}
+      {/* Action Banner Group */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {/* Success message */}
+        {successMsg && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            className="md:col-span-2 flex items-center gap-2 text-green-400 text-sm font-bold uppercase tracking-wider bg-green-500/10 border border-green-500/20 rounded-lg p-4"
+          >
+            <CheckCircle2 size={16} />
+            {successMsg}
+          </motion.div>
+        )}
+
+        {/* Checkin Banner */}
+        {isCheckinPhase && (
+          <Card className={`p-6 border-amber-500/20 bg-amber-500/5 ${!hasCheckedIn ? 'animate-pulse' : ''}`}>
+            <div className="flex flex-col gap-4">
+              <div className="space-y-1">
+                <div className="flex items-center gap-2 text-amber-500">
+                  <ClipboardCheck size={18} />
+                  <span className="text-xs font-bold uppercase tracking-widest">Appell</span>
                 </div>
-                <div className="flex gap-2">
-                  <Button
-                    variant="primary"
-                    size="sm"
-                    disabled={isMutating}
-                    onClick={() => acceptInviteMutation.mutate(invite.id, { onSuccess: () => setSuccessMsg('Team beigetreten!') })}
-                  >
-                    <UserCheck size={13} />
-                    Annehmen
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    disabled={isMutating}
-                    onClick={() => rejectInviteMutation.mutate(invite.id)}
-                  >
-                    <X size={13} />
-                    Ablehnen
-                  </Button>
-                </div>
+                <h3 className="text-lg font-bold text-foreground uppercase font-display">Check-in aktiv</h3>
+                <p className="text-xs text-muted italic">
+                  Bestätige deine Anwesenheit, sonst wirst du aus der Arena verbannt.
+                </p>
               </div>
-            ))}
-          </div>
-        </Card>
-      )}
+              <div className="flex items-center justify-between">
+                <div className="text-xs text-muted">
+                  <span className="text-foreground font-bold">{checkinStatus?.total_checked_in ?? 0}</span> / {checkinStatus?.total_registered ?? tournament.signups.length} bereit
+                </div>
+                {isLoggedIn && isUserRegistered && (
+                  <Button
+                    variant={hasCheckedIn ? 'secondary' : 'primary'}
+                    size="sm"
+                    disabled={hasCheckedIn || checkinMutation.isPending}
+                    onClick={handleCheckin}
+                  >
+                    {hasCheckedIn ? 'Bereit gemeldet' : 'Appell bestätigen'}
+                  </Button>
+                )}
+              </div>
+            </div>
+          </Card>
+        )}
 
-      {/* Tabs */}
-      <div className="flex border-b border-border">
+        {/* Offene Einladungen */}
+        {isLoggedIn && !myStatus?.team_id && myInvitations && myInvitations.length > 0 && (
+          <Card className="p-6 border-primary/20 bg-primary/5">
+            <div className="space-y-4">
+              <div className="flex items-center gap-2 text-primary">
+                <Mail size={18} />
+                <h3 className="text-xs font-bold uppercase tracking-widest">Einberufung</h3>
+              </div>
+              <div className="space-y-3">
+                {myInvitations.map((invite) => (
+                  <div key={invite.id} className="flex items-center justify-between gap-3 bg-white/5 p-3 rounded-lg border border-white/5">
+                    <div>
+                      <p className="text-sm font-bold text-foreground uppercase tracking-wide">{invite.team_name ?? `Team #${invite.team_id}`}</p>
+                      {invite.expires_at && (
+                        <p className="text-[10px] text-muted italic">
+                          Ablauf: {new Date(invite.expires_at).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })}
+                        </p>
+                      )}
+                    </div>
+                    <div className="flex gap-2">
+                      <Button
+                        variant="primary"
+                        size="sm"
+                        disabled={isMutating}
+                        onClick={() => acceptInviteMutation.mutate(invite.id, { onSuccess: () => setSuccessMsg('Team beigetreten!') })}
+                      >
+                        Folgen
+                      </Button>
+                      <button
+                        className="p-2 text-muted hover:text-danger transition-colors"
+                        onClick={() => rejectInviteMutation.mutate(invite.id)}
+                      >
+                        <X size={16} />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </Card>
+        )}
+      </div>
+
+      {/* Immersive Tabs */}
+      <div className="flex border-b border-white/5 gap-2 overflow-x-auto pb-px">
         {availableTabs.map((tab) => {
           const Icon = tab.icon
+          const isActive = activeTab === tab.key
           return (
             <button
               key={tab.key}
               onClick={() => setActiveTab(tab.key)}
-              className={`flex items-center gap-2 px-4 py-3 text-sm font-medium border-b-2 transition-colors ${
-                activeTab === tab.key
-                  ? 'border-primary text-primary'
-                  : 'border-transparent text-muted hover:text-foreground'
+              className={`flex items-center gap-2 px-6 py-4 text-[10px] font-bold uppercase tracking-[0.2em] transition-all relative ${
+                isActive
+                  ? 'text-primary'
+                  : 'text-muted hover:text-foreground hover:bg-white/5'
               }`}
             >
-              <Icon size={16} />
+              <Icon size={14} className={isActive ? 'text-primary' : 'text-muted'} />
               {tab.label}
-              {tab.key === 'gruppen' && (
-                <span className="relative group" title="Teams spielen in Gruppen gegeneinander (Round-Robin). Die besten 2 jeder Gruppe kommen weiter ins Bracket.">
-                  <Info size={13} className="text-muted hover:text-foreground transition-colors" />
-                  <span className="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-64 rounded-lg bg-card border border-border px-3 py-2 text-xs text-foreground opacity-0 group-hover:opacity-100 transition-opacity z-10 shadow-lg">
-                    Teams spielen in Gruppen gegeneinander (Round-Robin). Die besten 2 jeder Gruppe kommen weiter ins Bracket.
-                  </span>
-                </span>
-              )}
-              {tab.key === 'bracket' && (
-                <span className="relative group" title="K.O.-Runde: Wer verliert, scheidet aus. Wer gewinnt, kommt eine Runde weiter bis zum Finale.">
-                  <Info size={13} className="text-muted hover:text-foreground transition-colors" />
-                  <span className="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-56 rounded-lg bg-card border border-border px-3 py-2 text-xs text-foreground opacity-0 group-hover:opacity-100 transition-opacity z-10 shadow-lg">
-                    K.O.-Runde: Wer verliert, scheidet aus. Wer gewinnt, kommt eine Runde weiter bis zum Finale.
-                  </span>
-                </span>
+              {isActive && (
+                <motion.div
+                  layoutId="activeTab"
+                  className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary shadow-[var(--glow-primary)]"
+                />
               )}
             </button>
           )
@@ -567,388 +530,309 @@ export default function Tournament() {
       </div>
 
       {/* Tab Content */}
-      <div>
+      <motion.div
+        key={activeTab}
+        initial={{ opacity: 0, y: 5 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.2 }}
+      >
         {activeTab === 'übersicht' && (
-          <div className="space-y-4">
-            <Card className="p-6">
-              <h2 className="text-lg font-semibold text-foreground mb-4">Turnier-Informationen</h2>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
-                {tournament.registration_start && (
-                  <div>
-                    <span className="text-muted">Anmeldung Start:</span>
-                    <span className="ml-2 text-foreground">
-                      {new Date(tournament.registration_start).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
-                    </span>
+          <div className="space-y-8">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+              <div className="md:col-span-2 space-y-8">
+                <Card className="p-8 space-y-6">
+                  <h2 className="text-xl font-bold font-display uppercase tracking-widest text-foreground flex items-center gap-3">
+                    <Info size={20} className="text-primary" />
+                    Chronologie
+                  </h2>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-8">
+                    {tournament.registration_start && (
+                      <div className="space-y-2">
+                        <p className="text-[10px] uppercase font-bold text-muted tracking-widest">Rekrutierung beginnt</p>
+                        <p className="text-lg font-bold text-foreground">
+                          {new Date(tournament.registration_start).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                        </p>
+                      </div>
+                    )}
+                    {tournament.registration_end && (
+                      <div className="space-y-2">
+                        <p className="text-[10px] uppercase font-bold text-primary tracking-widest">Prüfungsbeginn</p>
+                        <p className="text-lg font-bold text-primary">
+                          {new Date(tournament.registration_end).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                        </p>
+                      </div>
+                    )}
                   </div>
-                )}
-                {tournament.registration_end && (
-                  <div>
-                    <span className="text-muted">Turnier-Start:</span>
-                    <span className="ml-2 text-foreground">
-                      {new Date(tournament.registration_end).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
-                    </span>
-                  </div>
+                </Card>
+
+                {isSignupOpen && (
+                   <Card className="p-8 border-primary/10 bg-primary/5 space-y-6">
+                     <div className="flex items-center justify-between">
+                        <h2 className="text-xl font-bold font-display uppercase tracking-widest text-foreground">Deine Einschreibung</h2>
+                        <Button variant="ghost" size="sm" onClick={() => setActiveTab('teams')}>
+                          Zum Kader <Users size={14} />
+                        </Button>
+                     </div>
+
+                     {!isLoggedIn ? (
+                        <div className="text-center py-6 space-y-4">
+                           <p className="text-muted italic">Du musst dich erst identifizieren, um teilzunehmen.</p>
+                           <LoginButton />
+                        </div>
+                     ) : !userTeam && !userHasSoloSignup ? (
+                        <div className="space-y-4">
+                          <p className="text-muted italic text-sm">Melde dich als einzelner Krieger an oder gründe eine Legion.</p>
+                          <div className="flex flex-wrap gap-4">
+                            <Button variant="primary" onClick={handleSignupSolo} disabled={signupSoloMutation.isPending}>
+                              Solo einschreiben
+                            </Button>
+                            <Button variant="secondary" onClick={() => setActiveTab('teams')}>
+                              Legion gründen
+                            </Button>
+                          </div>
+                        </div>
+                     ) : userHasSoloSignup && !userTeam ? (
+                        <div className="flex items-center justify-between p-4 rounded-lg border border-green-500/20 bg-green-500/5">
+                           <div className="flex items-center gap-3 text-green-400">
+                              <CheckCircle2 size={20} />
+                              <span className="font-bold uppercase tracking-widest text-sm">Solo eingetragen</span>
+                           </div>
+                           <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={handleWithdrawSolo}
+                              disabled={isMutating}
+                              className="text-red-400 border border-red-500/20 hover:bg-red-500/10"
+                            >
+                              Austragen
+                           </Button>
+                        </div>
+                     ) : userTeam ? (
+                        <div className="flex items-center justify-between p-4 rounded-lg border border-primary/20 bg-primary/5">
+                           <div className="flex items-center gap-3 text-primary">
+                              <Shield size={20} />
+                              <div>
+                                <p className="text-[10px] uppercase font-bold tracking-widest opacity-60 leading-none mb-1">Eingetragen mit</p>
+                                <p className="font-bold uppercase tracking-wider text-sm">{userTeam.name}</p>
+                              </div>
+                           </div>
+                           <Button variant="primary" size="sm" onClick={() => setActiveTab('teams')}>
+                              Verwalten
+                           </Button>
+                        </div>
+                     ) : null}
+                   </Card>
                 )}
               </div>
+
+              <div className="space-y-6">
+                <Card className="p-6">
+                  <h3 className="text-xs font-bold uppercase tracking-widest text-muted mb-4 border-b border-white/5 pb-2">Statusberichte</h3>
+                  <div className="space-y-4">
+                    {tournament.invite_mode === 'window' && (
+                       <div className="space-y-1">
+                          <p className="text-[10px] uppercase font-bold text-amber-500 tracking-widest">Rekrutierungs-Fenster</p>
+                          <p className="text-xs text-foreground italic">Nur zu bestimmten Zeiten offen.</p>
+                       </div>
+                    )}
+                    <div className="space-y-1">
+                       <p className="text-[10px] uppercase font-bold text-muted tracking-widest">Arena-Regeln</p>
+                       <p className="text-xs text-foreground italic">Unsportlichkeit führt zum Ausschluss.</p>
+                    </div>
+                    {tournament.rules && (
+                       <div className="pt-4 border-t border-white/5">
+                          <button
+                            onClick={() => setActiveTab('kodex')}
+                            className="flex items-center gap-2 text-[10px] font-bold text-primary uppercase tracking-widest hover:text-primary-hover transition-colors"
+                          >
+                            <Book size={14} />
+                            Vollständigen Kodex lesen
+                          </button>
+                       </div>
+                    )}
+                  </div>
+                </Card>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'kodex' && (
+          <div className="max-w-4xl mx-auto space-y-8">
+            <div className="flex items-center gap-3 border-l-2 border-primary pl-4 py-1">
+               <Book size={24} className="text-primary" />
+               <h2 className="text-2xl font-bold tracking-widest text-foreground uppercase font-display">Die Gesetze der Arena</h2>
+            </div>
+            
+            <Card className="p-8 md:p-12 border-white/5 bg-white/[0.02] relative overflow-hidden">
+               <div className="absolute top-0 right-0 p-8 opacity-[0.03] pointer-events-none">
+                  <Shield size={200} />
+               </div>
+               
+               <div className="relative z-10 prose prose-invert prose-amber max-w-none">
+                  {tournament.rules ? (
+                    <ReactMarkdown>{tournament.rules}</ReactMarkdown>
+                  ) : (
+                    <div className="text-center py-20 opacity-40 italic">
+                       <ScrollText size={48} className="mx-auto mb-4 opacity-20" />
+                       <p className="text-xl">Keine spezifischen Gesetze für dieses Turnier verkündet.</p>
+                       <p className="text-sm mt-2">Es gelten die allgemeinen Bestimmungen des Kodex.</p>
+                    </div>
+                  )}
+               </div>
             </Card>
-
-            {isSignupOpen && (
-              <Card className="p-4">
-                <div className="flex items-center justify-between gap-3 mb-3">
-                  <div>
-                    <h3 className="text-sm font-semibold text-foreground">Anmeldung</h3>
-                    <p className="text-sm text-muted">
-                      Direkter Einstieg für Solo-Anmeldung. Teams bleiben separat im Tab `Teams`.
-                    </p>
-                  </div>
-                  <Button variant="ghost" size="sm" onClick={() => setActiveTab('teams')}>
-                    <Users size={14} />
-                    Zu Teams
-                  </Button>
-                </div>
-
-                {mutationError && (
-                  <div className="flex items-center gap-2 text-red-400 text-sm bg-red-500/10 border border-red-500/20 rounded-lg p-3 mb-3">
-                    <AlertCircle size={16} />
-                    <span>{mutationError instanceof Error ? mutationError.message : 'Ein Fehler ist aufgetreten'}</span>
-                  </div>
-                )}
-
-                {!isLoggedIn ? (
-                  <p className="text-sm text-muted">
-                    Melde dich an, um dich für das Turnier zu registrieren oder ein Team zu erstellen.
-                  </p>
-                ) : !userTeam && !userHasSoloSignup ? (
-                  <div className="flex flex-wrap gap-2">
-                    <Button variant="secondary" size="sm" onClick={handleSignupSolo} disabled={signupSoloMutation.isPending}>
-                      <UserPlus size={14} />
-                      {signupSoloMutation.isPending ? 'Wird angemeldet...' : 'Für Turnier anmelden'}
-                    </Button>
-                  </div>
-                ) : userHasSoloSignup && !userTeam ? (
-                  <div className="flex items-center gap-3 flex-wrap">
-                    <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-medium bg-green-600 text-white">
-                      ✓ Solo eingetragen
-                    </span>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={handleWithdrawSolo}
-                      disabled={isMutating}
-                      className="text-red-400 border border-red-500/40 hover:bg-red-500/10"
-                    >
-                      {withdrawSoloMutation.isPending ? 'Wird ausgetragen...' : 'Austragen'}
-                    </Button>
-                    <Button variant="ghost" size="sm" onClick={() => setActiveTab('teams')}>
-                      <Users size={14} />
-                      Teams ansehen
-                    </Button>
-                  </div>
-                ) : userTeam ? (
-                  <div className="space-y-3">
-                    <div className="inline-flex items-center gap-2 rounded-full bg-primary/15 px-3 py-1 text-sm text-primary">
-                      <Shield size={14} />
-                      Angemeldet mit {userTeam.name}
-                    </div>
-                    <div className="flex flex-wrap gap-2">
-                      <Button variant="primary" size="sm" onClick={() => setActiveTab('teams')}>
-                        <Users size={14} />
-                        Team verwalten
-                      </Button>
-                      {isRegistration && (
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => handleLeaveTeam(userTeam.id)}
-                          disabled={isMutating || (isUserCaptain && userTeam.members.length > 1)}
-                          title={isUserCaptain && userTeam.members.length > 1 ? 'Übergib zuerst die Captain-Rolle' : undefined}
-                          className="text-red-400 border border-red-500/40 hover:bg-red-500/10"
-                        >
-                          {leaveTeamMutation.isPending ? 'Verlasse...' : 'Team verlassen'}
-                        </Button>
-                      )}
-                    </div>
-                  </div>
-                ) : null}
-              </Card>
-            )}
           </div>
         )}
 
         {activeTab === 'teams' && (
-          <div className="space-y-4">
-            {isSignupOpen && isLoggedIn && !userTeam && !userHasSoloSignup && (
-              <Card className="p-4">
-                <h3 className="text-sm font-semibold text-foreground mb-3">Team erstellen</h3>
-                <p className="text-sm text-muted mb-3">
-                  Team-Anlage und Team-Verwaltung sind hier separat gebündelt.
-                </p>
-                {mutationError && (
-                  <div className="flex items-center gap-2 text-red-400 text-sm bg-red-500/10 border border-red-500/20 rounded-lg p-3 mb-3">
-                    <AlertCircle size={16} />
-                    <span>{mutationError instanceof Error ? mutationError.message : 'Ein Fehler ist aufgetreten'}</span>
-                  </div>
-                )}
-                <div className="flex flex-wrap gap-2">
-                  <Button variant="primary" size="sm" onClick={() => setShowCreateTeam(!showCreateTeam)} disabled={createTeamMutation.isPending}>
-                    <Plus size={14} />
-                    Team erstellen
-                  </Button>
-                  <Button variant="secondary" size="sm" onClick={handleSignupSolo} disabled={signupSoloMutation.isPending}>
-                    <UserPlus size={14} />
-                    {signupSoloMutation.isPending ? 'Wird angemeldet...' : 'Für Turnier anmelden'}
-                  </Button>
-                </div>
-                {showCreateTeam && (
-                  <form onSubmit={handleCreateTeam} className="mt-3 flex gap-2">
-                    <input
-                      type="text"
-                      value={teamName}
-                      onChange={(e) => setTeamName(e.target.value)}
-                      placeholder="Teamname eingeben..."
-                      required
-                      className="flex-1 bg-background border border-border rounded-lg px-3 py-2 text-sm text-foreground placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-primary/50"
-                    />
-                    <Button type="submit" variant="primary" size="sm" disabled={createTeamMutation.isPending || !teamName.trim()}>
-                      {createTeamMutation.isPending ? 'Erstellt...' : 'Erstellen'}
-                    </Button>
-                    <Button type="button" variant="ghost" size="sm" onClick={() => { setShowCreateTeam(false); setTeamName('') }}>
-                      Abbrechen
-                    </Button>
-                  </form>
-                )}
-              </Card>
-            )}
-
-            {/* Solo signup status */}
-            {isSignupOpen && isLoggedIn && userHasSoloSignup && !userTeam && (
-              <Card className="p-4">
-                <h3 className="text-sm font-semibold text-foreground mb-3">Solo-Anmeldung</h3>
-                {mutationError && (
-                  <div className="flex items-center gap-2 text-red-400 text-sm bg-red-500/10 border border-red-500/20 rounded-lg p-3 mb-3">
-                    <AlertCircle size={16} />
-                    <span>{mutationError instanceof Error ? mutationError.message : 'Fehler'}</span>
-                  </div>
-                )}
-                <div className="flex items-center gap-3 flex-wrap">
-                  <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-medium bg-green-600 text-white">
-                    ✓ Solo eingetragen
-                  </span>
-                  <Button variant="ghost" size="sm" onClick={handleWithdrawSolo} disabled={isMutating}
-                    className="text-red-400 border border-red-500/40 hover:bg-red-500/10">
-                    {withdrawSoloMutation.isPending ? 'Wird ausgetragen...' : 'Austragen'}
-                  </Button>
-                </div>
-              </Card>
-            )}
-
-            {/* User's current team */}
-            {userTeam && (
-              <Card className="p-4 border-primary/30">
-                <div className="flex items-center justify-between mb-2">
-                  <div className="flex items-center gap-2">
-                    <Shield size={16} className="text-primary" />
-                    <span className="text-sm font-semibold text-primary">Dein Team</span>
-                  </div>
-                  {isRegistration && (
-                    <Button variant="ghost" size="sm" onClick={() => handleLeaveTeam(userTeam.id)}
-                      disabled={isMutating || (isUserCaptain && userTeam.members.length > 1)}
-                      title={isUserCaptain && userTeam.members.length > 1 ? 'Übergib zuerst die Captain-Rolle' : undefined}
-                      className="text-red-400 border border-red-500/40 hover:bg-red-500/10">
-                      {leaveTeamMutation.isPending ? 'Verlasse...' : 'Team verlassen'}
-                    </Button>
-                  )}
-                </div>
-                <h3 className="font-medium text-foreground">{userTeam.name}</h3>
-                <div className="mt-2 space-y-1">
-                  {userTeam.members.map((m, i) => (
-                    <div key={i} className="flex items-center gap-2 text-sm">
-                      <span className="text-foreground flex-1">{safePublicName(m.discord_name)}</span>
-                      {m.role === 'captain' && <span className="text-xs text-primary font-medium">Captain</span>}
-                      <span className="text-xs text-muted">{m.rank ?? '—'}</span>
-                    </div>
-                  ))}
-                </div>
-
-                {/* Captain: Solo-Spieler einladen */}
-                {isUserCaptain && isSignupOpen && canInvite && openSoloSignups.length > 0 && (
-                  <div className="mt-4 border-t border-border pt-3">
-                    <button
-                      className="flex items-center gap-1.5 text-sm font-medium text-foreground hover:text-primary transition-colors"
-                      onClick={() => setShowSoloTable((v) => !v)}
-                    >
-                      <UserPlus size={14} />
-                      Solo-Spieler einladen
-                      {showSoloTable ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-                    </button>
-                    {showSoloTable && (
-                      <div className="mt-3 overflow-x-auto">
-                        <table className="w-full text-sm">
-                          <thead>
-                            <tr className="text-left text-xs text-muted border-b border-border">
-                              <th className="pb-2 pr-4">Name</th>
-                              <th className="pb-2 pr-4">Rang</th>
-                              <th className="pb-2 text-right">Aktion</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {openSoloSignups.map((signup) => (
-                              <tr key={signup.id} className="border-b border-border/50 last:border-0">
-                                <td className="py-2 pr-4 font-medium text-foreground">{safePublicName(signup.discord_name)}</td>
-                                <td className="py-2 pr-4 text-muted text-xs">
-                                  {signup.rank
-                                    ? `${signup.rank} · ${signup.rank_score}`
-                                    : `Score ${signup.rank_score}`}
-                                </td>
-                                <td className="py-2 text-right">
-                                  <Button
-                                    variant="secondary"
-                                    size="sm"
-                                    disabled={isMutating}
-                                    onClick={() => handleInviteBySignup(userTeam.id, signup.id)}
-                                  >
-                                    {inviteBySignupMutation.isPending ? 'Eingeladen...' : 'Einladen'}
-                                  </Button>
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
+          <div className="space-y-8">
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+              {/* Sidebar: Your Team / Create Team */}
+              <div className="space-y-6">
+                 {isSignupOpen && isLoggedIn && !userTeam && !userHasSoloSignup && (
+                    <Card className="p-6 space-y-6 border-primary/10">
+                      <h3 className="text-sm font-bold uppercase tracking-widest text-foreground">Legion gründen</h3>
+                      <div className="space-y-4">
+                        <Button variant="primary" className="w-full" onClick={() => setShowCreateTeam(!showCreateTeam)} disabled={createTeamMutation.isPending}>
+                          Team gründen
+                        </Button>
+                        {showCreateTeam && (
+                          <motion.form
+                            initial={{ height: 0, opacity: 0 }}
+                            animate={{ height: 'auto', opacity: 1 }}
+                            onSubmit={handleCreateTeam}
+                            className="space-y-3 pt-2"
+                          >
+                            <input
+                              type="text"
+                              value={teamName}
+                              onChange={(e) => setTeamName(e.target.value)}
+                              placeholder="Name der Legion..."
+                              className="w-full bg-white/5 border border-white/10 rounded-lg px-4 py-3 text-sm focus:outline-none focus:border-primary/50"
+                            />
+                            <div className="flex gap-2">
+                              <Button type="submit" size="sm" className="flex-1" disabled={createTeamMutation.isPending}>
+                                Beschwören
+                              </Button>
+                              <Button variant="ghost" size="sm" onClick={() => setShowCreateTeam(false)}>
+                                Abbrechen
+                              </Button>
+                            </div>
+                          </motion.form>
+                        )}
                       </div>
-                    )}
-                  </div>
-                )}
-                {isUserCaptain && isSignupOpen && !canInvite && tournament.invite_mode !== 'always' && (
-                  <p className="mt-3 text-xs text-muted pt-2 border-t border-border">
-                    {tournament.invite_mode === 'never'
-                      ? 'Einladungen sind für dieses Turnier deaktiviert.'
-                      : 'Das Einladungs-Fenster ist aktuell nicht geöffnet.'}
-                  </p>
-                )}
-              </Card>
-            )}
+                    </Card>
+                 )}
 
-            {/* Error outside registration context */}
-            {mutationError && !isSignupOpen && (
-              <div className="flex items-center gap-2 text-red-400 text-sm bg-red-500/10 border border-red-500/20 rounded-lg p-3">
-                <AlertCircle size={16} />
-                <span>{mutationError instanceof Error ? mutationError.message : 'Ein Fehler ist aufgetreten'}</span>
+                 {userTeam && (
+                    <Card className="p-6 space-y-6 border-primary/30 relative overflow-hidden">
+                      <div className="absolute top-0 right-0 p-2">
+                        <Shield size={24} className="text-primary opacity-20" />
+                      </div>
+                      <div>
+                        <p className="text-[10px] font-bold text-primary uppercase tracking-widest mb-1">Deine Legion</p>
+                        <h3 className="text-xl font-bold uppercase tracking-tight text-foreground">{userTeam.name}</h3>
+                      </div>
+
+                      <div className="space-y-3">
+                        {userTeam.members.map((m, i) => (
+                          <div key={i} className="flex items-center justify-between text-xs border-b border-white/5 pb-2 last:border-0">
+                            <span className="font-bold text-foreground uppercase tracking-wide">{safePublicName(m.discord_name)}</span>
+                            {m.role === 'captain' && <span className="text-[10px] text-primary font-bold uppercase">Captain</span>}
+                          </div>
+                        ))}
+                      </div>
+
+                      {isRegistration && (
+                         <Button
+                          variant="ghost"
+                          size="sm"
+                          className="w-full text-red-400 border border-red-500/20 hover:bg-red-500/10"
+                          onClick={() => handleLeaveTeam(userTeam.id)}
+                          disabled={isMutating || (isUserCaptain && userTeam.members.length > 1)}
+                        >
+                          Legion verlassen
+                         </Button>
+                      )}
+                    </Card>
+                 )}
               </div>
-            )}
 
-            {/* Solo Signups Table (wenn kein Team aktiv) */}
-            {openSoloSignups.length > 0 && !isUserCaptain && (
-              <Card className="p-4">
-                <h3 className="text-sm font-semibold text-foreground mb-3">Offene Solo-Anmeldungen</h3>
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="text-left text-xs text-muted border-b border-border">
-                        <th className="pb-2 pr-4">Name</th>
-                        <th className="pb-2 pr-4 hidden sm:table-cell">Rang</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {openSoloSignups.map((signup) => (
-                        <tr key={signup.id} className="border-b border-border/50 last:border-0">
-                          <td className="py-2 pr-4 font-medium text-foreground">
-                            {signup.discord_name?.trim() ? (
-                              <Link to={`/spieler/${encodeURIComponent(signup.discord_name)}`}
-                                className="hover:text-primary transition-colors">
-                                {signup.discord_name}
-                              </Link>
-                            ) : (
-                              safePublicName(signup.discord_name)
-                            )}
-                          </td>
-                          <td className="py-2 pr-4 text-muted text-xs hidden sm:table-cell">
-                            {signup.rank ?? '—'}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+              {/* Team List */}
+              <div className="lg:col-span-2 space-y-6">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-sm font-bold uppercase tracking-widest text-muted">Gemeldete Legionen</h3>
+                  <span className="text-xs font-bold text-foreground bg-white/5 px-2 py-1 rounded-lg border border-white/5">
+                    {tournament.teams.length}
+                  </span>
                 </div>
-              </Card>
-            )}
 
-            {/* Team List */}
-            <div className="grid gap-3">
-              {tournament.teams.length > 0 ? tournament.teams.map((team) => {
-                const recruiting = recruitingLabel(team.recruitment_status)
-                const isCaptainTeam = userTeam?.id === team.id
-                const isFull = team.members.length >= tournament.team_size
-                const showJoin = isSignupOpen && isLoggedIn && !isCaptainTeam && team.recruitment_status === 'open' && !isFull
-                const showApply = isSignupOpen && isLoggedIn && !isCaptainTeam && team.recruitment_status === 'application' && !isFull && !userTeam
-                return (
-                  <Card key={team.id} className={`p-4 ${isCaptainTeam ? 'border-primary/30' : ''}`}>
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <h3 className="font-medium text-foreground">{team.name}</h3>
-                          <span className="text-sm text-muted">{team.members.length}/{tournament.team_size}</span>
-                          <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${recruiting.color}`}>
-                            {recruiting.text}
-                          </span>
-                          {team.has_pending_applications && isUserCaptain && isCaptainTeam && (
-                            <span className="text-xs px-2 py-0.5 rounded-full border border-amber-500/30 bg-amber-500/10 text-amber-400 font-medium">
-                              Neue Bewerbungen
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {tournament.teams.map((team) => {
+                    const recruiting = recruitingLabel(team.recruitment_status)
+                    const isMyTeam = userTeam?.id === team.id
+                    return (
+                      <Card key={team.id} className={`p-5 transition-all group ${isMyTeam ? 'border-primary/50' : 'hover:border-white/20'}`}>
+                        <div className="space-y-4">
+                          <div className="flex items-start justify-between gap-3">
+                            <div>
+                              <h4 className="font-bold text-foreground uppercase tracking-wide group-hover:text-primary transition-colors">{team.name}</h4>
+                              <p className="text-[10px] text-muted font-bold uppercase mt-1">
+                                {team.members.length} / {tournament.team_size} Mitglieder
+                              </p>
+                            </div>
+                            <span className={`text-[10px] px-2 py-0.5 rounded-lg border font-bold uppercase tracking-widest ${recruiting.color}`}>
+                              {recruiting.text}
                             </span>
+                          </div>
+
+                          <div className="flex flex-wrap gap-2">
+                             {team.members.slice(0, 3).map((m, i) => (
+                               <div key={i} title={m.discord_name ?? ''} className="w-6 h-6 rounded-lg bg-white/5 border border-white/10 flex items-center justify-center overflow-hidden">
+                                  <User size={12} className="text-muted" />
+                               </div>
+                             ))}
+                             {team.members.length > 3 && (
+                               <div className="w-6 h-6 rounded-lg bg-white/5 border border-white/10 flex items-center justify-center text-[10px] font-bold text-muted">
+                                 +{team.members.length - 3}
+                               </div>
+                             )}
+                          </div>
+
+                          {!isMyTeam && isSignupOpen && (
+                            <div className="pt-2">
+                               {team.recruitment_status === 'open' ? (
+                                 <Button variant="secondary" size="sm" className="w-full" onClick={() => handleJoinTeam(team)}>
+                                   Beitreten
+                                 </Button>
+                               ) : team.recruitment_status === 'application' ? (
+                                 <Button variant="outline" size="sm" className="w-full border-amber-500/30 text-amber-500 hover:bg-amber-500/10" onClick={() => handleApply(team.id)}>
+                                   Bewerben
+                                 </Button>
+                               ) : null}
+                            </div>
                           )}
                         </div>
-                        <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1">
-                          {team.members.map((m, i) => (
-                            <span key={i} className="text-xs text-muted">
-                              {m.discord_name?.trim() ? (
-                                <Link to={`/spieler/${encodeURIComponent(m.discord_name)}`}
-                                  className="hover:text-primary transition-colors">
-                                  {m.discord_name}
-                                </Link>
-                              ) : (
-                                safePublicName(m.discord_name)
-                              )}
-                              {m.role === 'captain' && <span className="ml-1 text-primary">(C)</span>}
-                              <span className="ml-1 opacity-60">[{m.rank ?? '—'}]</span>
-                            </span>
-                          ))}
-                        </div>
-                      </div>
-                      <div className="flex gap-2 flex-shrink-0">
-                        {showJoin && (
-                          <Button variant="secondary" size="sm" onClick={() => handleJoinTeam(team)} disabled={joinTeamMutation.isPending}>
-                            <UserPlus size={14} />
-                            Beitreten
-                          </Button>
-                        )}
-                        {showApply && (
-                          <Button variant="ghost" size="sm" onClick={() => handleApply(team.id)} disabled={applyMutation.isPending}
-                            className="border border-amber-500/40 text-amber-400 hover:bg-amber-500/10">
-                            Bewerben
-                          </Button>
-                        )}
-                      </div>
-                    </div>
-                  </Card>
-                )
-              }) : (
-                <Card className="text-center py-8">
-                  <Users size={32} className="mx-auto text-muted mb-3" />
-                  <p className="text-muted">Noch keine Teams angemeldet</p>
-                </Card>
-              )}
+                      </Card>
+                    )
+                  })}
+                </div>
+              </div>
             </div>
           </div>
         )}
 
         {activeTab === 'gruppen' && (
-          <div className="space-y-6">
+          <div className="space-y-12">
             <GroupStandings groups={tournament.groups} teams={tournament.teams} />
-            <GroupMatchList groups={tournament.groups} teams={tournament.teams} />
+            <div className="border-t border-white/5 pt-12">
+               <GroupMatchList groups={tournament.groups} teams={tournament.teams} />
+            </div>
           </div>
         )}
 
         {activeTab === 'bracket' && (
-          <div className="space-y-4">
+          <div className="space-y-12">
             {tournament.mini_groups.length > 0 && (
               <MiniGroupPanel
                 miniGroups={tournament.mini_groups}
@@ -960,164 +844,168 @@ export default function Tournament() {
           </div>
         )}
 
-        {activeTab === 'rangliste' && (() => {
-          const bracketEntries = deriveBracketPlacements(tournament.bracket_matches, tournament.teams)
-          const hasGroups = tournament.groups.length > 0
-
-          if (bracketEntries.length === 0 && !hasGroups) {
-            return (
-              <Card className="p-8 text-center">
-                <BarChart2 size={36} className="mx-auto text-muted mb-3" />
-                <p className="text-muted">Noch keine Rangliste verfügbar.</p>
-                <p className="text-xs text-muted mt-1">Platzierungen werden nach Start der Gruppenphase berechnet.</p>
-              </Card>
-            )
-          }
-
-          return (
-            <div className="space-y-6">
-              {bracketEntries.length > 0 && (
-                <div>
-                  <h2 className="text-lg font-semibold text-foreground mb-3">Abschluss-Platzierungen</h2>
-                  <Card className="overflow-hidden">
-                    <table className="w-full text-sm">
-                      <thead>
-                        <tr className="border-b border-border bg-background/50">
-                          <th className="px-4 py-3 text-left font-medium text-muted w-12">#</th>
-                          <th className="px-4 py-3 text-left font-medium text-muted">Team</th>
-                          <th className="px-4 py-3 text-left font-medium text-muted hidden sm:table-cell">Ergebnis</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {bracketEntries.map((entry) => (
-                          <tr
-                            key={entry.teamId}
-                            className={`border-b border-border/50 last:border-0 transition-colors ${
-                              entry.position <= 3 ? 'bg-primary/5' : ''
-                            }`}
-                          >
-                            <td className="px-4 py-3">
-                              <div className="flex items-center justify-center">
-                                {entry.position === 1
-                                  ? <Trophy size={16} className="text-yellow-400" />
-                                  : entry.position === 2
-                                    ? <Trophy size={16} className="text-slate-300" />
-                                    : <span className="text-sm font-bold text-muted">{entry.position}</span>}
-                              </div>
-                            </td>
-                            <td className="px-4 py-3 font-medium text-foreground">{entry.teamName}</td>
-                            <td className="px-4 py-3 hidden sm:table-cell">
-                              <span className="text-xs px-2 py-0.5 rounded-full bg-primary/15 text-primary font-medium">
-                                {entry.label}
-                              </span>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </Card>
-                </div>
-              )}
-
-              {hasGroups && bracketEntries.length === 0 && (
-                <div>
-                  <h2 className="text-lg font-semibold text-foreground mb-1">Gruppenrangliste</h2>
-                  <p className="text-sm text-muted mb-3">Alle Teams sortiert nach Gruppenphase-Punkten.</p>
-                  <Card className="overflow-hidden">
-                    <table className="w-full text-sm">
-                      <thead>
-                        <tr className="border-b border-border bg-background/50">
-                          <th className="px-4 py-3 text-left font-medium text-muted w-12">#</th>
-                          <th className="px-4 py-3 text-left font-medium text-muted">Team</th>
-                          <th className="px-4 py-3 text-center font-medium text-muted">S</th>
-                          <th className="px-4 py-3 text-center font-medium text-muted">N</th>
-                          <th className="px-4 py-3 text-right font-medium text-muted">Pkt</th>
-                          <th className="px-4 py-3 text-left font-medium text-muted hidden sm:table-cell">Gruppe</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {tournament.groups
-                          .flatMap((g) => g.teams.map((t) => ({ ...t, groupName: g.name })))
-                          .sort((a, b) => b.points !== a.points ? b.points - a.points : b.wins - a.wins)
-                          .map((team, idx) => (
-                            <tr key={`${team.team_id}-${team.groupName}`} className="border-b border-border/50 last:border-0 hover:bg-background/40 transition-colors">
-                              <td className="px-4 py-3 text-sm font-bold text-muted">{idx + 1}</td>
-                              <td className="px-4 py-3 font-medium text-foreground">{team.team_name}</td>
-                              <td className="px-4 py-3 text-center text-muted">{team.wins}</td>
-                              <td className="px-4 py-3 text-center text-muted">{team.losses}</td>
-                              <td className="px-4 py-3 text-right font-bold text-foreground">{team.points}</td>
-                              <td className="px-4 py-3 hidden sm:table-cell">
-                                <span className="text-xs px-2 py-0.5 rounded-full bg-border/50 text-muted">{team.groupName}</span>
-                              </td>
-                            </tr>
-                          ))}
-                      </tbody>
-                    </table>
-                  </Card>
-                </div>
-              )}
-            </div>
-          )
-        })()}
+        {activeTab === 'rangliste' && (
+           <div className="space-y-12">
+              <TournamentRangliste tournament={tournament} />
+           </div>
+        )}
 
         {activeTab === 'ergebnisse' && (
-          <div className="space-y-4">
+          <div className="space-y-6">
             {resultEntries.length === 0 ? (
-              <Card className="p-6 text-center">
-                <ScrollText size={32} className="mx-auto mb-3 text-muted" />
-                <p className="text-muted">Noch keine abgeschlossenen Ergebnisse vorhanden</p>
+              <Card className="p-20 text-center opacity-40 italic">
+                <ScrollText size={48} className="mx-auto mb-4 opacity-20" />
+                <p className="text-xl">Die Annalen sind noch leer.</p>
               </Card>
             ) : (
-              <>
-                <div>
-                  <h2 className="text-lg font-semibold text-foreground">Ergebnisübersicht</h2>
-                  <p className="mt-1 text-sm text-muted">Alle abgeschlossenen Gruppen- und Bracket-Matches in zeitlicher Reihenfolge.</p>
+              <div className="space-y-4">
+                <div className="flex items-center gap-3 border-l-2 border-primary pl-4 py-1">
+                   <ScrollText size={20} className="text-primary" />
+                   <h2 className="text-xl font-bold tracking-widest text-foreground uppercase">Ergebnisprotokoll</h2>
                 </div>
-                <div className="space-y-3">
+                <div className="grid gap-4">
                   {resultEntries.map((entry) => (
-                    <Card key={entry.id} className="p-4">
-                      <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-                        <div>
-                          <p className="text-xs uppercase tracking-wide text-primary">{entry.title}</p>
-                          <p className="mt-1 text-sm text-foreground">
-                            <span className="font-semibold text-green-400">{entry.winnerName}</span>
-                            {' '}besiegt{' '}
-                            <span className="text-muted">{entry.loserName}</span>
-                          </p>
+                    <Card key={entry.id} className="hover:border-white/20 transition-all group">
+                      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                        <div className="space-y-1">
+                          <p className="text-[10px] uppercase font-bold text-primary tracking-widest">{entry.title}</p>
+                          <div className="flex items-center gap-2 text-foreground font-bold">
+                            <span className="text-green-400 uppercase tracking-wide">{entry.winnerName}</span>
+                            <span className="text-muted font-normal text-xs uppercase">Besiegt</span>
+                            <span className="text-muted uppercase tracking-wide">{entry.loserName}</span>
+                          </div>
                         </div>
-                        <div className="text-sm text-muted">
+                        <div className="text-[10px] text-muted font-bold uppercase tracking-widest">
                           {entry.playedAt
-                            ? new Date(entry.playedAt).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })
-                            : 'Zeitpunkt nicht verfügbar'}
+                            ? new Date(entry.playedAt).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
+                            : 'Unbekannte Zeit'}
                         </div>
                       </div>
                     </Card>
                   ))}
                 </div>
-              </>
+              </div>
             )}
           </div>
         )}
-      </div>
+      </motion.div>
 
       {/* Confirmation Modal – Team wechseln */}
       {pendingJoinTeam && userTeam && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-card border border-border rounded-xl p-6 max-w-sm w-full mx-4 shadow-xl">
-            <h3 className="text-base font-semibold text-foreground mb-3">Team wechseln?</h3>
-            <p className="text-sm text-muted mb-5">
-              Du bist bereits in Team <span className="text-foreground font-medium">"{userTeam.name}"</span>.
-              Wenn du <span className="text-foreground font-medium">"{pendingJoinTeam.name}"</span> beitrittst, verlässt du dein aktuelles Team automatisch.
+        <div className="fixed inset-0 bg-background/90 backdrop-blur-sm flex items-center justify-center z-[100]">
+          <motion.div
+            initial={{ scale: 0.9, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            className="glass-card p-8 max-w-sm w-full mx-4 shadow-2xl border-primary/20"
+          >
+            <h3 className="text-xl font-bold text-foreground font-display uppercase tracking-widest mb-4">Loyalität wechseln?</h3>
+            <p className="text-sm text-muted italic mb-8 leading-relaxed">
+              Du bist bereits Teil der Legion <span className="text-primary font-bold">"{userTeam.name}"</span>.
+              Willst du ihr den Rücken kehren und dich <span className="text-foreground font-bold">"{pendingJoinTeam.name}"</span> anschließen?
             </p>
-            <div className="flex gap-2 justify-end">
-              <Button variant="ghost" size="sm" onClick={() => setPendingJoinTeam(null)} disabled={joinTeamMutation.isPending}>Abbrechen</Button>
-              <Button variant="primary" size="sm" disabled={joinTeamMutation.isPending}
+            <div className="flex gap-4">
+              <Button variant="ghost" className="flex-1" onClick={() => setPendingJoinTeam(null)} disabled={joinTeamMutation.isPending}>Bleiben</Button>
+              <Button variant="primary" className="flex-1" disabled={joinTeamMutation.isPending}
                 onClick={() => joinTeamMutation.mutate({ tournamentId, teamId: pendingJoinTeam.id }, { onSettled: () => setPendingJoinTeam(null) })}>
-                {joinTeamMutation.isPending ? 'Wechsle...' : 'Team wechseln'}
+                Wechseln
               </Button>
             </div>
-          </div>
+          </motion.div>
         </div>
+      )}
+    </motion.div>
+  )
+}
+
+function TournamentRangliste({ tournament }: { tournament: any }) {
+  const bracketEntries = deriveBracketPlacements(tournament.bracket_matches, tournament.teams)
+  const hasGroups = tournament.groups.length > 0
+
+  if (bracketEntries.length === 0 && !hasGroups) {
+    return (
+      <Card className="p-20 text-center opacity-40 italic">
+        <BarChart2 size={48} className="mx-auto text-muted mb-4 opacity-20" />
+        <p className="text-xl">Noch keine Rangordnung festgelegt.</p>
+      </Card>
+    )
+  }
+
+  return (
+    <div className="space-y-12">
+      {bracketEntries.length > 0 && (
+        <section className="space-y-6">
+          <div className="flex items-center gap-3 border-l-2 border-primary pl-4 py-1">
+             <Trophy size={20} className="text-primary" />
+             <h2 className="text-xl font-bold tracking-widest text-foreground uppercase">Abschluss-Platzierungen</h2>
+          </div>
+          <Card className="p-0 overflow-hidden border-white/5">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="bg-white/5 text-left border-b border-white/10">
+                  <th className="px-6 py-4 font-bold uppercase tracking-widest text-muted text-[10px] w-20 text-center">Rang</th>
+                  <th className="px-6 py-4 font-bold uppercase tracking-widest text-muted text-[10px]">Legion</th>
+                  <th className="px-6 py-4 font-bold uppercase tracking-widest text-muted text-[10px] text-right">Resultat</th>
+                </tr>
+              </thead>
+              <tbody>
+                {bracketEntries.map((entry) => (
+                  <tr
+                    key={entry.teamId}
+                    className={`border-b border-white/5 last:border-0 transition-colors ${
+                      entry.position === 1 ? 'bg-primary/5' : ''
+                    }`}
+                  >
+                    <td className="px-6 py-4 text-center">
+                       {entry.position === 1 ? <Trophy size={18} className="text-primary mx-auto" /> : <span className="font-bold text-muted">{entry.position}</span>}
+                    </td>
+                    <td className="px-6 py-4 font-bold text-foreground uppercase tracking-wide">{entry.teamName}</td>
+                    <td className="px-6 py-4 text-right">
+                      <span className="text-[10px] px-2 py-0.5 rounded-lg border border-primary/20 text-primary font-bold uppercase tracking-widest bg-primary/5">
+                        {entry.label}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </Card>
+        </section>
+      )}
+
+      {hasGroups && (
+        <section className="space-y-6">
+           <div className="flex items-center gap-3 border-l-2 border-primary pl-4 py-1">
+             <BarChart2 size={20} className="text-primary" />
+             <h2 className="text-xl font-bold tracking-widest text-foreground uppercase">Gruppenwertung</h2>
+          </div>
+          <Card className="p-0 overflow-hidden border-white/5">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="bg-white/5 text-left border-b border-white/10">
+                  <th className="px-6 py-4 font-bold uppercase tracking-widest text-muted text-[10px] w-20 text-center">#</th>
+                  <th className="px-6 py-4 font-bold uppercase tracking-widest text-muted text-[10px]">Legion</th>
+                  <th className="px-6 py-4 font-bold uppercase tracking-widest text-muted text-[10px] text-center">S</th>
+                  <th className="px-6 py-4 font-bold uppercase tracking-widest text-muted text-[10px] text-center">N</th>
+                  <th className="px-6 py-4 font-bold uppercase tracking-widest text-muted text-[10px] text-right">Pkt</th>
+                </tr>
+              </thead>
+              <tbody>
+                {tournament.groups
+                  .flatMap((g: any) => g.teams.map((t: any) => ({ ...t, groupName: g.name })))
+                  .sort((a: any, b: any) => b.points !== a.points ? b.points - a.points : b.wins - a.wins)
+                  .map((team: any, idx: number) => (
+                    <tr key={`${team.team_id}-${team.groupName}`} className="border-b border-white/5 last:border-0 hover:bg-white/[0.02] transition-colors">
+                      <td className="px-6 py-4 text-center text-muted font-bold">{idx + 1}</td>
+                      <td className="px-6 py-4 font-bold text-foreground uppercase tracking-wide">{team.team_name}</td>
+                      <td className="px-6 py-4 text-center text-muted font-medium">{team.wins}</td>
+                      <td className="px-6 py-4 text-center text-muted font-medium">{team.losses}</td>
+                      <td className="px-6 py-4 text-right font-bold text-primary">{team.points}</td>
+                    </tr>
+                  ))}
+              </tbody>
+            </table>
+          </Card>
+        </section>
       )}
     </div>
   )
