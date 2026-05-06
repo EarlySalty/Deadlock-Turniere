@@ -99,7 +99,7 @@ export default function Home() {
                     {active.rules && (
                       <span className="flex items-center gap-2 text-amber-500/80">
                         <ScrollText size={16} />
-                        Kodex bereit
+                        Regelwerk bereit
                       </span>
                     )}
                   </div>
@@ -128,10 +128,10 @@ export default function Home() {
             Chroniken
           </h2>
 
-          <div className="space-y-4">
+          <div className="flex flex-col gap-4">
             {archived.length > 0 ? archived.map(t => (
-              <Link key={t.id} to={`/${t.id}`}>
-                <Card hoverable className="p-4 border-white/5 bg-white/[0.02]">
+              <Link key={t.id} to={`/${t.id}`} className="relative block group">
+                <Card hoverable className="p-4 border-white/5 bg-white/[0.02] hover:z-10 relative">
                   <div className="flex items-center justify-between gap-4">
                     <div className="min-w-0">
                       <h3 className="font-bold text-foreground truncate uppercase text-sm tracking-wide group-hover:text-primary transition-colors">

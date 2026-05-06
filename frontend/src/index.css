@@ -8,9 +8,9 @@
   --color-card: rgba(22, 22, 30, 0.6);
   --color-card-hover: rgba(30, 30, 42, 0.8);
   --color-border: rgba(255, 255, 255, 0.08);
-  --color-primary: #f59e0b; /* Ethereal Amber */
-  --color-primary-hover: #d97706;
-  --color-primary-soft: rgba(245, 158, 11, 0.1);
+  --color-primary: #4ade80; /* Deadlock Green */
+  --color-primary-hover: #22c55e;
+  --color-primary-soft: rgba(74, 222, 128, 0.1);
   --color-accent: #a855f7; /* Occult Purple */
   --color-accent-hover: #9333ea;
   --color-accent-soft: rgba(168, 85, 247, 0.1);
@@ -20,7 +20,7 @@
   --color-muted: #8e8e93;
 
   /* Ethereal Glows */
-  --glow-primary: 0 0 15px rgba(245, 158, 11, 0.3);
+  --glow-primary: 0 0 15px rgba(74, 222, 128, 0.3);
   --glow-accent: 0 0 15px rgba(168, 85, 247, 0.3);
 }
 
@@ -28,7 +28,7 @@ body {
   min-height: 100vh;
   background-color: var(--color-background);
   background-image:
-    radial-gradient(circle at 20% 20%, rgba(245, 158, 11, 0.05), transparent 40%),
+    radial-gradient(circle at 20% 20%, rgba(74, 222, 128, 0.05), transparent 40%),
     radial-gradient(circle at 80% 80%, rgba(168, 85, 247, 0.05), transparent 40%),
     linear-gradient(to bottom, rgba(8, 8, 12, 0.8), rgba(8, 8, 12, 1));
   background-attachment: fixed;

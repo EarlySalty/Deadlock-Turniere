@@ -40,7 +40,7 @@ const ADMIN_ACTIONS = [
 
 export default function Hilfe() {
   const generalRules = `
-# Der Allgemeine Kodex
+# Der Allgemeine Regelwerk
 
 Mit der Teilnahme am Turnier sowie dem abgeschlossenen Check-in bestätigen alle Spieler, die vollständigen Turnierregeln sorgfältig gelesen, verstanden und akzeptiert zu haben. Den Teilnehmern ist bewusst, dass sämtliche Entscheidungen der Turnierleitung auf Grundlage dieser Regeln getroffen werden. 
 
@@ -95,7 +95,7 @@ Jeder Spieler trägt selbst die Verantwortung, sich vor Turnierbeginn über Abla
             <BookOpen size={32} className="text-primary" />
           </div>
         </div>
-        <h1 className="text-4xl font-bold tracking-tighter text-foreground font-display">Der <span className="text-primary">Kodex</span></h1>
+        <h1 className="text-4xl font-bold tracking-tighter text-foreground font-display">Der <span className="text-primary">Regelwerk</span></h1>
         <p className="text-muted italic max-w-lg mx-auto">
           "Die universellen Gesetze der Arena. Lerne sie, oder werde Teil der Geschichte."
         </p>

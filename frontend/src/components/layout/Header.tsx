@@ -22,7 +22,7 @@ export default function Header() {
   const navItems = [
     { label: 'Arena', path: '/', icon: Swords },
     { label: 'Rangliste', path: '/rangliste', icon: BarChart2 },
-    { label: 'Kodex', path: '/hilfe', icon: Trophy },
+    { label: 'Regelwerk', path: '/hilfe', icon: Trophy },
   ]
 
   return (
@@ -63,28 +63,25 @@ export default function Header() {
               <>
                 {(user.is_mod || user.is_admin) && (
                   <Link to="/admin">
-                    <Button variant="ghost" size="sm" className="hidden sm:flex">
-                      <Settings size={14} />
+                    <Button variant="ghost" size="md" className="hidden sm:flex">
+                      <Settings size={16} />
                       Admin
                     </Button>
                   </Link>
                 )}
-                <Link to="/profil" className="flex items-center gap-3 p-1.5 pr-4 rounded-lg border border-white/5 bg-white/5 hover:bg-white/10 transition-all group">
+                <Link to="/profil" className="inline-flex items-center gap-3 px-4 py-2.5 rounded-lg border border-white/5 bg-white/5 hover:bg-white/10 transition-all group text-sm font-bold uppercase tracking-wider">
                   {avatarUrl ? (
                     <img
                       src={avatarUrl}
                       alt={user.discord_name}
-                      className="w-8 h-8 rounded-lg grayscale group-hover:grayscale-0 transition-all border border-white/10"
+                      className="w-6 h-6 rounded-md grayscale group-hover:grayscale-0 transition-all border border-white/10"
                     />
                   ) : (
-                    <div className="w-8 h-8 rounded-lg bg-primary/20 flex items-center justify-center text-primary border border-primary/20">
-                      <User size={16} />
+                    <div className="w-6 h-6 rounded-md bg-primary/20 flex items-center justify-center text-primary border border-primary/20">
+                      <User size={14} />
                     </div>
                   )}
-                  <div className="hidden sm:block">
-                    <p className="text-[10px] uppercase font-bold text-muted tracking-tighter leading-none mb-1">Spieler</p>
-                    <p className="text-xs font-bold text-foreground tracking-wide leading-none">{user.discord_name}</p>
-                  </div>
+                  <span className="hidden sm:block text-foreground">{user.discord_name}</span>
                 </Link>
                 <button
                   onClick={logout}

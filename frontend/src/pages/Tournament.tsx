@@ -39,7 +39,7 @@ type Tab = 'übersicht' | 'kodex' | 'gruppen' | 'bracket' | 'teams' | 'ergebniss
 
 const ALL_TABS: { key: Tab; label: string; icon: typeof Trophy }[] = [
   { key: 'übersicht', label: 'Übersicht', icon: Trophy },
-  { key: 'kodex', label: 'Kodex', icon: Book },
+  { key: 'kodex', label: 'Regelwerk', icon: Book },
   { key: 'teams', label: 'Teams', icon: Users },
   { key: 'gruppen', label: 'Gruppen', icon: LayoutGrid },
   { key: 'bracket', label: 'Bracket', icon: GitBranch },
@@ -646,7 +646,7 @@ export default function Tournament() {
                             className="flex items-center gap-2 text-[10px] font-bold text-primary uppercase tracking-widest hover:text-primary-hover transition-colors"
                           >
                             <Book size={14} />
-                            Vollständigen Kodex lesen
+                            Vollständiges Regelwerk lesen
                           </button>
                        </div>
                     )}
@@ -676,7 +676,7 @@ export default function Tournament() {
                     <div className="text-center py-20 opacity-40 italic">
                        <ScrollText size={48} className="mx-auto mb-4 opacity-20" />
                        <p className="text-xl">Keine spezifischen Gesetze für dieses Turnier verkündet.</p>
-                       <p className="text-sm mt-2">Es gelten die allgemeinen Bestimmungen des Kodex.</p>
+                       <p className="text-sm mt-2">Es gelten die allgemeinen Bestimmungen des Regelwerks.</p>
                     </div>
                   )}
                </div>
