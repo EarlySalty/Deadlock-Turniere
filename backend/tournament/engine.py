@@ -635,7 +635,13 @@ async def finalize_checkin(
                         (tournament_id,),
                     )
                     seeded_entries = [{"team_id": row["id"]} for row in await cursor.fetchall()]
-                    matches_created = await _build_seeded_bracket(db, tournament_id, seeded_entries)
+                    bracket_format = tournament["bracket_format"] if "bracket_format" in tournament.keys() else "single_elimination"
+                    if bracket_format == "double_elimination":
+                        matches_created = await _build_double_elimination_bracket(
+                            db, tournament_id, seeded_entries,
+                        )
+                    else:
+                        matches_created = await _build_seeded_bracket(db, tournament_id, seeded_entries)
                     cursor = await db.execute(
                         "UPDATE tournaments SET status = 'bracket', updated_at = datetime('now') "
                         "WHERE id = ? AND status = 'checkin'",
