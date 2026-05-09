@@ -830,7 +830,7 @@ async def create_tournament(
             body.lobby_settings_preset,
             body.lobby_settings,
         )
-        # Auto Tournament Mode bestimmen: >= 12 Teams = group_stage, else = bracket_only
+        # Auto Tournament Mode bestimmen: >= 16 Teams = group_stage, else = bracket_only
         # Admin kann mit force_tournament_mode überschreiben
         tournament_mode = determine_tournament_mode(
             team_count=body.team_size,  # Fallback zur Team-Größe, nicht ideal aber praktisch
@@ -3168,7 +3168,7 @@ async def generate_groups_endpoint(
     user: UserSession = Depends(require_mod),
 ) -> dict:
     """Gruppen generieren mit Snake-Draft Seeding (Mod+)."""
-    num_groups = 4
+    num_groups: int | None = None
     if body and "num_groups" in body:
         num_groups = int(body["num_groups"])
         num_groups = max(2, min(8, num_groups))

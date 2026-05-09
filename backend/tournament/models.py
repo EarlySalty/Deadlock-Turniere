@@ -41,8 +41,8 @@ class BracketFormat(str, Enum):
 
 class TournamentMode(str, Enum):
     """Automatisch bestimmter Turnier-Modus basierend auf Team-Anzahl."""
-    group_stage = "group_stage"  # Group Phase + Bracket (>= 12 Teams)
-    bracket_only = "bracket_only"  # Nur Bracket (< 12 Teams)
+    group_stage = "group_stage"  # Group Phase + Bracket (>= 16 Teams)
+    bracket_only = "bracket_only"  # Nur Bracket (< 16 Teams)
 
 
 class TournamentGameMode(str, Enum):

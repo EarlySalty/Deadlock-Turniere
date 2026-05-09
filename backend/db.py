@@ -137,6 +137,8 @@ CREATE TABLE IF NOT EXISTS bracket_matches(
     team2_id INTEGER REFERENCES teams(id),
     source_match1_id INTEGER REFERENCES bracket_matches(id),
     source_match2_id INTEGER REFERENCES bracket_matches(id),
+    loser_to_match_id INTEGER REFERENCES bracket_matches(id),
+    loser_to_slot INTEGER,
     source_mini_group1_id INTEGER REFERENCES bracket_mini_groups(id),
     source_mini_group2_id INTEGER REFERENCES bracket_mini_groups(id),
     winner_id INTEGER REFERENCES teams(id),
@@ -384,6 +386,8 @@ async def _ensure_schema_upgrades(db: aiosqlite.Connection) -> None:
     await _ensure_column(db, "bracket_matches", "match_stats", "TEXT")
     await _ensure_column(db, "bracket_matches", "source_match1_id", "INTEGER")
     await _ensure_column(db, "bracket_matches", "source_match2_id", "INTEGER")
+    await _ensure_column(db, "bracket_matches", "loser_to_match_id", "INTEGER")
+    await _ensure_column(db, "bracket_matches", "loser_to_slot", "INTEGER")
     await _ensure_column(db, "bracket_matches", "mini_group_id", "INTEGER")
     await _ensure_column(db, "bracket_matches", "source_mini_group1_id", "INTEGER")
     await _ensure_column(db, "bracket_matches", "source_mini_group2_id", "INTEGER")

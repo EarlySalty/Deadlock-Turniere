@@ -56,6 +56,26 @@
 
 ---
 
+## Neue Aufgabe (2026-05-09): Turnier-Engine - Auto-Gruppen, Cross-Seed, Double Elim
+
+### Ziel
+- Group Stage erst ab **16 Teams**
+- Gruppen-Anzahl automatisch aus Team-Anzahl ableiten
+- Gruppen-Qualifier im Bracket per Cross-Seed statt flacher Punktesortierung paaren
+- Double-Elimination im Backend tatsächlich erzeugen und Loser-Routing persistieren
+
+### Status (2026-05-09)
+→ **Abgeschlossen** — Engine/DB/Tests + Frontend-Bracket-Visualisierung umgesetzt
+
+### Fortschritt
+- Relevante Stellen geprüft: `backend/tournament/engine.py`, `backend/db.py`, `backend/tournament/admin_routes.py`, `backend/tournament/models.py`, `backend/match/result_processor.py`, bestehende Tests in `backend/tests/`
+- Schema ergänzt: `bracket_matches.loser_to_match_id` und `bracket_matches.loser_to_slot` für Neuinstallationen und idempotente Migrationen
+- Engine erweitert: Auto-Gruppen-Helfer, Auto-Default für `generate_groups`, DB-gesteuertes `bracket_format`, Cross-Seeding aus Gruppenphase, Double-Elimination-Builder inkl. GF-Reset-Logik
+- Neue Tests ergänzt: `test_engine_auto_num_groups.py`, `test_engine_cross_seeding.py`, `test_engine_double_elim.py`
+- Verifikation: gezielter Lauf der drei neuen Tests erfolgreich; vollständiger `backend/tests/`-Lauf ausgeführt, dabei zusätzliche bestehende fachfremde Fehler in `profile`, `security` und `match_manager` sichtbar
+
+---
+
 ## Neue Aufgabe (2026-04-25): Mini-RR-Bracket, Captain-Teamnamen, Game-Modes, Auto-Lobby
 
 ### Ziel
