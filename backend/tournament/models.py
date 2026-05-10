@@ -398,6 +398,10 @@ class BracketMatch(BaseModel):
     team2_id: Optional[int] = None
     winner_id: Optional[int] = None
     status: MatchStatus = MatchStatus.pending
+    source_match1_id: Optional[int] = None
+    source_match2_id: Optional[int] = None
+    loser_to_match_id: Optional[int] = None
+    loser_to_slot: Optional[int] = None
     steam_party_id: Optional[str] = None
     party_code: Optional[str] = None
     deadlock_match_id: Optional[str] = None

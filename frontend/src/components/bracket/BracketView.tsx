@@ -1,5 +1,6 @@
 import { motion } from 'framer-motion'
 import { GitBranch } from 'lucide-react'
+import { useMemo } from 'react'
 import Card from '@/components/ui/Card'
 import BracketMatch from './BracketMatch'
 import type { BracketMatch as BracketMatchType, TeamPublic } from '@/types/tournament'
@@ -8,6 +9,12 @@ interface Props {
   matches: BracketMatchType[]
   teams: TeamPublic[]
 }
+
+interface SlotPlaceholders {
+  p1: string | null
+  p2: string | null
+}
+type PlaceholderMap = Map<number, SlotPlaceholders>
 
 function getWinnerRoundLabel(round: number, maxRound: number): string {
   if (round === maxRound) return 'Finale'
@@ -24,17 +31,71 @@ function getLoserRoundLabel(round: number, maxRound: number, minRound: number): 
 
 function getGrandFinalLabel(round: number, gfRounds: number[]): string {
   const sorted = [...gfRounds].sort((a, b) => a - b)
-  if (sorted.length >= 2 && round === sorted[1]) return 'Bracket Reset'
+  if (sorted.length >= 2 && round === sorted[1]) return 'Bracket Reset (nur bei LB-Sieg)'
   return 'Grand Final'
+}
+
+function describeStage(match: BracketMatchType, allMatches: BracketMatchType[]): string {
+  if (match.bracket_type === 'winners') {
+    const winners = allMatches.filter((m) => m.bracket_type === 'winners')
+    const maxR = Math.max(...winners.map((m) => m.round))
+    if (match.round === maxR) return 'WB-Finale'
+    if (match.round === maxR - 1) return 'WB-Halbfinale'
+    if (match.round === maxR - 2) return 'WB-Viertelfinale'
+    return `WB R${match.round}`
+  }
+  if (match.bracket_type === 'losers') {
+    const losers = allMatches.filter((m) => m.bracket_type === 'losers')
+    const maxR = Math.max(...losers.map((m) => m.round))
+    if (match.round === maxR) return 'LB-Finale'
+    const minR = Math.min(...losers.map((m) => m.round))
+    const idx = match.round - minR + 1
+    return `LB R${idx}`
+  }
+  return 'Grand Final'
+}
+
+function computePlaceholder(
+  match: BracketMatchType,
+  slot: 1 | 2,
+  allMatches: BracketMatchType[],
+): string | null {
+  const sourceMatchId = slot === 1 ? match.source_match1_id : match.source_match2_id
+  if (sourceMatchId !== null && sourceMatchId !== undefined) {
+    const source = allMatches.find((m) => m.id === sourceMatchId)
+    if (source) {
+      return `Sieger ${describeStage(source, allMatches)}`
+    }
+  }
+  // Loser-Drop: ein anderes Match routet seinen Verlierer in diesen Slot
+  const loserSource = allMatches.find(
+    (m) => m.loser_to_match_id === match.id && m.loser_to_slot === slot,
+  )
+  if (loserSource) {
+    return `Verlierer ${describeStage(loserSource, allMatches)}`
+  }
+  return null
+}
+
+function buildPlaceholderMap(allMatches: BracketMatchType[]): PlaceholderMap {
+  const map: PlaceholderMap = new Map()
+  for (const match of allMatches) {
+    map.set(match.id, {
+      p1: computePlaceholder(match, 1, allMatches),
+      p2: computePlaceholder(match, 2, allMatches),
+    })
+  }
+  return map
 }
 
 interface BracketColumnsProps {
   matches: BracketMatchType[]
   teams: TeamPublic[]
   roundLabel: (round: number, maxRound: number, minRound: number) => string
+  placeholders: PlaceholderMap
 }
 
-function BracketColumns({ matches, teams, roundLabel }: BracketColumnsProps) {
+function BracketColumns({ matches, teams, roundLabel, placeholders }: BracketColumnsProps) {
   const roundsMap = new Map<number, BracketMatchType[]>()
   for (const match of matches) {
     const existing = roundsMap.get(match.round) ?? []
@@ -78,6 +139,8 @@ function BracketColumns({ matches, teams, roundLabel }: BracketColumnsProps) {
                   ? (spacingMultiplier - 1) * 64
                   : 0
 
+                const ph = placeholders.get(match.id)
+
                 return (
                   <div
                     key={match.id}
@@ -90,7 +153,12 @@ function BracketColumns({ matches, teams, roundLabel }: BracketColumnsProps) {
                       <div className="w-6 border-t-2 border-border/40" />
                     )}
 
-                    <BracketMatch match={match} teams={teams} />
+                    <BracketMatch
+                      match={match}
+                      teams={teams}
+                      placeholder1={ph?.p1 ?? null}
+                      placeholder2={ph?.p2 ?? null}
+                    />
 
                     {roundData.round < maxRound && (
                       <div className="w-6 border-t-2 border-border/40" />
@@ -107,6 +175,8 @@ function BracketColumns({ matches, teams, roundLabel }: BracketColumnsProps) {
 }
 
 export default function BracketView({ matches, teams }: Props) {
+  const placeholders = useMemo(() => buildPlaceholderMap(matches), [matches])
+
   if (matches.length === 0) {
     return (
       <Card className="p-6 text-center">
@@ -129,6 +199,7 @@ export default function BracketView({ matches, teams }: Props) {
           matches={winners.length > 0 ? winners : matches}
           teams={teams}
           roundLabel={getWinnerRoundLabel}
+          placeholders={placeholders}
         />
       </div>
     )
@@ -146,6 +217,7 @@ export default function BracketView({ matches, teams }: Props) {
           matches={winners}
           teams={teams}
           roundLabel={getWinnerRoundLabel}
+          placeholders={placeholders}
         />
       </section>
 
@@ -158,6 +230,7 @@ export default function BracketView({ matches, teams }: Props) {
             matches={losers}
             teams={teams}
             roundLabel={getLoserRoundLabel}
+            placeholders={placeholders}
           />
         </section>
       )}
@@ -171,6 +244,7 @@ export default function BracketView({ matches, teams }: Props) {
             matches={grandFinal}
             teams={teams}
             roundLabel={(round) => getGrandFinalLabel(round, gfRounds)}
+            placeholders={placeholders}
           />
         </section>
       )}

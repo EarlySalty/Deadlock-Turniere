@@ -264,6 +264,10 @@ export interface BracketMatch {
   hero_assignments: Record<string, unknown> | null
   scheduled_at: string | null
   played_at: string | null
+  source_match1_id?: number | null
+  source_match2_id?: number | null
+  loser_to_match_id?: number | null
+  loser_to_slot?: number | null
 }
 
 export interface MatchGame {

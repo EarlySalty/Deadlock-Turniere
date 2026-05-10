@@ -1,3 +1,10 @@
+## #5 — CI-Optimierung und Double-Elimination-Feinschliff
+
+- Täglichen Security-Scan-Schedule entfernt — Security läuft bei Push und PRs
+- Semgrep blockiert Build nicht mehr bei Findings
+- Bracket-Datenmodell erweitert: Loser-Bracket-Verlinkungen (source_match, loser_to_match) direkt im Modell
+- Bracket-Ansicht zeigt Winner-/Loser-Bracket-Verbindungen klarer an
+
 ## #4 — Automatische Security-Pipeline eingerichtet
 
 - Dependabot überwacht ab jetzt Python-Backend, npm-Frontend und GitHub Actions täglich
