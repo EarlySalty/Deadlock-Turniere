@@ -1,3 +1,8 @@
+## #6 — Tiefere Security-Scans: Trivy und Lizenz-Audit
+
+- Trivy scannt jetzt bei jedem Push das Filesystem auf HIGH/CRITICAL CVEs
+- Lizenz-Audit warnt bei Copyleft-Lizenzen (GPL/AGPL) in Python-Abhängigkeiten
+
 ## #5 — CI-Optimierung und Double-Elimination-Feinschliff
 
 - Täglichen Security-Scan-Schedule entfernt — Security läuft bei Push und PRs
