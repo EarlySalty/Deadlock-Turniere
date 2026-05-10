@@ -1,3 +1,9 @@
+## #4 — Automatische Security-Pipeline eingerichtet
+
+- Dependabot überwacht ab jetzt Python-Backend, npm-Frontend und GitHub Actions täglich
+- Bei jedem Push wird automatisch geprüft ob Abhängigkeiten bekannte CVEs haben
+- Jeder Release wird kryptografisch signiert (SBOM + Provenance-Attestierung via Sigstore)
+
 ## #3 — Sicherheitslücken in Frontend-Abhängigkeiten geschlossen
 
 - vite und weitere Build-Pakete auf gepatchte Versionen angehoben — schließt Path-Traversal und ReDoS-Lücken
