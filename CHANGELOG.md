@@ -1,3 +1,8 @@
+## #7 — Dependency-Pinning erzwungen
+
+- requirements.txt auf exakte Versionen (==) umgestellt — was pip-audit prüft ist jetzt auch was deployed wird
+- CI blockiert ab sofort wenn >= oder ~= in requirements.txt auftaucht
+
 ## #6 — Tiefere Security-Scans: Trivy und Lizenz-Audit
 
 - Trivy scannt jetzt bei jedem Push das Filesystem auf HIGH/CRITICAL CVEs

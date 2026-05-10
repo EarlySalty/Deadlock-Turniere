@@ -78,6 +78,15 @@ jobs:
       - name: Run pip-audit
         run: pip-audit --strict --desc -r backend/requirements.txt
 
+      - name: Check dependency pinning
+        run: |
+          if grep -Eq ">=|<=|~=|!=" backend/requirements.txt; then
+            echo "::error::backend/requirements.txt enthält unpinned dependencies. Bitte == verwenden."
+            grep -E ">=|<=|~=|!=" backend/requirements.txt
+            exit 1
+          fi
+          echo "Pinning OK: alle Abhängigkeiten auf == fixiert."
+
       - name: License audit
         continue-on-error: true
         run: |
