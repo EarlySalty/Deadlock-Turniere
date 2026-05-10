@@ -1,3 +1,7 @@
+## #3 — Sicherheitslücken in Frontend-Abhängigkeiten geschlossen
+
+- vite und weitere Build-Pakete auf gepatchte Versionen angehoben — schließt Path-Traversal und ReDoS-Lücken
+
 ## #2 — Double Elimination & smartere Turnier-Brackets
 
 - Double Elimination funktioniert jetzt richtig: Wer im Hauptbaum verliert, kommt in den Loser-Bracket; das Finale entscheidet wie üblich Sieger oben gegen Sieger unten, mit Bracket-Reset wenn der Loser-Bracket-Sieger das erste Finalspiel gewinnt
