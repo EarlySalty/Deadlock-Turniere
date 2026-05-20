@@ -9,6 +9,7 @@ import {
   useLeaveLobby,
   useResetMatch,
   useSetManualMatchLobby,
+  useSetMatchStreamFlag,
   useStartMatch,
 } from '@/hooks/useTournament'
 import type { BracketMatch, MatchGame, Team } from '@/types/tournament'
@@ -96,6 +97,7 @@ export default function MatchAdminPanel({
   const leaveLobbyMutation = useLeaveLobby()
   const resetMatchMutation = useResetMatch()
   const setManualLobbyMutation = useSetManualMatchLobby()
+  const streamFlagMutation = useSetMatchStreamFlag(tournamentId)
 
   const [activeAction, setActiveAction] = useState<ActiveAction | null>(null)
   const [messages, setMessages] = useState<Record<number, MatchMessage>>({})
@@ -290,8 +292,27 @@ export default function MatchAdminPanel({
                     Serie: {teamName(match.team1_id, teams)} {match.series_wins_team1} : {match.series_wins_team2} {teamName(match.team2_id, teams)}
                   </div>
                 )}
-                <div className="flex flex-wrap gap-3 text-xs text-muted">
+                <div className="flex flex-wrap items-center gap-3 text-xs text-muted">
                   <span>Status: {statusLabel(match)}</span>
+                  <button
+                    type="button"
+                    disabled={streamFlagMutation.isPending}
+                    onClick={() =>
+                      streamFlagMutation.mutate({
+                        matchId: match.id,
+                        onStream: !match.on_stream,
+                      })
+                    }
+                    title="Stream-Marker umschalten"
+                    className={`flex items-center gap-1 rounded-full px-2 py-0.5 transition-colors disabled:opacity-50 ${
+                      match.on_stream
+                        ? 'bg-primary/15 text-primary hover:bg-primary/25'
+                        : 'bg-muted/15 text-muted hover:bg-muted/25'
+                    }`}
+                  >
+                    <Radio size={11} />
+                    {match.on_stream ? 'Auf Stream' : 'Parallel'}
+                  </button>
                   {match.deadlock_match_id && <span>Deadlock Match-ID: {match.deadlock_match_id}</span>}
                   {match.match_duration_s !== null && <span>Dauer: {formatDuration(match.match_duration_s)}</span>}
                 </div>

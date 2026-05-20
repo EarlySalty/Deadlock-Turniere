@@ -40,6 +40,9 @@ import type {
   CreateTestUsersResult,
   SimulateTestRoundResult,
   WipeTestDataResult,
+  MatchResultReport,
+  MatchResultReportCreate,
+  ActionItemsResult,
 } from '@/types/tournament'
 
 const API_BASE = '/turnier/api'
@@ -484,6 +487,42 @@ export const submitDraftAction = (sessionId: number, heroName: string, takenBy: 
     method: 'POST',
     body: JSON.stringify({ hero_name: heroName, taken_by: takenBy, force: true }),
   })
+
+// --- Ergebnis-Meldung, Leitstand & Stream-Marker ---
+export const reportMatchResult = (
+  tournamentId: number,
+  matchId: number,
+  data: MatchResultReportCreate,
+) =>
+  request<MatchResultReport>(
+    `/tournaments/${tournamentId}/matches/${matchId}/report-result`,
+    { method: 'POST', body: JSON.stringify(data) },
+  )
+
+export const fetchActionItems = (tournamentId: number) =>
+  request<ActionItemsResult>(`/admin/tournaments/${tournamentId}/action-items`)
+
+export const confirmResultReport = (reportId: number) =>
+  request<{ status: string; match_id: number; winner_id: number }>(
+    `/admin/result-reports/${reportId}/confirm`,
+    { method: 'POST' },
+  )
+
+export const rejectResultReport = (reportId: number) =>
+  request<{ status: string; report_id: number }>(
+    `/admin/result-reports/${reportId}/reject`,
+    { method: 'POST' },
+  )
+
+export const setMatchStreamFlag = (
+  tournamentId: number,
+  matchId: number,
+  onStream: boolean,
+) =>
+  request<{ status: string; match_id: number; on_stream: boolean }>(
+    `/admin/tournaments/${tournamentId}/matches/${matchId}/stream`,
+    { method: 'PATCH', body: JSON.stringify({ on_stream: onStream }) },
+  )
 
 // --- Series Games ---
 export const startSeriesGame = (tournamentId: number, matchId: number, gameNumber: number) =>

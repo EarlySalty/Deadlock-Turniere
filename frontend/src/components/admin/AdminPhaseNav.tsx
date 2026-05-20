@@ -1,5 +1,5 @@
 import {
-  CalendarRange,
+  Check,
   CheckCheck,
   GitBranch,
   Headphones,
@@ -18,14 +18,25 @@ export type AdminPhase =
   | 'bracket'
   | 'voice'
 
+type PhaseState = 'done' | 'current' | 'upcoming'
+
 interface PhaseConfig {
   id: AdminPhase
   label: string
   icon: LucideIcon
-  /** Hint why this phase is hidden/disabled. */
-  description: string
-  /** Phase wird sichtbar wenn das Tournament in einem dieser Stadien ist (oder bestimmte Daten existieren). */
+  /** Status-Rang, zu dem diese Phase gehört (für die Fortschrittsanzeige). */
+  statusRank: number
   isAvailable: (status: TournamentStatus, hasGroups: boolean, hasBracket: boolean) => boolean
+}
+
+const STATUS_RANK: Record<TournamentStatus, number> = {
+  draft: 0,
+  registration: 1,
+  checkin: 2,
+  group_phase: 3,
+  bracket: 4,
+  completed: 5,
+  archived: 5,
 }
 
 const PHASE_CONFIG: PhaseConfig[] = [
@@ -33,14 +44,14 @@ const PHASE_CONFIG: PhaseConfig[] = [
     id: 'setup',
     label: 'Setup',
     icon: Settings,
-    description: 'Stammdaten, Zeitplan, Spielmodus',
+    statusRank: 0,
     isAvailable: () => true,
   },
   {
     id: 'participants',
     label: 'Teilnehmer',
     icon: Users,
-    description: 'Spieler, Teams, Solo-Pool',
+    statusRank: 1,
     isAvailable: (status) =>
       ['draft', 'registration', 'checkin', 'group_phase', 'bracket'].includes(status),
   },
@@ -48,28 +59,28 @@ const PHASE_CONFIG: PhaseConfig[] = [
     id: 'checkin',
     label: 'Check-in',
     icon: CheckCheck,
-    description: 'Anwesenheit prüfen, Bracket starten',
+    statusRank: 2,
     isAvailable: (status) => status === 'checkin',
   },
   {
     id: 'group_phase',
     label: 'Gruppenphase',
     icon: LayoutGrid,
-    description: 'Gruppen-Matches & Tabellen',
+    statusRank: 3,
     isAvailable: (_status, hasGroups) => hasGroups,
   },
   {
     id: 'bracket',
-    label: 'Bracket',
+    label: 'Matches',
     icon: GitBranch,
-    description: 'KO-Runden & Match-Steuerung',
+    statusRank: 4,
     isAvailable: (_status, _hasGroups, hasBracket) => hasBracket,
   },
   {
     id: 'voice',
     label: 'Voice & Caster',
     icon: Headphones,
-    description: 'Voice-Channel-Splits & Casting',
+    statusRank: 4,
     isAvailable: (_status, _hasGroups, hasBracket) => hasBracket,
   },
 ]
@@ -98,6 +109,13 @@ export function defaultPhaseFor(
   return 'setup'
 }
 
+function phaseState(phase: PhaseConfig, status: TournamentStatus): PhaseState {
+  const currentRank = STATUS_RANK[status] ?? 0
+  if (phase.statusRank < currentRank) return 'done'
+  if (phase.statusRank > currentRank) return 'upcoming'
+  return 'current'
+}
+
 export default function AdminPhaseNav({
   status,
   hasGroups,
@@ -110,12 +128,16 @@ export default function AdminPhaseNav({
   return (
     <nav
       role="tablist"
-      aria-label="Turnier-Phasen"
+      aria-label="Turnier-Lebenszyklus"
       className="flex flex-col gap-1 rounded-xl border border-border bg-card p-2"
     >
+      <div className="px-2 pb-1 pt-1 text-[10px] uppercase tracking-wider text-muted">
+        Phase
+      </div>
       {visible.map((phase) => {
         const Icon = phase.icon
         const isActive = activePhase === phase.id
+        const state = phaseState(phase, status)
         return (
           <button
             key={phase.id}
@@ -123,34 +145,31 @@ export default function AdminPhaseNav({
             role="tab"
             aria-selected={isActive}
             onClick={() => onChange(phase.id)}
-            className={`group flex items-start gap-3 rounded-lg px-3 py-2.5 text-left transition-colors ${
+            className={`group flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-left transition-colors ${
               isActive
                 ? 'bg-primary/15 text-primary'
-                : 'text-foreground/85 hover:bg-card-hover hover:text-foreground'
+                : state === 'upcoming'
+                  ? 'text-muted hover:bg-card-hover'
+                  : 'text-foreground/85 hover:bg-card-hover hover:text-foreground'
             }`}
           >
-            <Icon
-              size={16}
-              className={`mt-0.5 shrink-0 ${isActive ? 'text-primary' : 'text-muted group-hover:text-foreground'}`}
-            />
-            <div className="min-w-0">
-              <div className="text-sm font-medium leading-tight">{phase.label}</div>
-              <div
-                className={`mt-0.5 truncate text-[11px] ${
-                  isActive ? 'text-primary/70' : 'text-muted'
-                }`}
-              >
-                {phase.description}
-              </div>
-            </div>
+            <span
+              className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full border text-[10px] ${
+                state === 'done'
+                  ? 'border-green-400/50 bg-green-400/15 text-green-400'
+                  : state === 'current'
+                    ? 'border-primary/60 bg-primary/15 text-primary'
+                    : 'border-border text-muted'
+              }`}
+            >
+              {state === 'done' ? <Check size={11} /> : <Icon size={11} />}
+            </span>
+            <span className="min-w-0 truncate text-sm font-medium leading-tight">
+              {phase.label}
+            </span>
           </button>
         )
       })}
-
-      <div className="mt-2 border-t border-border/60 pt-2 px-3 pb-1 text-[10px] uppercase tracking-wider text-muted">
-        <CalendarRange size={10} className="mr-1 inline" />
-        Aktueller Status: {status}
-      </div>
     </nav>
   )
 }

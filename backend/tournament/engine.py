@@ -1268,6 +1268,21 @@ async def _build_double_elimination_bracket(
         (grand_final_reset_id,),
     )
 
+    # Stream-Heuristik: interessante Matches laufen auf Stream (Default on_stream = 1),
+    # die frühen/mittleren Loser-Runden laufen parallel/off-stream. Das LB-Finale
+    # (letzte Loser-Runde) und das Grand Final bleiben auf Stream.
+    off_stream_ids = [
+        match_id
+        for losers_round in losers_rounds[:-1]
+        for match_id in losers_round
+    ]
+    if off_stream_ids:
+        placeholders = ", ".join("?" for _ in off_stream_ids)
+        await db.execute(
+            f"UPDATE bracket_matches SET on_stream = 0 WHERE id IN ({placeholders})",
+            off_stream_ids,
+        )
+
     return match_count
 
 

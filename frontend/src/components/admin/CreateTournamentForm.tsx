@@ -213,6 +213,9 @@ export default function CreateTournamentForm() {
     useState<TournamentGameMode>('standard')
   const [autoLobbyEnabled, setAutoLobbyEnabled] = useState(true)
   const [reminderOffsets, setReminderOffsets] = useState('1440, 120, 15')
+  const [startReminderOffsets, setStartReminderOffsets] = useState('1440, 60')
+  const [matchObjective, setMatchObjective] = useState('auto')
+  const [noShowGrace, setNoShowGrace] = useState(10)
   const [sliders, setSliders] = useState<Record<string, SliderState>>(initSliders)
   const [successMsg, setSuccessMsg] = useState('')
 
@@ -272,6 +275,9 @@ export default function CreateTournamentForm() {
         auto_lobby_enabled: autoLobbyEnabled,
         exclude_from_leaderboard: excludeFromLeaderboard,
         reminder_offsets: parseReminderOffsets(reminderOffsets),
+        start_reminder_offsets: parseReminderOffsets(startReminderOffsets),
+        match_objective: matchObjective,
+        no_show_grace_minutes: noShowGrace,
         rules: rules.trim() || undefined,
       },
       {
@@ -497,6 +503,56 @@ export default function CreateTournamentForm() {
               <div className="text-xs text-muted">Ideal für Testturniere oder interne Cups</div>
             </div>
           </label>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div>
+            <label htmlFor="start-reminder-offsets" className="block text-sm font-medium text-foreground mb-1.5">
+              Erinnerung vor Match-Start
+            </label>
+            <input
+              id="start-reminder-offsets"
+              type="text"
+              value={startReminderOffsets}
+              onChange={(e) => setStartReminderOffsets(e.target.value)}
+              placeholder="1440, 60"
+              className="w-full bg-background border border-border rounded-lg px-3 py-2 text-foreground placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-primary/50"
+            />
+            <p className="mt-1 text-xs text-muted">Minuten vor Turnier-Beginn, an Teilnehmer.</p>
+          </div>
+
+          <div>
+            <label htmlFor="match-objective" className="block text-sm font-medium text-foreground mb-1.5">
+              Match-Wertung
+            </label>
+            <select
+              id="match-objective"
+              value={matchObjective}
+              onChange={(e) => setMatchObjective(e.target.value)}
+              className="w-full bg-background border border-border rounded-lg px-3 py-2 text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
+            >
+              <option value="auto">Automatisch (nach Team-Größe)</option>
+              <option value="first_guardian">Erster Guardian gewinnt</option>
+              <option value="first_walker">Erster Walker gewinnt</option>
+              <option value="base">Reguläres Spielende (Basis)</option>
+            </select>
+            <p className="mt-1 text-xs text-muted">Wird in der Lobby-Ansage angezeigt.</p>
+          </div>
+
+          <div>
+            <label htmlFor="no-show-grace" className="block text-sm font-medium text-foreground mb-1.5">
+              No-Show-Frist (Minuten)
+            </label>
+            <input
+              id="no-show-grace"
+              type="number"
+              min={1}
+              value={noShowGrace}
+              onChange={(e) => setNoShowGrace(Math.max(1, Number(e.target.value) || 1))}
+              className="w-full bg-background border border-border rounded-lg px-3 py-2 text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
+            />
+            <p className="mt-1 text-xs text-muted">Wartezeit, bis ein Walkover möglich ist.</p>
+          </div>
         </div>
 
         {/* Invite-Modus */}

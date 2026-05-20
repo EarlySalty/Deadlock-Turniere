@@ -53,6 +53,9 @@ export interface Tournament {
   invite_window_end: string | null
   exclude_from_leaderboard: boolean
   reminder_offsets: number[]
+  start_reminder_offsets: number[]
+  match_objective: string
+  no_show_grace_minutes: number
   is_test: boolean
   created_by: string
   created_at: string
@@ -263,6 +266,7 @@ export interface BracketMatch {
   mini_group_id: number | null
   hero_assignments: Record<string, unknown> | null
   scheduled_at: string | null
+  on_stream: boolean
   played_at: string | null
   source_match1_id?: number | null
   source_match2_id?: number | null
@@ -306,6 +310,9 @@ export interface TournamentCreate {
   auto_lobby_enabled?: boolean
   exclude_from_leaderboard?: boolean
   reminder_offsets?: number[]
+  start_reminder_offsets?: number[]
+  match_objective?: string
+  no_show_grace_minutes?: number
   is_test?: boolean
   rules?: string | null
 }
@@ -331,11 +338,63 @@ export interface TournamentUpdate {
   invite_window_end?: string
   exclude_from_leaderboard?: boolean
   reminder_offsets?: number[]
+  start_reminder_offsets?: number[]
+  match_objective?: string
+  no_show_grace_minutes?: number
   rules?: string | null
 }
 
 export interface ManualResult {
   winner_id: number
+}
+
+// --- Match-Ergebnis-Meldungen & Leitstand ---
+
+export interface MatchResultReportCreate {
+  winner_team_id?: number | null
+  deadlock_match_id?: string | null
+  is_no_show?: boolean
+  no_show_team_id?: number | null
+}
+
+export interface MatchResultReport {
+  id: number
+  match_type: string
+  match_id: number
+  tournament_id: number
+  reported_by: string
+  winner_team_id: number | null
+  deadlock_match_id: string | null
+  is_no_show: boolean
+  no_show_team_id: number | null
+  status: 'pending' | 'confirmed' | 'rejected'
+  created_at: string
+  resolved_at: string | null
+  resolved_by: string | null
+}
+
+export interface ActionItem {
+  report_id: number
+  match_id: number
+  match_round: number
+  on_stream: boolean
+  team1_name: string | null
+  team2_name: string | null
+  reported_by: string
+  is_no_show: boolean
+  winner_team_id: number | null
+  winner_name: string | null
+  no_show_team_id: number | null
+  no_show_name: string | null
+  deadlock_match_id: string | null
+  created_at: string
+  grace_minutes: number
+  grace_expired: boolean
+}
+
+export interface ActionItemsResult {
+  pending_reports: ActionItem[]
+  no_show_grace_minutes: number
 }
 
 export interface LobbyCreateResult {

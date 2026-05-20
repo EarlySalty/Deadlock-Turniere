@@ -1,3 +1,11 @@
+## #8 — Erinnerungen, Selbstmeldung & aufgeräumte Admin-Seite
+
+- Teilnehmer bekommen jetzt automatisch eine Discord-DM, wann das Turnier startet und wenn ihr Match als Nächstes dran ist — freundlicher Hinweis statt verpasster Matches
+- Teams können Off-Stream-Ergebnisse selbst melden (mit Deadlock-Match-ID), ein Admin bestätigt sie per Klick — so kann das Loser-Bracket parallel zum Haupt-Bracket laufen, ohne dass alles über den Stream muss
+- Erscheint ein Gegner nicht, lässt sich das melden; nach einer einstellbaren Frist kann der Admin einen Walkover bestätigen
+- Neuer "Aktion erforderlich"-Leitstand auf der Admin-Seite zeigt auf einen Blick, welche Matches eine Bestätigung oder Entscheidung brauchen; die Phasen-Navigation ist jetzt eine klare Fortschritts-Schiene statt verschachtelter Tabs
+- Bei jedem Match steht jetzt die Wertung in der Lobby-Ansage (z.B. "erster Walker gewinnt"), und der Bot markiert automatisch, welche Matches auf Stream und welche parallel laufen
+
 ## #7 — Dependency-Pinning erzwungen
 
 - requirements.txt auf exakte Versionen (==) umgestellt — was pip-audit prüft ist jetzt auch was deployed wird

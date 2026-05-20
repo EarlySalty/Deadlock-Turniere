@@ -8,6 +8,26 @@ from match.heroes import HERO_NAMES
 from tournament.models import TournamentGameMode
 
 
+_OBJECTIVE_LABELS: dict[str, str] = {
+    "first_guardian": "Erster zerstörter Guardian gewinnt",
+    "first_walker": "Erster zerstörter Walker gewinnt",
+    "base": "Reguläres Spielende — gegnerische Basis zerstören",
+}
+
+
+def resolve_match_objective(match_objective: str | None, team_size: int) -> tuple[str, str]:
+    """Ermittelt die Wertungs-Bedingung eines Matches als (code, anzeige_text).
+
+    'auto' leitet die Bedingung aus der Team-Größe ab: kleine Formate (1v1/2v2)
+    enden an einer festen Objective-Stufe, größere Formate spielen regulär aus.
+    """
+    code = (match_objective or "auto").strip().lower()
+    if code == "auto":
+        code = "first_walker" if team_size <= 2 else "base"
+    label = _OBJECTIVE_LABELS.get(code, code)
+    return code, label
+
+
 def _pick_unique_heroes(count: int) -> list[str]:
     if count <= 0:
         return []

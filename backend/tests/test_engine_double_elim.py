@@ -159,3 +159,48 @@ async def test_generate_bracket_builds_double_elimination_and_grand_final_reset(
     grand_final_reset = await _load_matches(1, "grand_final", 5)
     assert grand_final_reset[0]["status"] == "pending"
     assert (grand_final_reset[0]["team1_id"], grand_final_reset[0]["team2_id"]) == (1, 3)
+
+
+@pytest.mark.asyncio
+async def test_double_elimination_sets_stream_heuristic(tmp_path, monkeypatch):
+    db_path = tmp_path / "double-elim-stream.db"
+    avatars_dir = tmp_path / "avatars"
+    monkeypatch.setattr(settings, "DATABASE_PATH", str(db_path))
+    monkeypatch.setattr(settings, "AVATAR_DIR", str(avatars_dir))
+    await init_db()
+
+    async with get_db() as db:
+        await db.execute(
+            """
+            INSERT INTO tournaments (name, status, created_by, updated_at, bracket_format)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            ("Stream Heuristic", "bracket", "admin", "now", "double_elimination"),
+        )
+        for team_number in range(8):
+            await db.execute(
+                """
+                INSERT INTO teams (tournament_id, name, name_key, captain_discord_id)
+                VALUES (?, ?, ?, ?)
+                """,
+                (1, f"Team {team_number + 1}", f"team-{team_number + 1}", f"{team_number + 1:03d}"),
+            )
+        await db.commit()
+
+    await engine.generate_bracket(1)
+
+    async with get_db() as db:
+        cursor = await db.execute(
+            "SELECT bracket_type, round, on_stream FROM bracket_matches WHERE tournament_id = 1"
+        )
+        rows = [dict(row) for row in await cursor.fetchall()]
+
+    # Winner-Bracket und Grand Final laufen auf Stream
+    assert all(r["on_stream"] == 1 for r in rows if r["bracket_type"] == "winners")
+    assert all(r["on_stream"] == 1 for r in rows if r["bracket_type"] == "grand_final")
+
+    losers = [r for r in rows if r["bracket_type"] == "losers"]
+    last_losers_round = max(r["round"] for r in losers)
+    # LB-Finale auf Stream, frühere Loser-Runden parallel/off-stream
+    assert all(r["on_stream"] == 1 for r in losers if r["round"] == last_losers_round)
+    assert all(r["on_stream"] == 0 for r in losers if r["round"] != last_losers_round)

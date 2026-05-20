@@ -28,11 +28,14 @@ import {
   voiceMoveTeams, voiceMoveSammelpunkt, voiceMoveUser,
   fetchDraftHeroes, startDraft, fetchDraftSession, submitDraftAction,
   submitSeriesGameResult,
+  reportMatchResult, fetchActionItems, confirmResultReport, rejectResultReport,
+  setMatchStreamFlag,
 } from '@/api/client'
 import type {
   ManualResult, TeamMoveRequest, TournamentCreate, TournamentUpdate,
   UserProfileUpdate,
   CreateTestTournamentRequest,
+  MatchResultReportCreate,
 } from '@/types/tournament'
 
 function invalidateTournamentCaches(qc: ReturnType<typeof useQueryClient>, tournamentId?: number) {
@@ -946,6 +949,60 @@ export function useSubmitDraftAction(sessionId: number) {
       submitDraftAction(sessionId, heroName, takenBy),
     onSuccess: (data) => {
       qc.setQueryData(['draft', 'session', sessionId], data)
+    },
+  })
+}
+
+// Ergebnis-Meldung, Leitstand & Stream-Marker
+export function useReportMatchResult(tournamentId: number) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ matchId, data }: { matchId: number; data: MatchResultReportCreate }) =>
+      reportMatchResult(tournamentId, matchId, data),
+    onSuccess: () => {
+      invalidateTournamentCaches(qc, tournamentId)
+      qc.invalidateQueries({ queryKey: ['admin', 'tournaments', tournamentId, 'action-items'] })
+    },
+  })
+}
+
+export function useActionItems(tournamentId: number, enabled = true) {
+  return useQuery({
+    queryKey: ['admin', 'tournaments', tournamentId, 'action-items'],
+    queryFn: () => fetchActionItems(tournamentId),
+    enabled: tournamentId > 0 && enabled,
+    refetchInterval: 5_000,
+  })
+}
+
+export function useConfirmResultReport(tournamentId: number) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (reportId: number) => confirmResultReport(reportId),
+    onSuccess: () => {
+      invalidateTournamentCaches(qc, tournamentId)
+      qc.invalidateQueries({ queryKey: ['admin', 'tournaments', tournamentId, 'action-items'] })
+    },
+  })
+}
+
+export function useRejectResultReport(tournamentId: number) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (reportId: number) => rejectResultReport(reportId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['admin', 'tournaments', tournamentId, 'action-items'] })
+    },
+  })
+}
+
+export function useSetMatchStreamFlag(tournamentId: number) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ matchId, onStream }: { matchId: number; onStream: boolean }) =>
+      setMatchStreamFlag(tournamentId, matchId, onStream),
+    onSuccess: () => {
+      invalidateTournamentCaches(qc, tournamentId)
     },
   })
 }

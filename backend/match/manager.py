@@ -7,7 +7,7 @@ from typing import Any
 
 from config import settings
 from db import get_db
-from match.game_modes import prepare_match_assignments
+from match.game_modes import prepare_match_assignments, resolve_match_objective
 from match import steam_bridge
 from notifications.discord_notifier import (
     create_match_channel,
@@ -256,6 +256,25 @@ async def _create_lobby_for_match(
                 for row in participant_rows
                 if row["discord_id"] and row["team_id"] == match.get("team2_id")
             ]
+            objective_text: str | None = None
+            try:
+                async with get_db() as db:
+                    cursor = await db.execute(
+                        "SELECT match_objective, team_size FROM tournaments WHERE id = ?",
+                        (tournament_id,),
+                    )
+                    objective_row = await cursor.fetchone()
+                if objective_row is not None:
+                    _, objective_text = resolve_match_objective(
+                        objective_row["match_objective"],
+                        int(objective_row["team_size"]),
+                    )
+            except Exception:
+                logger.exception(
+                    "Objective-Auflösung für Match %s fehlgeschlagen (non-critical)",
+                    match_id,
+                )
+
             try:
                 await send_lobby_announcement(
                     match_id=match_id,
@@ -265,6 +284,7 @@ async def _create_lobby_for_match(
                     team1_discord_ids=team1_ids,
                     team2_discord_ids=team2_ids,
                     hero_assignments_text=hero_assignments_text or None,
+                    objective_text=objective_text,
                 )
             except Exception:
                 logger.exception(

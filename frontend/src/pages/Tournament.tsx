@@ -18,6 +18,7 @@ import GroupStandings from '@/components/groups/GroupStandings'
 import GroupMatchList from '@/components/groups/GroupMatchList'
 import BracketView from '@/components/bracket/BracketView'
 import MiniGroupPanel from '@/components/bracket/MiniGroupPanel'
+import MyMatchReport from '@/components/MyMatchReport'
 import LoginButton from '@/components/auth/LoginButton'
 import {
   Trophy, Users, LayoutGrid, GitBranch, Shield, X, Info, Book,
@@ -872,6 +873,14 @@ export default function Tournament() {
 
         {activeTab === 'bracket' && (
           <div className="space-y-12">
+            {isUserCaptain && myStatus?.team_id != null && (
+              <MyMatchReport
+                tournamentId={tournamentId}
+                matches={tournament.bracket_matches}
+                teams={tournament.teams}
+                myTeamId={myStatus.team_id}
+              />
+            )}
             {tournament.mini_groups.length > 0 && (
               <MiniGroupPanel
                 miniGroups={tournament.mini_groups}

@@ -363,17 +363,158 @@ async def _check_and_send_registration_reminders() -> None:
         await db.commit()
 
 
+def _offset_label(offset_minutes: int) -> str:
+    hours = offset_minutes // 60
+    minutes = offset_minutes % 60
+    if hours and minutes:
+        return f"{hours}h {minutes}min"
+    if hours:
+        return f"{hours}h"
+    return f"{minutes}min"
+
+
+def _tournament_start_value(row: Any) -> str | None:
+    """Zeitpunkt, ab dem für die Teilnehmer tatsächlich gespielt wird."""
+    keys = row.keys()
+    mode = row["tournament_mode"] if "tournament_mode" in keys else None
+    bracket_start = row["bracket_start"] if "bracket_start" in keys else None
+    group_start = row["group_phase_start"] if "group_phase_start" in keys else None
+    if mode == "bracket_only":
+        return bracket_start
+    return group_start or bracket_start
+
+
+async def _check_and_send_start_reminders() -> None:
+    """Erinnert angemeldete Teilnehmer per DM, wann das Turnier tatsächlich losgeht."""
+    async with get_db() as db:
+        cursor = await db.execute(
+            "SELECT id, name, status, tournament_mode, group_phase_start, bracket_start, "
+            "start_reminder_offsets, is_test FROM tournaments "
+            "WHERE status IN ('registration', 'checkin') ORDER BY id"
+        )
+        tournaments = await cursor.fetchall()
+
+        now = datetime.now()
+
+        for tournament in tournaments:
+            if bool(tournament["is_test"]):
+                continue
+            start_value = _tournament_start_value(tournament)
+            start_at = _parse_timestamp(start_value)
+            if start_at is None:
+                continue
+
+            for offset_minutes in _parse_reminder_offsets(tournament["start_reminder_offsets"]):
+                reminder_at = start_at - timedelta(minutes=offset_minutes)
+                if not (reminder_at <= now <= reminder_at + timedelta(minutes=5)):
+                    continue
+
+                dedupe_cur = await db.execute(
+                    "SELECT 1 FROM sent_start_reminders WHERE tournament_id = ? AND offset_minutes = ?",
+                    (tournament["id"], offset_minutes),
+                )
+                if await dedupe_cur.fetchone():
+                    continue
+
+                participant_ids = await _load_tournament_participant_ids(db, tournament["id"])
+                if not participant_ids:
+                    continue
+
+                try:
+                    await notify_users(
+                        participant_ids,
+                        "match_start",
+                        f"Turnier '{tournament['name']}' startet in {_offset_label(offset_minutes)} — "
+                        "sei rechtzeitig da und mach dich ready!",
+                    )
+                except Exception:
+                    logger.exception(
+                        "Start reminder failed (tournament=%s offset=%s)",
+                        tournament["id"],
+                        offset_minutes,
+                    )
+                    continue
+
+                await db.execute(
+                    "INSERT OR IGNORE INTO sent_start_reminders (tournament_id, offset_minutes, sent_at) "
+                    "VALUES (?, ?, datetime('now'))",
+                    (tournament["id"], offset_minutes),
+                )
+
+        await db.commit()
+
+
+async def _check_and_send_match_reminders() -> None:
+    """Schickt den beteiligten Spielern einen lockeren 'gleich dran'-Hinweis per DM."""
+    async with get_db() as db:
+        cursor = await db.execute(
+            """
+            SELECT bm.id, bm.team1_id, bm.team2_id, t.name AS tournament_name
+            FROM bracket_matches bm
+            JOIN tournaments t ON t.id = bm.tournament_id
+            WHERE t.status IN ('group_phase', 'bracket')
+              AND t.is_test = 0
+              AND bm.status = 'pending'
+              AND bm.team1_id IS NOT NULL
+              AND bm.team2_id IS NOT NULL
+              AND bm.steam_party_id IS NULL
+            ORDER BY bm.id
+            """
+        )
+        matches = await cursor.fetchall()
+
+        for match in matches:
+            dedupe_cur = await db.execute(
+                "SELECT 1 FROM sent_match_reminders "
+                "WHERE match_type = 'bracket' AND match_id = ? AND kind = 'next_up'",
+                (match["id"],),
+            )
+            if await dedupe_cur.fetchone():
+                continue
+
+            member_cur = await db.execute(
+                "SELECT DISTINCT discord_id FROM team_members WHERE team_id IN (?, ?)",
+                (match["team1_id"], match["team2_id"]),
+            )
+            member_ids = [str(row["discord_id"]) for row in await member_cur.fetchall() if row["discord_id"]]
+            if not member_ids:
+                continue
+
+            try:
+                await notify_users(
+                    member_ids,
+                    "match_start",
+                    f"Hey! Euer Match im Turnier '{match['tournament_name']}' ist als Nächstes dran — "
+                    "macht euch ready.",
+                )
+            except Exception:
+                logger.exception("Match reminder failed (match=%s)", match["id"])
+                continue
+
+            await db.execute(
+                "INSERT OR IGNORE INTO sent_match_reminders (match_type, match_id, kind, sent_at) "
+                "VALUES ('bracket', ?, 'next_up', datetime('now'))",
+                (match["id"],),
+            )
+
+        await db.commit()
+
+
 async def start_scheduler(app: Any | None = None) -> None:
     """Startet den Hintergrund-Loop für automatische Turnier-Übergänge."""
     logger.info("Tournament-Scheduler gestartet")
 
-    try:
+    async def _run_all_checks() -> None:
         await _check_and_advance_tournaments()
         await _check_and_send_registration_reminders()
+        await _check_and_send_start_reminders()
+        await _check_and_send_match_reminders()
+
+    try:
+        await _run_all_checks()
         while True:
             await asyncio.sleep(SCHEDULER_INTERVAL_SECONDS)
-            await _check_and_advance_tournaments()
-            await _check_and_send_registration_reminders()
+            await _run_all_checks()
     except asyncio.CancelledError:
         logger.info("Tournament-Scheduler gestoppt")
         raise

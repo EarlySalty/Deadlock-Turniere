@@ -141,6 +141,9 @@ class TournamentCreate(TournamentBase):
     auto_lobby_enabled: bool = True
     exclude_from_leaderboard: bool = False
     reminder_offsets: list[int] = Field(default_factory=lambda: [1440, 120, 15])
+    start_reminder_offsets: list[int] = Field(default_factory=lambda: [1440, 60])
+    match_objective: str = "auto"
+    no_show_grace_minutes: int = 10
     rules: Optional[str] = None
 
     @field_validator("series_format")
@@ -164,6 +167,12 @@ class TournamentCreate(TournamentBase):
     def validate_reminder_offsets(cls, value: list[int]) -> list[int]:
         cleaned = sorted({int(offset) for offset in value if int(offset) >= 0}, reverse=True)
         return cleaned or [1440, 120, 15]
+
+    @field_validator("start_reminder_offsets")
+    @classmethod
+    def validate_start_reminder_offsets(cls, value: list[int]) -> list[int]:
+        cleaned = sorted({int(offset) for offset in value if int(offset) >= 0}, reverse=True)
+        return cleaned or [1440, 60]
 
 
 class TournamentUpdate(BaseModel):
@@ -190,6 +199,9 @@ class TournamentUpdate(BaseModel):
     exclude_from_leaderboard: Optional[bool] = None
     is_test: Optional[bool] = None
     reminder_offsets: Optional[list[int]] = None
+    start_reminder_offsets: Optional[list[int]] = None
+    match_objective: Optional[str] = None
+    no_show_grace_minutes: Optional[int] = None
     rules: Optional[str] = None
 
     @field_validator("series_format")
@@ -217,6 +229,16 @@ class TournamentUpdate(BaseModel):
             return value
         cleaned = sorted({int(offset) for offset in value if int(offset) >= 0}, reverse=True)
         return cleaned or [1440, 120, 15]
+
+    @field_validator("start_reminder_offsets")
+    @classmethod
+    def validate_update_start_reminder_offsets(
+        cls, value: list[int] | None
+    ) -> list[int] | None:
+        if value is None:
+            return value
+        cleaned = sorted({int(offset) for offset in value if int(offset) >= 0}, reverse=True)
+        return cleaned or [1440, 60]
 
 
 class TournamentSignup(BaseModel):
@@ -257,6 +279,9 @@ class Tournament(TournamentBase):
     lobby_settings: Optional[str] = None
     exclude_from_leaderboard: bool = False
     reminder_offsets: list[int] = Field(default_factory=lambda: [1440, 120, 15])
+    start_reminder_offsets: list[int] = Field(default_factory=lambda: [1440, 60])
+    match_objective: str = "auto"
+    no_show_grace_minutes: int = 10
     rules: Optional[str] = None
 
     @field_validator("reminder_offsets", mode="before")
@@ -276,6 +301,24 @@ class Tournament(TournamentBase):
             if isinstance(parsed, list):
                 return [int(offset) for offset in parsed]
         return [1440, 120, 15]
+
+    @field_validator("start_reminder_offsets", mode="before")
+    @classmethod
+    def parse_start_reminder_offsets(cls, value: Any) -> list[int]:
+        if value is None:
+            return [1440, 60]
+        if isinstance(value, list):
+            return [int(offset) for offset in value]
+        if isinstance(value, str):
+            import json
+
+            try:
+                parsed = json.loads(value)
+            except ValueError:
+                return [1440, 60]
+            if isinstance(parsed, list):
+                return [int(offset) for offset in parsed]
+        return [1440, 60]
 
 
 # --- Team ---
@@ -412,6 +455,7 @@ class BracketMatch(BaseModel):
     series_wins_team2: int = 0
     games: list["MatchGame"] = []
     scheduled_at: Optional[str] = None
+    on_stream: bool = True
     played_at: Optional[str] = None
 
     @field_validator("hero_assignments", mode="before")
@@ -518,6 +562,29 @@ class MatchResult(BaseModel):
     player_stats: Optional[str] = None
     source: ResultSource = ResultSource.manual
     created_at: str
+
+
+class MatchResultReportCreate(BaseModel):
+    winner_team_id: Optional[int] = None
+    deadlock_match_id: Optional[str] = None
+    is_no_show: bool = False
+    no_show_team_id: Optional[int] = None
+
+
+class MatchResultReport(BaseModel):
+    id: int
+    match_type: str
+    match_id: int
+    tournament_id: int
+    reported_by: str
+    winner_team_id: Optional[int] = None
+    deadlock_match_id: Optional[str] = None
+    is_no_show: bool = False
+    no_show_team_id: Optional[int] = None
+    status: str = "pending"
+    created_at: str
+    resolved_at: Optional[str] = None
+    resolved_by: Optional[str] = None
 
 
 class ConsentCreate(BaseModel):

@@ -842,8 +842,9 @@ async def create_tournament(
             "registration_end, checkin_start, group_phase_start, bracket_start, "
             "created_by, invite_mode, invite_window_start, invite_window_end, tournament_mode, "
             "tournament_game_mode, auto_lobby_enabled, exclude_from_leaderboard, is_test, reminder_offsets, rules, "
-            "series_format, final_series_format) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "series_format, final_series_format, "
+            "match_objective, no_show_grace_minutes, start_reminder_offsets) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 body.name,
                 body.description,
@@ -867,6 +868,9 @@ async def create_tournament(
                 body.rules,
                 body.series_format,
                 body.final_series_format,
+                body.match_objective,
+                body.no_show_grace_minutes,
+                _serialize_reminder_offsets(body.start_reminder_offsets),
             ),
         )
         await db.execute(
@@ -992,6 +996,10 @@ async def update_tournament(
             update_data["tournament_game_mode"] = body.tournament_game_mode.value
         if body.reminder_offsets is not None:
             update_data["reminder_offsets"] = _serialize_reminder_offsets(body.reminder_offsets)
+        if body.start_reminder_offsets is not None:
+            update_data["start_reminder_offsets"] = _serialize_reminder_offsets(
+                body.start_reminder_offsets
+            )
         if "invite_window_start" in body.model_fields_set:
             update_data["invite_window_start"] = body.invite_window_start
         if "invite_window_end" in body.model_fields_set:

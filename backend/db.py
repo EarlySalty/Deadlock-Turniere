@@ -32,7 +32,10 @@ CREATE TABLE IF NOT EXISTS tournaments(
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now')),
     series_format INTEGER NOT NULL DEFAULT 1,
-    rules TEXT
+    rules TEXT,
+    match_objective TEXT NOT NULL DEFAULT 'auto',
+    no_show_grace_minutes INTEGER NOT NULL DEFAULT 10,
+    start_reminder_offsets TEXT DEFAULT '[1440,60]'
 );
 
 CREATE TABLE IF NOT EXISTS teams(
@@ -151,6 +154,7 @@ CREATE TABLE IF NOT EXISTS bracket_matches(
     match_stats TEXT,
     hero_assignments TEXT,
     scheduled_at TEXT,
+    on_stream INTEGER NOT NULL DEFAULT 1,
     played_at TEXT
 );
 
@@ -351,6 +355,39 @@ CREATE TABLE IF NOT EXISTS tournament_casters(
     UNIQUE(tournament_id, discord_id),
     FOREIGN KEY (tournament_id) REFERENCES tournaments(id) ON DELETE CASCADE
 );
+
+CREATE TABLE IF NOT EXISTS sent_start_reminders(
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tournament_id INTEGER NOT NULL REFERENCES tournaments(id) ON DELETE CASCADE,
+    offset_minutes INTEGER NOT NULL,
+    sent_at TEXT NOT NULL,
+    UNIQUE(tournament_id, offset_minutes)
+);
+
+CREATE TABLE IF NOT EXISTS sent_match_reminders(
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    match_type TEXT NOT NULL,
+    match_id INTEGER NOT NULL,
+    kind TEXT NOT NULL DEFAULT 'next_up',
+    sent_at TEXT NOT NULL,
+    UNIQUE(match_type, match_id, kind)
+);
+
+CREATE TABLE IF NOT EXISTS match_result_reports(
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    match_type TEXT NOT NULL,
+    match_id INTEGER NOT NULL,
+    tournament_id INTEGER NOT NULL REFERENCES tournaments(id) ON DELETE CASCADE,
+    reported_by TEXT NOT NULL,
+    winner_team_id INTEGER REFERENCES teams(id),
+    deadlock_match_id TEXT,
+    is_no_show INTEGER NOT NULL DEFAULT 0,
+    no_show_team_id INTEGER REFERENCES teams(id),
+    status TEXT NOT NULL DEFAULT 'pending',
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    resolved_at TEXT,
+    resolved_by TEXT
+);
 """
 
 
@@ -466,6 +503,18 @@ async def _ensure_schema_upgrades(db: aiosqlite.Connection) -> None:
     )
     await _ensure_column(db, "tournaments", "rules", "TEXT")
     await _ensure_column(db, "tournaments", "final_series_format", "INTEGER")
+    await _ensure_column(
+        db, "tournaments", "match_objective", "TEXT NOT NULL DEFAULT 'auto'"
+    )
+    await _ensure_column(
+        db, "tournaments", "no_show_grace_minutes", "INTEGER NOT NULL DEFAULT 10"
+    )
+    await _ensure_column(
+        db, "tournaments", "start_reminder_offsets", "TEXT DEFAULT '[1440,60]'"
+    )
+    await _ensure_column(
+        db, "bracket_matches", "on_stream", "INTEGER NOT NULL DEFAULT 1"
+    )
 
     try:
         await db.execute(
@@ -584,6 +633,42 @@ async def _ensure_schema_upgrades(db: aiosqlite.Connection) -> None:
             assigned_by TEXT,
             UNIQUE(tournament_id, discord_id),
             FOREIGN KEY (tournament_id) REFERENCES tournaments(id) ON DELETE CASCADE
+        )
+    """)
+    await db.execute("""
+        CREATE TABLE IF NOT EXISTS sent_start_reminders (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            tournament_id INTEGER NOT NULL REFERENCES tournaments(id) ON DELETE CASCADE,
+            offset_minutes INTEGER NOT NULL,
+            sent_at TEXT NOT NULL,
+            UNIQUE(tournament_id, offset_minutes)
+        )
+    """)
+    await db.execute("""
+        CREATE TABLE IF NOT EXISTS sent_match_reminders (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            match_type TEXT NOT NULL,
+            match_id INTEGER NOT NULL,
+            kind TEXT NOT NULL DEFAULT 'next_up',
+            sent_at TEXT NOT NULL,
+            UNIQUE(match_type, match_id, kind)
+        )
+    """)
+    await db.execute("""
+        CREATE TABLE IF NOT EXISTS match_result_reports (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            match_type TEXT NOT NULL,
+            match_id INTEGER NOT NULL,
+            tournament_id INTEGER NOT NULL REFERENCES tournaments(id) ON DELETE CASCADE,
+            reported_by TEXT NOT NULL,
+            winner_team_id INTEGER REFERENCES teams(id),
+            deadlock_match_id TEXT,
+            is_no_show INTEGER NOT NULL DEFAULT 0,
+            no_show_team_id INTEGER REFERENCES teams(id),
+            status TEXT NOT NULL DEFAULT 'pending',
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            resolved_at TEXT,
+            resolved_by TEXT
         )
     """)
 

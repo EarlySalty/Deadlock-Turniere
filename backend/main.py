@@ -21,6 +21,7 @@ from tournament.leaderboard_routes import router as leaderboard_router
 from tournament.models import UserSession
 from tournament.scheduler import start_scheduler
 from tournament.admin_routes import router as admin_router
+from tournament.operations_routes import router as operations_router
 from tournament.routes import router as tournament_router
 
 
@@ -61,6 +62,7 @@ app.add_middleware(TrustedHostMiddleware, allowed_hosts=settings.allowed_hosts)
 app.include_router(auth_router)
 app.include_router(tournament_router)
 app.include_router(admin_router)
+app.include_router(operations_router)
 app.include_router(admin_test_router)
 app.include_router(consent_router)
 app.include_router(leaderboard_router)
