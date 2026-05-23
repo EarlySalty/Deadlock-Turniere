@@ -1,3 +1,7 @@
+## #9 — Turnier-Doku jetzt im FAQ-Bot abrufbar
+
+- Anmeldung, Modi, Leaderboard, Consent-Flow und Draft sind jetzt zentral dokumentiert — Spieler bekommen Fragen dazu direkt im Discord-FAQ beantwortet, ohne ein Ticket eröffnen zu müssen
+
 ## #8 — Erinnerungen, Selbstmeldung & aufgeräumte Admin-Seite
 
 - Teilnehmer bekommen jetzt automatisch eine Discord-DM, wann das Turnier startet und wenn ihr Match als Nächstes dran ist — freundlicher Hinweis statt verpasster Matches
