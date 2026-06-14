@@ -28,8 +28,10 @@ sodass ein Wechsel in beide Richtungen ohne Datenmigration möglich ist.
 
 ## Dokumentation
 
+- [`docs/architecture.md`](docs/architecture.md) — Schichten, Request-Lebenszyklus, Datenfluss
 - [`docs/db-contract.md`](docs/db-contract.md) — DB-Schema-Vertrag (Single Source of Truth)
 - [`docs/known-issues.md`](docs/known-issues.md) — beim Port gefundene Alt-Bugs/Inkonsistenzen
+- [`docs/cutover.md`](docs/cutover.md) — Stand + Schritte zum Scharfschalten
 - [`docs/adr/`](docs/adr/) — Architektur-Entscheidungen
 
 ## Build

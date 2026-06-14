@@ -243,3 +243,50 @@ laufen ohne gemeinsames Lock (TOCTOU). Beides 1:1 erhalten.
 points_row["matches_won"]` — der Rang-Score bekommt fälschlich die Anzahl
 gewonnener Matches statt des echten Rang-Scores (Copy-Paste-Fehler). 1:1 erhalten
 in `leaderboard.rs` (Kommentar markiert die Stelle).
+
+### KI-W02 [erhalten] — `set_consent` bestätigt unbedingt
+`consent_routes.py`: `POST /consent` gibt `has_consent=true` und die rohe
+gepostete `consent_version` zurück, auch wenn diese unter der geforderten Version
+liegt. 1:1 erhalten.
+
+### KI-W03 [erhalten] — Asymmetrische Registration-Gates (public)
+`routes.py`: `accept`-Routen (Einladung/Bewerbung) haben ein
+`_ensure_registration_open`-Gate, die `reject`-Pendants und
+`get_team_applications` nicht. Ebenso erlauben create/join/solo
+`registration+checkin`, cancel/kick/leave aber nur `registration`. 1:1 erhalten.
+
+### KI-W04 [erhalten] — Direkt-Add umgeht Zustimmung & invite_mode
+`routes.py` `invite_to_team`: fügt den Spieler sofort ohne Zustimmung und ohne
+`team_invitations`-Eintrag ein, umgeht `invite_mode`/-window. Abweichend von
+„invite-by-signup". 1:1 erhalten.
+
+### KI-W05 [erhalten] — Solo-Signup-Auto-Team race-anfällig
+`routes.py` `solo_signup` (team_size==1): Auto-Team-Name per Such-Schleife +
+Signup-ohne-team_id-dann-UPDATE statt `ON CONFLICT`. 1:1 erhalten.
+
+### KI-W06 [erhalten] — Group-Standings nicht idempotent
+`admin_routes.py:2236`: Der Group-Ergebnis-Pfad inkrementiert wins/losses/points
+blind (+3 Sieger), kein Unentschieden, bei Doppelaufruf doppelt; `force` wird für
+Group ignoriert (Bracket delegiert, Group inline). 1:1 erhalten.
+
+### KI-W07 [erhalten] — Auto-Modus aus `team_size` statt Teamanzahl
+`admin_routes.py:835`: `create_tournament` ruft `determine_tournament_mode` mit
+`team_size` (Spieler/Team) als Teamanzahl — der ≥16-Schwellwert ist faktisch
+wirkungslos. 1:1 erhalten.
+
+### KI-W08 [erhalten] — Match-Caster-Routen sind 410-Gone-Stubs
+`admin_routes.py:2982`: Die Match-Ebene-Caster-Routen (POST/DELETE) antworten
+410 Gone; `list_match_casters` validiert die `match_id`, gibt aber Turnier-Caster
+zurück. 1:1 erhalten.
+
+### KI-W09 [erhalten] — Test-Modus immer gemountet + Orphan-Cleanup
+`admin/test_mode.py`: Im Original ist der Router ungated. Der Port hängt ihn an
+`TURNIER_ENABLE_TEST_MODE` (Default an = wie Python), gibt aber einen Prod-Kill-
+Switch. Das Löschen von Test-Usern räumt nur einen Teil der Tabellen
+(Orphan-Daten in applications/invitations/checkins) — 1:1 erhalten.
+
+> Die vollständigen Befund-Listen der parallel portierten Router (consent/public/
+> admin/test_mode) liegen in den Agent-Reports der Welle 5b. Verifikation: gesamter
+> Workspace kompiliert, `clippy -D warnings` sauber, 37 Test-Suites grün,
+> `tb-app --check` bootet end-to-end. Ein endpunkt-genauer Paritäts-Audit der zwei
+> grossen Router ist als Folge-Schritt empfohlen (siehe `cutover.md`).

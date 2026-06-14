@@ -1,0 +1,29 @@
+[package]
+name = "tb-app"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+# Composition-Root + Binary: lädt Config, baut Pool + AppState, wendet Migrationen
+# an, startet den Scheduler-Loop und serviert die axum-API.
+[[bin]]
+name = "tb-app"
+path = "src/main.rs"
+
+[dependencies]
+tb-config = { path = "../tb-config" }
+tb-db = { path = "../tb-db" }
+tb-discord = { path = "../tb-discord" }
+tb-match = { path = "../tb-match" }
+tb-scheduler = { path = "../tb-scheduler" }
+tb-web = { path = "../tb-web" }
+
+tokio.workspace = true
+axum.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+anyhow.workspace = true
+
+[lints]
+workspace = true
