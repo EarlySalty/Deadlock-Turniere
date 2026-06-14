@@ -82,6 +82,13 @@ impl From<tb_db::DbError> for WebError {
     }
 }
 
+impl From<sqlx::Error> for WebError {
+    fn from(err: sqlx::Error) -> Self {
+        tracing::error!(error = %err, "DB-Fehler in Route");
+        Self::internal("Interner Datenbankfehler")
+    }
+}
+
 impl From<tb_tournament::TournamentError> for WebError {
     fn from(err: tb_tournament::TournamentError) -> Self {
         use tb_tournament::TournamentError::*;

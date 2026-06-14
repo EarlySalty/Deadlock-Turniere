@@ -20,6 +20,7 @@ tb-match = { path = "../tb-match" }
 tb-draft = { path = "../tb-draft" }
 tb-scheduler = { path = "../tb-scheduler" }
 
+sqlx.workspace = true
 axum.workspace = true
 axum-extra.workspace = true
 tower.workspace = true

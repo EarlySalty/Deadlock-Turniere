@@ -233,3 +233,13 @@ laufen ohne gemeinsames Lock (TOCTOU). Beides 1:1 erhalten.
 > Checks ist einzeln fehlertolerant, der Loop endet nur über das Shutdown-Signal.
 > `offset_label` ist Einzelquelle (statt Inline-Duplikat); `parse_reminder_offsets`
 > ist müll-tolerant.
+
+---
+
+## Web / Routen (`tb-web`)
+
+### KI-W01 [erhalten] — `rank_score` im Spielerprofil zeigt `matches_won`
+`leaderboard_routes.py:110`: `get_player_profile` setzt `rank_score =
+points_row["matches_won"]` — der Rang-Score bekommt fälschlich die Anzahl
+gewonnener Matches statt des echten Rang-Scores (Copy-Paste-Fehler). 1:1 erhalten
+in `leaderboard.rs` (Kommentar markiert die Stelle).
