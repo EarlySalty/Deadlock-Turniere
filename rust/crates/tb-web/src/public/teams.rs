@@ -54,7 +54,7 @@ async fn create_team(
     if !(2..=32).contains(&name_len) {
         return Err(WebError::bad_request("Team-Name muss zwischen 2 und 32 Zeichen lang sein"));
     }
-    let name_key = name.to_lowercase();
+    let name_key = tb_tournament::name_key(&name);
 
     let pool = &state.pool;
     helpers::ensure_consent(pool, &user.discord_id).await?;

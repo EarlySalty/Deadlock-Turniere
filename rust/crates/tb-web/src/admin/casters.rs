@@ -21,11 +21,10 @@ use super::helpers::{audit, ensure_bracket_match_exists, load_tournament_or_404}
 #[derive(Debug, Clone, Serialize)]
 pub struct MatchCasterOut {
     pub discord_id: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    // Kein skip_serializing_if: FastAPI gibt fehlende Felder als `null` aus
+    // (kein exclude_none), nicht weggelassen.
     pub display_name: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub assigned_at: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub assigned_by: Option<String>,
 }
 

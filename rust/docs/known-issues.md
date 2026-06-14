@@ -288,5 +288,52 @@ Switch. Das Löschen von Test-Usern räumt nur einen Teil der Tabellen
 > Die vollständigen Befund-Listen der parallel portierten Router (consent/public/
 > admin/test_mode) liegen in den Agent-Reports der Welle 5b. Verifikation: gesamter
 > Workspace kompiliert, `clippy -D warnings` sauber, 37 Test-Suites grün,
-> `tb-app --check` bootet end-to-end. Ein endpunkt-genauer Paritäts-Audit der zwei
-> grossen Router ist als Folge-Schritt empfohlen (siehe `cutover.md`).
+> `tb-app --check` bootet end-to-end.
+
+---
+
+## Paritäts-Audit (endpunktgenau, 85 Endpunkte)
+
+Adversarialer Endpunkt-Audit der grossen Router (admin/public/consent) gegen das
+Python-Original: 92 Endpunkte als paritätsgleich bestätigt, 2 high + 7 medium +
+9 low Divergenzen. Die nutzerwirksamen wurden **gefixt**:
+
+- **[gefixt, high]** `apply-convars`/`apply-event-preset`: fehlendes Match lieferte
+  502 statt 404 (`MatchError::NotFound` wurde in der `SteamTaskError`-Kette
+  verschluckt) → `From<MatchError>` erhält `NotFound` jetzt → 404.
+- **[gefixt, med]** Turnier-Response: `reminder_offsets`/`start_reminder_offsets`
+  lieferten bei NULL/Müll `[]` statt der Feld-Defaults `[1440,120,15]`/`[1440,60]`
+  → nutzt jetzt `tb_core::json::parse_offsets`.
+- **[gefixt, med]** Caster-Ausgabe: `display_name`/`assigned_at`/`assigned_by`
+  wurden bei `null` weggelassen statt als `null` serialisiert (FastAPI-Default)
+  → `skip_serializing_if` entfernt.
+- **[gefixt, med]** Avatar-Upload: Multipart-Lesefehler gaben 400 statt 422 → auf
+  `unprocessable` (422) angeglichen.
+- **[gefixt, med]** Team-`name_key` nutzte `to_lowercase()` statt `casefold()`
+  (`ß` blieb stehen) → eine geteilte `tb_tournament::name_key`-Funktion faltet
+  `ß`→`ss`, konsistent zu den von Python erzeugten Schlüsseln.
+
+### KI-AU01 [erhalten] — PUT-Update kann nullbare Felder nicht gezielt leeren
+`admin_routes.py` `update_tournament`: Python (`model_dump(exclude_unset=True)`)
+unterscheidet „Feld fehlt" von „Feld = null"; ein explizites `null` leert die
+Spalte. Der Rust-`Option<String>` kann beides nicht trennen (beides → `None` →
+nicht aktualisiert). Folge: gezieltes Leeren via `null` nicht möglich (Wert
+setzen/weglassen geht). Behebbar nur mit `Option<Option<…>>` über ~12 Felder —
+zurückgestellt (geringe Praxiswirkung).
+
+### KI-AU02 [Rust sauberer] — robustere Fehlerbehandlung statt Python-500
+An mehreren Stellen ist der Port robuster als das Original und liefert klare
+4xx/2xx, wo Python mit 500 abstürzen würde: `groups/generate` `num_groups=null`
+→ Auto statt 500; finaler Serien-Game-Apply-Fehler → klares 4xx statt 500;
+`resolve_discord_name` → definierter Name statt Query-Crash. Bewusst NICHT auf
+das Python-Crash-Verhalten „zurückgebrochen".
+
+### KI-AU03 [erhalten] — strengere Body-Typprüfung durch serde
+Falsch typisierte JSON-Felder (z. B. `winner_id: "5"`, `5.5`, `true`) lehnt serde
+schon beim Parsen mit 422 ab, wo Pythons `isinstance`-Checks teils 400 lieferten.
+Statuscode-Nuance ohne Praxiswirkung (Frontend sendet korrekte Typen).
+
+### KI-AU04 [erhalten] — Avatar-Serving ohne ETag/Range-Header
+`GET /api/avatars/*` liefert die Datei mit Content-Type (+ Content-Length), aber
+ohne `ETag`/`Last-Modified`/`Accept-Ranges` wie FastAPIs `FileResponse`. Bild
+lädt korrekt; nur Caching-/Range-Feinheiten fehlen.

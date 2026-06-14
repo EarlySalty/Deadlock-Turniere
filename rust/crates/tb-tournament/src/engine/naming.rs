@@ -19,8 +19,14 @@ pub const TEAM_NAMES: [&str; 16] = [
 ];
 
 /// Casefold-Äquivalent für den `name_key` (siehe Modul-Doku).
+///
+/// Pythons `str.casefold()` faltet aggressiver als `lower()` — relevant für
+/// deutsche Teamnamen ist vor allem `ß` → `ss` (`to_lowercase()` lässt `ß`
+/// stehen). Wir bilden `to_lowercase()` + diese Faltung nach, damit die
+/// Duplikat-Erkennung (`UNIQUE(tournament_id, name_key)`) konsistent zu den
+/// bereits von Python casefold-erzeugten Schlüsseln in der geteilten DB bleibt.
 pub fn name_key(name: &str) -> String {
-    name.to_lowercase()
+    name.to_lowercase().replace('ß', "ss")
 }
 
 /// Hält die bereits vergebenen `name_key`s und vergibt neue, kollisionsfreie

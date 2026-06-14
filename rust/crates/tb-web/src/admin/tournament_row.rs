@@ -45,10 +45,6 @@ struct TournamentRow {
     is_test: i64,
 }
 
-fn parse_offsets(raw: Option<&str>) -> Vec<i64> {
-    raw.and_then(|s| serde_json::from_str::<Vec<i64>>(s).ok()).unwrap_or_default()
-}
-
 /// String → Domänen-Enum (snake_case-serde); Fehler → 500.
 fn parse_enum<T: serde::de::DeserializeOwned>(value: &str) -> WebResult<T> {
     serde_json::from_value(serde_json::Value::String(value.to_string()))
@@ -82,8 +78,14 @@ impl TournamentRow {
             invite_window_end: self.invite_window_end,
             lobby_settings: self.lobby_settings,
             exclude_from_leaderboard: self.exclude_from_leaderboard != 0,
-            reminder_offsets: parse_offsets(self.reminder_offsets.as_deref()),
-            start_reminder_offsets: parse_offsets(self.start_reminder_offsets.as_deref()),
+            reminder_offsets: tb_core::json::parse_offsets(
+                self.reminder_offsets.as_deref(),
+                &tb_core::json::default_reminder_offsets(),
+            ),
+            start_reminder_offsets: tb_core::json::parse_offsets(
+                self.start_reminder_offsets.as_deref(),
+                &tb_core::json::default_start_reminder_offsets(),
+            ),
             match_objective: self.match_objective,
             no_show_grace_minutes: self.no_show_grace_minutes,
             rules: self.rules,

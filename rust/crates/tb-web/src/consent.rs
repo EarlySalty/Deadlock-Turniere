@@ -426,13 +426,13 @@ async fn upload_profile_avatar(
     while let Some(field) = multipart
         .next_field()
         .await
-        .map_err(|_| WebError::bad_request("Ungültiger Multipart-Upload"))?
+        .map_err(|_| WebError::unprocessable("Ungültiger Multipart-Upload"))?
     {
         if field.name() == Some("avatar") {
             let bytes = field
                 .bytes()
                 .await
-                .map_err(|_| WebError::bad_request("Avatar konnte nicht gelesen werden"))?;
+                .map_err(|_| WebError::unprocessable("Avatar konnte nicht gelesen werden"))?;
             data = Some(bytes.to_vec());
             break;
         }

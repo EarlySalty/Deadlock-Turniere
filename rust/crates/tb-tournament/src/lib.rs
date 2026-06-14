@@ -30,6 +30,7 @@ pub use error::{TournamentError, TournamentResult};
 
 // Reine API (DB-frei).
 pub use engine::groups::auto_num_groups;
+pub use engine::naming::name_key;
 pub use engine::slots::BracketSlot;
 pub use status::{
     determine_tournament_mode, is_valid_transition, valid_next_statuses,

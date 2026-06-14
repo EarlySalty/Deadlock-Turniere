@@ -88,7 +88,7 @@ async fn create_team(
     let mut tx = state.pool.begin().await?;
     let tournament = load_tournament_or_404(&mut *tx, tournament_id).await?;
     ensure_participant_management_allowed(tournament.get::<String, _>("status").as_str())?;
-    let name_key = name.to_lowercase();
+    let name_key = tb_tournament::name_key(&name);
 
     let exists: Option<i64> =
         sqlx::query_scalar("SELECT id FROM teams WHERE tournament_id = ? AND name_key = ?")
@@ -136,7 +136,7 @@ async fn rename_team(
     let tournament = load_tournament_or_404(&mut *tx, tournament_id).await?;
     ensure_participant_management_allowed(tournament.get::<String, _>("status").as_str())?;
     load_team_or_404(&mut *tx, tournament_id, team_id).await?;
-    let name_key = name.to_lowercase();
+    let name_key = tb_tournament::name_key(&name);
 
     let exists: Option<i64> = sqlx::query_scalar(
         "SELECT id FROM teams WHERE tournament_id = ? AND name_key = ? AND id != ?",
