@@ -1763,6 +1763,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "tb-match"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "rand 0.8.6",
+ "serde",
+ "serde_json",
+ "sqlx",
+ "tb-config",
+ "tb-core",
+ "tb-db",
+ "tb-discord",
+ "tb-draft",
+ "tb-tournament",
+ "thiserror",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "tb-steam"
 version = "0.1.0"
 dependencies = [

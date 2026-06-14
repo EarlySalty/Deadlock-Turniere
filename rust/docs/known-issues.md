@@ -156,3 +156,35 @@ ohne zu prüfen, ob die Position einen Ban/Pick des jeweiligen Teams erwartet.
 > ist durch eine Transaktion mit `BEGIN IMMEDIATE` + optimistischem
 > Compare-and-Swap auf `current_action_index` serialisiert — belegt durch einen
 > echten 2-Threads-Race-Test. Beobachtbar gültige Picks unverändert.
+
+---
+
+## Match-Lebenszyklus (`tb-match`)
+
+### KI-M01 [erhalten] — `match_results.winning_team` trägt zwei Wertfamilien
+`result_processor.py:162` vs. `manager.py:955`: Der Bracket-Pfad schreibt die
+**winner_id** (Team-PK) in die Spalte, der Group-Pfad einen **Slot** (1/2). 1:1
+erhalten (beide Pfade per Integrationstest belegt).
+
+### KI-M02 [erhalten] — Drei uneinheitliche `winning_team`-Konventionen
+Bracket-Ergebnis 0-basiert (0=team1, 1=team2), Group 1-basiert (1/2), Serien-
+`winner_team` 1/2. Alle drei Konventionen 1:1 erhalten (typisiert + getestet).
+
+### KI-M03 [erhalten] — Redundanter zweiter Status-Guard
+`result_processor.py:73-81`: Die manuelle Status-Prüfung hat einen faktisch
+redundanten zweiten `NOT IN`-Teil. Irreführend, aber 1:1 erhalten.
+
+### KI-M04 [erhalten] — `reset_bracket_downstream` ohne Zyklus-/Tiefenschutz
+`result_processor.py:252-283`: Bei fehlerhaften `source_match`-Verweisen droht
+theoretisch Endlosrekursion. Bewusst KEIN `visited`-Set ergänzt (1:1 erhalten,
+in Rust via `Box::pin`-Rekursion).
+
+### KI-M05 [erhalten] — Stale-Task-Reaper inline statt entkoppelt
+`steam_bridge.py:21-34`: `_fail_stale_running_tasks` läuft bei jedem
+`create_task`/`get_task`/`has_active_task` (beim Pollen alle 0,5 s ein
+Schreib-Commit). Nicht in einen eigenen Reaper-Task entkoppelt. 1:1 erhalten.
+
+> Beim Port mitbereinigt (safe): stringly-typed `match_type` (`_match_table`/
+> `_match_scope_column`-String-Hacks) durch das Enum `MatchKind` + eine
+> Repository-Abstraktion mit festen Query-Zweigen ersetzt; Ergebnis-Persistenz in
+> EINER Transaktion (DELETE+UPDATE+INSERT); `ensure_game_exists` wiederverwendet.
