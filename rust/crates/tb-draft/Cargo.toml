@@ -1,0 +1,27 @@
+[package]
+name = "tb-draft"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+# Pick/Ban-Draft-Subsystem: eine reine Zustandsmaschine (DB-frei, voll
+# unit-testbar) plus eine sqlx-Persistenzschicht. Pro Bracket-Match wird eine
+# Draft-Session mit fester Sequenz aus 6 Bans + 12 Picks materialisiert; Admins
+# führen Aktionen sequenziell aus. Die HTTP-Routen (/api/draft/*) leben in
+# tb-web; hier sitzt die Logik darunter. Funktional 1:1 zu backend/draft/*.py.
+[dependencies]
+tb-db = { path = "../tb-db" }
+
+sqlx.workspace = true
+serde.workspace = true
+chrono.workspace = true
+thiserror.workspace = true
+once_cell.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true }
+serde_json.workspace = true
+
+[lints]
+workspace = true

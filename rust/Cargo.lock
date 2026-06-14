@@ -1749,6 +1749,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "tb-draft"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "once_cell",
+ "serde",
+ "serde_json",
+ "sqlx",
+ "tb-db",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
 name = "tb-steam"
 version = "0.1.0"
 dependencies = [
@@ -1760,6 +1774,23 @@ dependencies = [
  "tb-config",
  "tb-core",
  "tb-db",
+ "thiserror",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "tb-tournament"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "rand 0.8.6",
+ "serde_json",
+ "sqlx",
+ "tb-core",
+ "tb-db",
+ "tb-steam",
  "thiserror",
  "tokio",
  "tracing",

@@ -94,3 +94,65 @@ kein Problem.
 Master-Broker `state_id` bei `consume-result` genau einmal einlöst (Single-Use +
 Ablauf). Der Port erzwingt das nicht selbst — als externe Invariante im
 `oauth.rs`-Modul-Doc dokumentiert.
+
+---
+
+## Turnier-Engine (`tb-tournament`)
+
+### KI-T01 [erhalten] — Platzierungs-Heuristik ist Single-Elim-zentriert
+`points.py`: `max(round)` gilt als Finale, `round-1` als Halbfinale. Bei
+Double-Elim ist das teils unscharf (Losers-Runden zählen anders).
+**Folgefix-Vorschlag:** Platzierung aus der tatsächlichen Bracket-Topologie statt
+aus der Rundennummer ableiten.
+
+### KI-T02 [erhalten] — Toter Platzierungs-Schlüssel + Halbfinal-Pauschale
+`points.py`: `PLACEMENT_POINTS[4]` wird nie getroffen; alle Halbfinal-Verlierer
+bekommen Platz 3. 1:1 erhalten.
+
+### KI-T03 [erhalten] — `matches_played` zählt global statt teambezogen
+Ein Spieler bekommt alle abgeschlossenen Bracket-Matches gezählt, nicht nur die
+seines Teams. 1:1 erhalten.
+
+### KI-T04 [erhalten] — Win-Punkte runden ab
+`int(wins * 0.5)` ≡ Integer-Division `wins / 2`: bei ungerader Win-Zahl geht ein
+halber Punkt verloren. 1:1 erhalten.
+
+### KI-T05 [erhalten] — Doppeltes Gruppen-Clamping + fehlender Sekundär-Tiebreaker
+Gruppenzahl wird an zwei Stellen geklemmt (`2..8` und nochmals `Teams/2`); die
+Top-2-Standings haben keinen stabilen Sekundär-Tiebreaker
+(`ORDER BY points DESC, wins DESC` ohne weitere Stufe). 1:1 erhalten.
+
+### KI-T06 [erhalten] — `bracket_format`-Argument von `generate_bracket` ignoriert
+Das Format wird aus der `tournaments`-Zeile gelesen, das Funktionsargument bleibt
+wirkungslos (toter Legacy-Pfad). 1:1 erhalten.
+
+> Beim Port mitbereinigt (safe, kein Verhaltensunterschied): toter Code nicht
+> mitportiert (`calc_rank_score`-Import, `_highest_power_of_two_below`,
+> `team_avg_score`); `recalculate_player_points` ist jetzt idempotent
+> (Voll-Recompute statt additivem Doppelzählen); jede Operation läuft in EINER
+> Transaktion; Audit committet nicht mehr selbst.
+
+---
+
+## Draft (`tb-draft`)
+
+### KI-DR01 [erhalten] — `taken_by` nicht an die Auth-Identität gebunden
+`routes.py:51/61`: `take_action` übernimmt `taken_by` aus dem Argument, ohne zu
+erzwingen, dass es der eingeloggte Admin ist. Die Signatur erlaubt tb-web, hier
+`user.discord_id` durchzureichen (Empfehlung), das Default-Verhalten bleibt offen.
+
+### KI-DR02 [erhalten] — Doppel-Pick nur applikativ geprüft (kein UNIQUE-Index)
+`(session_id, hero_name)` hat keinen partiellen UNIQUE-Index; die Prüfung läuft
+per SELECT — jetzt aber innerhalb `BEGIN IMMEDIATE` (nicht mehr race-anfällig).
+Ein DB-Constraint wäre robuster, hätte aber eine Schema-Migration erfordert.
+
+### KI-DR03 [erhalten] — Held nicht gegen erwarteten `action_type`/`team_slot` validiert
+`engine.py:108-115`: Der Held wird blind an `current_action_index` geschrieben,
+ohne zu prüfen, ob die Position einen Ban/Pick des jeweiligen Teams erwartet.
+1:1 erhalten.
+
+> Beim Port mitbereinigt (safe): die Race-Condition in `take_action`
+> (Index-Lesen + Doppel-Pick-SELECT + zwei UPDATEs ohne Isolation, last-write-wins)
+> ist durch eine Transaktion mit `BEGIN IMMEDIATE` + optimistischem
+> Compare-and-Swap auf `current_action_index` serialisiert — belegt durch einen
+> echten 2-Threads-Race-Test. Beobachtbar gültige Picks unverändert.
