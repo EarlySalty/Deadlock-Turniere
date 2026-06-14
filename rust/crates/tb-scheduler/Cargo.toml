@@ -1,0 +1,34 @@
+[package]
+name = "tb-scheduler"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+# Hintergrund-Loop des Turnier-Backends: schiebt Turniere automatisch durch ihren
+# Lebenszyklus (draft → registration → checkin → group_phase → bracket), sobald die
+# jeweiligen Zeitstempel fällig sind, und verschickt drei Klassen von Erinnerungs-DMs
+# (Registrierungs-/Start-/Match-Reminder). Beim Phasenwechsel werden Gruppen/Matches/
+# Bracket generiert, Auto-Lobbys geplant, Punkte bei Abschluss neu berechnet und alles
+# im Audit-Log protokolliert. Die geteilte Orchestrierung advance_tournament_status
+# wird auch von tb-web (Admin-Routen) aufgerufen.
+[dependencies]
+tb-core = { path = "../tb-core" }
+tb-db = { path = "../tb-db" }
+tb-config = { path = "../tb-config" }
+tb-discord = { path = "../tb-discord" }
+tb-tournament = { path = "../tb-tournament" }
+tb-match = { path = "../tb-match" }
+
+sqlx.workspace = true
+tokio.workspace = true
+chrono.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true }
+
+[lints]
+workspace = true

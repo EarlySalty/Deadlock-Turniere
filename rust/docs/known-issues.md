@@ -188,3 +188,48 @@ Schreib-Commit). Nicht in einen eigenen Reaper-Task entkoppelt. 1:1 erhalten.
 > `_match_scope_column`-String-Hacks) durch das Enum `MatchKind` + eine
 > Repository-Abstraktion mit festen Query-Zweigen ersetzt; Ergebnis-Persistenz in
 > EINER Transaktion (DELETE+UPDATE+INSERT); `ensure_game_exists` wiederverwendet.
+
+---
+
+## Scheduler (`tb-scheduler`)
+
+### KI-SC01 [erhalten] — TZ-Fragilität bei Zeitvergleichen
+`scheduler.py:29-47`: Zeitstempel werden in lokal-naive Zeit umgerechnet und
+gegen `now()` (Server-Lokalzeit) verglichen. Stimmt die Server-TZ nicht mit den
+DB-Zeitstempeln überein, verschieben sich alle Reminder/Phasenwechsel um den
+Offset; über DST driftet es zusätzlich. Bewusst **nicht** auf UTC umgestellt, weil
+das ändern würde, **wann** Auslösungen feuern (Parität).
+
+### KI-SC02 [erhalten] — Generierung vor dem Optimistic-Lock
+`scheduler.py:153-169`: Gruppen/Bracket werden VOR dem Status-`UPDATE … WHERE
+status=current` erzeugt. Bei parallelem Statuswechsel (`rows_affected = 0`) sind
+die Datensätze bereits angelegt → mögliche Waisen. 1:1 erhalten.
+
+### KI-SC03 [Abweichung, dokumentiert] — Status+Punkte nicht mehr atomar
+Im Original liefen `completed`-`UPDATE` und `recalculate_player_points` in
+derselben Transaktion. Da `recalculate_player_points` im Port `&pool` nimmt
+(eigene Transaktion), committet der Port den Status zuerst und rechnet dann die
+Punkte. Schlägt der Recompute fehl, bleibt `completed` ohne neue Punkte stehen.
+Folgenarm, weil der Recompute **idempotent** ist (einfach erneut auslösbar) und
+dieser Pfad nur extern (tb-web) getriggert wird. Folgefix: eine
+transaktions-durchgereichte Recompute-Variante in `tb-tournament`.
+
+### KI-SC04 [erhalten] — Reminder-Fenster ohne Catch-up
+`is_within_window` prüft `reminder_at <= now <= reminder_at + 5min`. Nach einem
+längeren Ausfall verpasste Fenster werden nicht nachgeholt. 1:1 erhalten.
+
+### KI-SC05 [erhalten] — `bracket_only`-Logikfalle
+Bei `tournament_mode == "bracket_only"` und Status `checkin` wird nur nach
+`bracket` gewechselt, wenn `bracket_start` fällig ist; sonst bleibt das Turnier in
+`checkin` hängen, auch wenn `group_phase_start` längst vorbei ist. 1:1 erhalten.
+
+### KI-SC06 [erhalten] — Dedupe-Insert nach dem Versand + Aktiv-Check-TOCTOU
+Reminder werden versendet, dann erst per `INSERT OR IGNORE` markiert (Crash
+dazwischen → erneuter Versand). Der Single-Active-Check und der Statuswechsel
+laufen ohne gemeinsames Lock (TOCTOU). Beides 1:1 erhalten.
+
+> Beim Port mitbereinigt (safe): der Tot-Loop (eine Exception aus einem Check
+> beendete im Original den ganzen Scheduler-Task) ist behoben — jeder der vier
+> Checks ist einzeln fehlertolerant, der Loop endet nur über das Shutdown-Signal.
+> `offset_label` ist Einzelquelle (statt Inline-Duplikat); `parse_reminder_offsets`
+> ist müll-tolerant.
