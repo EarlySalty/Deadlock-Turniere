@@ -1,0 +1,38 @@
+[package]
+name = "tb-web"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+# Die HTTP-Schicht (axum): AppState, Auth-Extractoren, Fehler->Response-Mapping,
+# Middleware (CORS, TrustedHost) und die Router aller Endpunkte. Verdrahtet die
+# Domänen-Crates; enthält selbst keine Geschäftslogik ausser Request/Response.
+[dependencies]
+tb-core = { path = "../tb-core" }
+tb-config = { path = "../tb-config" }
+tb-db = { path = "../tb-db" }
+tb-auth = { path = "../tb-auth" }
+tb-steam = { path = "../tb-steam" }
+tb-discord = { path = "../tb-discord" }
+tb-tournament = { path = "../tb-tournament" }
+tb-match = { path = "../tb-match" }
+tb-draft = { path = "../tb-draft" }
+tb-scheduler = { path = "../tb-scheduler" }
+
+axum.workspace = true
+axum-extra.workspace = true
+tower.workspace = true
+tower-http.workspace = true
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
+tracing.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true }
+
+[lints]
+workspace = true
