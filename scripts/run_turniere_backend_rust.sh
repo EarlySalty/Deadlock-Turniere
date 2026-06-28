@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Rust-Cutover-Launcher: spiegelt run_turniere_backend.sh (gleiche Infisical-
 # Secret-Ladung, gleiche Env, gleicher cwd = backend/), startet aber das Rust-
-# Binary tb-app statt uvicorn. Enthaelt selbst KEINE Secrets.
+# Binary turnier-bot (ex tb-app) statt uvicorn. Enthaelt selbst KEINE Secrets.
 # Rollback: systemd-Drop-in 30-rust-cutover.conf entfernen, daemon-reload, restart.
 set -euo pipefail
 
@@ -66,4 +66,4 @@ export DISCORD_BOT_TOKEN="${DISCORD_BOT_TOKEN:-${DISCORD_TOKEN:-}}"
 # cwd = backend/, damit der DATABASE_PATH-/AVATAR_DIR-Default (data/...) wie bei
 # Python auf backend/data/* zeigt (geteilte DB).
 cd "$ROOT_DIR/backend"
-exec "$ROOT_DIR/rust/target/release/tb-app"
+exec "$ROOT_DIR/rust/target/release/turnier-bot"
