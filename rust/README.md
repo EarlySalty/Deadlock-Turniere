@@ -13,18 +13,18 @@ sodass ein Wechsel in beide Richtungen ohne Datenmigration möglich ist.
 
 | Crate | Zuständigkeit |
 |-------|---------------|
-| `tb-core` | Domänen-Typen: Enums + Wire-DTOs (1:1 zu den Pydantic-Modellen). Kein I/O. |
-| `tb-config` | Geschichtete Konfiguration (Datei → Env → Default), Rollen-/CORS-Ableitungen. |
-| `tb-db` | `SqlitePool`, PRAGMA-Setup (WAL/FK/busy_timeout), konsolidierte Migration. |
-| `tb-steam` | Rang-Resolver, read-only Steam-Bridge-DB, `rank_cache`. |
-| `tb-discord` | Master-Broker-Client, Embeds, `discord_tasks`-Queue. |
-| `tb-auth` | RBAC, Session-Resolver (opake Tokens), interner OAuth-Client. |
-| `tb-tournament` | Bracket-Engine + Generierung/Standings/Status-Übergänge + Punkte. |
-| `tb-match` | Match-Lebenszyklus: Lobby, Ergebnis, Serien, Spielmodi, Auto-Lobby. |
-| `tb-draft` | Pick/Ban-Zustandsmaschine. |
-| `tb-scheduler` | Hintergrund-Loop: Phasenübergänge + Reminder. |
-| `tb-web` | axum-Router (alle Endpunkte), Extractoren, Static-Frontend. |
-| `tb-app` | Composition-Root + Binary. |
+| `turnier-core` | Domänen-Typen: Enums + Wire-DTOs (1:1 zu den Pydantic-Modellen). Kein I/O. |
+| `turnier-config` | Geschichtete Konfiguration (Datei → Env → Default), Rollen-/CORS-Ableitungen. |
+| `turnier-db` | `SqlitePool`, PRAGMA-Setup (WAL/FK/busy_timeout), konsolidierte Migration. |
+| `turnier-steam` | Rang-Resolver, read-only Steam-Bridge-DB, `rank_cache`. |
+| `turnier-discord` | Master-Broker-Client, Embeds, `discord_tasks`-Queue. |
+| `turnier-auth` | RBAC, Session-Resolver (opake Tokens), interner OAuth-Client. |
+| `turnier-engine` | Bracket-Engine + Generierung/Standings/Status-Übergänge + Punkte. |
+| `turnier-match` | Match-Lebenszyklus: Lobby, Ergebnis, Serien, Spielmodi, Auto-Lobby. |
+| `turnier-draft` | Pick/Ban-Zustandsmaschine. |
+| `turnier-scheduler` | Hintergrund-Loop: Phasenübergänge + Reminder. |
+| `turnier-api` | axum-Router (alle Endpunkte), Extractoren, Static-Frontend. |
+| `turnier-bot` | Composition-Root + Binary. |
 
 ## Dokumentation
 

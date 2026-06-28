@@ -1,0 +1,29 @@
+[package]
+name = "turnier-bot"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+# Composition-Root + Binary: lädt Config, baut Pool + AppState, wendet Migrationen
+# an, startet den Scheduler-Loop und serviert die axum-API.
+[[bin]]
+name = "turnier-bot"
+path = "src/main.rs"
+
+[dependencies]
+turnier-config = { path = "../turnier-config" }
+turnier-db = { path = "../turnier-db" }
+turnier-discord = { path = "../turnier-discord" }
+turnier-match = { path = "../turnier-match" }
+turnier-scheduler = { path = "../turnier-scheduler" }
+turnier-api = { path = "../turnier-api" }
+
+tokio.workspace = true
+axum.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+anyhow.workspace = true
+
+[lints]
+workspace = true

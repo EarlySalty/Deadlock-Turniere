@@ -11,7 +11,7 @@ mitbereinigt (kein beobachtbarer Verhaltensunterschied).
 
 ---
 
-## Steam / Ränge (`tb-steam`)
+## Steam / Ränge (`turnier-steam`)
 
 ### KI-S01 [erhalten] — Steam-Bridge maskiert Discord-Fallback bei rang-losem Link
 `rank_reader.py:258-268`: Existiert in `steam_links` eine Zeile für den Spieler,
@@ -39,7 +39,7 @@ Verhaltensunterschied zum Original mehr.
 
 ---
 
-## Discord-Notifier (`tb-discord`)
+## Discord-Notifier (`turnier-discord`)
 
 ### KI-D01 [erhalten] — Profil-lose User: Event-Default überschreibt DM-Schalter
 `discord_notifier.py:283-284`: Fehlt einem Nutzer das `user_profiles`-Profil,
@@ -75,7 +75,7 @@ abweichen — für Team-Namen unkritisch.
 
 ---
 
-## Auth (`tb-auth`)
+## Auth (`turnier-auth`)
 
 ### KI-A01 [erhalten] — Rollen-Staleness bis zu 7 Tage
 `discord_oauth.py:130` vs. `middleware.py`: Die Discord-Rollen werden beim Login
@@ -97,7 +97,7 @@ Ablauf). Der Port erzwingt das nicht selbst — als externe Invariante im
 
 ---
 
-## Turnier-Engine (`tb-tournament`)
+## Turnier-Engine (`turnier-engine`)
 
 ### KI-T01 [erhalten] — Platzierungs-Heuristik ist Single-Elim-zentriert
 `points.py`: `max(round)` gilt als Finale, `round-1` als Halbfinale. Bei
@@ -134,11 +134,11 @@ wirkungslos (toter Legacy-Pfad). 1:1 erhalten.
 
 ---
 
-## Draft (`tb-draft`)
+## Draft (`turnier-draft`)
 
 ### KI-DR01 [erhalten] — `taken_by` nicht an die Auth-Identität gebunden
 `routes.py:51/61`: `take_action` übernimmt `taken_by` aus dem Argument, ohne zu
-erzwingen, dass es der eingeloggte Admin ist. Die Signatur erlaubt tb-web, hier
+erzwingen, dass es der eingeloggte Admin ist. Die Signatur erlaubt turnier-api, hier
 `user.discord_id` durchzureichen (Empfehlung), das Default-Verhalten bleibt offen.
 
 ### KI-DR02 [erhalten] — Doppel-Pick nur applikativ geprüft (kein UNIQUE-Index)
@@ -159,7 +159,7 @@ ohne zu prüfen, ob die Position einen Ban/Pick des jeweiligen Teams erwartet.
 
 ---
 
-## Match-Lebenszyklus (`tb-match`)
+## Match-Lebenszyklus (`turnier-match`)
 
 ### KI-M01 [erhalten] — `match_results.winning_team` trägt zwei Wertfamilien
 `result_processor.py:162` vs. `manager.py:955`: Der Bracket-Pfad schreibt die
@@ -191,7 +191,7 @@ Schreib-Commit). Nicht in einen eigenen Reaper-Task entkoppelt. 1:1 erhalten.
 
 ---
 
-## Scheduler (`tb-scheduler`)
+## Scheduler (`turnier-scheduler`)
 
 ### KI-SC01 [erhalten] — TZ-Fragilität bei Zeitvergleichen
 `scheduler.py:29-47`: Zeitstempel werden in lokal-naive Zeit umgerechnet und
@@ -211,8 +211,8 @@ derselben Transaktion. Da `recalculate_player_points` im Port `&pool` nimmt
 (eigene Transaktion), committet der Port den Status zuerst und rechnet dann die
 Punkte. Schlägt der Recompute fehl, bleibt `completed` ohne neue Punkte stehen.
 Folgenarm, weil der Recompute **idempotent** ist (einfach erneut auslösbar) und
-dieser Pfad nur extern (tb-web) getriggert wird. Folgefix: eine
-transaktions-durchgereichte Recompute-Variante in `tb-tournament`.
+dieser Pfad nur extern (turnier-api) getriggert wird. Folgefix: eine
+transaktions-durchgereichte Recompute-Variante in `turnier-engine`.
 
 ### KI-SC04 [erhalten] — Reminder-Fenster ohne Catch-up
 `is_within_window` prüft `reminder_at <= now <= reminder_at + 5min`. Nach einem
@@ -236,7 +236,7 @@ laufen ohne gemeinsames Lock (TOCTOU). Beides 1:1 erhalten.
 
 ---
 
-## Web / Routen (`tb-web`)
+## Web / Routen (`turnier-api`)
 
 ### KI-W01 [erhalten] — `rank_score` im Spielerprofil zeigt `matches_won`
 `leaderboard_routes.py:110`: `get_player_profile` setzt `rank_score =
@@ -288,7 +288,7 @@ Switch. Das Löschen von Test-Usern räumt nur einen Teil der Tabellen
 > Die vollständigen Befund-Listen der parallel portierten Router (consent/public/
 > admin/test_mode) liegen in den Agent-Reports der Welle 5b. Verifikation: gesamter
 > Workspace kompiliert, `clippy -D warnings` sauber, 37 Test-Suites grün,
-> `tb-app --check` bootet end-to-end.
+> `turnier-bot --check` bootet end-to-end.
 
 ---
 
@@ -303,14 +303,14 @@ Python-Original: 92 Endpunkte als paritätsgleich bestätigt, 2 high + 7 medium 
   verschluckt) → `From<MatchError>` erhält `NotFound` jetzt → 404.
 - **[gefixt, med]** Turnier-Response: `reminder_offsets`/`start_reminder_offsets`
   lieferten bei NULL/Müll `[]` statt der Feld-Defaults `[1440,120,15]`/`[1440,60]`
-  → nutzt jetzt `tb_core::json::parse_offsets`.
+  → nutzt jetzt `turnier_core::json::parse_offsets`.
 - **[gefixt, med]** Caster-Ausgabe: `display_name`/`assigned_at`/`assigned_by`
   wurden bei `null` weggelassen statt als `null` serialisiert (FastAPI-Default)
   → `skip_serializing_if` entfernt.
 - **[gefixt, med]** Avatar-Upload: Multipart-Lesefehler gaben 400 statt 422 → auf
   `unprocessable` (422) angeglichen.
 - **[gefixt, med]** Team-`name_key` nutzte `to_lowercase()` statt `casefold()`
-  (`ß` blieb stehen) → eine geteilte `tb_tournament::name_key`-Funktion faltet
+  (`ß` blieb stehen) → eine geteilte `turnier_engine::name_key`-Funktion faltet
   `ß`→`ss`, konsistent zu den von Python erzeugten Schlüsseln.
 
 ### KI-AU01 [erhalten] — PUT-Update kann nullbare Felder nicht gezielt leeren

@@ -1,0 +1,26 @@
+[package]
+name = "turnier-steam"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+# Rang-Resolver des Turnier-Backends: eine Rang-Domäne (Tier↔Name + rank_score),
+# der read-only Bridge-DB-Reader (steam_links/deadlock_subrank_roles), der
+# persistente rank_cache und der Discord-Rollen-Fallback. Keine Web-Schicht.
+[dependencies]
+turnier-core = { path = "../turnier-core" }
+turnier-db = { path = "../turnier-db" }
+turnier-config = { path = "../turnier-config" }
+
+sqlx.workspace = true
+tokio.workspace = true
+async-trait.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+
+[lints]
+workspace = true

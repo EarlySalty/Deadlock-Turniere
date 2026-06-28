@@ -1967,201 +1967,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "tb-app"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "axum",
- "tb-config",
- "tb-db",
- "tb-discord",
- "tb-match",
- "tb-scheduler",
- "tb-web",
- "tokio",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
-name = "tb-auth"
-version = "0.1.0"
-dependencies = [
- "base64",
- "chrono",
- "rand 0.8.6",
- "reqwest",
- "serde",
- "serde_json",
- "sqlx",
- "tb-config",
- "tb-core",
- "tb-db",
- "thiserror",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "tb-config"
-version = "0.1.0"
-dependencies = [
- "tracing",
-]
-
-[[package]]
-name = "tb-core"
-version = "0.1.0"
-dependencies = [
- "serde",
- "serde_json",
- "sqlx",
-]
-
-[[package]]
-name = "tb-db"
-version = "0.1.0"
-dependencies = [
- "sqlx",
- "tb-core",
- "thiserror",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "tb-discord"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "rand 0.8.6",
- "reqwest",
- "serde",
- "serde_json",
- "sqlx",
- "tb-config",
- "tb-core",
- "tb-db",
- "thiserror",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "tb-draft"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "once_cell",
- "serde",
- "serde_json",
- "sqlx",
- "tb-db",
- "thiserror",
- "tokio",
-]
-
-[[package]]
-name = "tb-match"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "chrono",
- "rand 0.8.6",
- "serde",
- "serde_json",
- "sqlx",
- "tb-config",
- "tb-core",
- "tb-db",
- "tb-discord",
- "tb-draft",
- "tb-tournament",
- "thiserror",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "tb-scheduler"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "serde_json",
- "sqlx",
- "tb-config",
- "tb-core",
- "tb-db",
- "tb-discord",
- "tb-match",
- "tb-tournament",
- "thiserror",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "tb-steam"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "reqwest",
- "serde",
- "serde_json",
- "sqlx",
- "tb-config",
- "tb-core",
- "tb-db",
- "thiserror",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "tb-tournament"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "chrono",
- "rand 0.8.6",
- "serde_json",
- "sqlx",
- "tb-core",
- "tb-db",
- "tb-steam",
- "thiserror",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "tb-web"
-version = "0.1.0"
-dependencies = [
- "axum",
- "axum-extra",
- "chrono",
- "serde",
- "serde_json",
- "sqlx",
- "tb-auth",
- "tb-config",
- "tb-core",
- "tb-db",
- "tb-discord",
- "tb-draft",
- "tb-match",
- "tb-scheduler",
- "tb-steam",
- "tb-tournament",
- "thiserror",
- "tokio",
- "tower",
- "tower-http",
- "tracing",
-]
-
-[[package]]
 name = "thiserror"
 version = "2.0.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2470,6 +2275,201 @@ dependencies = [
  "rand 0.9.4",
  "sha1",
  "thiserror",
+]
+
+[[package]]
+name = "turnier-api"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "axum-extra",
+ "chrono",
+ "serde",
+ "serde_json",
+ "sqlx",
+ "thiserror",
+ "tokio",
+ "tower",
+ "tower-http",
+ "tracing",
+ "turnier-auth",
+ "turnier-config",
+ "turnier-core",
+ "turnier-db",
+ "turnier-discord",
+ "turnier-draft",
+ "turnier-engine",
+ "turnier-match",
+ "turnier-scheduler",
+ "turnier-steam",
+]
+
+[[package]]
+name = "turnier-auth"
+version = "0.1.0"
+dependencies = [
+ "base64",
+ "chrono",
+ "rand 0.8.6",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "sqlx",
+ "thiserror",
+ "tokio",
+ "tracing",
+ "turnier-config",
+ "turnier-core",
+ "turnier-db",
+]
+
+[[package]]
+name = "turnier-bot"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "axum",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "turnier-api",
+ "turnier-config",
+ "turnier-db",
+ "turnier-discord",
+ "turnier-match",
+ "turnier-scheduler",
+]
+
+[[package]]
+name = "turnier-config"
+version = "0.1.0"
+dependencies = [
+ "tracing",
+]
+
+[[package]]
+name = "turnier-core"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "sqlx",
+]
+
+[[package]]
+name = "turnier-db"
+version = "0.1.0"
+dependencies = [
+ "sqlx",
+ "thiserror",
+ "tokio",
+ "tracing",
+ "turnier-core",
+]
+
+[[package]]
+name = "turnier-discord"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "rand 0.8.6",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "sqlx",
+ "thiserror",
+ "tokio",
+ "tracing",
+ "turnier-config",
+ "turnier-core",
+ "turnier-db",
+]
+
+[[package]]
+name = "turnier-draft"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "once_cell",
+ "serde",
+ "serde_json",
+ "sqlx",
+ "thiserror",
+ "tokio",
+ "turnier-db",
+]
+
+[[package]]
+name = "turnier-engine"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "rand 0.8.6",
+ "serde_json",
+ "sqlx",
+ "thiserror",
+ "tokio",
+ "tracing",
+ "turnier-core",
+ "turnier-db",
+ "turnier-steam",
+]
+
+[[package]]
+name = "turnier-match"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "rand 0.8.6",
+ "serde",
+ "serde_json",
+ "sqlx",
+ "thiserror",
+ "tokio",
+ "tracing",
+ "turnier-config",
+ "turnier-core",
+ "turnier-db",
+ "turnier-discord",
+ "turnier-draft",
+ "turnier-engine",
+]
+
+[[package]]
+name = "turnier-scheduler"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "serde_json",
+ "sqlx",
+ "thiserror",
+ "tokio",
+ "tracing",
+ "turnier-config",
+ "turnier-core",
+ "turnier-db",
+ "turnier-discord",
+ "turnier-engine",
+ "turnier-match",
+]
+
+[[package]]
+name = "turnier-steam"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "sqlx",
+ "thiserror",
+ "tokio",
+ "tracing",
+ "turnier-config",
+ "turnier-core",
+ "turnier-db",
 ]
 
 [[package]]

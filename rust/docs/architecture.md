@@ -7,53 +7,53 @@ Domänen-Crates kennen das Fundament, die Web-/App-Schicht kennt die Domäne.
 ## Schichten
 
 ```
-                         tb-app  (Binary, Composition-Root)
+                         turnier-bot  (Binary, Composition-Root)
                             │
-                         tb-web  (axum: Router, Extractoren, Fehler-Mapping)
+                         turnier-api  (axum: Router, Extractoren, Fehler-Mapping)
         ┌───────────────────┼─────────────────────────────┐
-   tb-scheduler          tb-match        tb-tournament   tb-draft
+   turnier-scheduler          turnier-match        turnier-engine   turnier-draft
    (Loop/Phasen)        (Lobby/Result)   (Engine/Punkte) (Pick/Ban)
         └─────────┬─────────┴───────┬───────────┴────────────┘
-              tb-discord        tb-steam        tb-auth
+              turnier-discord        turnier-steam        turnier-auth
               (Broker)          (Ränge)         (Session/RBAC)
                             │
-            tb-core   ·   tb-config   ·   tb-db          (Fundament)
+            turnier-core   ·   turnier-config   ·   turnier-db          (Fundament)
 ```
 
-- **tb-core** — Domänen-Enums + Wire-DTOs (1:1 zu den Pydantic-Modellen). Kein I/O.
-- **tb-config** — geschichtete Konfiguration (Datei → Env → Default) + Ableitungen
+- **turnier-core** — Domänen-Enums + Wire-DTOs (1:1 zu den Pydantic-Modellen). Kein I/O.
+- **turnier-config** — geschichtete Konfiguration (Datei → Env → Default) + Ableitungen
   (Rollen-Sets, CORS, allowed_hosts).
-- **tb-db** — `SqlitePool`, PRAGMA-Setup (WAL/FK/busy_timeout), konsolidierte
+- **turnier-db** — `SqlitePool`, PRAGMA-Setup (WAL/FK/busy_timeout), konsolidierte
   Migration (aus der Live-DB generiert), Fehler-Typ.
-- **tb-auth** — opake Session-Tokens (kein JWT), RBAC (`User < Mod < Admin`),
+- **turnier-auth** — opake Session-Tokens (kein JWT), RBAC (`User < Mod < Admin`),
   delegierter OAuth-Client gegen den Master-Broker.
-- **tb-steam** — dreistufiger Rang-Resolver (Cache → Steam-Bridge → Discord-Rollen);
+- **turnier-steam** — dreistufiger Rang-Resolver (Cache → Steam-Bridge → Discord-Rollen);
   EINE `rank_score`-Formel als Quelle der Wahrheit.
-- **tb-discord** — Master-Broker-Client (Channels, Embeds, DMs, Voice), entkoppelt
+- **turnier-discord** — Master-Broker-Client (Channels, Embeds, DMs, Voice), entkoppelt
   von axum; `discord_tasks`-Queue.
-- **tb-tournament** — die Engine: Bracket-Generierung (Single/Double-Elim),
+- **turnier-engine** — die Engine: Bracket-Generierung (Single/Double-Elim),
   Seeding, Mini-Groups, Standings, Status-Übergänge, idempotente Punkte. Strikt
   getrennt: reine Algorithmen (`engine/`) vs. sqlx-Persistenz (`persist/`).
-- **tb-match** — Match-Lebenszyklus: Lobby, Ergebnisverarbeitung (Bracket+Group
+- **turnier-match** — Match-Lebenszyklus: Lobby, Ergebnisverarbeitung (Bracket+Group
   vereinheitlicht), Bo-N-Serien, Spielmodi, Auto-Lobby, Steam-Bridge-Queue.
   `MatchKind`-Enum + Repository statt stringly-typed `match_type`.
-- **tb-draft** — Pick/Ban-Zustandsmaschine + Repository (CAS auf den Aktionsindex).
-- **tb-scheduler** — Hintergrund-Loop (Phasenübergänge + Reminder) und die geteilte
-  Orchestrierung `advance_tournament_status` (auch von tb-web genutzt).
-- **tb-web** — axum-HTTP-Schicht: `AppState`, Extractoren, Fehler→Response,
+- **turnier-draft** — Pick/Ban-Zustandsmaschine + Repository (CAS auf den Aktionsindex).
+- **turnier-scheduler** — Hintergrund-Loop (Phasenübergänge + Reminder) und die geteilte
+  Orchestrierung `advance_tournament_status` (auch von turnier-api genutzt).
+- **turnier-api** — axum-HTTP-Schicht: `AppState`, Extractoren, Fehler→Response,
   Middleware (CORS, TrustedHost) und die Router aller ~213 Endpunkte.
-- **tb-app** — Composition-Root + Binary: Config → Pool → Migration → AppState →
+- **turnier-bot** — Composition-Root + Binary: Config → Pool → Migration → AppState →
   Scheduler → `axum::serve`. Mit `--check` bootet der Prozess vollständig, ohne zu
   servieren (Smoke-Test).
 
-## Request-Lebenszyklus (tb-web)
+## Request-Lebenszyklus (turnier-api)
 
 1. **Middleware**: TrustedHost prüft den `Host`-Header gegen `allowed_hosts`; CORS
    spiegelt Methoden/Header mit `allow_credentials`.
 2. **Extractor**: `AuthUser`/`ModUser`/`AdminUser` lesen das Token (Bearer-Header
-   vor Cookie `session_token`), lösen die Session über `tb_auth::resolve_session`
+   vor Cookie `session_token`), lösen die Session über `turnier_auth::resolve_session`
    auf und setzen die RBAC-Flags. Public-Routen nutzen keinen Extractor.
-3. **Handler**: ruft die Domänen-Crates (kein Geschäftslogik-Code in tb-web),
+3. **Handler**: ruft die Domänen-Crates (kein Geschäftslogik-Code in turnier-api),
    formt die Antwort als Wire-DTO oder ad-hoc-JSON.
 4. **Fehler**: jeder Domänenfehler wird über `?` in einen `WebError` mit passendem
    Status übersetzt; die Response-Form ist FastAPI-kompatibel (`{"detail": …}`).

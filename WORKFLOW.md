@@ -2,6 +2,26 @@
 
 ---
 
+## Neue Aufgabe (2026-06-29): Phase 0 Task 1 Crate-Rename tb-* -> turnier-*
+
+### Ziel
+- Mechanischer, verhaltensneutraler Rename der Rust-Cargo-Crates unter `rust/`: `tb-*` -> `turnier-*`.
+- Keine Funktionsänderung, kein Release-Build, kein Commit/Push.
+
+### Status (2026-06-29)
+→ **Abgeschlossen** — Rename umgesetzt, Debug-Build/Clippy/Tests grün
+
+### Fortschritt
+- Plan gelesen: `docs/plans/2026-06-29-turnier-automatik-phase0.md`, Task 1.
+- Workflow gelesen; Arbeitsbaum vor Start geprüft.
+- Referenz-Build vor Rename: `cargo build --workspace` grün.
+- Crates unter `rust/crates/` per `git mv` umbenannt: `tb-*` -> `turnier-*`, inklusive `tb-tournament` -> `turnier-engine`.
+- Cargo-Manifeste, Rust-Importe, Tests und Rust-Doku-Verweise mechanisch auf neue Namen angepasst; Binary-Name ist `turnier-bot`.
+- Verifikation nach Rename: `cargo build --workspace`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace` grün.
+- Rückstands-Grep für `*.rs`/`*.toml` leer; zusätzlicher breiter Rust-Scan ohne `target` ebenfalls leer.
+
+---
+
 ## Neue Aufgabe (2026-04-25, Teil 2): Tournament-Caster, Live/Archiv-Trennung, Test-Modus
 
 ### Ziel

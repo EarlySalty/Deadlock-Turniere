@@ -1,11 +1,11 @@
 # DB-Vertrag — Single Source of Truth
 
 Die maßgebliche Schemadefinition ist die konsolidierte Migration
-[`crates/tb-db/migrations/0001_initial.sql`](../crates/tb-db/migrations/0001_initial.sql).
+[`crates/turnier-db/migrations/0001_initial.sql`](../crates/turnier-db/migrations/0001_initial.sql).
 Sie wurde **1:1 aus dem effektiven Live-Schema** (`backend/data/tournament.db`)
 generiert — inklusive aller historisch per `ALTER TABLE` nachgezogenen Spalten,
 die im Python-`db.py`-Literal NICHT vollständig abgebildet waren. Ein
-Integrationstest (`crates/tb-db/tests/migration.rs`) beweist:
+Integrationstest (`crates/turnier-db/tests/migration.rs`) beweist:
 
 - frische DB → die Migration baut alle 31 Tabellen auf;
 - Kopie der Live-DB → die Migration läuft idempotent durch (No-op, alle CREATEs

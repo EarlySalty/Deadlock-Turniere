@@ -5,13 +5,13 @@ ist. Der Python-Stand im Repo-Root bleibt unverändert und ist der Rollback-Pfad
 
 ## Status
 
-Vollständiger Port, 12 Crates + Binary (`tb-app`), baut als ein Workspace. Alle
+Vollständiger Port, 12 Crates + Binary (`turnier-bot`), baut als ein Workspace. Alle
 Tests grün (`cargo test --workspace`, 37 Suites), `cargo clippy --workspace
---all-targets -- -D warnings` sauber, Release-Build OK. `tb-app --check` bootet
+--all-targets -- -D warnings` sauber, Release-Build OK. `turnier-bot --check` bootet
 end-to-end (Config → Pool → Migration → AppState → Scheduler → Router) und
 degradiert ohne externe Dienste sauber.
 
-Verdrahtet in `tb-app`: HTTP-API (axum, ~213 Endpunkte) + Scheduler-Loop
+Verdrahtet in `turnier-bot`: HTTP-API (axum, ~213 Endpunkte) + Scheduler-Loop
 (Phasenübergänge + Reminder) im selben Prozess, gegen die geteilte SQLite-DB.
 
 ## Verifikation, die schon gelaufen ist
@@ -36,7 +36,7 @@ Verdrahtet in `tb-app`: HTTP-API (axum, ~213 Endpunkte) + Scheduler-Loop
    (geteilt mit Python) zeigen lassen; `AVATAR_DIR` auf das bestehende
    Avatar-Verzeichnis.
 5. **Erststart** gegen die echte DB prüfen (Dashboard/Frontend gegen die API),
-   dann den Python-Dienst stoppen und `tb-app` den Port übernehmen lassen.
+   dann den Python-Dienst stoppen und `turnier-bot` den Port übernehmen lassen.
 
 ## Empfohlener Folge-Schritt vor Live
 
@@ -54,5 +54,5 @@ sind dort als Opt-in-Folgefixe gelistet (Verhalten 1:1 erhalten).
 
 ## Rollback
 
-Python-Stand im Repo-Root ist unangetastet. Rollback = `tb-app` stoppen, Python
+Python-Stand im Repo-Root ist unangetastet. Rollback = `turnier-bot` stoppen, Python
 `uvicorn main:app` starten. Beide nutzen dieselbe `tournament.db`.
