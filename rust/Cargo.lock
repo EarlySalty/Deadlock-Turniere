@@ -2293,6 +2293,7 @@ dependencies = [
  "tower-http",
  "tracing",
  "turnier-auth",
+ "turnier-automatik",
  "turnier-config",
  "turnier-core",
  "turnier-db",

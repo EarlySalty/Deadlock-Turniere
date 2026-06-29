@@ -5,6 +5,12 @@ export type TournamentGameMode = 'standard' | 'mirror' | 'all_same' | 'random_he
 export type MatchStatus = 'pending' | 'checkin' | 'lobby_created' | 'in_progress' | 'completed' | 'forfeit' | 'cancelled'
 export type RecruitmentStatus = 'open' | 'application' | 'closed'
 export type InviteMode = 'always' | 'window' | 'never'
+export type Category = 'fun' | 'comp'
+export type DmScope = 'fun' | 'comp' | 'all'
+export type ProposalState = 'draft' | 'pending_approval' | 'approved' | 'rejected' | 'expired'
+export type ProposalSource = 'bot' | 'manual'
+export type VoteDecision = 'approve' | 'reject'
+export type ProposalEventInput = 'submit' | 'approve' | 'reject' | 'expire'
 export type LobbySettingsPreset =
   | 'standard'
   | 'fast_mode'
@@ -346,6 +352,88 @@ export interface TournamentUpdate {
 
 export interface ManualResult {
   winner_id: number
+}
+
+// --- Turnier-Automatik ---
+
+export interface PresetConfig {
+  team_size: number
+  bracket_format: BracketFormat
+  series_format: number
+  final_series_format: number | null
+  tournament_mode: TournamentMode
+  tournament_game_mode: TournamentGameMode
+  match_objective: string
+  invite_mode: InviteMode
+  reminder_offsets: string | null
+  start_reminder_offsets: string | null
+  rules: string | null
+  description_template: string | null
+}
+
+export interface Preset extends PresetConfig {
+  id: number
+  name: string
+  category: Category
+  active: boolean
+  created_by: string
+  created_at: string
+  updated_at: string
+}
+
+export interface NewPresetInput {
+  name: string
+  category: Category
+  config: PresetConfig
+  active?: boolean
+}
+
+export interface PresetUpdateInput {
+  name: string
+  category: Category
+  config: PresetConfig
+}
+
+export interface Proposal {
+  id: number
+  preset_id: number | null
+  source: ProposalSource
+  proposed_start: string | null
+  config_json: string
+  state: ProposalState
+  proposal_message_id: string | null
+  channel_id: string | null
+  tournament_id: number | null
+  decided_at: string | null
+  created_at: string
+}
+
+export interface ProposalVote {
+  id: number
+  proposal_id: number
+  caster_discord_id: string
+  decision: VoteDecision
+  created_at: string
+}
+
+export interface ProposalFeedback {
+  id: number
+  proposal_id: number
+  caster_discord_id: string
+  raw_text: string
+  applied_change_json: string | null
+  created_at: string
+}
+
+export interface ProposalDetail {
+  proposal: Proposal
+  votes: ProposalVote[]
+  feedback: ProposalFeedback[]
+  approvals: number
+}
+
+export interface DmOptoutStatus {
+  scopes: DmScope[]
 }
 
 // --- Match-Ergebnis-Meldungen & Leitstand ---

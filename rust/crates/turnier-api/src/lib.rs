@@ -15,6 +15,7 @@ pub mod state;
 
 // Router-Module (je eine Datei/Ordner — getrennt befüllbar).
 pub mod admin;
+pub mod account;
 pub mod auth;
 pub mod consent;
 pub mod draft;

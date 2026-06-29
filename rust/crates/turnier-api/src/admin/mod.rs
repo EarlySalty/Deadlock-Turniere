@@ -24,6 +24,7 @@ use axum::Router;
 use crate::state::AppState;
 
 mod brackets;
+mod automatik;
 mod casters;
 mod group_matches;
 mod helpers;
@@ -40,6 +41,7 @@ mod voice;
 pub fn router() -> Router<AppState> {
     Router::new()
         .merge(tournaments::router())
+        .merge(automatik::router())
         .merge(phases::router())
         .merge(teams::router())
         .merge(brackets::router())

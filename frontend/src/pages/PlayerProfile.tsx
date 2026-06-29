@@ -12,6 +12,7 @@ import { useAuth } from '@/hooks/useAuth'
 import Card from '@/components/ui/Card'
 import Button from '@/components/ui/Button'
 import LoadingSpinner from '@/components/ui/LoadingSpinner'
+import DmSubscriptionPanel from '@/components/account/DmSubscriptionPanel'
 
 function placementLabel(placement: number | null): string {
   if (!placement) return 'Keine Platzierung'
@@ -341,6 +342,8 @@ export default function PlayerProfile() {
                 {consentMessage}
               </p>
             )}
+
+            <DmSubscriptionPanel />
           </div>
         )}
       </div>

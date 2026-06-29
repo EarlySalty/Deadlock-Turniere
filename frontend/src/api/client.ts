@@ -43,6 +43,16 @@ import type {
   MatchResultReport,
   MatchResultReportCreate,
   ActionItemsResult,
+  Preset,
+  NewPresetInput,
+  PresetUpdateInput,
+  Proposal,
+  ProposalDetail,
+  ProposalEventInput,
+  ProposalState,
+  VoteDecision,
+  DmScope,
+  DmOptoutStatus,
 } from '@/types/tournament'
 
 const API_BASE = '/turnier/api'
@@ -226,6 +236,73 @@ export const removeTournamentCaster = (tournamentId: number, discordId: string) 
     `/admin/tournaments/${tournamentId}/casters/${encodeURIComponent(discordId)}`,
     { method: 'DELETE' },
   )
+
+// Turnier-Automatik
+export const fetchPresets = () =>
+  request<Preset[]>('/admin/presets')
+
+export const createPreset = (data: NewPresetInput) =>
+  request<Preset>('/admin/presets', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  })
+
+export const fetchPreset = (id: number) =>
+  request<Preset>(`/admin/presets/${id}`)
+
+export const updatePreset = (id: number, data: PresetUpdateInput) =>
+  request<Preset>(`/admin/presets/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  })
+
+export const setPresetActive = (id: number, active: boolean) =>
+  request<Preset>(`/admin/presets/${id}/active`, {
+    method: 'PATCH',
+    body: JSON.stringify({ active }),
+  })
+
+export const deletePreset = (id: number) =>
+  request<void>(`/admin/presets/${id}`, { method: 'DELETE' })
+
+export const fetchProposals = (state?: ProposalState) => {
+  const query = state ? `?state=${encodeURIComponent(state)}` : ''
+  return request<Proposal[]>(`/admin/proposals${query}`)
+}
+
+export const fetchProposal = (id: number) =>
+  request<ProposalDetail>(`/admin/proposals/${id}`)
+
+export const createManualProposal = (data: {
+  preset_id: number
+  name: string
+  proposed_start?: string | null
+}) =>
+  request<Proposal>('/admin/proposals', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  })
+
+export const applyProposalEvent = (id: number, event: ProposalEventInput) =>
+  request<{ state: ProposalState }>(`/admin/proposals/${id}/event`, {
+    method: 'POST',
+    body: JSON.stringify({ event }),
+  })
+
+export const recordProposalVote = (
+  id: number,
+  data: { caster_id: string; decision: VoteDecision },
+) =>
+  request<void>(`/admin/proposals/${id}/votes`, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  })
+
+export const recordProposalFeedback = (id: number, data: { raw_text: string }) =>
+  request<{ id: number }>(`/admin/proposals/${id}/feedback`, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  })
 
 // Test-Modus
 export const fetchTestUsers = () =>
@@ -427,6 +504,21 @@ export const revokeConsent = () => request<void>('/consent', { method: 'DELETE' 
 export const fetchMyProfile = () => request<UserProfile>('/profile')
 export const updateMyProfile = (data: UserProfileUpdate) =>
   request<UserProfile>('/profile', { method: 'PUT', body: JSON.stringify(data) })
+
+export const fetchMyDmOptout = () =>
+  request<DmOptoutStatus>('/me/dm-optout')
+
+export const setMyDmOptout = (scope: DmScope) =>
+  request<DmOptoutStatus>('/me/dm-optout', {
+    method: 'PUT',
+    body: JSON.stringify({ scope }),
+  })
+
+export const clearMyDmOptout = (scope: DmScope) =>
+  request<DmOptoutStatus>(`/me/dm-optout/${encodeURIComponent(scope)}`, {
+    method: 'DELETE',
+  })
+
 export const uploadProfileAvatar = async (file: File): Promise<UserProfile> => {
   const formData = new FormData()
   formData.append('avatar', file)

@@ -156,6 +156,16 @@ impl From<turnier_scheduler::SchedulerError> for WebError {
     }
 }
 
+impl From<turnier_automatik::AutomatikError> for WebError {
+    fn from(err: turnier_automatik::AutomatikError) -> Self {
+        use turnier_automatik::AutomatikError::*;
+        match err {
+            InvalidTransition { .. } => Self::conflict("Dieser Statuswechsel ist nicht möglich"),
+            Db(e) => e.into(),
+        }
+    }
+}
+
 impl From<turnier_steam::SteamError> for WebError {
     fn from(err: turnier_steam::SteamError) -> Self {
         tracing::error!(error = %err, "Steam-/Rang-Fehler in Route");

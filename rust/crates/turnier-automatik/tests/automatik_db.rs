@@ -264,6 +264,44 @@ async fn proposals_votes_feedback_and_state_roundtrip() {
 }
 
 #[tokio::test]
+async fn list_proposals_filters_state_and_orders_desc() {
+    let pool = temp_pool().await;
+    let first_id = proposals::create_proposal(
+        &pool,
+        None,
+        ProposalSource::Bot,
+        Some("2026-07-10T18:00:00Z"),
+        r#"{"name":"First"}"#,
+    )
+    .await
+    .unwrap();
+    let second_id = proposals::create_proposal(
+        &pool,
+        None,
+        ProposalSource::Manual,
+        Some("2026-07-11T18:00:00Z"),
+        r#"{"name":"Second"}"#,
+    )
+    .await
+    .unwrap();
+
+    proposals::apply_event(&pool, first_id, ProposalEvent::SubmitForApproval)
+        .await
+        .unwrap();
+
+    let all = proposals::list_proposals(&pool, None).await.unwrap();
+    assert_eq!(all.len(), 2);
+    assert_eq!(all[0].id, second_id);
+    assert_eq!(all[1].id, first_id);
+
+    let drafts = proposals::list_proposals(&pool, Some(ProposalState::Draft))
+        .await
+        .unwrap();
+    assert_eq!(drafts.len(), 1);
+    assert_eq!(drafts[0].id, second_id);
+}
+
+#[tokio::test]
 async fn apply_event_rejects_invalid_transition_without_persisting() {
     let pool = temp_pool().await;
     let proposal_id = proposals::create_proposal(

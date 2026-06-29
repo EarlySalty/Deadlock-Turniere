@@ -19,6 +19,8 @@ import VoiceChannelPanel from '@/components/admin/VoiceChannelPanel'
 import TournamentCasterPanel from '@/components/admin/TournamentCasterPanel'
 import ArchivedTournamentView from '@/components/admin/ArchivedTournamentView'
 import TestModePanel from '@/components/admin/TestModePanel'
+import AutomatikPanel from '@/components/admin/automatik/AutomatikPanel'
+import { AUTOMATIK_COPY } from '@/components/admin/automatik/copy'
 import Leitstand from '@/components/admin/Leitstand'
 import AdminPhaseNav, {
   defaultPhaseFor,
@@ -30,6 +32,7 @@ import MiniGroupPanel from '@/components/bracket/MiniGroupPanel'
 import AutoLobbyButton from '@/components/admin/AutoLobbyButton'
 import {
   Archive,
+  CalendarClock,
   FlaskConical,
   Plus,
   Radio,
@@ -39,12 +42,13 @@ import {
   Trophy,
 } from 'lucide-react'
 
-type AdminMode = 'live' | 'archive' | 'test'
+type AdminMode = 'live' | 'archive' | 'test' | 'automatik'
 
 const MODE_TABS: { key: AdminMode; label: string; icon: typeof Trophy }[] = [
   { key: 'live', label: 'Live', icon: Radio },
   { key: 'archive', label: 'Archiv', icon: Archive },
   { key: 'test', label: 'Test-Modus', icon: FlaskConical },
+  { key: 'automatik', label: AUTOMATIK_COPY.tabLabel, icon: CalendarClock },
 ]
 
 export default function Admin() {
@@ -98,6 +102,7 @@ export default function Admin() {
 
   useEffect(() => {
     if (!liveDetail) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setActivePhase(null)
       return
     }
@@ -108,6 +113,7 @@ export default function Admin() {
   }, [liveDetail, hasGroups, hasBracket])
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setActivePhase(null)
   }, [liveSelectedId])
 
@@ -174,7 +180,9 @@ export default function Admin() {
               ? liveTournaments.length
               : tab.key === 'archive'
                 ? archivedTournaments.length
-                : (tournaments ?? []).filter((t) => t.is_test).length
+                : tab.key === 'test'
+                  ? (tournaments ?? []).filter((t) => t.is_test).length
+                  : 0
           return (
             <button
               key={tab.key}
@@ -511,6 +519,7 @@ export default function Admin() {
       )}
 
       {adminMode === 'test' && <TestModePanel />}
+      {adminMode === 'automatik' && <AutomatikPanel />}
     </div>
   )
 }

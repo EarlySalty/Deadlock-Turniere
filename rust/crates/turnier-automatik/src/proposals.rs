@@ -127,6 +127,26 @@ pub async fn get_proposal(pool: &Pool, proposal_id: i64) -> AutomatikResult<Opti
     Ok(row)
 }
 
+/// Listet Vorschlaege, optional nach Zustand gefiltert.
+pub async fn list_proposals(
+    pool: &Pool,
+    state: Option<ProposalState>,
+) -> AutomatikResult<Vec<Proposal>> {
+    let rows = if let Some(state) = state {
+        sqlx::query_as::<_, Proposal>(
+            "SELECT * FROM tournament_proposals WHERE state = ? ORDER BY id DESC",
+        )
+        .bind(state)
+        .fetch_all(pool)
+        .await?
+    } else {
+        sqlx::query_as::<_, Proposal>("SELECT * FROM tournament_proposals ORDER BY id DESC")
+            .fetch_all(pool)
+            .await?
+    };
+    Ok(rows)
+}
+
 /// Speichert/aktualisiert den Vote eines Casters. Pro Caster und Proposal gibt
 /// es wegen UNIQUE hoechstens eine Zeile; erneuter Vote ueberschreibt die
 /// Entscheidung.

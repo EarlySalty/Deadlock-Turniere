@@ -16,7 +16,7 @@ use turnier_core::UserSession;
 use crate::error::WebError;
 use crate::extract::AuthUser;
 use crate::state::AppState;
-use crate::{admin, auth, consent, draft, leaderboard, operations, public, test_mode};
+use crate::{account, admin, auth, consent, draft, leaderboard, operations, public, test_mode};
 
 /// Baut den vollständigen axum-Router inkl. State und Middleware.
 pub fn build_router(state: AppState) -> Router {
@@ -26,6 +26,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/me", get(me))
         .route("/api/health", get(health))
         .merge(auth::router())
+        .merge(account::router())
         .merge(public::router())
         .merge(admin::router())
         .merge(operations::router())
