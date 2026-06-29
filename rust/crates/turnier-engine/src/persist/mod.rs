@@ -17,7 +17,7 @@ mod mini_group_complete;
 mod points;
 
 pub use advance::advance_bracket_winner;
-pub use bracket::generate_bracket;
+pub use bracket::{generate_bracket, generate_bracket_in_tx};
 pub use checkin::{
     assign_random_teams, build_checkin_snapshot_token, finalize_checkin, AddedPlayer, CreatedTeam,
     FinalizeCheckinParams, FinalizeCheckinResult, NoShuffle, RemovedPlayer, RngShuffler,
@@ -25,7 +25,7 @@ pub use checkin::{
 };
 pub use groups::{generate_group_matches, generate_groups};
 pub use mini_group_complete::complete_mini_group_round_robin;
-pub use points::recalculate_player_points;
+pub use points::{recalculate_player_points, recalculate_player_points_in_tx};
 
 use sqlx::{Sqlite, Transaction};
 

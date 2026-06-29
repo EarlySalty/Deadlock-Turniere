@@ -8,14 +8,16 @@ use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use sqlx::Row;
 
 use turnier_core::{
-    LobbySettingsPreset, Tournament, TournamentCreate, TournamentDetail, TournamentMode,
+    LobbySettingsPreset, Patch, Tournament, TournamentCreate, TournamentDetail, TournamentMode,
     TournamentStatus, TournamentUpdate,
 };
-use turnier_engine::{determine_tournament_mode, is_valid_transition, valid_next_statuses};
+use turnier_engine::{
+    determine_tournament_mode, generate_bracket_in_tx, is_valid_transition, valid_next_statuses,
+};
 
 use crate::error::{WebError, WebResult};
 use crate::extract::{AdminUser, ModUser};
@@ -35,16 +37,36 @@ use super::tournament_row::{load_all_tournaments_dto, load_tournament_dto};
 /// Router der Turnier-CRUD- und Status-Endpunkte.
 pub fn router() -> Router<AppState> {
     Router::new()
-        .route("/api/admin/tournaments", get(list_tournaments).post(create_tournament))
+        .route(
+            "/api/admin/tournaments",
+            get(list_tournaments).post(create_tournament),
+        )
         .route(
             "/api/admin/tournaments/{tournament_id}",
-            get(get_tournament).put(update_tournament).delete(delete_tournament),
+            get(get_tournament)
+                .put(update_tournament)
+                .delete(delete_tournament),
         )
-        .route("/api/admin/tournaments/{tournament_id}/mini-groups", get(get_mini_groups))
-        .route("/api/admin/tournaments/{tournament_id}/auto-lobby/run", post(run_auto_lobby))
-        .route("/api/admin/tournaments/{tournament_id}/open-checkin", post(open_checkin))
-        .route("/api/admin/tournaments/{tournament_id}/revert-checkin", post(revert_checkin))
-        .route("/api/admin/tournaments/{tournament_id}/advance", post(advance_tournament))
+        .route(
+            "/api/admin/tournaments/{tournament_id}/mini-groups",
+            get(get_mini_groups),
+        )
+        .route(
+            "/api/admin/tournaments/{tournament_id}/auto-lobby/run",
+            post(run_auto_lobby),
+        )
+        .route(
+            "/api/admin/tournaments/{tournament_id}/open-checkin",
+            post(open_checkin),
+        )
+        .route(
+            "/api/admin/tournaments/{tournament_id}/revert-checkin",
+            post(revert_checkin),
+        )
+        .route(
+            "/api/admin/tournaments/{tournament_id}/advance",
+            post(advance_tournament),
+        )
 }
 
 /// Hilfsfunktion: serde-String eines Status (für SQL-Vergleiche/Audit).
@@ -112,7 +134,10 @@ async fn get_mini_groups(
     let mut by_group: BTreeMap<i64, Vec<Value>> = BTreeMap::new();
     for m in &bracket_matches {
         if let Some(gid) = m.mini_group_id {
-            by_group.entry(gid).or_default().push(serde_json::to_value(m).unwrap_or_default());
+            by_group
+                .entry(gid)
+                .or_default()
+                .push(serde_json::to_value(m).unwrap_or_default());
         }
     }
 
@@ -271,22 +296,35 @@ async fn update_tournament(
         let new_status_s = status_str(new_status);
         if new_status_s != current_status {
             let allowed: Vec<&'static str> = parse_status(&current_status)
-                .map(|s| valid_next_statuses(s).iter().map(|t| status_str(*t)).collect())
+                .map(|s| {
+                    valid_next_statuses(s)
+                        .iter()
+                        .map(|t| status_str(*t))
+                        .collect()
+                })
                 .unwrap_or_default();
             let transition_ok = parse_status(&current_status)
                 .map(|f| is_valid_transition(f, new_status))
                 .unwrap_or(false);
             if !transition_ok {
-                let allowed_text = if allowed.is_empty() { "keine".to_string() } else { allowed.join(", ") };
+                let allowed_text = if allowed.is_empty() {
+                    "keine".to_string()
+                } else {
+                    allowed.join(", ")
+                };
                 return Err(WebError::bad_request(format!(
                     "Ungültiger Status-Übergang: {current_status} -> {new_status_s}. Erlaubt: {allowed_text}"
                 )));
             }
             if current_status == "registration" && new_status_s == "checkin" {
-                return Err(WebError::bad_request("Check-in bitte über den dedizierten Endpoint öffnen"));
+                return Err(WebError::bad_request(
+                    "Check-in bitte über den dedizierten Endpoint öffnen",
+                ));
             }
             if current_status == "checkin" && new_status_s == "group_phase" {
-                return Err(WebError::bad_request("Check-in bitte über finalize-checkin abschließen"));
+                return Err(WebError::bad_request(
+                    "Check-in bitte über finalize-checkin abschließen",
+                ));
             }
             if helpers::ACTIVE_TOURNAMENT_STATUSES.contains(&new_status_s) {
                 ensure_single_active_tournament(&mut *tx, Some(tournament_id)).await?;
@@ -311,8 +349,10 @@ async fn update_tournament(
     if let Some(v) = &body.name {
         push!("name", json!(v));
     }
-    if let Some(v) = &body.description {
-        push!("description", json!(v));
+    match &body.description {
+        Patch::Missing => {}
+        Patch::Null => push!("description", Value::Null),
+        Patch::Value(v) => push!("description", json!(v)),
     }
     if let Some(v) = body.status {
         push!("status", json!(status_str(v)));
@@ -326,23 +366,35 @@ async fn update_tournament(
     if let Some(v) = body.series_format {
         push!("series_format", json!(v));
     }
-    if let Some(v) = body.final_series_format {
-        push!("final_series_format", json!(v));
+    match &body.final_series_format {
+        Patch::Missing => {}
+        Patch::Null => push!("final_series_format", Value::Null),
+        Patch::Value(v) => push!("final_series_format", json!(v)),
     }
-    if let Some(v) = &body.registration_start {
-        push!("registration_start", json!(v));
+    match &body.registration_start {
+        Patch::Missing => {}
+        Patch::Null => push!("registration_start", Value::Null),
+        Patch::Value(v) => push!("registration_start", json!(v)),
     }
-    if let Some(v) = &body.registration_end {
-        push!("registration_end", json!(v));
+    match &body.registration_end {
+        Patch::Missing => {}
+        Patch::Null => push!("registration_end", Value::Null),
+        Patch::Value(v) => push!("registration_end", json!(v)),
     }
-    if let Some(v) = &body.checkin_start {
-        push!("checkin_start", json!(v));
+    match &body.checkin_start {
+        Patch::Missing => {}
+        Patch::Null => push!("checkin_start", Value::Null),
+        Patch::Value(v) => push!("checkin_start", json!(v)),
     }
-    if let Some(v) = &body.group_phase_start {
-        push!("group_phase_start", json!(v));
+    match &body.group_phase_start {
+        Patch::Missing => {}
+        Patch::Null => push!("group_phase_start", Value::Null),
+        Patch::Value(v) => push!("group_phase_start", json!(v)),
     }
-    if let Some(v) = &body.bracket_start {
-        push!("bracket_start", json!(v));
+    match &body.bracket_start {
+        Patch::Missing => {}
+        Patch::Null => push!("bracket_start", Value::Null),
+        Patch::Value(v) => push!("bracket_start", json!(v)),
     }
     if let Some(v) = &body.match_objective {
         push!("match_objective", json!(v));
@@ -350,8 +402,10 @@ async fn update_tournament(
     if let Some(v) = body.no_show_grace_minutes {
         push!("no_show_grace_minutes", json!(v));
     }
-    if let Some(v) = &body.rules {
-        push!("rules", json!(v));
+    match &body.rules {
+        Patch::Missing => {}
+        Patch::Null => push!("rules", Value::Null),
+        Patch::Value(v) => push!("rules", json!(v)),
     }
 
     // Mode-Wechsel (nur in draft/checkin/group_phase, group_phase nur ungespielt).
@@ -390,30 +444,47 @@ async fn update_tournament(
     if let Some(v) = body.tournament_game_mode {
         push!("tournament_game_mode", json!(serde_value_str(&v)));
     }
-    if let Some(v) = &body.reminder_offsets {
-        push!("reminder_offsets", json!(serialize_reminder_offsets(v)));
+    match &body.reminder_offsets {
+        Patch::Missing => {}
+        Patch::Null => push!("reminder_offsets", Value::Null),
+        Patch::Value(v) => push!("reminder_offsets", json!(serialize_reminder_offsets(v))),
     }
-    if let Some(v) = &body.start_reminder_offsets {
-        push!("start_reminder_offsets", json!(serialize_reminder_offsets(v)));
+    match &body.start_reminder_offsets {
+        Patch::Missing => {}
+        Patch::Null => push!("start_reminder_offsets", Value::Null),
+        Patch::Value(v) => push!(
+            "start_reminder_offsets",
+            json!(serialize_reminder_offsets(v))
+        ),
     }
-    if body.invite_window_start.is_some() {
-        push!("invite_window_start", json!(body.invite_window_start));
+    match &body.invite_window_start {
+        Patch::Missing => {}
+        Patch::Null => push!("invite_window_start", Value::Null),
+        Patch::Value(v) => push!("invite_window_start", json!(v)),
     }
-    if body.invite_window_end.is_some() {
-        push!("invite_window_end", json!(body.invite_window_end));
+    match &body.invite_window_end {
+        Patch::Missing => {}
+        Patch::Null => push!("invite_window_end", Value::Null),
+        Patch::Value(v) => push!("invite_window_end", json!(v)),
     }
 
     // Lobby-Settings: Preset oder Custom (Custom impliziert preset=custom).
-    if body.lobby_settings_preset.is_some() || body.lobby_settings.is_some() {
+    if body.lobby_settings_preset.is_some() || !matches!(body.lobby_settings, Patch::Missing) {
         let preset = match (body.lobby_settings_preset, &body.lobby_settings) {
             (Some(p), _) => Some(p),
-            (None, Some(_)) => Some(LobbySettingsPreset::Custom),
-            (None, None) => None,
+            (None, Patch::Value(_)) => Some(LobbySettingsPreset::Custom),
+            (None, Patch::Missing | Patch::Null) => None,
         };
         if let Some(p) = preset {
-            let serialized = serialize_lobby_settings(p, body.lobby_settings.as_ref())?;
+            let custom_settings = match &body.lobby_settings {
+                Patch::Value(v) => Some(v),
+                Patch::Missing | Patch::Null => None,
+            };
+            let serialized = serialize_lobby_settings(p, custom_settings)?;
             push!("lobby_settings", json!(serialized));
-        } else if body.lobby_settings.is_some() {
+        } else if matches!(body.lobby_settings, Patch::Null) {
+            push!("lobby_settings", Value::Null);
+        } else if matches!(body.lobby_settings, Patch::Value(_)) {
             return Err(WebError::bad_request(
                 "lobby_settings_preset ist erforderlich, wenn lobby_settings gesetzt wird",
             ));
@@ -432,12 +503,18 @@ async fn update_tournament(
     }
     q.bind(tournament_id).execute(&mut *tx).await?;
 
-    // Mode-Wechsel group_phase → bracket_only: Tree-Rebuild (Befund
-    // admin_routes.py:1042 — 1:1 erhalten, needs-decision).
+    // Mode-Wechsel group_phase → bracket_only: Delete + Rebuild + Status
+    // zusammen mit dem Update committen.
     let rebuild_bracket_only = current_status == "group_phase" && mode_changed_to_bracket_only;
     if rebuild_bracket_only {
         delete_group_phase_tree(&mut tx, tournament_id).await?;
-        helpers::clear_bracket_tree(&mut tx, tournament_id).await?;
+        generate_bracket_in_tx(&mut tx, tournament_id).await?;
+        sqlx::query(
+            "UPDATE tournaments SET status = 'bracket', updated_at = datetime('now') WHERE id = ?",
+        )
+        .bind(tournament_id)
+        .execute(&mut *tx)
+        .await?;
     }
 
     audit(
@@ -448,21 +525,6 @@ async fn update_tournament(
     )
     .await?;
     tx.commit().await?;
-
-    // Vollständigen Single-Elim-Tree aus den Teams neu bauen + auf `bracket`
-    // setzen. `generate_bracket` leert das (bereits geleerte) Bracket erneut und
-    // baut bei fehlender Gruppenphase aus allen Teams den kompletten Seed-Tree —
-    // entspricht dem `_build_seeded_bracket`-Rebuild des Originals. Läuft nach dem
-    // Commit, da `generate_bracket` eine eigene Transaktion öffnet.
-    if rebuild_bracket_only {
-        turnier_engine::generate_bracket(&state.pool, tournament_id).await?;
-        sqlx::query(
-            "UPDATE tournaments SET status = 'bracket', updated_at = datetime('now') WHERE id = ?",
-        )
-        .bind(tournament_id)
-        .execute(&state.pool)
-        .await?;
-    }
 
     Ok(Json(load_tournament_dto(&state.pool, tournament_id).await?))
 }
@@ -502,7 +564,9 @@ async fn delete_tournament(
     .await?;
     tx.commit().await?;
 
-    Ok(Json(json!({ "status": "gelöscht", "tournament_id": tournament_id })))
+    Ok(Json(
+        json!({ "status": "gelöscht", "tournament_id": tournament_id }),
+    ))
 }
 
 /// `POST /api/admin/tournaments/{id}/open-checkin` — Check-in öffnen.
@@ -530,7 +594,14 @@ async fn open_checkin(
         }
     }
 
-    advance_status_shared(&state, tournament_id, "registration", "checkin", &user.discord_id).await?;
+    advance_status_shared(
+        &state,
+        tournament_id,
+        "registration",
+        "checkin",
+        &user.discord_id,
+    )
+    .await?;
     Ok(Json(load_tournament_dto(&state.pool, tournament_id).await?))
 }
 
@@ -594,13 +665,22 @@ async fn advance_tournament(
         let current_status: String = existing.get("status");
 
         if current_status == "registration" {
-            return Err(WebError::bad_request("Check-in bitte über open-checkin öffnen"));
+            return Err(WebError::bad_request(
+                "Check-in bitte über open-checkin öffnen",
+            ));
         }
         if current_status == "checkin" {
-            return Err(WebError::bad_request("Check-in bitte über finalize-checkin abschließen"));
+            return Err(WebError::bad_request(
+                "Check-in bitte über finalize-checkin abschließen",
+            ));
         }
         let allowed: Vec<&'static str> = parse_status(&current_status)
-            .map(|s| valid_next_statuses(s).iter().map(|t| status_str(*t)).collect())
+            .map(|s| {
+                valid_next_statuses(s)
+                    .iter()
+                    .map(|t| status_str(*t))
+                    .collect()
+            })
             .unwrap_or_default();
         let Some(&next_status) = allowed.first() else {
             return Err(WebError::bad_request(format!(
@@ -614,8 +694,14 @@ async fn advance_tournament(
         (current_status, next_status)
     };
 
-    advance_status_shared(&state, tournament_id, &current_status, next_status, &user.discord_id)
-        .await?;
+    advance_status_shared(
+        &state,
+        tournament_id,
+        &current_status,
+        next_status,
+        &user.discord_id,
+    )
+    .await?;
     Ok(Json(load_tournament_dto(&state.pool, tournament_id).await?))
 }
 

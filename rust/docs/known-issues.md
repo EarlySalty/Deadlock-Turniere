@@ -205,14 +205,13 @@ das ändern würde, **wann** Auslösungen feuern (Parität).
 status=current` erzeugt. Bei parallelem Statuswechsel (`rows_affected = 0`) sind
 die Datensätze bereits angelegt → mögliche Waisen. 1:1 erhalten.
 
-### KI-SC03 [Abweichung, dokumentiert] — Status+Punkte nicht mehr atomar
+### KI-SC03 [gefixt] — Status+Punkte wieder atomar
 Im Original liefen `completed`-`UPDATE` und `recalculate_player_points` in
-derselben Transaktion. Da `recalculate_player_points` im Port `&pool` nimmt
-(eigene Transaktion), committet der Port den Status zuerst und rechnet dann die
-Punkte. Schlägt der Recompute fehl, bleibt `completed` ohne neue Punkte stehen.
-Folgenarm, weil der Recompute **idempotent** ist (einfach erneut auslösbar) und
-dieser Pfad nur extern (turnier-api) getriggert wird. Folgefix: eine
-transaktions-durchgereichte Recompute-Variante in `turnier-engine`.
+derselben Transaktion. Der Port nutzt dafür jetzt
+`rust/crates/turnier-engine/src/persist/points.rs`
+(`recalculate_player_points_in_tx`) aus
+`rust/crates/turnier-scheduler/src/transition.rs`; Status, Audit und
+Punkte-Recompute committen wieder gemeinsam oder gar nicht.
 
 ### KI-SC04 [erhalten] — Reminder-Fenster ohne Catch-up
 `is_within_window` prüft `reminder_at <= now <= reminder_at + 5min`. Nach einem
@@ -313,13 +312,13 @@ Python-Original: 92 Endpunkte als paritätsgleich bestätigt, 2 high + 7 medium 
   (`ß` blieb stehen) → eine geteilte `turnier_engine::name_key`-Funktion faltet
   `ß`→`ss`, konsistent zu den von Python erzeugten Schlüsseln.
 
-### KI-AU01 [erhalten] — PUT-Update kann nullbare Felder nicht gezielt leeren
+### KI-AU01 [gefixt] — PUT-Update kann nullbare Felder gezielt leeren
 `admin_routes.py` `update_tournament`: Python (`model_dump(exclude_unset=True)`)
 unterscheidet „Feld fehlt" von „Feld = null"; ein explizites `null` leert die
-Spalte. Der Rust-`Option<String>` kann beides nicht trennen (beides → `None` →
-nicht aktualisiert). Folge: gezieltes Leeren via `null` nicht möglich (Wert
-setzen/weglassen geht). Behebbar nur mit `Option<Option<…>>` über ~12 Felder —
-zurückgestellt (geringe Praxiswirkung).
+Spalte. Der Port bildet diese Semantik jetzt für die nullable Turnierfelder über
+`Patch<T>` in `rust/crates/turnier-core/src/tournament.rs` ab; die SQL-Feldsammlung
+in `rust/crates/turnier-api/src/admin/tournaments.rs` schreibt bei `Null`
+explizit SQL-`NULL`.
 
 ### KI-AU02 [Rust sauberer] — robustere Fehlerbehandlung statt Python-500
 An mehreren Stellen ist der Port robuster als das Original und liefert klare
@@ -333,7 +332,15 @@ Falsch typisierte JSON-Felder (z. B. `winner_id: "5"`, `5.5`, `true`) lehnt serd
 schon beim Parsen mit 422 ab, wo Pythons `isinstance`-Checks teils 400 lieferten.
 Statuscode-Nuance ohne Praxiswirkung (Frontend sendet korrekte Typen).
 
-### KI-AU04 [erhalten] — Avatar-Serving ohne ETag/Range-Header
-`GET /api/avatars/*` liefert die Datei mit Content-Type (+ Content-Length), aber
-ohne `ETag`/`Last-Modified`/`Accept-Ranges` wie FastAPIs `FileResponse`. Bild
-lädt korrekt; nur Caching-/Range-Feinheiten fehlen.
+### KI-AU04 [zurückgestellt] — Avatar-Serving ohne ETag/Last-Modified/Range
+`GET /api/avatars/*` liefert lokale Dateien in
+`rust/crates/turnier-api/src/consent.rs:526-588` mit Content-Type
+(+ Content-Length), aber ohne `ETag`, `Last-Modified` und `Accept-Ranges` wie
+FastAPIs `FileResponse`. Bild lädt korrekt; nur Caching-/Range-Feinheiten fehlen.
+
+### KI-AU05 [zurückgestellt] — Steam-Ops-Timeouttext generisch
+`rust/crates/turnier-api/src/admin/steam_ops.rs:33-46` mappt
+`SteamTaskError::Timeout` auf den generischen Task-Fehlertext. Das Python-Original
+liefert je Aktion spezifische 504-Details (z. B. Lobby erstellen, Match starten,
+Resultat holen). Statuscode und `{"detail": ...}`-Form bleiben gleich; nur die
+aktionsspezifische Diagnose ist zurückgestellt.

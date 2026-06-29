@@ -12,7 +12,7 @@
 use std::sync::Arc;
 
 use turnier_config::Config;
-use turnier_db::{connect_str, run_migrations, Pool};
+use turnier_db::{Pool, connect_str, run_migrations};
 use turnier_discord::{BrokerClient, DiscordNotifier};
 use turnier_match::MatchManager;
 
@@ -22,7 +22,10 @@ pub async fn temp_pool() -> Pool {
     use std::sync::atomic::{AtomicU64, Ordering};
     use std::time::{SystemTime, UNIX_EPOCH};
     static COUNTER: AtomicU64 = AtomicU64::new(0);
-    let nanos = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos() as u64;
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos() as u64;
     let unique = nanos
         .wrapping_add(COUNTER.fetch_add(1, Ordering::Relaxed))
         .wrapping_add((std::process::id() as u64) << 40);
@@ -78,12 +81,11 @@ pub async fn tournament_status(pool: &Pool, tournament_id: i64) -> String {
 
 /// Zählt die Audit-Einträge einer bestimmten Action.
 pub async fn audit_count(pool: &Pool, action: &str) -> i64 {
-    let (count,): (i64,) =
-        sqlx::query_as("SELECT COUNT(*) FROM audit_log WHERE action = ?")
-            .bind(action)
-            .fetch_one(pool)
-            .await
-            .expect("audit count");
+    let (count,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM audit_log WHERE action = ?")
+        .bind(action)
+        .fetch_one(pool)
+        .await
+        .expect("audit count");
     count
 }
 

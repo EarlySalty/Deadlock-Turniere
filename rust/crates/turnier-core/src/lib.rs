@@ -25,7 +25,7 @@ pub use team::{
     Team, TeamApplication, TeamCreate, TeamInvitation, TeamMember, TeamMemberPublic, TeamPublic,
 };
 pub use tournament::{
-    Tournament, TournamentCreate, TournamentDetail, TournamentDetailPublic, TournamentSignup,
+    Patch, Tournament, TournamentCreate, TournamentDetail, TournamentDetailPublic, TournamentSignup,
     TournamentSignupPublic, TournamentUpdate,
 };
 pub use user::{

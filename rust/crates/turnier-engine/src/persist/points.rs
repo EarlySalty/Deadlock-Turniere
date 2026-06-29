@@ -16,7 +16,7 @@
 use std::collections::HashMap;
 
 use chrono::Utc;
-use sqlx::{Pool, Sqlite};
+use sqlx::{Pool, Sqlite, Transaction};
 
 use crate::error::TournamentResult;
 use crate::points::{
@@ -60,9 +60,22 @@ impl PlayerAggregate {
 /// damit idempotent. Eigene Transaktion.
 pub async fn recalculate_player_points(
     pool: &Pool<Sqlite>,
-    _tournament_id: i64,
+    tournament_id: i64,
 ) -> TournamentResult<()> {
     let mut tx = pool.begin().await?;
+    recalculate_player_points_in_tx(&mut tx, tournament_id).await?;
+    tx.commit().await?;
+    Ok(())
+}
+
+/// Transaktionsfähige Variante von [`recalculate_player_points`].
+///
+/// Der Aufrufer besitzt Commit/Rollback. So können Statuswechsel, Audit und
+/// Punkte-Recompute wieder wie im Python-Original atomar zusammenlaufen.
+pub async fn recalculate_player_points_in_tx(
+    tx: &mut Transaction<'_, Sqlite>,
+    _tournament_id: i64,
+) -> TournamentResult<()> {
 
     // Alle gewerteten Turniere: abgeschlossen UND nicht von der Rangliste
     // ausgeschlossen (der Original-Caller filtert exclude_from_leaderboard vor
@@ -70,7 +83,7 @@ pub async fn recalculate_player_points(
     let tournaments: Vec<(i64,)> = sqlx::query_as(
         "SELECT id FROM tournaments WHERE status = 'completed' AND exclude_from_leaderboard = 0",
     )
-    .fetch_all(&mut *tx)
+    .fetch_all(&mut **tx)
     .await?;
 
     let mut aggregates: HashMap<String, PlayerAggregate> = HashMap::new();
@@ -82,7 +95,7 @@ pub async fn recalculate_player_points(
              WHERE tournament_id = ? AND status = 'completed' ORDER BY round DESC",
         )
         .bind(tid)
-        .fetch_all(&mut *tx)
+        .fetch_all(&mut **tx)
         .await?;
         let matches: Vec<CompletedMatch> = raw_matches
             .iter()
@@ -104,7 +117,7 @@ pub async fn recalculate_player_points(
              JOIN teams t ON tm.team_id = t.id WHERE t.tournament_id = ?",
         )
         .bind(tid)
-        .fetch_all(&mut *tx)
+        .fetch_all(&mut **tx)
         .await?;
 
         for (discord_id, team_id) in participants {
@@ -120,7 +133,7 @@ pub async fn recalculate_player_points(
     // Tabelle vollständig neu schreiben (idempotent).
     let now = Utc::now().to_rfc3339();
     sqlx::query("DELETE FROM player_points")
-        .execute(&mut *tx)
+        .execute(&mut **tx)
         .await?;
     for (discord_id, agg) in &aggregates {
         sqlx::query(
@@ -135,10 +148,9 @@ pub async fn recalculate_player_points(
         .bind(agg.matches_won)
         .bind(agg.best_placement)
         .bind(&now)
-        .execute(&mut *tx)
+        .execute(&mut **tx)
         .await?;
     }
 
-    tx.commit().await?;
     Ok(())
 }

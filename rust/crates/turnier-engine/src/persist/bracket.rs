@@ -35,13 +35,25 @@ struct Qualifier {
 /// der `tournaments`-Zeile gelesen.
 pub async fn generate_bracket(pool: &Pool<Sqlite>, tournament_id: i64) -> TournamentResult<i64> {
     let mut tx = pool.begin().await?;
+    let match_count = generate_bracket_in_tx(&mut tx, tournament_id).await?;
+    tx.commit().await?;
+    Ok(match_count)
+}
 
-    clear_bracket_tree(&mut tx, tournament_id).await?;
+/// Transaktionsfähige Variante von [`generate_bracket`].
+///
+/// Der Aufrufer besitzt Commit/Rollback. Genutzt für Admin-Updates, bei denen
+/// Löschen, Rebuild, Statuswechsel und Audit atomar zusammengehören.
+pub async fn generate_bracket_in_tx(
+    tx: &mut Transaction<'_, Sqlite>,
+    tournament_id: i64,
+) -> TournamentResult<i64> {
+    clear_bracket_tree(tx, tournament_id).await?;
 
     let format_row: Option<(String,)> =
         sqlx::query_as("SELECT bracket_format FROM tournaments WHERE id = ?")
             .bind(tournament_id)
-            .fetch_optional(&mut *tx)
+            .fetch_optional(&mut **tx)
             .await?;
     let bracket_format = format_row
         .map(|r| r.0)
@@ -51,7 +63,7 @@ pub async fn generate_bracket(pool: &Pool<Sqlite>, tournament_id: i64) -> Tourna
     let group_ids: Vec<(i64,)> =
         sqlx::query_as("SELECT id FROM groups WHERE tournament_id = ? ORDER BY seeding_order")
             .bind(tournament_id)
-            .fetch_all(&mut *tx)
+            .fetch_all(&mut **tx)
             .await?;
 
     let mut qualified: Vec<Qualifier> = Vec::new();
@@ -62,7 +74,7 @@ pub async fn generate_bracket(pool: &Pool<Sqlite>, tournament_id: i64) -> Tourna
              WHERE group_id = ? ORDER BY points DESC, wins DESC",
         )
         .bind(group_id)
-        .fetch_all(&mut *tx)
+        .fetch_all(&mut **tx)
         .await?;
         let mut group_qs: Vec<Qualifier> = Vec::new();
         for (rank_pos, (team_id, wins, _losses, points)) in standings.iter().take(2).enumerate() {
@@ -87,7 +99,7 @@ pub async fn generate_bracket(pool: &Pool<Sqlite>, tournament_id: i64) -> Tourna
         let all_teams: Vec<(i64,)> =
             sqlx::query_as("SELECT id FROM teams WHERE tournament_id = ?")
                 .bind(tournament_id)
-                .fetch_all(&mut *tx)
+                .fetch_all(&mut **tx)
                 .await?;
         qualified = all_teams
             .into_iter()
@@ -117,15 +129,14 @@ pub async fn generate_bracket(pool: &Pool<Sqlite>, tournament_id: i64) -> Tourna
                 DoubleElimInput::Entries(entries)
             }
         };
-        build_double_elimination_bracket(&mut tx, tournament_id, pairs_or_entries).await?
+        build_double_elimination_bracket(tx, tournament_id, pairs_or_entries).await?
     } else if let Some(pairs) = cross_seed_pairs {
-        build_paired_bracket(&mut tx, tournament_id, pairs, 1, "winners").await?
+        build_paired_bracket(tx, tournament_id, pairs, 1, "winners").await?
     } else {
         let entries = sort_and_map_entries(qualified);
-        build_seeded_bracket(&mut tx, tournament_id, entries).await?
+        build_seeded_bracket(tx, tournament_id, entries).await?
     };
 
-    tx.commit().await?;
     Ok(match_count)
 }
 

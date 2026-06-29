@@ -14,7 +14,7 @@ use turnier_discord::DiscordNotifier;
 use turnier_match::MatchManager;
 use turnier_engine::{
     generate_bracket, generate_group_matches, generate_groups, is_valid_transition,
-    recalculate_player_points, valid_next_statuses,
+    recalculate_player_points_in_tx, valid_next_statuses,
 };
 
 use crate::error::{SchedulerError, SchedulerResult};
@@ -198,14 +198,7 @@ pub async fn advance_tournament_status(
                 .fetch_optional(&mut *tx)
                 .await?;
         if matches!(exclude, Some((flag,)) if flag == 0) {
-            // recalculate_player_points öffnet eine eigene Transaktion; daher die
-            // aktuelle hier zuerst committen, damit der completed-Status sichtbar
-            // ist (die Recompute-Query liest status = 'completed').
-            tx.commit().await?;
-            recalculate_player_points(pool, tournament_id).await?;
-            // Ab hier ist nichts mehr zu committen.
-            schedule_lobbies_best_effort(matchmgr, tournament_id, next_status).await;
-            return Ok(metadata);
+            recalculate_player_points_in_tx(&mut tx, tournament_id).await?;
         }
     }
 
