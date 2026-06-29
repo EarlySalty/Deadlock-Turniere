@@ -1,0 +1,33 @@
+[package]
+name = "turnier-engine"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+# Die Turnier-Engine — das Herz des Backends. Trennt strikt die REINEN
+# Algorithmen (Seeding, Bracket-Verdrahtung Single/Double-Elim, Mini-Group-
+# Verteilung, Snake-Draft, Tiebreaker, Punkte-Platzierung — alles DB-frei und
+# voll unit-testbar) von der sqlx-Persistenz (build_*_bracket, generate_groups,
+# finalize_checkin, advance_bracket_winner). Jede öffentliche Persistenz-
+# Operation läuft in EINER Transaktion. Determinismus über injizierbaren
+# StdRng. 1:1-Parität zum Python-Original (backend/tournament/*.py), bewiesen
+# durch die portierten Paritätstests unter tests/.
+[dependencies]
+turnier-core = { path = "../turnier-core" }
+turnier-db = { path = "../turnier-db" }
+turnier-steam = { path = "../turnier-steam" }
+
+sqlx.workspace = true
+rand.workspace = true
+chrono.workspace = true
+thiserror.workspace = true
+async-trait.workspace = true
+tracing.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true }
+
+[lints]
+workspace = true

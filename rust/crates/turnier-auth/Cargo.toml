@@ -1,0 +1,31 @@
+[package]
+name = "turnier-auth"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+# Auth-Schicht: RBAC (Rollen → is_admin/is_mod), Session-Resolver gegen die
+# `sessions`-Tabelle und der interne OAuth-/Master-Broker-Client. Die HTTP-Routen
+# (/auth/discord/*) und der axum-Extractor leben in turnier-api; hier sitzt die Logik
+# darunter.
+[dependencies]
+turnier-core = { path = "../turnier-core" }
+turnier-db = { path = "../turnier-db" }
+turnier-config = { path = "../turnier-config" }
+
+sqlx.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
+reqwest.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+rand.workspace = true
+base64.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true }
+
+[lints]
+workspace = true

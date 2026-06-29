@@ -1,0 +1,39 @@
+[package]
+name = "turnier-api"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+# Die HTTP-Schicht (axum): AppState, Auth-Extractoren, Fehler->Response-Mapping,
+# Middleware (CORS, TrustedHost) und die Router aller Endpunkte. Verdrahtet die
+# Domänen-Crates; enthält selbst keine Geschäftslogik ausser Request/Response.
+[dependencies]
+turnier-core = { path = "../turnier-core" }
+turnier-config = { path = "../turnier-config" }
+turnier-db = { path = "../turnier-db" }
+turnier-auth = { path = "../turnier-auth" }
+turnier-steam = { path = "../turnier-steam" }
+turnier-discord = { path = "../turnier-discord" }
+turnier-engine = { path = "../turnier-engine" }
+turnier-match = { path = "../turnier-match" }
+turnier-draft = { path = "../turnier-draft" }
+turnier-scheduler = { path = "../turnier-scheduler" }
+
+sqlx.workspace = true
+axum.workspace = true
+axum-extra.workspace = true
+tower.workspace = true
+tower-http.workspace = true
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
+tracing.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true }
+
+[lints]
+workspace = true

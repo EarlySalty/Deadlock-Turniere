@@ -1,0 +1,77 @@
+# Deadlock-Turniere — Rust-Neuentwicklung (alles unter /rust).
+#
+# Cargo-Workspace: ein Manifest, viele kleine Crates mit je EINER klaren
+# Zuständigkeit (keine Monolithen). Versionen zentral in [workspace.dependencies],
+# damit alle Crates denselben Stand teilen.
+[workspace]
+resolver = "2"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.85"
+license = "MIT"
+authors = ["Deutsche Deadlock Community"]
+repository = "https://github.com/EarlySalty/Deadlock-Turniere"
+
+[workspace.dependencies]
+# --- Fundament ---
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+anyhow = "1"
+chrono = { version = "0.4", features = ["serde", "clock"] }
+
+# --- Async / Laufzeit ---
+tokio = { version = "1", features = ["full"] }
+futures = "0.3"
+async-trait = "0.1"
+
+# --- Persistenz ---
+# Laufzeit-geprüfte Queries (query_as + FromRow) statt der compile-time-Makros:
+# die DB ist eine geteilte, externe SQLite-Datei; der Build darf nicht an einen
+# DATABASE_URL / .sqlx-Offline-Cache gekoppelt sein, der bei paralleler Crate-
+# Entwicklung ständig driftet. Typsicherheit kommt aus den FromRow-Structs +
+# der DB-gestützten Testsuite. Siehe docs/adr/0002-runtime-checked-sqlx.md.
+sqlx = { version = "0.8", default-features = false, features = [
+    "runtime-tokio",
+    "sqlite",
+    "chrono",
+    "json",
+    "macros",
+    "migrate",
+] }
+
+# --- Web ---
+axum = { version = "0.8", features = ["ws", "macros", "multipart"] }
+axum-extra = { version = "0.10", features = ["cookie", "typed-header"] }
+tower = "0.5"
+tower-http = { version = "0.6", features = ["fs", "trace", "cors"] }
+
+# --- Netz / externe Dienste ---
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+
+# --- Observability ---
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+
+# --- Hilfen ---
+rand = "0.8"
+base64 = "0.22"
+once_cell = "1"
+
+# Interne Crates referenzieren sich über path-Deps (siehe jeweilige Cargo.toml).
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+panic = "unwind"
+strip = true

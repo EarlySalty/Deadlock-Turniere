@@ -1,0 +1,91 @@
+//! Discord-REST-Anbindung für den Rollen-Fallback — als injizierbarer Trait,
+//! damit Tests ihn faken können (kein echter Netzaufruf).
+//!
+//! Portiert den HTTP-Teil von `get_discord_role_rank` (`rank_reader.py`):
+//! `GET /guilds/{guild}/members/{discord_id}` mit `Authorization: Bot <token>`,
+//! 10 s Timeout. Liefert die Rollen-IDs des Members.
+
+use std::time::Duration;
+
+use async_trait::async_trait;
+use serde::Deserialize;
+
+use crate::error::{SteamError, SteamResult};
+
+/// Basis-URL der Discord-REST-API (v10).
+const DISCORD_API: &str = "https://discord.com/api/v10";
+
+/// Holt die Rollen-IDs eines Guild-Members. Implementierungen kapseln den
+/// konkreten Transport (HTTP in Produktion, Fake im Test).
+#[async_trait]
+pub trait DiscordMemberClient: Send + Sync {
+    /// Liefert die Rollen-IDs (als Strings, wie von Discord geliefert) des Members
+    /// `discord_id` in der konfigurierten Guild. `None` bedeutet „Member nicht
+    /// auflösbar" (z. B. 404, fehlendes Token) — exakt wie das Python-Original,
+    /// das bei Nicht-200 / Fehler `None` zurückgibt.
+    async fn member_role_ids(&self, discord_id: &str) -> SteamResult<Option<Vec<String>>>;
+}
+
+/// Antwort-Teil des Discord-Member-Objekts (nur die Rollen interessieren uns).
+#[derive(Debug, Deserialize)]
+struct MemberResponse {
+    #[serde(default)]
+    roles: Vec<String>,
+}
+
+/// Produktiv-Client: reqwest gegen die Discord-REST-API.
+pub struct ReqwestDiscordClient {
+    client: reqwest::Client,
+    guild_id: String,
+    bot_token: String,
+}
+
+impl ReqwestDiscordClient {
+    /// Erstellt den Client mit 10-s-Timeout. Gibt `None`, wenn Token oder Guild-ID
+    /// fehlen — dann ist der Discord-Fallback wie im Original deaktiviert
+    /// (`if not DISCORD_BOT_TOKEN or not DISCORD_GUILD_ID: return None`).
+    pub fn new(bot_token: &str, guild_id: &str) -> Option<Self> {
+        if bot_token.trim().is_empty() || guild_id.trim().is_empty() {
+            return None;
+        }
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(10))
+            .build()
+            .ok()?;
+        Some(Self {
+            client,
+            guild_id: guild_id.to_string(),
+            bot_token: bot_token.to_string(),
+        })
+    }
+}
+
+#[async_trait]
+impl DiscordMemberClient for ReqwestDiscordClient {
+    async fn member_role_ids(&self, discord_id: &str) -> SteamResult<Option<Vec<String>>> {
+        let url = format!(
+            "{DISCORD_API}/guilds/{}/members/{}",
+            self.guild_id, discord_id
+        );
+
+        let response = self
+            .client
+            .get(&url)
+            .header("Authorization", format!("Bot {}", self.bot_token))
+            .send()
+            .await
+            .map_err(|e| SteamError::DiscordHttp(e.to_string()))?;
+
+        // Nicht-200 ⇒ kein auflösbarer Rang (Original: `if status != 200: return None`).
+        if response.status() != reqwest::StatusCode::OK {
+            return Ok(None);
+        }
+
+        let member: MemberResponse = response
+            .json()
+            .await
+            .map_err(|e| SteamError::DiscordHttp(e.to_string()))?;
+
+        Ok(Some(member.roles))
+    }
+}

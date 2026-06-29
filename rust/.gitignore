@@ -1,0 +1,7 @@
+/target
+**/*.rs.bk
+*.pdb
+# Lokale DB-Kopien / Test-Artefakte
+*.db
+*.db-wal
+*.db-shm

@@ -1,0 +1,37 @@
+[package]
+name = "turnier-match"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+# Match-Lebenszyklus des Turnier-Backends: Steam-Custom-Lobbys erstellen/starten/
+# verlassen (über die externe steam_tasks-Bridge-DB), Hero-Assignments je
+# Spielmodus, Live-Event-ConVar-Presets, Best-of-N-Serien und die VEREINHEITLICHTE
+# Ergebnisverarbeitung (Bracket + Group) mit Gewinner-Propagation ins Bracket. Der
+# Python-Monolith manager.py ist in klar geschnittene Module aufgebrochen; der
+# stringly-typed match_type wird durch das Enum MatchKind + eine Repository-
+# Abstraktion ersetzt, die das SQL kapselt (keine Tabellennamen als String).
+[dependencies]
+turnier-core = { path = "../turnier-core" }
+turnier-db = { path = "../turnier-db" }
+turnier-config = { path = "../turnier-config" }
+turnier-discord = { path = "../turnier-discord" }
+turnier-engine = { path = "../turnier-engine" }
+turnier-draft = { path = "../turnier-draft" }
+
+sqlx.workspace = true
+tokio.workspace = true
+async-trait.workspace = true
+chrono.workspace = true
+rand.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true }
+
+[lints]
+workspace = true

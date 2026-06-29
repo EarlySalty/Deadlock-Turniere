@@ -1,0 +1,33 @@
+[package]
+name = "turnier-discord"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+# Broker-Client-Schicht zwischen Turnier-Backend und dem zentralen
+# "Discord-Master-Broker" (separater interner HTTP-Dienst). Kapselt alle
+# Discord-Effekte (Channel anlegen/löschen, Embeds posten, DMs, Voice/Rollen)
+# als POST an interne Broker-Endpunkte. KEINE axum-/HTTPException-Kopplung —
+# eigener Fehler-Enum. Lifecycle einzelner Effekte wird in discord_tasks (turnier-db)
+# protokolliert.
+[dependencies]
+turnier-core = { path = "../turnier-core" }
+turnier-db = { path = "../turnier-db" }
+turnier-config = { path = "../turnier-config" }
+
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+reqwest.workspace = true
+sqlx.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+rand.workspace = true
+chrono.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true }
+
+[lints]
+workspace = true

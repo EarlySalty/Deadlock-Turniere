@@ -2,6 +2,66 @@
 
 ---
 
+## Neue Aufgabe (2026-06-29): Phase0 Task4c Rework Offset-Null + Test-Haertung
+
+### Ziel
+- Kritiker-Befund fuer `reminder_offsets` und `start_reminder_offsets` erst gegen Python pruefen, dann Rust-Paritaet herstellen.
+- Scheduler-Rollback-Test um Sentinel-Pruefung haerten; optional Admin-Rebuild-Integrationstest nur bei praktikablem Scope.
+- Kein Commit/Push, kein Service-Restart, kein Release-Build.
+
+### Status (2026-06-29)
+→ **Abgeschlossen** — Rework umgesetzt, Debug-Build/Clippy/Tests gruen
+
+### Fortschritt
+- WORKFLOW gelesen; vorhandener Arbeitsbaum enthaelt bereits Phase0-Task4-Aenderungen.
+- Python-Pruefung: explizites JSON-`null` bleibt in `TournamentUpdate` fuer beide Offset-Felder `None`, wird durch `model_dump(exclude_unset=True)` als gesetztes Feld behalten und im Handler nicht serialisiert; damit schreibt Python SQL-NULL.
+- Rust-Rework: `reminder_offsets` und `start_reminder_offsets` in `TournamentUpdate` auf `Patch<Vec<i64>>` umgestellt; Admin-Update schreibt bei `Patch::Null` SQL-NULL und bereinigt Offsets nur im Value-Fall.
+- Tests: DTO-Missing/Null/Value fuer beide Offset-Felder ergaenzt; Scheduler-Rollback-Test prueft die `player_points`-Sentinel-Zeile nach fehlgeschlagenem Recompute.
+- Optionaler Admin-Rebuild-Integrationstest nicht ergaenzt: keine vorhandene `turnier-api/tests`-Struktur und kein Router-Testmuster; bestehender Engine-Tx-Test deckt die direkte Rebuild-Transaktionsgrenze ab.
+- Verifikation: `cargo build --workspace`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace` gruen.
+
+---
+
+## Neue Aufgabe (2026-06-29): Phase0 Task4 Paritäts-Fixes Py→Rust
+
+### Ziel
+- Drei Rust-Paritätsfixes aus `rust/docs/audit/2026-06-29/REVIEW_B.md`: explizites JSON-`null` bei Turnier-Updates, atomarer `group_phase -> bracket_only`-Rebuild, atomarer Scheduler-`completed`+Punkte-Recompute.
+- Zwei bewusst zurückgestellte Punkte in `rust/docs/known-issues.md` dokumentieren.
+- Kein Commit/Push, kein Service-Restart, kein Release-Build.
+
+### Status (2026-06-29)
+→ **Abgeschlossen** — Implementierung und Abschluss-Verifikation grün
+
+### Fortschritt
+- Audit, Schema und betroffene Rust-Dateien gelesen.
+- `TournamentUpdate` nutzt für nullable Felder `Patch<T>` mit Missing/Null/Value-Semantik; DTO-Tests ergänzt.
+- `generate_bracket_in_tx` ergänzt und Admin-Rebuild in die bestehende Update-Transaktion gezogen; Rollback-Test ergänzt.
+- `recalculate_player_points_in_tx` ergänzt und Scheduler-`completed`-Pfad transaktional gemacht; Positiv- und Rollback-Test ergänzt.
+- Known-Issues für Avatar-Header und generische Steam-Ops-Timeouttexte ergänzt; behobene A1/A3-Doku aktualisiert.
+- Verifikation: `cargo build --workspace`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace` grün (225 passed, 0 failed).
+
+---
+
+## Neue Aufgabe (2026-06-29): Phase 0 Task 1 Crate-Rename tb-* -> turnier-*
+
+### Ziel
+- Mechanischer, verhaltensneutraler Rename der Rust-Cargo-Crates unter `rust/`: `tb-*` -> `turnier-*`.
+- Keine Funktionsänderung, kein Release-Build, kein Commit/Push.
+
+### Status (2026-06-29)
+→ **Abgeschlossen** — Rename umgesetzt, Debug-Build/Clippy/Tests grün
+
+### Fortschritt
+- Plan gelesen: `docs/plans/2026-06-29-turnier-automatik-phase0.md`, Task 1.
+- Workflow gelesen; Arbeitsbaum vor Start geprüft.
+- Referenz-Build vor Rename: `cargo build --workspace` grün.
+- Crates unter `rust/crates/` per `git mv` umbenannt: `tb-*` -> `turnier-*`, inklusive `tb-tournament` -> `turnier-engine`.
+- Cargo-Manifeste, Rust-Importe, Tests und Rust-Doku-Verweise mechanisch auf neue Namen angepasst; Binary-Name ist `turnier-bot`.
+- Verifikation nach Rename: `cargo build --workspace`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace` grün.
+- Rückstands-Grep für `*.rs`/`*.toml` leer; zusätzlicher breiter Rust-Scan ohne `target` ebenfalls leer.
+
+---
+
 ## Neue Aufgabe (2026-04-25, Teil 2): Tournament-Caster, Live/Archiv-Trennung, Test-Modus
 
 ### Ziel
