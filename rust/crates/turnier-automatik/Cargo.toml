@@ -1,0 +1,23 @@
+[package]
+name = "turnier-automatik"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+# Fundament der Turnier-Automatik: Presets, Proposal-Gate, DM-Opt-out und
+# Signal-Snapshots. Keine Discord-, Scheduler- oder HTTP-Logik in Phase 1a.
+[dependencies]
+turnier-core = { path = "../turnier-core" }
+turnier-db = { path = "../turnier-db" }
+
+sqlx.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+chrono.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true }
+
+[lints]
+workspace = true

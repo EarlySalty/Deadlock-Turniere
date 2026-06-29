@@ -2324,6 +2324,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "turnier-automatik"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "serde",
+ "sqlx",
+ "thiserror",
+ "tokio",
+ "turnier-core",
+ "turnier-db",
+]
+
+[[package]]
 name = "turnier-bot"
 version = "0.1.0"
 dependencies = [
