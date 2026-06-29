@@ -1,3 +1,11 @@
+## #10 — Turnier-Automatik: Presets, Vorschläge & DM-Einstellungen
+
+Bisher musste jedes Turnier komplett von Hand aufgesetzt werden — bei jedem Mal alle Einstellungen neu zusammenklicken. Im Admin-Bereich gibt es jetzt einen eigenen "Automatik"-Tab: wiederverwendbare Presets (Modus, Format, Regeln, Kategorie Fun/Comp) anlegen und pflegen und daraus mit wenigen Klicks ein Turnier einplanen. Solche Vorschläge haben einen eigenen Status-Verlauf (Entwurf → Freigabe offen → angenommen/abgelehnt) samt Votes und Änderungs-Feedback, der im selben Tab gesteuert wird.
+
+Für Spieler kommt im Profil eine Einstellung dazu, ob man DMs zu Fun- bzw. Comp-Turnieren bekommen möchte — oder gar keine. Das betrifft nur die Benachrichtigungen, nie die Teilnahme.
+
+Das ist die Grundlage für die kommende automatische Turnier-Planung: dass der Bot selbst Turniere vorschlägt und nach Freigabe durch einen Caster ankündigt, folgt im nächsten Schritt.
+
 ## #9 — Turnier-Doku jetzt im FAQ-Bot abrufbar
 
 - Anmeldung, Modi, Leaderboard, Consent-Flow und Draft sind jetzt zentral dokumentiert — Spieler bekommen Fragen dazu direkt im Discord-FAQ beantwortet, ohne ein Ticket eröffnen zu müssen
