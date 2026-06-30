@@ -29,7 +29,7 @@ const PH_INVALID_PROPOSAL_STATE: &str = "Ungültiger Vorschlags-Status";
 const PH_INVALID_PROPOSAL_EVENT: &str = "Ungültige Vorschlags-Aktion";
 const PH_INVALID_VOTE_DECISION: &str = "Ungültige Vote-Entscheidung";
 const PH_CONFIG_JSON_ERROR: &str = "Konfiguration konnte nicht erzeugt werden";
-const PH_CASTER_ROLE_REQUIRED: &str = "Platzhalter";
+const PH_CASTER_ROLE_REQUIRED: &str = "Nur ein Caster kann diese Freigabe erteilen.";
 
 /// Router fuer `/api/admin/presets` und `/api/admin/proposals`.
 pub fn router() -> Router<AppState> {
@@ -518,6 +518,9 @@ async fn apply_proposal_event(
 ) -> WebResult<Json<ProposalStateDto>> {
     load_proposal(&state.pool, id).await?;
     let event = parse_event(&body.event)?;
+    if matches!(event, ProposalEvent::Approve) && !actor_has_caster_role(&state, &user) {
+        return Err(WebError::forbidden(PH_CASTER_ROLE_REQUIRED));
+    }
     let next = proposals::apply_event(&state.pool, id, event).await?;
     audit(
         &state.pool,

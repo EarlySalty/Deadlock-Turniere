@@ -39,6 +39,19 @@ async fn setup() -> (Router, Pool, String) {
     (build_router(state), pool, token)
 }
 
+async fn create_caster_session(pool: &Pool, discord_id: &str) -> String {
+    let caster_role = Config::from_env().discord_caster_role_id.to_string();
+    turnier_auth::create_session(
+        pool,
+        discord_id,
+        "Caster User",
+        "",
+        &["mod-role".to_string(), caster_role],
+    )
+    .await
+    .expect("caster session")
+}
+
 fn preset_body(name: &str) -> Value {
     json!({
         "name": name,
@@ -203,7 +216,8 @@ async fn manual_proposal_uses_preset_config() {
 
 #[tokio::test]
 async fn invalid_proposal_transition_returns_conflict() {
-    let (app, _pool, token) = setup().await;
+    let (app, pool, token) = setup().await;
+    let caster_token = create_caster_session(&pool, "caster-conflict-user").await;
     let preset = create_preset(&app, &token, "Transition Preset").await;
     let preset_id = preset["id"].as_i64().unwrap();
     let (status, proposal) = send_json(
@@ -219,7 +233,7 @@ async fn invalid_proposal_transition_returns_conflict() {
 
     let (status, body) = send_json(
         &app,
-        &token,
+        &caster_token,
         Method::POST,
         &format!("/api/admin/proposals/{proposal_id}/event"),
         Some(json!({ "event": "approve" })),
@@ -259,16 +273,7 @@ async fn proposal_vote_requires_actor_caster_role() {
 #[tokio::test]
 async fn proposal_vote_uses_authenticated_actor_id() {
     let (app, pool, token) = setup().await;
-    let caster_role = Config::from_env().discord_caster_role_id.to_string();
-    let caster_token = turnier_auth::create_session(
-        &pool,
-        "caster-user",
-        "Caster User",
-        "",
-        &["mod-role".to_string(), caster_role],
-    )
-    .await
-    .expect("caster session");
+    let caster_token = create_caster_session(&pool, "caster-user").await;
 
     let preset = create_preset(&app, &token, "Actor Vote Preset").await;
     let preset_id = preset["id"].as_i64().unwrap();
@@ -301,6 +306,62 @@ async fn proposal_vote_uses_authenticated_actor_id() {
     .await
     .unwrap();
     assert_eq!(stored, "caster-user");
+}
+
+#[tokio::test]
+async fn proposal_event_approve_requires_actor_caster_role_even_after_caster_vote() {
+    let (app, pool, token) = setup().await;
+    let caster_token = create_caster_session(&pool, "caster-approver").await;
+    let preset = create_preset(&app, &token, "Event Caster Gate Preset").await;
+    let preset_id = preset["id"].as_i64().unwrap();
+    let (status, proposal) = send_json(
+        &app,
+        &token,
+        Method::POST,
+        "/api/admin/proposals",
+        Some(json!({ "preset_id": preset_id, "name": "Event Caster Gate Cup" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let proposal_id = proposal["id"].as_i64().unwrap();
+
+    let (status, body) = send_json(
+        &app,
+        &token,
+        Method::POST,
+        &format!("/api/admin/proposals/{proposal_id}/event"),
+        Some(json!({ "event": "submit" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["state"], "pending_approval");
+
+    let (status, _body) = send_json(
+        &app,
+        &caster_token,
+        Method::POST,
+        &format!("/api/admin/proposals/{proposal_id}/votes"),
+        Some(json!({ "caster_id": "caster-approver", "decision": "approve" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+
+    let (status, _body) = send_json(
+        &app,
+        &token,
+        Method::POST,
+        &format!("/api/admin/proposals/{proposal_id}/event"),
+        Some(json!({ "event": "approve" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+
+    let stored: String = sqlx::query_scalar("SELECT state FROM tournament_proposals WHERE id = ?")
+        .bind(proposal_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(stored, "pending_approval");
 }
 
 #[tokio::test]
