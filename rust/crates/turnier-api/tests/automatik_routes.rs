@@ -230,6 +230,80 @@ async fn invalid_proposal_transition_returns_conflict() {
 }
 
 #[tokio::test]
+async fn proposal_vote_requires_actor_caster_role() {
+    let (app, _pool, token) = setup().await;
+    let preset = create_preset(&app, &token, "Caster Gate Preset").await;
+    let preset_id = preset["id"].as_i64().unwrap();
+    let (status, proposal) = send_json(
+        &app,
+        &token,
+        Method::POST,
+        "/api/admin/proposals",
+        Some(json!({ "preset_id": preset_id, "name": "Caster Gate Cup" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let proposal_id = proposal["id"].as_i64().unwrap();
+
+    let (status, _body) = send_json(
+        &app,
+        &token,
+        Method::POST,
+        &format!("/api/admin/proposals/{proposal_id}/votes"),
+        Some(json!({ "caster_id": "spoofed-caster", "decision": "approve" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn proposal_vote_uses_authenticated_actor_id() {
+    let (app, pool, token) = setup().await;
+    let caster_role = Config::from_env().discord_caster_role_id.to_string();
+    let caster_token = turnier_auth::create_session(
+        &pool,
+        "caster-user",
+        "Caster User",
+        "",
+        &["mod-role".to_string(), caster_role],
+    )
+    .await
+    .expect("caster session");
+
+    let preset = create_preset(&app, &token, "Actor Vote Preset").await;
+    let preset_id = preset["id"].as_i64().unwrap();
+    let (status, proposal) = send_json(
+        &app,
+        &token,
+        Method::POST,
+        "/api/admin/proposals",
+        Some(json!({ "preset_id": preset_id, "name": "Actor Vote Cup" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let proposal_id = proposal["id"].as_i64().unwrap();
+
+    let (status, _body) = send_json(
+        &app,
+        &caster_token,
+        Method::POST,
+        &format!("/api/admin/proposals/{proposal_id}/votes"),
+        Some(json!({ "caster_id": "spoofed-caster", "decision": "approve" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+
+    let stored: String = sqlx::query_scalar(
+        "SELECT caster_discord_id FROM tournament_proposal_votes WHERE proposal_id = ?",
+    )
+    .bind(proposal_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(stored, "caster-user");
+}
+
+#[tokio::test]
 async fn dm_optout_uses_own_session_discord_id() {
     let (app, pool, token) = setup().await;
 

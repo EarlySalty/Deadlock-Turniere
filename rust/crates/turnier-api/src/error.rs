@@ -161,6 +161,7 @@ impl From<turnier_automatik::AutomatikError> for WebError {
         use turnier_automatik::AutomatikError::*;
         match err {
             InvalidTransition { .. } => Self::conflict("Dieser Statuswechsel ist nicht möglich"),
+            MissingApproval { .. } => Self::conflict("Platzhalter"),
             Db(e) => e.into(),
         }
     }

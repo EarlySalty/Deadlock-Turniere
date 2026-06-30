@@ -5,6 +5,8 @@
 //! Alle Snowflake-IDs werden EINMAL beim Eintritt geparst; ungültige IDs landen
 //! deterministisch in der jeweiligen `failed`-Bucket statt zu panicken.
 
+use std::collections::HashSet;
+
 use serde::Serialize;
 use serde_json::{json, Value};
 
@@ -263,8 +265,9 @@ impl DiscordNotifier {
 
     // --- Direktnachrichten ----------------------------------------------
 
-    /// Sendet eine Event-DM an Spieler unter Beachtung des DM-Master-Schalters
-    /// und des event-spezifischen Flags. Rückgabe: `{sent, skipped, failed}`.
+    /// Sendet eine Event-DM an Spieler unter Beachtung von `tournament_dm_optout`,
+    /// des DM-Master-Schalters und des event-spezifischen Flags.
+    /// Rückgabe: `{sent, skipped, failed}`.
     pub async fn notify_users(
         &self,
         discord_ids: &[String],
@@ -277,9 +280,15 @@ impl DiscordNotifier {
         }
 
         let flags = self.load_notify_flags(&unique_ids, event).await.map_err(map_db_err)?;
+        let optout_ids = self.load_tournament_dm_optout_ids(&unique_ids).await.map_err(map_db_err)?;
 
         let mut summary = NotifyUsersResult::default();
         for discord_id in &unique_ids {
+            if optout_ids.contains(discord_id) {
+                summary.skipped.push(discord_id.clone());
+                continue;
+            }
+
             // Profil-loses Verhalten EXAKT wie im Original (Befund
             // discord_notifier.py:283-284 — "behavior-change", bewusst erhalten):
             // fehlt das Profil, gilt für BEIDE Schalter das EVENT-Default.
@@ -365,6 +374,26 @@ impl DiscordNotifier {
             .collect())
     }
 
+    /// Lädt alle IDs, die eine Turnier-DM-Unterdrückung gesetzt haben.
+    async fn load_tournament_dm_optout_ids(&self, ids: &[String]) -> sqlx::Result<HashSet<String>> {
+        if ids.is_empty() {
+            return Ok(HashSet::new());
+        }
+
+        let placeholders = std::iter::repeat_n("?", ids.len()).collect::<Vec<_>>().join(",");
+        let sql = format!(
+            "SELECT DISTINCT discord_id FROM tournament_dm_optout \
+             WHERE discord_id IN ({placeholders})"
+        );
+
+        let mut query = sqlx::query_scalar::<_, String>(&sql);
+        for id in ids {
+            query = query.bind(id);
+        }
+        let rows = query.fetch_all(&self.pool).await?;
+        Ok(rows.into_iter().collect())
+    }
+
     /// DM an jeden Caster + Sammel-Mention-Embed im Match-Channel.
     pub async fn notify_casters_match_created(
         &self,
@@ -373,6 +402,11 @@ impl DiscordNotifier {
         caster_discord_ids: &[String],
     ) -> BrokerResult<CasterNotifyResult> {
         let unique_ids = unique_preserve_order(caster_discord_ids);
+        let optout_ids = self.load_tournament_dm_optout_ids(&unique_ids).await.map_err(map_db_err)?;
+        let dm_ids = unique_ids
+            .into_iter()
+            .filter(|discord_id| !optout_ids.contains(discord_id))
+            .collect::<Vec<_>>();
         let mut summary = CasterNotifyResult::default();
 
         // channel_url nur, wenn guild_id gesetzt UND channel_id numerisch ist.
@@ -386,7 +420,7 @@ impl DiscordNotifier {
             None
         };
 
-        for discord_id in &unique_ids {
+        for discord_id in &dm_ids {
             let content = format!(
                 "Du bist als Caster für Match #{match_id} eingetragen. Match-Channel: {}",
                 channel_url.clone().unwrap_or_else(|| format!("#{channel_id}"))
@@ -397,16 +431,16 @@ impl DiscordNotifier {
             }
         }
 
-        if !unique_ids.is_empty() {
+        if !dm_ids.is_empty() {
             let channel = require_snowflake(channel_id)?;
             let embed = Embed::new()
                 .title("Caster informiert")
                 .description("Die zugewiesenen Caster wurden benachrichtigt.");
             let payload = json!({
                 "channel_id": channel,
-                "content": mentions(&unique_ids),
+                "content": mentions(&dm_ids),
                 "embed": embed,
-                "allowed_user_ids": parse_all(&unique_ids),
+                "allowed_user_ids": parse_all(&dm_ids),
             });
             let _: Value = self.broker.post_internal(path::SEND_RICH_MESSAGE, &payload).await?;
         }

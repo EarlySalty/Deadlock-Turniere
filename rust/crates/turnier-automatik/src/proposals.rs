@@ -217,6 +217,9 @@ pub async fn apply_event(
             .fetch_one(pool)
             .await?;
     let next = transition(current.0, event)?;
+    if matches!(next, ProposalState::Approved) && approvals_count(pool, proposal_id).await? < 1 {
+        return Err(AutomatikError::MissingApproval { proposal_id });
+    }
     set_state(pool, proposal_id, current.0, next).await?;
     Ok(next)
 }
