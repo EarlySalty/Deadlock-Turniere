@@ -1,3 +1,11 @@
+## #11 — Caster-Freigabe wirklich verbindlich, DM-Wunsch lückenlos respektiert
+
+**Ausgangslage:** Mit der Turnier-Automatik (#10) sollte eine Turnier-Freigabe ausschließlich von einem Caster kommen — über einen direkten Status-Weg ließ sich das aber umgehen. Und der „keine Turnier-DMs"-Wunsch sollte auf jedem Benachrichtigungsweg greifen.
+
+**Was wurde geändert:** Die Freigabe ist jetzt an jeder Stelle an die Caster-Rolle gebunden, auch über den direkten Status-Weg — wer kein Caster ist, kann ein Turnier nicht mehr durchwinken. Der DM-Opt-out wird vor jedem einzelnen Versand geprüft; ist der Status mal nicht eindeutig, wird im Zweifel nicht zugestellt.
+
+**Wie es jetzt läuft:** „Nur Caster geben frei" gilt ohne Schlupfloch, und wer keine Turnier-DMs will, bekommt auch keine.
+
 ## #10 — Turnier-Automatik: Presets, Vorschläge & DM-Einstellungen
 
 Bisher musste jedes Turnier komplett von Hand aufgesetzt werden — bei jedem Mal alle Einstellungen neu zusammenklicken. Im Admin-Bereich gibt es jetzt einen eigenen "Automatik"-Tab: wiederverwendbare Presets (Modus, Format, Regeln, Kategorie Fun/Comp) anlegen und pflegen und daraus mit wenigen Klicks ein Turnier einplanen. Solche Vorschläge haben einen eigenen Status-Verlauf (Entwurf → Freigabe offen → angenommen/abgelehnt) samt Votes und Änderungs-Feedback, der im selben Tab gesteuert wird.

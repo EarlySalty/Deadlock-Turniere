@@ -2,6 +2,28 @@
 
 ---
 
+## Neue Aufgabe (2026-06-30): Fix Enforcement-Gaps Turniere
+
+### Ziel
+- HIGH 1: Proposal darf nur nach echter Caster-Freigabe auf `approved` wechseln.
+- HIGH 2: Live-DM-Sendepfade muessen `tournament_dm_optout` vor dem Versand respektieren.
+- Kein Commit/Push, kein Deploy.
+
+### Status (2026-06-30)
+→ **Abgeschlossen** — beide HIGH-Fixes umgesetzt, Build/Clippy/Tests gruen
+
+### Fortschritt
+- Audit `rust/docs/audit/2026-06-30-enforcement-gap-audit.md` vollstaendig gelesen.
+- Root-Cause bestaetigt: `proposals::apply_event()` prueft beim `Approve` keine gespeicherte Freigabe; `record_proposal_vote()` nutzt `caster_id` aus dem Body.
+- Root-Cause bestaetigt: `DiscordNotifier::notify_users()` und `notify_casters_match_created()` senden ohne Lookup in `tournament_dm_optout`.
+- Rote Tests belegt: Approval ohne Vote wurde akzeptiert, Vote-Spoofing moeglich, DM-Opt-out in beiden Notifier-Pfaden ignoriert.
+- Fix: `apply_event()` verlangt vor `approved` mindestens einen Approval-Vote; Proposal-Votes nutzen die authentifizierte Actor-ID und verlangen die Caster-Rolle.
+- Fix: `DiscordNotifier` laedt `tournament_dm_optout` zentral und skippt Opt-out-User vor `send_dm_inner()` in `notify_users()` und `notify_casters_match_created()`.
+- Platzhalter gesetzt fuer neue user-sichtbare Fehlertexte: Caster-Rollenfehler und Missing-Approval-HTTP-Mapping.
+- Verifikation: `cargo build --release -p turnier-bot --bin turnier-bot`, `cargo clippy -p turnier-automatik -p turnier-discord --all-targets -- -D warnings`, `cargo clippy -p turnier-api --all-targets -- -D warnings`, `cargo test -p turnier-automatik -p turnier-api -p turnier-discord`, `cargo test --workspace` gruen.
+
+---
+
 ## Neue Aufgabe (2026-06-29): Phase0 Task4c Rework Offset-Null + Test-Haertung
 
 ### Ziel

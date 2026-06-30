@@ -143,9 +143,7 @@ pub async fn generate_bracket_in_tx(
 /// Sortiert die Qualifikanten (`-points, -wins, seed`) und mappt sie auf
 /// Team-Slots. Portiert die zweifach duplizierte Sortier-/Map-Logik einmalig.
 fn sort_and_map_entries(mut qualified: Vec<Qualifier>) -> Vec<BracketSlot> {
-    qualified.sort_by(|a, b| {
-        (-a.points, -a.wins, a.seed).cmp(&(-b.points, -b.wins, b.seed))
-    });
+    qualified.sort_by_key(|q| (-q.points, -q.wins, q.seed));
     qualified
         .into_iter()
         .map(|q| BracketSlot::Team(q.team_id))

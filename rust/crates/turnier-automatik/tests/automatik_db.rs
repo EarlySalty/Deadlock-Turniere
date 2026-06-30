@@ -327,6 +327,37 @@ async fn apply_event_rejects_invalid_transition_without_persisting() {
     assert!(proposal.decided_at.is_none());
 }
 
+#[tokio::test]
+async fn apply_event_requires_approval_vote_before_approved() {
+    let pool = temp_pool().await;
+    let proposal_id = proposals::create_proposal(
+        &pool,
+        None,
+        ProposalSource::Manual,
+        None,
+        r#"{"name":"Manual Cup"}"#,
+    )
+    .await
+    .unwrap();
+
+    proposals::apply_event(&pool, proposal_id, ProposalEvent::SubmitForApproval)
+        .await
+        .unwrap();
+
+    assert!(
+        proposals::apply_event(&pool, proposal_id, ProposalEvent::Approve)
+            .await
+            .is_err()
+    );
+
+    let proposal = proposals::get_proposal(&pool, proposal_id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(proposal.state, ProposalState::PendingApproval);
+    assert!(proposal.decided_at.is_none());
+}
+
 #[test]
 fn compute_recipients_filters_category_all_and_none() {
     let role_members = vec![

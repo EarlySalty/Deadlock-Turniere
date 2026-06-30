@@ -16,6 +16,13 @@ pub enum AutomatikError {
         event: ProposalEvent,
     },
 
+    /// Proposal-Approval ohne gespeicherte Caster-Freigabe.
+    #[error("proposal approval missing for proposal {proposal_id}")]
+    MissingApproval {
+        /// Proposal-ID.
+        proposal_id: i64,
+    },
+
     /// Persistenz-Fehler (Pool/Query).
     #[error(transparent)]
     Db(#[from] turnier_db::DbError),

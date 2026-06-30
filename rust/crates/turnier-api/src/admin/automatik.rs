@@ -15,7 +15,7 @@ use turnier_automatik::proposals::{
     self, Proposal, ProposalEvent, ProposalFeedback, ProposalSource, ProposalState, ProposalVote,
     VoteDecision,
 };
-use turnier_core::{BracketFormat, InviteMode, TournamentGameMode, TournamentMode};
+use turnier_core::{BracketFormat, InviteMode, TournamentGameMode, TournamentMode, UserSession};
 
 use crate::error::{WebError, WebResult};
 use crate::extract::ModUser;
@@ -29,6 +29,7 @@ const PH_INVALID_PROPOSAL_STATE: &str = "Ungültiger Vorschlags-Status";
 const PH_INVALID_PROPOSAL_EVENT: &str = "Ungültige Vorschlags-Aktion";
 const PH_INVALID_VOTE_DECISION: &str = "Ungültige Vote-Entscheidung";
 const PH_CONFIG_JSON_ERROR: &str = "Konfiguration konnte nicht erzeugt werden";
+const PH_CASTER_ROLE_REQUIRED: &str = "Nur ein Caster kann diese Freigabe erteilen.";
 
 /// Router fuer `/api/admin/presets` und `/api/admin/proposals`.
 pub fn router() -> Router<AppState> {
@@ -305,6 +306,11 @@ fn parse_event(value: &str) -> WebResult<ProposalEvent> {
     }
 }
 
+fn actor_has_caster_role(state: &AppState, user: &UserSession) -> bool {
+    let caster_role_id = state.config.discord_caster_role_id.to_string();
+    user.roles.iter().any(|role| role == &caster_role_id)
+}
+
 async fn load_preset(pool: &turnier_db::Pool, preset_id: i64) -> WebResult<Preset> {
     presets::get(pool, preset_id)
         .await?
@@ -512,6 +518,9 @@ async fn apply_proposal_event(
 ) -> WebResult<Json<ProposalStateDto>> {
     load_proposal(&state.pool, id).await?;
     let event = parse_event(&body.event)?;
+    if matches!(event, ProposalEvent::Approve) && !actor_has_caster_role(&state, &user) {
+        return Err(WebError::forbidden(PH_CASTER_ROLE_REQUIRED));
+    }
     let next = proposals::apply_event(&state.pool, id, event).await?;
     audit(
         &state.pool,
@@ -529,14 +538,25 @@ async fn record_proposal_vote(
     Path(id): Path<i64>,
     Json(body): Json<VoteBody>,
 ) -> WebResult<StatusCode> {
+    if !actor_has_caster_role(&state, &user) {
+        return Err(WebError::forbidden(PH_CASTER_ROLE_REQUIRED));
+    }
     load_proposal(&state.pool, id).await?;
-    let decision = parse_wire_enum(&body.decision, PH_INVALID_VOTE_DECISION)?;
-    proposals::record_vote(&state.pool, id, &body.caster_id, decision).await?;
+    let actor_id = user.discord_id.clone();
+    let requested_caster_id = body.caster_id;
+    let decision_text = body.decision;
+    let decision = parse_wire_enum(&decision_text, PH_INVALID_VOTE_DECISION)?;
+    proposals::record_vote(&state.pool, id, &actor_id, decision).await?;
     audit(
         &state.pool,
         "proposal_vote",
-        &user.discord_id,
-        json!({ "proposal_id": id, "caster_id": body.caster_id, "decision": body.decision }),
+        &actor_id,
+        json!({
+            "proposal_id": id,
+            "caster_id": &actor_id,
+            "requested_caster_id": requested_caster_id,
+            "decision": decision_text
+        }),
     )
     .await?;
     Ok(StatusCode::NO_CONTENT)

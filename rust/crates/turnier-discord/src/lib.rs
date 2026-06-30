@@ -7,7 +7,7 @@
 //! Discord-API, sondern als POST an interne Broker-Endpunkte mit
 //! `X-Internal-Token`. Ein Teil der Operationen wird zusätzlich in der Tabelle
 //! `discord_tasks` als Lifecycle-Job protokolliert; DM-Versand respektiert die
-//! Opt-out-Flags aus `user_profiles`.
+//! Opt-out-Flags aus `user_profiles` und `tournament_dm_optout`.
 //!
 //! Diese Crate ist BEWUSST ENTKOPPELT von axum/FastAPI: kein `HTTPException`,
 //! sondern ein eigener [`error::BrokerError`]. Sie portiert
