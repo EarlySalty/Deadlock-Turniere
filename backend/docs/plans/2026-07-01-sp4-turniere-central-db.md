@@ -201,12 +201,14 @@ Verifikationsstand 2026-07-01: `cargo build -p turnier-match` gruen; `cargo test
 
 **Files:** `rust/crates/turnier-engine/src/persist/**`, `rust/crates/turnier-engine/tests/**`.
 
-- [ ] Alle `Pool<Sqlite>`/`Transaction<'_, Sqlite>` auf PG umstellen.
-- [ ] Bulk-Insert-/Generator-Pfade mit `RETURNING id` und expliziter Reihenfolge portieren; keine Annahme ueber SQLite-Rowid.
-- [ ] Snapshot-/Rollback-Tests gegen PG-Transaktionen erhalten: Bracket-Rebuild, Scheduler-Punkte-Recompute, Check-in-Team-Bildung.
-- [ ] Bool-/JSON-/Zeitfelder portieren: `exclude_from_leaderboard`, `is_test`, `on_stream`, `lobby_settings`, `reminder_offsets`.
-- [ ] Points-Recompute: `DELETE/INSERT`-Semantik und Best-Placement unveraendert; keine neue Aggregationslogik.
-- [ ] Verifikation: `cargo build -p turnier-engine`, `cargo test -p turnier-engine --features testing -- --include-ignored`, Clippy/Fmt.
+- [x] Alle `Pool<Sqlite>`/`Transaction<'_, Sqlite>` auf PG umstellen.
+- [x] Bulk-Insert-/Generator-Pfade mit `RETURNING id` und expliziter Reihenfolge portieren; keine Annahme ueber SQLite-Rowid.
+- [x] Snapshot-/Rollback-Tests gegen PG-Transaktionen erhalten: Bracket-Rebuild, Scheduler-Punkte-Recompute, Check-in-Team-Bildung.
+- [x] Bool-/JSON-/Zeitfelder portieren: `exclude_from_leaderboard`, `is_test`, `on_stream`, `lobby_settings`, `reminder_offsets`.
+- [x] Points-Recompute: `DELETE/INSERT`-Semantik und Best-Placement unveraendert; keine neue Aggregationslogik.
+- [x] Verifikation: `cargo build -p turnier-engine`, `cargo test -p turnier-engine --features testing -- --include-ignored`, Clippy/Fmt.
+
+Verifikationsstand 2026-07-01: `cargo build -p turnier-engine` gruen; `cargo clippy -p turnier-engine --all-targets -- -D warnings` gruen; `cargo fmt --check -p turnier-engine` gruen; `../Deadlock-Bots/rust/scripts/central_test_db.sh bash -lc 'cd /home/naniadm/Documents/Deadlock-Turniere/rust && cargo test -p turnier-engine --features testing -- --include-ignored'` gruen. Aufrufer-Check: `cargo build -p turnier-scheduler` gruen; `cargo build -p turnier-api -p turnier-scheduler` scheitert weiterhin an noch offenen T10/T11-`turnier-api`-SQLite-Executor-/Error-Mapping-Stellen, nicht an `turnier-engine`.
 
 ## Task T9: `turnier-scheduler`
 

@@ -6,7 +6,7 @@
 //! Persistenz. Grand-Final-Slot-Konvention (bug-preserved, jetzt explizit):
 //! Slot 1 = Winners-Finalist, Slot 2 = Losers-Finalist.
 
-use sqlx::{Sqlite, Transaction};
+use sqlx::{Postgres, Transaction};
 
 use crate::engine::double_elim::{
     higher_winners_loser_drop, losers_round_size, total_losers_rounds, total_winners_rounds,
@@ -23,34 +23,33 @@ use super::insert_bracket_match;
 /// Fällt für Nicht-Power-of-2 / < 4 Teams auf Single-Elim zurück (wie im
 /// Original, mit Warnung).
 pub(crate) async fn build_double_elimination_bracket(
-    tx: &mut Transaction<'_, Sqlite>,
+    tx: &mut Transaction<'_, Postgres>,
     tournament_id: i64,
     input: DoubleElimInput,
 ) -> TournamentResult<i64> {
     // Round-One-Paare und die flache Fallback-Liste bestimmen.
-    let (mut round_one_pairs, fallback_entries): (Vec<(BracketSlot, BracketSlot)>, Vec<BracketSlot>) =
-        match input {
-            DoubleElimInput::Pairs(pairs) => {
-                if pairs.is_empty() {
-                    return Err(TournamentError::validation(
-                        "Mindestens 2 Teams für Bracket benötigt",
-                    ));
-                }
-                let flat: Vec<BracketSlot> = pairs
-                    .iter()
-                    .flat_map(|(l, r)| [*l, *r])
-                    .collect();
-                (pairs, flat)
+    let (mut round_one_pairs, fallback_entries): (
+        Vec<(BracketSlot, BracketSlot)>,
+        Vec<BracketSlot>,
+    ) = match input {
+        DoubleElimInput::Pairs(pairs) => {
+            if pairs.is_empty() {
+                return Err(TournamentError::validation(
+                    "Mindestens 2 Teams für Bracket benötigt",
+                ));
             }
-            DoubleElimInput::Entries(entries) => {
-                if entries.is_empty() {
-                    return Err(TournamentError::validation(
-                        "Mindestens 2 Teams für Bracket benötigt",
-                    ));
-                }
-                (Vec::new(), entries)
+            let flat: Vec<BracketSlot> = pairs.iter().flat_map(|(l, r)| [*l, *r]).collect();
+            (pairs, flat)
+        }
+        DoubleElimInput::Entries(entries) => {
+            if entries.is_empty() {
+                return Err(TournamentError::validation(
+                    "Mindestens 2 Teams für Bracket benötigt",
+                ));
             }
-        };
+            (Vec::new(), entries)
+        }
+    };
 
     let num_teams = fallback_entries.len();
     if num_teams < 4 || !is_power_of_two(num_teams) {
@@ -195,7 +194,8 @@ pub(crate) async fn build_double_elimination_bracket(
         let (dest_idx, slot) = wr1_loser_drop(index);
         let dest_match = losers_rounds[0][dest_idx];
         sqlx::query(
-            "UPDATE bracket_matches SET loser_to_match_id = ?, loser_to_slot = ? WHERE id = ?",
+            "UPDATE turnier.bracket_matches \
+             SET loser_to_match_id = $1, loser_to_slot = $2 WHERE id = $3",
         )
         .bind(dest_match)
         .bind(slot)
@@ -213,7 +213,8 @@ pub(crate) async fn build_double_elimination_bracket(
             let dest_idx = higher_winners_loser_drop(position, destination_count);
             let dest_match = destination_matches[dest_idx];
             sqlx::query(
-                "UPDATE bracket_matches SET loser_to_match_id = ?, loser_to_slot = 2 WHERE id = ?",
+                "UPDATE turnier.bracket_matches \
+                 SET loser_to_match_id = $1, loser_to_slot = 2 WHERE id = $2",
             )
             .bind(dest_match)
             .bind(winners_match_id)
@@ -253,7 +254,8 @@ pub(crate) async fn build_double_elimination_bracket(
     match_count += 2;
 
     sqlx::query(
-        "UPDATE bracket_matches SET status = 'pending', team1_id = NULL, team2_id = NULL WHERE id = ?",
+        "UPDATE turnier.bracket_matches \
+         SET status = 'pending', team1_id = NULL, team2_id = NULL WHERE id = $1",
     )
     .bind(grand_final_reset_id)
     .execute(&mut **tx)
@@ -261,11 +263,14 @@ pub(crate) async fn build_double_elimination_bracket(
 
     // Stream-Heuristik: alle Losers-Runden AUSSER der letzten laufen off-stream.
     let mut off_stream_ids: Vec<i64> = Vec::new();
-    for losers_round in losers_rounds.iter().take(losers_rounds.len().saturating_sub(1)) {
+    for losers_round in losers_rounds
+        .iter()
+        .take(losers_rounds.len().saturating_sub(1))
+    {
         off_stream_ids.extend(losers_round.iter().copied());
     }
     for match_id in &off_stream_ids {
-        sqlx::query("UPDATE bracket_matches SET on_stream = 0 WHERE id = ?")
+        sqlx::query("UPDATE turnier.bracket_matches SET on_stream = false WHERE id = $1")
             .bind(match_id)
             .execute(&mut **tx)
             .await?;

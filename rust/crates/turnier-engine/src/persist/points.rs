@@ -15,13 +15,17 @@
 
 use std::collections::HashMap;
 
-use chrono::Utc;
-use sqlx::{Pool, Sqlite, Transaction};
+use sqlx::{Pool, Postgres, Transaction};
+use turnier_core::now_utc;
 
 use crate::error::TournamentResult;
 use crate::points::{
     contribution_for_team, team_placements, team_wins, CompletedMatch, PointsContribution,
 };
+
+// ASCII tag "trnpnts1" as a signed i64. Serializes the global player_points
+// DELETE+INSERT recompute across all tournaments for one transaction.
+const POINTS_RECOMPUTE_ADVISORY_LOCK_KEY: i64 = i64::from_be_bytes(*b"trnpnts1");
 
 #[derive(sqlx::FromRow)]
 struct MatchRow {
@@ -59,7 +63,7 @@ impl PlayerAggregate {
 /// Signatur-Parität erhalten; der Recompute selbst ist turnier-übergreifend und
 /// damit idempotent. Eigene Transaktion.
 pub async fn recalculate_player_points(
-    pool: &Pool<Sqlite>,
+    pool: &Pool<Postgres>,
     tournament_id: i64,
 ) -> TournamentResult<()> {
     let mut tx = pool.begin().await?;
@@ -73,26 +77,32 @@ pub async fn recalculate_player_points(
 /// Der Aufrufer besitzt Commit/Rollback. So können Statuswechsel, Audit und
 /// Punkte-Recompute wieder wie im Python-Original atomar zusammenlaufen.
 pub async fn recalculate_player_points_in_tx(
-    tx: &mut Transaction<'_, Sqlite>,
+    tx: &mut Transaction<'_, Postgres>,
     _tournament_id: i64,
 ) -> TournamentResult<()> {
+    sqlx::query("SELECT pg_advisory_xact_lock($1)")
+        .bind(POINTS_RECOMPUTE_ADVISORY_LOCK_KEY)
+        .execute(&mut **tx)
+        .await?;
 
     // Alle gewerteten Turniere: abgeschlossen UND nicht von der Rangliste
     // ausgeschlossen (der Original-Caller filtert exclude_from_leaderboard vor
     // dem Recalc; hier zentral).
     let tournaments: Vec<(i64,)> = sqlx::query_as(
-        "SELECT id FROM tournaments WHERE status = 'completed' AND exclude_from_leaderboard = 0",
+        "SELECT id FROM turnier.tournaments \
+         WHERE status = 'completed' AND exclude_from_leaderboard = false \
+         ORDER BY id",
     )
     .fetch_all(&mut **tx)
     .await?;
 
-    let mut aggregates: HashMap<String, PlayerAggregate> = HashMap::new();
+    let mut aggregates: HashMap<i64, PlayerAggregate> = HashMap::new();
 
     for (tid,) in &tournaments {
         // Abgeschlossene Bracket-Matches, round DESC (für die Platzierungs-Heuristik).
         let raw_matches: Vec<MatchRow> = sqlx::query_as::<_, MatchRow>(
-            "SELECT round, team1_id, team2_id, winner_id FROM bracket_matches \
-             WHERE tournament_id = ? AND status = 'completed' ORDER BY round DESC",
+            "SELECT round, team1_id, team2_id, winner_id FROM turnier.bracket_matches \
+             WHERE tournament_id = $1 AND status = 'completed' ORDER BY round DESC, id",
         )
         .bind(tid)
         .fetch_all(&mut **tx)
@@ -112,34 +122,31 @@ pub async fn recalculate_player_points_in_tx(
         let total_completed = matches.len() as i64;
 
         // Teilnehmer: Mitglieder aller Teams dieses Turniers.
-        let participants: Vec<(String, i64)> = sqlx::query_as(
-            "SELECT tm.discord_id, t.id FROM team_members tm \
-             JOIN teams t ON tm.team_id = t.id WHERE t.tournament_id = ?",
+        let participants: Vec<(i64, i64)> = sqlx::query_as(
+            "SELECT tm.discord_id, t.id FROM turnier.team_members tm \
+             JOIN turnier.teams t ON tm.team_id = t.id \
+             WHERE t.tournament_id = $1 ORDER BY t.id, tm.joined_at, tm.id",
         )
         .bind(tid)
         .fetch_all(&mut **tx)
         .await?;
 
         for (discord_id, team_id) in participants {
-            let contribution =
-                contribution_for_team(team_id, &placements, &wins, total_completed);
-            aggregates
-                .entry(discord_id)
-                .or_default()
-                .add(contribution);
+            let contribution = contribution_for_team(team_id, &placements, &wins, total_completed);
+            aggregates.entry(discord_id).or_default().add(contribution);
         }
     }
 
     // Tabelle vollständig neu schreiben (idempotent).
-    let now = Utc::now().to_rfc3339();
-    sqlx::query("DELETE FROM player_points")
+    let now = now_utc();
+    sqlx::query("DELETE FROM turnier.player_points")
         .execute(&mut **tx)
         .await?;
     for (discord_id, agg) in &aggregates {
         sqlx::query(
-            "INSERT INTO player_points \
+            "INSERT INTO turnier.player_points \
              (discord_id, total_points, tournaments_played, matches_played, matches_won, best_placement, updated_at) \
-             VALUES (?, ?, ?, ?, ?, ?, ?)",
+             VALUES ($1, $2, $3, $4, $5, $6, $7)",
         )
         .bind(discord_id)
         .bind(agg.total_points)
@@ -147,7 +154,7 @@ pub async fn recalculate_player_points_in_tx(
         .bind(agg.matches_played)
         .bind(agg.matches_won)
         .bind(agg.best_placement)
-        .bind(&now)
+        .bind(now)
         .execute(&mut **tx)
         .await?;
     }

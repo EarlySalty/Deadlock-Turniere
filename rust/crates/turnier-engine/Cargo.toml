@@ -39,8 +39,11 @@ persist = [
     "dep:tracing",
     "dep:turnier-db",
     "dep:turnier-steam",
+    # Uebergangsweise fuer turnier-steam::bridge; die Engine-Persistenz selbst
+    # nutzt keine SQLite-Pools/Queries mehr. T6/T13 entfernen diese Restflaeche.
     "sqlx/sqlite",
 ]
+testing = ["persist", "turnier-db/testing"]
 
 [lints]
 workspace = true

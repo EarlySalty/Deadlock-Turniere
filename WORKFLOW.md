@@ -2,6 +2,77 @@
 
 ---
 
+## Neue Aufgabe (2026-07-01): Rework SP4 T8 Tiebreaker + Concurrency-Guards
+
+### Ziel
+- Kritiker-Befunde in `turnier-engine::persist` beheben: deterministische Gruppen-Top-2, Check-in-Zeilenlock und globaler Points-Recompute-Lock.
+- Bestehende uncommitted T8-Aenderungen erhalten; kein Commit/Push.
+
+### Status (2026-07-01)
+-> **Abgeschlossen fuer GPT-Worker** — Review durch Claude ausstehend
+
+### Fortschritt
+- `WORKFLOW.md`, Git-Status und relevante Persistenz-/Testdateien gelesen.
+- Ranking-Queries in `bracket.rs`/`groups.rs`/`double_elim.rs` per `rg` geprueft; einzige unvollstaendige Top-2-DB-Sortierung liegt in `bracket.rs`.
+- `bracket.rs`: Gruppen-IDs und Gruppen-Top-2 deterministisch geordnet (`seeding_order, id` sowie `points DESC, wins DESC, id ASC, team_id ASC`); flache Qualifier-Sortierung nutzt explizit die urspruengliche Reihenfolge als weiteren Fallback.
+- `checkin.rs`: initialer Tournament-Snapshot in `finalize_checkin` nimmt jetzt `FOR UPDATE` innerhalb der Transaktion.
+- `points.rs`: globaler `player_points`-Recompute nimmt am Anfang der Transaktion einen benannten `pg_advisory_xact_lock`.
+- Regressionstest ergaenzt: Punkte-/Wins-Gleichstand in einer Gruppe waehlt deterministisch die ersten `group_teams`-Zeilen.
+- Verifikation: `cargo build -p turnier-engine` gruen.
+- Verifikation: `cargo clippy -p turnier-engine --all-targets -- -D warnings` gruen.
+- Verifikation: `cargo fmt --check -p turnier-engine` gruen.
+- Verifikation: `../Deadlock-Bots/rust/scripts/central_test_db.sh bash -lc 'cd /home/naniadm/Documents/Deadlock-Turniere/rust && cargo test -p turnier-engine --features testing -- --include-ignored'` gruen (40 Tests).
+- Zusatzcheck: `git diff --check -- rust/crates/turnier-engine/src/persist/bracket.rs rust/crates/turnier-engine/src/persist/checkin.rs rust/crates/turnier-engine/src/persist/points.rs rust/crates/turnier-engine/tests/engine_cross_seeding.rs WORKFLOW.md` gruen.
+- Kein Commit/Push, keine Dienste neu gestartet, keine Secret-Werte ausgegeben.
+
+---
+
+## Neue Aufgabe (2026-07-01): Kritiker-Review SP4 T8 turnier-engine
+
+### Ziel
+- Uncommitted T8-Diff von `turnier-engine::persist` gegen `HEAD` vollstaendig lesen und auf echte Portierungsbugs pruefen.
+- Fokus: Generator-ID-Reihenfolge, Points-Recompute, Check-in-Transaktionen/Concurrency, PG-Bools/JSONB, Double-Elim-/Advance-Propagation und Testabdeckung.
+- Keine Codeaenderungen an Produktiv-/Testcode, kein Commit/Push.
+
+### Status (2026-07-01)
+→ **Abgeschlossen** — Review-Befunde an Claude zurueckzugeben
+
+### Fortschritt
+- `WORKFLOW.md`, Git-Status, Branch und Basis-Commit gelesen; bestehende uncommitted Aenderungen bleiben unangetastet.
+- Vollstaendigen T8-Diff der `turnier-engine::persist`-Dateien und migrierte Engine-Tests gegen `HEAD` gelesen; zentrale PG-Schema-Definition `0009_turnier.sql` fuer Typ-/Constraint-Abgleich geprueft.
+- Befund 1: `finalize_checkin` validiert den Snapshot nur einmal und schuetzt die danach gelesenen Check-ins/Signups/Teams unter Postgres nicht gegen parallele Mutationen; der spaete Status-CAS deckt nur Statuswechsel ab.
+- Befund 2: `recalculate_player_points_in_tx` macht globales `DELETE` + per-Spieler-`INSERT` ohne PG-weite Serialisierung; parallele Recomputes koennen auf dem `player_points`-PK kollidieren und einen Completed-Statuswechsel zurueckrollen.
+- Befund 3: Bracket-Qualifikation aus `group_teams` bricht Punkte/Wins-Gleichstaende ohne stabilen Tie-Breaker (`id`/Seed); Postgres darf dadurch andere Top-2/Seeding-Reihenfolgen liefern als die faktische SQLite-Rowid-Reihenfolge.
+- Geprueft: sequenzielle `RETURNING id`-Nutzung in Bracket-/Group-/Double-Elim-Generatoren, PG-Bools/JSONB, Mini-Group-JSONB, Double-Elim-Propagation, Advance-Propagation und Testabdeckung.
+- Verifikation: `git diff --check HEAD -- rust/crates/turnier-engine/src/persist rust/crates/turnier-engine/tests` gruen; keine Cargo-Tests neu ausgefuehrt, da Review statisch war und externe T8-Verifikation bereits vorlag.
+
+---
+
+## Neue Aufgabe (2026-07-01): SP4 T8 turnier-engine zentrale Postgres
+
+### Ziel
+- `turnier-engine::persist` von SQLite auf zentrale Postgres-Tabellen unter `turnier.*` portieren.
+- Check-in-Finalisierung, Gruppen-/Bracket-/Mini-Group-/Double-Elim-Generatoren und Points-Recompute mit PG-Typen testen.
+- Keine Secrets ausgeben, kein Commit/Push.
+
+### Status (2026-07-01)
+→ **Abgeschlossen fuer GPT-Worker** — Review durch Claude ausstehend
+
+### Fortschritt
+- `WORKFLOW.md`, T8-Planabschnitt, zentrale `0009_turnier.sql`, bestehende Engine-Persistenz, T7-`turnier-match`-PG-Muster und Aufrufer per `rg` gelesen.
+- `turnier-engine::persist` auf `Pool<Postgres>`/`Transaction<'_, Postgres>`, `turnier.*`, `$n`-Binds, PG-Bools, JSONB und `DateTime<Utc>` umgestellt; Discord-IDs werden an der DB-Grenze `String <-> i64` konvertiert.
+- Generatoren nutzen `RETURNING id` und explizite Reihenfolgen statt SQLite-Rowid-Annahmen; `on_stream` ist echtes `BOOLEAN`.
+- Engine-Tests auf zentrale Wegwerf-PG-DB (`turnier-db/testing`) migriert; Rollback-Abdeckung fuer Bracket-Rebuild, Points-Recompute und Check-in-Team-Bildung vorhanden.
+- `turnier-engine` behaelt `sqlx/sqlite` im `persist`-Feature nur als Uebergang fuer `turnier-steam::bridge`; Engine-Persistenz selbst enthaelt keine SQLite-Pools/Queries mehr.
+- Verifikation: `cargo build -p turnier-engine` gruen.
+- Verifikation: `cargo clippy -p turnier-engine --all-targets -- -D warnings` gruen.
+- Verifikation: `cargo fmt --check -p turnier-engine` gruen.
+- Verifikation: `../Deadlock-Bots/rust/scripts/central_test_db.sh bash -lc 'cd /home/naniadm/Documents/Deadlock-Turniere/rust && cargo test -p turnier-engine --features testing -- --include-ignored'` gruen.
+- Aufrufer-Check: `cargo build -p turnier-scheduler` gruen; `cargo build -p turnier-api -p turnier-scheduler` scheitert weiter an offenen T10/T11-`turnier-api`-SQLite-Executor-/Error-Mapping-Stellen.
+- Kein Commit/Push, keine Dienste neu gestartet, keine Secret-Werte ausgegeben.
+
+---
+
 ## Neue Aufgabe (2026-07-01): Rework SP4 T7 Mini-Group-Tiebreak
 
 ### Ziel
