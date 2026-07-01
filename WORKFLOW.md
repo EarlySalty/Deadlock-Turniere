@@ -2,6 +2,32 @@
 
 ---
 
+## Neue Aufgabe (2026-07-01): SP4 T9 turnier-scheduler zentrale Postgres
+
+### Ziel
+- `turnier-scheduler` auf zentrale `turnier.*`-Postgres-Tabellen portieren.
+- Reminder-Dedupe, Reminder-Offsets, Phasen-CAS, Punkte-Recompute und Test-Turnier-Skips mit PG-Typen absichern.
+- Keine Secrets ausgeben, kein Commit/Push.
+
+### Status (2026-07-01)
+-> **Abgeschlossen fuer GPT-Worker** — Review durch Claude ausstehend
+
+### Fortschritt
+- `WORKFLOW.md`, T9-Planabschnitt, Scheduler-Code, Scheduler-Tests und zentrales `0009_turnier.sql` gelesen.
+- Ausgangsstand: Branch `central-postgres-sp4`; nur vorbestehende untracked Audit-Datei ausserhalb T9 sichtbar.
+- Scheduler-Queries auf `turnier.*`, `$n`-Binds, PG-Bools, JSONB-Reminder-Offsets und `DateTime<Utc>` umgestellt; keine String-Zeitstempel/`datetime('now')` im Scheduler-Persistenzpfad.
+- Reminder-Dedupe nutzt `ON CONFLICT DO NOTHING`; dynamische Reminder-Tabellennamen laufen weiter nur ueber `turnier_db::dynamic_sql::ReminderDedupeTable`.
+- Statuswechsel behaelt den CAS `WHERE id = $n AND status = $n`; Audit schreibt `user_id BIGINT`, JSONB-Details und `created_at`.
+- `completed`-Recompute bleibt in der Scheduler-Transaktion und nutzt die in T8 serialisierte Engine-Funktion ohne zusaetzliche Scheduler-Locks.
+- Scheduler-Tests auf zentrale Wegwerf-PG-DB migriert und erweitert: Registration-/Start-/Match-Reminder-Dedupe, Test-Turnier-Skip, completed->points-Recompute und Recompute-Rollback.
+- Verifikation: `cargo build -p turnier-scheduler` gruen.
+- Verifikation: `cargo clippy -p turnier-scheduler --all-targets -- -D warnings` gruen.
+- Verifikation: `cargo fmt --check -p turnier-scheduler` gruen.
+- Verifikation: `../Deadlock-Bots/rust/scripts/central_test_db.sh bash -lc 'cd /home/naniadm/Documents/Deadlock-Turniere/rust && cargo test -p turnier-scheduler --features testing -- --include-ignored'` gruen.
+- Kein Commit/Push, keine Dienste neu gestartet, keine Secret-Werte ausgegeben.
+
+---
+
 ## Neue Aufgabe (2026-07-01): Rework SP4 T8 Tiebreaker + Concurrency-Guards
 
 ### Ziel

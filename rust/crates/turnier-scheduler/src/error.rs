@@ -22,6 +22,11 @@ pub enum SchedulerError {
     #[error("Turnierstatus wurde parallel geändert")]
     StatusConflict,
 
+    /// Actor-IDs werden in Postgres als `BIGINT` gespeichert und muessen deshalb
+    /// valide Discord-Snowflakes sein.
+    #[error("Ungültige Actor-Discord-ID: {0}")]
+    InvalidActorId(#[from] turnier_core::DiscordIdParseError),
+
     /// Fehler aus der Turnier-Engine (Generierung Gruppen/Matches/Bracket,
     /// Punkte-Neuberechnung).
     #[error(transparent)]

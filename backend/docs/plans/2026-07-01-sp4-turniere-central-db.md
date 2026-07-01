@@ -216,12 +216,14 @@ Verifikationsstand 2026-07-01: `cargo build -p turnier-engine` gruen; `cargo cli
 
 **Files:** `rust/crates/turnier-scheduler/src/**`, `rust/crates/turnier-scheduler/tests/**`.
 
-- [ ] Reminder-Queries auf PG-Zeittypen: keine String-Buckets, kein `datetime('now')`.
-- [ ] `INSERT OR IGNORE` fuer `sent_*_reminders` -> `ON CONFLICT (...) DO NOTHING`; Crash-Fenster bleibt dokumentiert wie bisher.
-- [ ] Whitelist fuer dynamische Reminder-Tabellennamen beibehalten, QueryBuilder/format nur nach Whitelist.
-- [ ] Status-CAS `UPDATE tournaments SET status = ... WHERE id = ... AND status = ...` erhalten.
-- [ ] Tests fuer Reminder-Dedupe, Registration/Start/Match-Reminder, completed->points-Recompute, Test-Turnier-Skip.
-- [ ] Verifikation: `cargo build -p turnier-scheduler`, `cargo test -p turnier-scheduler --features testing -- --include-ignored`, Clippy/Fmt.
+- [x] Reminder-Queries auf PG-Zeittypen: keine String-Buckets, kein `datetime('now')`.
+- [x] `INSERT OR IGNORE` fuer `sent_*_reminders` -> `ON CONFLICT (...) DO NOTHING`; Crash-Fenster bleibt dokumentiert wie bisher.
+- [x] Whitelist fuer dynamische Reminder-Tabellennamen beibehalten, QueryBuilder/format nur nach Whitelist.
+- [x] Status-CAS `UPDATE tournaments SET status = ... WHERE id = ... AND status = ...` erhalten.
+- [x] Tests fuer Reminder-Dedupe, Registration/Start/Match-Reminder, completed->points-Recompute, Test-Turnier-Skip.
+- [x] Verifikation: `cargo build -p turnier-scheduler`, `cargo test -p turnier-scheduler --features testing -- --include-ignored`, Clippy/Fmt.
+
+Verifikationsstand 2026-07-01: `cargo build -p turnier-scheduler` gruen; `cargo clippy -p turnier-scheduler --all-targets -- -D warnings` gruen; `cargo fmt --check -p turnier-scheduler` gruen; `../Deadlock-Bots/rust/scripts/central_test_db.sh bash -lc 'cd /home/naniadm/Documents/Deadlock-Turniere/rust && cargo test -p turnier-scheduler --features testing -- --include-ignored'` gruen.
 
 ## Task T10: `turnier-api` Public/Account/Consent/Leaderboard
 

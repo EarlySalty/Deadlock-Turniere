@@ -14,9 +14,6 @@
 //!    der Loop stirbt nie (behebt den Tot-Loop des Originals).
 //!
 //! ## Bewusst erhaltene Befunde (`bugs_preserved`)
-//! - **TZ-Fragilität** (needs-decision): Vergleich gegen lokale naive Zeit; siehe
-//!   [`time`]-Modul-Doku. NICHT auf UTC umgestellt (würde ändern, wann Reminder
-//!   feuern).
 //! - **Generierung vor dem UPDATE** (behavior-change): Gruppen/Matches/Bracket
 //!   werden vor dem Optimistic-Lock erzeugt — bei parallelem Statuswechsel können
 //!   verwaiste Datensätze entstehen. 1:1 zum Original.
@@ -41,7 +38,7 @@ pub use reminders::{
     check_and_send_start_reminders, load_all_profile_ids, load_tournament_participant_ids,
 };
 pub use time::{
-    is_due, is_within_window, offset_label, parse_reminder_offsets, parse_timestamp,
-    DEFAULT_REMINDER_OFFSETS, REMINDER_WINDOW_MINUTES,
+    is_due, is_within_window, offset_label, parse_reminder_offsets, DEFAULT_REMINDER_OFFSETS,
+    REMINDER_WINDOW_MINUTES,
 };
 pub use transition::{advance_tournament_status, get_due_next_status, DueStatusRow};

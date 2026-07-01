@@ -6,35 +6,34 @@
 //! Seiteneffekte (Gruppen/Matches/Bracket), schreibt den Status mit Optimistic-
 //! Lock, auditet, berechnet bei `completed` die Punkte neu und plant Auto-Lobbys.
 
-use chrono::NaiveDateTime;
+use chrono::{DateTime, Utc};
 
-use turnier_core::TournamentStatus;
+use turnier_core::{now_utc, parse_discord_id, TournamentStatus};
 use turnier_db::Pool;
 use turnier_discord::DiscordNotifier;
-use turnier_match::MatchManager;
 use turnier_engine::{
     generate_bracket, generate_group_matches, generate_groups, is_valid_transition,
     recalculate_player_points_in_tx, valid_next_statuses,
 };
+use turnier_match::MatchManager;
 
 use crate::error::{SchedulerError, SchedulerResult};
 use crate::time::is_due;
 
 /// Die für die Übergangsentscheidung relevanten Felder einer `tournaments`-Zeile.
 ///
-/// Die Zeitstempel bleiben als rohe `Option<String>`, weil [`crate::time`] sie
-/// genau wie das Original (lokal-naiv) parst. Das Feld `status`/`tournament_mode`
-/// kommt ebenfalls roh, damit die Entscheidung 1:1 die Original-String-Vergleiche
-/// abbildet.
+/// Die Zeitstempel kommen aus PG-`TIMESTAMPTZ`-Spalten als UTC-Instants. Das
+/// Feld `status`/`tournament_mode` kommt weiter roh, damit die Entscheidung 1:1
+/// die Original-String-Vergleiche abbildet.
 #[derive(Debug, Clone, Default)]
 pub struct DueStatusRow {
     pub status: String,
     pub tournament_mode: Option<String>,
-    pub registration_start: Option<String>,
-    pub registration_end: Option<String>,
-    pub checkin_start: Option<String>,
-    pub group_phase_start: Option<String>,
-    pub bracket_start: Option<String>,
+    pub registration_start: Option<DateTime<Utc>>,
+    pub registration_end: Option<DateTime<Utc>>,
+    pub checkin_start: Option<DateTime<Utc>>,
+    pub group_phase_start: Option<DateTime<Utc>>,
+    pub bracket_start: Option<DateTime<Utc>>,
 }
 
 /// Ermittelt den nächsten fälligen Status anhand der Zeitstempel und des Modus.
@@ -43,31 +42,27 @@ pub struct DueStatusRow {
 /// Übergang fällig ist. Bei `tournament_mode == "bracket_only"` wird die
 /// Gruppenphase übersprungen (checkin → bracket), aber NUR wenn `bracket_start`
 /// fällig ist (Logikfalle aus dem Original, bewusst 1:1 erhalten — `bugs_preserved`).
-pub fn get_due_next_status(row: &DueStatusRow, now: NaiveDateTime) -> Option<&'static str> {
+pub fn get_due_next_status(row: &DueStatusRow, now: DateTime<Utc>) -> Option<&'static str> {
     let s = row.status.as_str();
 
-    if s == "draft" && is_due(row.registration_start.as_deref(), now) {
+    if s == "draft" && is_due(row.registration_start.as_ref(), now) {
         return Some("registration");
     }
 
     // checkin_start ODER registration_end als Auslöser (wie im Original).
-    let checkin_trigger = row
-        .checkin_start
-        .as_deref()
-        .filter(|v| !v.is_empty())
-        .or(row.registration_end.as_deref());
+    let checkin_trigger = row.checkin_start.as_ref().or(row.registration_end.as_ref());
     if s == "registration" && is_due(checkin_trigger, now) {
         return Some("checkin");
     }
 
     let bracket_only = row.tournament_mode.as_deref() == Some("bracket_only");
 
-    if s == "checkin" && is_due(row.group_phase_start.as_deref(), now) {
+    if s == "checkin" && is_due(row.group_phase_start.as_ref(), now) {
         if bracket_only {
             // Gruppenphase überspringen — aber erst springen, wenn bracket_start
             // fällig ist. group_phase_start dient hier nur als Auslöse-Gate.
             // (Logikfalle 1:1 erhalten, siehe Modul-Doku.)
-            return if is_due(row.bracket_start.as_deref(), now) {
+            return if is_due(row.bracket_start.as_ref(), now) {
                 Some("bracket")
             } else {
                 None
@@ -76,7 +71,7 @@ pub fn get_due_next_status(row: &DueStatusRow, now: NaiveDateTime) -> Option<&'s
         return Some("group_phase");
     }
 
-    if s == "group_phase" && is_due(row.bracket_start.as_deref(), now) {
+    if s == "group_phase" && is_due(row.bracket_start.as_ref(), now) {
         return Some("bracket");
     }
 
@@ -99,7 +94,7 @@ fn parse_status(value: &str) -> Option<TournamentStatus> {
 ///    Bracket generieren. (Generierung läuft VOR dem UPDATE — wie im Original;
 ///    siehe `bugs_preserved`.)
 /// 3. Status per Optimistic-Lock setzen
-///    (`UPDATE ... WHERE id = ? AND status = current`); traf keine Zeile →
+///    (`UPDATE ... WHERE id = $n AND status = current`); traf keine Zeile →
 ///    [`SchedulerError::StatusConflict`].
 /// 4. Audit-Log schreiben: `tournament_auto_advance` bei `source == "scheduler"`,
 ///    sonst `tournament_advance`; `details` = JSON-Metadata.
@@ -166,11 +161,13 @@ pub async fn advance_tournament_status(
     // --- 3.-5. Statuswechsel + Audit + ggf. Punkte: EINE Transaktion ---
     let mut tx = pool.begin().await?;
 
+    let now = now_utc();
     let res = sqlx::query(
-        "UPDATE tournaments SET status = ?, updated_at = datetime('now') \
-         WHERE id = ? AND status = ?",
+        "UPDATE turnier.tournaments SET status = $1, updated_at = $2 \
+         WHERE id = $3 AND status = $4",
     )
     .bind(next_status)
+    .bind(now)
     .bind(tournament_id)
     .bind(current_status)
     .execute(&mut *tx)
@@ -184,20 +181,26 @@ pub async fn advance_tournament_status(
     } else {
         "tournament_advance"
     };
-    sqlx::query("INSERT INTO audit_log (action, user_id, details) VALUES (?, ?, ?)")
-        .bind(action)
-        .bind(actor_id)
-        .bind(metadata.to_string())
-        .execute(&mut *tx)
-        .await?;
+    let actor_id = actor_id.map(parse_discord_id).transpose()?;
+    sqlx::query(
+        "INSERT INTO turnier.audit_log (action, user_id, details, created_at) \
+         VALUES ($1, $2, $3, $4)",
+    )
+    .bind(action)
+    .bind(actor_id)
+    .bind(metadata.clone())
+    .bind(now)
+    .execute(&mut *tx)
+    .await?;
 
     if next_status == "completed" {
-        let exclude: Option<(i64,)> =
-            sqlx::query_as("SELECT exclude_from_leaderboard FROM tournaments WHERE id = ?")
-                .bind(tournament_id)
-                .fetch_optional(&mut *tx)
-                .await?;
-        if matches!(exclude, Some((flag,)) if flag == 0) {
+        let exclude: Option<(bool,)> = sqlx::query_as(
+            "SELECT exclude_from_leaderboard FROM turnier.tournaments WHERE id = $1",
+        )
+        .bind(tournament_id)
+        .fetch_optional(&mut *tx)
+        .await?;
+        if matches!(exclude, Some((false,))) {
             recalculate_player_points_in_tx(&mut tx, tournament_id).await?;
         }
     }
@@ -250,10 +253,16 @@ fn status_as_str(s: &TournamentStatus) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::NaiveDateTime;
+    use chrono::{DateTime, Utc};
 
-    fn now() -> NaiveDateTime {
-        NaiveDateTime::parse_from_str("2026-06-14T12:00:00", "%Y-%m-%dT%H:%M:%S").unwrap()
+    fn utc(s: &str) -> DateTime<Utc> {
+        DateTime::parse_from_rfc3339(&format!("{s}Z"))
+            .unwrap()
+            .with_timezone(&Utc)
+    }
+
+    fn now() -> DateTime<Utc> {
+        utc("2026-06-14T12:00:00")
     }
 
     fn row(status: &str) -> DueStatusRow {
@@ -266,10 +275,10 @@ mod tests {
     #[test]
     fn draft_zu_registration_wenn_registration_start_faellig() {
         let mut r = row("draft");
-        r.registration_start = Some("2026-06-14T11:00:00".into());
+        r.registration_start = Some(utc("2026-06-14T11:00:00"));
         assert_eq!(get_due_next_status(&r, now()), Some("registration"));
         // Noch nicht fällig.
-        r.registration_start = Some("2026-06-14T13:00:00".into());
+        r.registration_start = Some(utc("2026-06-14T13:00:00"));
         assert_eq!(get_due_next_status(&r, now()), None);
     }
 
@@ -277,26 +286,20 @@ mod tests {
     fn registration_zu_checkin_trigger_prioritaet() {
         // checkin_start hat Vorrang vor registration_end.
         let mut r = row("registration");
-        r.checkin_start = Some("2026-06-14T11:00:00".into());
-        r.registration_end = Some("2026-06-14T13:00:00".into());
+        r.checkin_start = Some(utc("2026-06-14T11:00:00"));
+        r.registration_end = Some(utc("2026-06-14T13:00:00"));
         assert_eq!(get_due_next_status(&r, now()), Some("checkin"));
 
         // Ohne checkin_start fällt es auf registration_end zurück.
         let mut r2 = row("registration");
-        r2.registration_end = Some("2026-06-14T11:30:00".into());
+        r2.registration_end = Some(utc("2026-06-14T11:30:00"));
         assert_eq!(get_due_next_status(&r2, now()), Some("checkin"));
-
-        // Leerer checkin_start → registration_end greift.
-        let mut r3 = row("registration");
-        r3.checkin_start = Some("".into());
-        r3.registration_end = Some("2026-06-14T11:30:00".into());
-        assert_eq!(get_due_next_status(&r3, now()), Some("checkin"));
     }
 
     #[test]
     fn checkin_zu_group_phase_standardmodus() {
         let mut r = row("checkin");
-        r.group_phase_start = Some("2026-06-14T11:00:00".into());
+        r.group_phase_start = Some(utc("2026-06-14T11:00:00"));
         assert_eq!(get_due_next_status(&r, now()), Some("group_phase"));
     }
 
@@ -304,21 +307,21 @@ mod tests {
     fn checkin_bracket_only_ueberspringt_gruppenphase() {
         let mut r = row("checkin");
         r.tournament_mode = Some("bracket_only".into());
-        r.group_phase_start = Some("2026-06-14T11:00:00".into());
+        r.group_phase_start = Some(utc("2026-06-14T11:00:00"));
         // bracket_start noch nicht fällig → bleibt hängen (Logikfalle 1:1).
-        r.bracket_start = Some("2026-06-14T13:00:00".into());
+        r.bracket_start = Some(utc("2026-06-14T13:00:00"));
         assert_eq!(get_due_next_status(&r, now()), None);
         // bracket_start fällig → direkt nach bracket.
-        r.bracket_start = Some("2026-06-14T11:30:00".into());
+        r.bracket_start = Some(utc("2026-06-14T11:30:00"));
         assert_eq!(get_due_next_status(&r, now()), Some("bracket"));
     }
 
     #[test]
     fn group_phase_zu_bracket() {
         let mut r = row("group_phase");
-        r.bracket_start = Some("2026-06-14T11:00:00".into());
+        r.bracket_start = Some(utc("2026-06-14T11:00:00"));
         assert_eq!(get_due_next_status(&r, now()), Some("bracket"));
-        r.bracket_start = Some("2026-06-14T13:00:00".into());
+        r.bracket_start = Some(utc("2026-06-14T13:00:00"));
         assert_eq!(get_due_next_status(&r, now()), None);
     }
 
