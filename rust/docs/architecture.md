@@ -45,9 +45,10 @@ Domänen-Crates kennen das Fundament, die Web-/App-Schicht kennt die Domäne.
   Orchestrierung `advance_tournament_status` (auch von turnier-api genutzt).
 - **turnier-api** — axum-HTTP-Schicht: `AppState`, Extractoren, Fehler→Response,
   Middleware (CORS, TrustedHost) und die Router aller ~213 Endpunkte.
-- **turnier-bot** — Composition-Root + Binary: Config → Pool → Migration → AppState →
-  Scheduler → `axum::serve`. Mit `--check` bootet der Prozess vollständig, ohne zu
-  servieren (Smoke-Test).
+- **turnier-bot** — Composition-Root + Binary: Config → zentraler PgPool →
+  AppState → Scheduler → `axum::serve`. Mit `--check` baut der Prozess Config,
+  Pool, AppState, Scheduler und Router, ohne zu servieren oder Scheduler-Checks
+  auszufuehren (Smoke-Test).
 
 ## Request-Lebenszyklus (turnier-api)
 
@@ -77,10 +78,13 @@ fachlichen Turnierdaten liegen in `turnier.*`; zentrale Cross-Schema-Lookups
 nutzen explizit qualifizierte Tabellen wie `core.*` oder `voice.*`. Das Schema
 ist der Vertrag (siehe [`db-contract.md`](db-contract.md)); produktive
 Migrationen besitzt `dl-central-db` im Schwesterrepo.
+`DEADLOCK_CENTRAL_DSN` ist fuer den Rust-Backend-Start Pflicht. `DATABASE_PATH`
+ist nur noch Python-/SQLite-Legacy und wird vom Rust-Backend ignoriert.
 
 Python unter `backend/` ist Legacy-Flaeche und kein stiller produktiver
-SQLite-Schreibpfad fuer den Rust-Cutover. Die Steam-Bridge-SQLite-Flaeche wird
-separat in SP4/T6 entfernt oder abgegrenzt.
+SQLite-Schreibpfad fuer den Rust-Cutover; Python-Starts sind nur noch explizite
+Rollback-/Dev-Starts. Die Steam-Bridge-SQLite-Flaeche wird separat in SP4/T6
+entfernt oder abgegrenzt.
 
 ## Persistenz-Stil
 

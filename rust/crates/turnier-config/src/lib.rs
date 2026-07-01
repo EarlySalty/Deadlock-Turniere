@@ -2,6 +2,12 @@
 //!
 //! Lädt einmal beim Start aus geschichteten Quellen (siehe [`secrets`]) und wird
 //! danach als unveränderliches `Arc<Config>` durch die App gereicht.
+//!
+//! `DEADLOCK_CENTRAL_DSN` ist Pflicht fuer das Rust-Backend, wird aber bewusst
+//! nicht in [`Config`] gespeichert: `turnier_db::connect_central()` liest die
+//! Umgebungsvariable direkt und gibt beim Fehlen einen Startfehler zurueck, ohne
+//! den Wert zu loggen. `DATABASE_PATH` ist nur noch Python-/SQLite-Legacy und wird
+//! vom Rust-Backend ignoriert.
 
 pub mod secrets;
 
@@ -38,8 +44,7 @@ pub struct Config {
     // --- JWT (im Port effektiv ungenutzt: Sessions sind opake Tokens) ---
     pub jwt_secret: String,
 
-    // --- Datenbanken / Pfade ---
-    pub database_path: String,
+    // --- Pfade ---
     pub avatar_dir: String,
     pub steam_bridge_db_path: String,
 
@@ -56,7 +61,7 @@ pub struct Config {
 
 impl Config {
     /// Lädt die Konfiguration aus den geschichteten Quellen. Defaults entsprechen
-    /// exakt dem Python-Original.
+    /// dem Python-Original, soweit die Werte im Rust-Backend noch aktiv sind.
     pub fn from_env() -> Self {
         let cfg = Self {
             discord_oauth_internal_api_base_url: get_string(
@@ -137,7 +142,6 @@ impl Config {
             ),
             discord_mod_role_ids: get_string("DISCORD_MOD_ROLE_IDS", "1474210107255554331"),
             jwt_secret: get_string("JWT_SECRET", ""),
-            database_path: get_string("DATABASE_PATH", "data/tournament.db"),
             avatar_dir: get_string("AVATAR_DIR", "data/avatars"),
             steam_bridge_db_path: get_string(
                 "STEAM_BRIDGE_DB_PATH",
@@ -166,7 +170,10 @@ impl Config {
     /// Admin-Rollen-IDs = allgemeine Admin-Rollen ∪ Turnier-Admin-Rollen.
     pub fn admin_role_ids(&self) -> BTreeSet<String> {
         let mut ids = BTreeSet::new();
-        for raw in [&self.discord_admin_role_ids, &self.discord_tournament_admin_role_ids] {
+        for raw in [
+            &self.discord_admin_role_ids,
+            &self.discord_tournament_admin_role_ids,
+        ] {
             ids.extend(split_csv(raw));
         }
         ids
@@ -195,7 +202,11 @@ impl Config {
         for h in ["127.0.0.1", "localhost", "::1"] {
             hosts.insert(h.to_string());
         }
-        for candidate in [&self.frontend_url, &self.turnier_public_url, &self.backend_host] {
+        for candidate in [
+            &self.frontend_url,
+            &self.turnier_public_url,
+            &self.backend_host,
+        ] {
             if let Some(host) = hostname_of(candidate) {
                 hosts.insert(host);
             }
@@ -249,7 +260,10 @@ mod tests {
 
     #[test]
     fn hostname_extraction() {
-        assert_eq!(hostname_of("https://example.com/path"), Some("example.com".to_string()));
+        assert_eq!(
+            hostname_of("https://example.com/path"),
+            Some("example.com".to_string())
+        );
         assert_eq!(hostname_of("127.0.0.1:8900"), Some("127.0.0.1".to_string()));
         assert_eq!(hostname_of("localhost"), Some("localhost".to_string()));
         assert_eq!(hostname_of(""), None);

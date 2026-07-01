@@ -15,6 +15,9 @@ produktiven Rust-Backend nicht mehr angewendet.
 - Verbindungsaufbau: `turnier_db::connect_central()` liest
   `DEADLOCK_CENTRAL_DSN` ueber `dl-central-db`. DSNs werden nie geloggt oder in
   Dateien geschrieben.
+- `DEADLOCK_CENTRAL_DSN` ist fuer den Rust-Backend-Start Pflicht; es gibt keinen
+  stillen Fallback auf SQLite. `DATABASE_PATH` ist nur noch Python-/SQLite-Legacy
+  und wird vom Rust-Backend ignoriert.
 - Migrations-Owner: ausschliesslich `dl-central-migrate` aus dem Schwesterrepo.
   `turnier-db::run_migrations()` ist im PG-Pfad ein bewusster No-op.
 - Tests: echte Wegwerf-PG via `dl_central_db::testing::test_pool()` bzw.
@@ -72,7 +75,7 @@ Alle dynamischen Werte bleiben Bind-Parameter.
 
 ## Legacy-Flaechen
 
-Python unter `backend/` und die alte Steam-Bridge-SQLite-Flaeche sind waehrend
-SP4 separat zu behandeln. Sie duerfen nach dem Cutover nicht still als
-produktive SQLite-Schreibpfade erreichbar bleiben; T6/T12 entscheiden bzw.
-dokumentieren diese Grenzen.
+Python unter `backend/` ist ab dem Rust-/PG-Cutover Legacy und darf nicht
+produktiv gegen `backend/data/tournament.db` gestartet werden. Ein Python-Start
+ist nur noch als expliziter Rollback-/Dev-Pfad mit Operator-Entscheidung
+zulaessig. Die alte Steam-Bridge-SQLite-Flaeche wird separat behandelt.

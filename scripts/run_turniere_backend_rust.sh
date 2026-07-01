@@ -63,7 +63,13 @@ done
 
 export DISCORD_BOT_TOKEN="${DISCORD_BOT_TOKEN:-${DISCORD_TOKEN:-}}"
 
-# cwd = backend/, damit der DATABASE_PATH-/AVATAR_DIR-Default (data/...) wie bei
-# Python auf backend/data/* zeigt (geteilte DB).
+if [[ -z "${DEADLOCK_CENTRAL_DSN:-}" ]]; then
+  echo "DEADLOCK_CENTRAL_DSN nicht gesetzt — zentrale Turnier-DB ist Pflicht fuer Rust." >&2
+  exit 1
+fi
+
+# cwd = backend/, damit der AVATAR_DIR-Default (data/avatars) wie bei Python auf
+# backend/data/avatars zeigt. DATABASE_PATH ist Rust-seitig Legacy/ignoriert; die
+# Turnier-Fachdaten kommen aus DEADLOCK_CENTRAL_DSN.
 cd "$ROOT_DIR/backend"
 exec "$ROOT_DIR/rust/target/release/turnier-bot"

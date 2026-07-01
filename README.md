@@ -11,7 +11,9 @@ Turnier-Plattform der **Deutschen Deadlock Community** — organisiert und verwa
 
 ## Tech-Stack
 
-- Backend: Python (FastAPI)
+- Backend: Rust (`turnier-bot`/axum) gegen zentrale Postgres; `backend/` ist
+  Python-Legacy und darf nicht versehentlich produktiv gegen SQLite gestartet
+  werden.
 - Frontend: React + TypeScript
 - Deployment: Linux mit Caddy als Reverse-Proxy
 

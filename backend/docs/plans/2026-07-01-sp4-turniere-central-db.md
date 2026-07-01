@@ -266,13 +266,15 @@ Rework 2026-07-02: Kritiker-Befunde gefixt: Test-Mode-Wipe/Seed verlangt zusaetz
 - Modify: `scripts/**`, `rust/docs/**`, `README.md` soweit noetig
 - Python inventory/doc: `backend/**` nur Doku/Fence oder explizite Port-Tickets, je T0-Entscheidung
 
-- [ ] `turnier-bot`: `turnier_db::connect_str(&config.database_path, ...)` -> `turnier_db::connect_central()`; kein DB-Pfad loggen, keine DSN loggen.
-- [ ] `DATABASE_PATH` als Legacy/ignored markieren oder entfernen; `DEADLOCK_CENTRAL_DSN` als Pflicht fuer Rust-Backend dokumentieren.
-- [ ] `run_migrations` nicht im Prod-Start gegen zentral ausfuehren. Falls ein Start-Smoke Schema prueft, nur read-only.
-- [ ] `AppState`/Scheduler/Notifier/RankResolver mit `PgPool` bauen.
-- [ ] Python-Fence: dokumentieren, dass `backend/` nicht produktiv gegen SQLite gestartet werden darf, oder Folgeplan fuer Python-PG-Port erstellen, falls T0 live Nutzung findet.
-- [ ] `--check` Boot-Smoke: prueft Config + Pool-Aufbau + Router, ohne zu servieren.
-- [ ] Verifikation: `cargo build -p turnier-bot --bin turnier-bot`, `cargo run -p turnier-bot -- --check` nur gegen Test-/Read-only-Oracle nach Review-Freigabe, Clippy/Fmt.
+- [x] `turnier-bot`: `turnier_db::connect_str(&config.database_path, ...)` -> `turnier_db::connect_central()`; kein DB-Pfad loggen, keine DSN loggen.
+- [x] `DATABASE_PATH` als Legacy/ignored markieren oder entfernen; `DEADLOCK_CENTRAL_DSN` als Pflicht fuer Rust-Backend dokumentieren.
+- [x] `run_migrations` nicht im Prod-Start gegen zentral ausfuehren. Falls ein Start-Smoke Schema prueft, nur read-only.
+- [x] `AppState`/Scheduler/Notifier/RankResolver mit `PgPool` bauen.
+- [x] Python-Fence: dokumentieren, dass `backend/` nicht produktiv gegen SQLite gestartet werden darf, oder Folgeplan fuer Python-PG-Port erstellen, falls T0 live Nutzung findet.
+- [x] `--check` Boot-Smoke: prueft Config + Pool-Aufbau + Router, ohne zu servieren.
+- [x] Verifikation: `cargo build -p turnier-bot --bin turnier-bot`, `cargo run -p turnier-bot -- --check` nur gegen Test-/Read-only-Oracle nach Review-Freigabe, Clippy/Fmt.
+
+Verifikationsstand 2026-07-02: `cargo build -p turnier-bot --bin turnier-bot` gruen; `cargo clippy -p turnier-bot --all-targets -- -D warnings` gruen; `cargo fmt --check -p turnier-bot` gruen. `cargo run -p turnier-bot -- --check` wurde bewusst nicht ausgefuehrt, weil kein Review-freigegebener Test-/Read-only-Oracle genutzt wurde. Der implementierte `--check`-Pfad baut Config, zentralen Pool, AppState, Scheduler-Objekt und Router, startet aber keinen Scheduler-Loop und serviert nicht.
 
 ## Task T13: Workspace-Barriere + Cutover-Handoff
 

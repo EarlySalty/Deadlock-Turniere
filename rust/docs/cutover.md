@@ -1,18 +1,19 @@
 # Cutover — Python → Rust
 
-Stand der Rust-Neuentwicklung unter `/rust` und was vor dem Scharfschalten nötig
-ist. Der Python-Stand im Repo-Root bleibt unverändert und ist der Rollback-Pfad.
+Stand der Rust-Neuentwicklung unter `/rust` und was vor dem Scharfschalten noetig
+ist. Der Python-Stand im Repo-Root bleibt unveraendert, ist nach dem PG-Cutover
+aber nur noch ein expliziter Rollback-/Dev-Pfad.
 
 ## Status
 
-Vollständiger Port, 12 Crates + Binary (`turnier-bot`), baut als ein Workspace. Alle
-Tests grün (`cargo test --workspace`, 37 Suites), `cargo clippy --workspace
---all-targets -- -D warnings` sauber, Release-Build OK. `turnier-bot --check` bootet
-end-to-end (Config → Pool → Migration → AppState → Scheduler → Router) und
-degradiert ohne externe Dienste sauber.
+Vollstaendiger Port, 12 Crates + Binary (`turnier-bot`), baut als ein Workspace.
+Im zentralen PG-Pfad baut `turnier-bot --check` Config, Pool, AppState,
+Scheduler-Objekt und Router, ohne zu servieren oder Scheduler-Checks
+auszufuehren.
 
 Verdrahtet in `turnier-bot`: HTTP-API (axum, ~213 Endpunkte) + Scheduler-Loop
-(Phasenübergänge + Reminder) im selben Prozess, gegen die geteilte SQLite-DB.
+(Phasenuebergaenge + Reminder) im selben Prozess, gegen die zentrale
+Postgres/TimescaleDB.
 
 ## Verifikation, die schon gelaufen ist
 
@@ -32,9 +33,10 @@ Verdrahtet in `turnier-bot`: HTTP-API (axum, ~213 Endpunkte) + Scheduler-Loop
    (Default `127.0.0.1:8766`).
 3. **Steam-Bridge-DB**: `STEAM_BRIDGE_DB_PATH` auf die Linux-Pfad-Variante der
    geteilten Deadlock-Bots-SQLite setzen (der Default ist ein Windows-Pfad).
-4. **DB-Pfad**: `DATABASE_PATH` auf die echte `backend/data/tournament.db`
-   (geteilt mit Python) zeigen lassen; `AVATAR_DIR` auf das bestehende
-   Avatar-Verzeichnis.
+4. **Zentrale DB**: `DEADLOCK_CENTRAL_DSN` muss gesetzt sein. Der Wert darf nicht
+   geloggt oder in Dateien geschrieben werden. `DATABASE_PATH` ist Rust-seitig
+   Legacy/ignoriert; es gibt keinen SQLite-Fallback. `AVATAR_DIR` auf das
+   bestehende Avatar-Verzeichnis setzen.
 5. **Erststart** gegen die echte DB prüfen (Dashboard/Frontend gegen die API),
    dann den Python-Dienst stoppen und `turnier-bot` den Port übernehmen lassen.
 
@@ -54,5 +56,7 @@ sind dort als Opt-in-Folgefixe gelistet (Verhalten 1:1 erhalten).
 
 ## Rollback
 
-Python-Stand im Repo-Root ist unangetastet. Rollback = `turnier-bot` stoppen, Python
-`uvicorn main:app` starten. Beide nutzen dieselbe `tournament.db`.
+Python-Stand im Repo-Root ist unangetastet, darf aber nicht versehentlich
+produktiv gegen `backend/data/tournament.db` weiterlaufen. Rollback auf Python
+ist eine explizite Operator-Entscheidung und braucht eine eigene DB-Strategie;
+der Rust-Pfad nutzt `DEADLOCK_CENTRAL_DSN`.

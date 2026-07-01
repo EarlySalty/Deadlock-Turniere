@@ -15,7 +15,7 @@ use turnier_steam::RankResolver;
 /// Zentraler, geteilter Anwendungszustand.
 #[derive(Clone)]
 pub struct AppState {
-    /// Haupt-DB-Pool auf die Turnier-SQLite.
+    /// Haupt-DB-Pool auf die zentrale Turnier-Postgres.
     pub pool: Pool,
     /// Aufgelöste Laufzeit-Konfiguration.
     pub config: Arc<Config>,

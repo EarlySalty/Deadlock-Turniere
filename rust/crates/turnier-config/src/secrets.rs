@@ -30,18 +30,22 @@ fn read_file(path: &std::path::Path) -> Option<String> {
 }
 
 fn credential_dirs() -> Vec<PathBuf> {
-    ["CREDENTIALS_DIRECTORY", "SECRETS_DIRECTORY", "VAULT_SECRETS_DIR"]
-        .iter()
-        .filter_map(|name| {
-            let raw = env::var(name).ok()?;
-            let raw = raw.trim();
-            if raw.is_empty() {
-                None
-            } else {
-                Some(PathBuf::from(raw))
-            }
-        })
-        .collect()
+    [
+        "CREDENTIALS_DIRECTORY",
+        "SECRETS_DIRECTORY",
+        "VAULT_SECRETS_DIR",
+    ]
+    .iter()
+    .filter_map(|name| {
+        let raw = env::var(name).ok()?;
+        let raw = raw.trim();
+        if raw.is_empty() {
+            None
+        } else {
+            Some(PathBuf::from(raw))
+        }
+    })
+    .collect()
 }
 
 fn name_candidates(name: &str) -> [String; 3] {

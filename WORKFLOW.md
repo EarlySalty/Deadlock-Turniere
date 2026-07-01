@@ -2,6 +2,31 @@
 
 ---
 
+## Neue Aufgabe (2026-07-02): SP4 T12 turnier-bot Composition Root
+
+### Ziel
+- `turnier-bot` als Composition Root auf zentrale Postgres-DB verdrahten.
+- `DATABASE_PATH` aus dem Rust-Produktivpfad entfernen/als Legacy abgrenzen; `DEADLOCK_CENTRAL_DSN` ist Pflicht.
+- Kein produktiver `run_migrations`-Aufruf gegen die zentrale DB, kein DSN-/DB-Pfad-Logging, kein Commit/Push.
+
+### Fortschritt
+- T12-Planabschnitt, `WORKFLOW.md`, `turnier-bot`, `turnier-config`, `turnier-db`, `AppState` und relevante Doku gelesen.
+- Befund: `turnier-db::connect_central()` existiert bereits und nutzt `dl_central_db::dsn_from_env()` + `connect_pool()`; `run_migrations()` ist im PG-Pfad ein No-op.
+- Befund: `--check` wuerde im Ist-Zustand den Scheduler starten; das muss fuer den Smoke-Pfad ohne mutierende Checks umgebaut werden.
+- `turnier-bot` nutzt jetzt `turnier_db::connect_central()`; DB-Pfad-/DSN-Logging und produktiver `run_migrations()`-Aufruf sind aus dem Startpfad entfernt.
+- `--check` baut Config, zentralen Pool, AppState, Scheduler-Objekt und Router, startet aber keinen Scheduler-Loop und serviert nicht.
+- `turnier-config` enthaelt keinen `database_path` mehr; `DATABASE_PATH` ist dokumentiert als Python-/SQLite-Legacy, `DEADLOCK_CENTRAL_DSN` als Pflicht fuer Rust.
+- Python-Fence dokumentiert in README, `rust/docs/db-contract.md`, `rust/docs/architecture.md` und `rust/docs/cutover.md`; Rust-Launcher bricht ohne `DEADLOCK_CENTRAL_DSN` ab.
+- Verifikation: `cargo build -p turnier-bot --bin turnier-bot` gruen.
+- Verifikation: `cargo clippy -p turnier-bot --all-targets -- -D warnings` gruen.
+- Verifikation: `cargo fmt --check -p turnier-bot` gruen.
+- Kein `cargo run -p turnier-bot -- --check` gegen Live-/Produktiv-DB ausgefuehrt; kein Commit/Push.
+
+### Status (2026-07-02)
+-> **Abgeschlossen fuer GPT-Worker** — Review durch Claude ausstehend
+
+---
+
 ## Neue Aufgabe (2026-07-02): SP4 T10+T11 turnier-api zentrale Postgres
 
 ### Ziel
