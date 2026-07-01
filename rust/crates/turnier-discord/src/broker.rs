@@ -41,13 +41,18 @@ impl BrokerClient {
 
     /// Komfort-Konstruktor aus [`turnier_config::Config`].
     pub fn from_config(config: &turnier_config::Config) -> Self {
-        Self::new(&config.discord_master_broker_base_url, &config.discord_master_broker_token)
+        Self::new(
+            &config.discord_master_broker_base_url,
+            &config.discord_master_broker_token,
+        )
     }
 
     /// Die effektive Basis-URL oder ein [`BrokerError::Unconfigured`].
     fn base_url(&self) -> BrokerResult<&str> {
         if self.base_url.is_empty() {
-            return Err(BrokerError::Unconfigured("Discord-Master-Broker ist nicht konfiguriert"));
+            return Err(BrokerError::Unconfigured(
+                "Discord-Master-Broker ist nicht konfiguriert",
+            ));
         }
         Ok(&self.base_url)
     }
@@ -55,7 +60,9 @@ impl BrokerClient {
     /// Das Auth-Token oder ein [`BrokerError::Unconfigured`].
     fn token(&self) -> BrokerResult<&str> {
         if self.token.is_empty() {
-            return Err(BrokerError::Unconfigured("Discord-Master-Broker ist nicht authentifiziert"));
+            return Err(BrokerError::Unconfigured(
+                "Discord-Master-Broker ist nicht authentifiziert",
+            ));
         }
         Ok(&self.token)
     }
@@ -90,14 +97,19 @@ impl BrokerClient {
         let body_text = response.text().await.map_err(BrokerError::Unreachable)?;
 
         if status.as_u16() != 200 {
-            return Err(BrokerError::Http { status: status.as_u16(), detail: error_detail(&body_text) });
+            return Err(BrokerError::Http {
+                status: status.as_u16(),
+                detail: error_detail(&body_text),
+            });
         }
 
         // 200: erst als JSON-Objekt validieren, dann nach T deserialisieren.
         let value: serde_json::Value = serde_json::from_str(&body_text)
             .map_err(|_| BrokerError::BadJson("Discord-Broker lieferte kein JSON"))?;
         if !value.is_object() {
-            return Err(BrokerError::BadJson("Discord-Broker lieferte ein ungültiges Payload"));
+            return Err(BrokerError::BadJson(
+                "Discord-Broker lieferte ein ungültiges Payload",
+            ));
         }
         serde_json::from_value(value)
             .map_err(|_| BrokerError::BadJson("Discord-Broker lieferte ein ungültiges Payload"))
@@ -109,12 +121,17 @@ impl BrokerClient {
 fn error_detail(body_text: &str) -> String {
     const DEFAULT: &str = "Discord-Broker Fehler";
 
-    if let Ok(serde_json::Value::Object(map)) = serde_json::from_str::<serde_json::Value>(body_text) {
+    if let Ok(serde_json::Value::Object(map)) = serde_json::from_str::<serde_json::Value>(body_text)
+    {
         let from_field = map
             .get("error")
             .and_then(|v| v.as_str())
             .filter(|s| !s.trim().is_empty())
-            .or_else(|| map.get("detail").and_then(|v| v.as_str()).filter(|s| !s.trim().is_empty()));
+            .or_else(|| {
+                map.get("detail")
+                    .and_then(|v| v.as_str())
+                    .filter(|s| !s.trim().is_empty())
+            });
         if let Some(err) = from_field {
             return err.trim().to_string();
         }

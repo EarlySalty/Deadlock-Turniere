@@ -41,7 +41,8 @@ pub static DEADLOCK_HEROES: [&str; 26] = [
 ];
 
 /// Einmalig gebautes Set für O(1)-Lookups (entspricht `HERO_SET` im Original).
-static HERO_SET: Lazy<HashSet<&'static str>> = Lazy::new(|| DEADLOCK_HEROES.iter().copied().collect());
+static HERO_SET: Lazy<HashSet<&'static str>> =
+    Lazy::new(|| DEADLOCK_HEROES.iter().copied().collect());
 
 /// Prüft, ob `name` exakt einem bekannten Helden entspricht. Wie im Original
 /// gibt es keine Normalisierung (Groß-/Kleinschreibung zählt).

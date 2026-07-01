@@ -2,6 +2,112 @@
 
 ---
 
+## Neue Aufgabe (2026-07-01): SP4 Turniere Welle1 T3-T5 Umsetzung
+
+### Ziel
+- T3 (`turnier-auth` + `turnier-discord`), T4 (`turnier-automatik`) und T5 (`turnier-draft`) aus `backend/docs/plans/2026-07-01-sp4-turniere-central-db.md` auf `central-postgres-sp4` umsetzen.
+- SQLite-Queries in diesen Crates auf zentrale Postgres-Tabellen unter `turnier.*` portieren.
+- Tests/Build/Clippy/Fmt fuer die vier Crates ausfuehren; keine Secrets ausgeben, kein Commit/Push.
+
+### Status (2026-07-01)
+→ **Abgeschlossen fuer GPT-Worker** — T3-T5 umgesetzt, Review durch Claude ausstehend
+
+### Fortschritt
+- `WORKFLOW.md`, Git-Status und SP4-Plan gelesen.
+- Scope bestaetigt: T3 Sessions/Discord-Tasks/Notifier-Optout, T4 Automatik-Presets/Proposals/Votes/Feedback/Optout/Signals, T5 Draft-Repo/CAS.
+- Aktueller Arbeitsbaum war bereits schmutzig: vorhandene `WORKFLOW.md`-Aenderung und untracked Audit-Datei bleiben erhalten.
+- T3 umgesetzt: `turnier.sessions` mit `BIGINT`-Discord-ID und `TIMESTAMPTZ`, `turnier.discord_tasks` mit JSONB-Payloads/`RETURNING id`, Notifier-Lookups via PG-Bools und BIGINT-ID-Konvertierung.
+- T4 umgesetzt: Automatik-Tabellen auf `turnier.*`, JSONB fuer Offset-/Config-/Feedback-Felder, explizite PG-Zeitstempel, `ON CONFLICT DO NOTHING`, TEXT-Enum-Mapping fuer zentrale PG-Textspalten.
+- T5 umgesetzt: Draft-Repo auf PG-Transaktionen, `RETURNING id` fuer Action-Materialisierung, `is_admin_forced BOOLEAN`, `taken_at TIMESTAMPTZ`, CAS-Konfliktgrenze ohne `BEGIN IMMEDIATE`.
+- Tests auf echte zentrale Wegwerf-PG-DBs umgestellt: Sessions, Discord-Tasks, DM-Optout, Approval-Gate, Vote-Upsert, JSONB-Roundtrip, Optout, Signals, doppelte Hero-Auswahl, CAS, Admin-forced und parallele Aktion.
+- Verifikation via Infisical-geladener `DEADLOCK_CENTRAL_DSN` als `DATABASE_URL` ohne Secret-Ausgabe: `cargo build -p turnier-auth -p turnier-discord -p turnier-automatik -p turnier-draft` gruen.
+- Verifikation: `cargo test -p turnier-auth -p turnier-discord -p turnier-automatik -p turnier-draft --features testing -- --include-ignored` gruen.
+- Verifikation: `cargo clippy -p turnier-auth -p turnier-discord -p turnier-automatik -p turnier-draft --all-targets --all-features -- -D warnings` gruen.
+- Verifikation: `cargo fmt --check -p turnier-auth -p turnier-discord -p turnier-automatik -p turnier-draft` gruen; dafuer scoped `cargo fmt` ueber die vier Ziel-Crates ausgefuehrt.
+- Kein Commit/Push, keine Dienste neu gestartet, keine Secret-Werte ausgegeben.
+
+---
+
+## Neue Aufgabe (2026-07-01): Review SP4 Turniere T0-T2 Kritiker
+
+### Ziel
+- Uncommitted Diff auf `central-postgres-sp4` gegen `backend/docs/plans/2026-07-01-sp4-turniere-central-db.md`, Tickets T0-T2, kritisch prüfen.
+- Keine Codeänderungen, kein Commit/Push, keine Live-Daten anfassen.
+
+### Status (2026-07-01)
+→ **Abgeschlossen** — Review-Befunde an Claude zurückzugeben
+
+### Fortschritt
+- `WORKFLOW.md`, `git status --short --branch` und `git diff --stat` gelesen.
+- Review-Fokus bestätigt: SQLite-Entfernung, Startpfad-Migrationen, ID-Helfer, JSONB-Mapping, Dynamic-SQL-Whitelist, DSN-Ausgabe, Tests und Doku/ADR.
+- Gezielter `cargo check -p turnier-bot` ohne DB-Zugriff ausgeführt: Build bricht bereits wegen fehlendem `sqlx::sqlite` in `turnier-steam`/`turnier-draft`.
+- Blocker notiert: Workspace-SQLx-Features entfernen SQLite global, produktiver `turnier-bot`-Startpfad nutzt weiter `connect_str(&config.database_path, ...)`, Dynamic-SQL-Whitelist ist nicht in die bestehenden Builder/Reminder-Pfade integriert.
+- Kein Commit/Push, keine Dienste neu gestartet, keine Live-Daten gelesen oder geschrieben.
+
+---
+
+## Neue Aufgabe (2026-07-01): SP4 Turniere T2 Typ-/Query-Konventionen
+
+### Ziel
+- T2 aus `backend/docs/plans/2026-07-01-sp4-turniere-central-db.md` umsetzen.
+- Zentrale Helfer fuer Discord-ID-Casts, UTC-Zeit, nullable JSONB und erlaubte dynamische SQL-Muster bereitstellen.
+- ADR/DB-Vertrag/Architektur auf zentrale PG-Konventionen aktualisieren.
+- Kein Commit/Push; Änderungen bleiben uncommitted fuer Claude-Review.
+
+### Status (2026-07-01)
+→ **Abgeschlossen fuer GPT-Worker** — T2 umgesetzt, Review durch Claude ausstehend
+
+### Fortschritt
+- `WORKFLOW.md`, SP4-Plan, T1-Stand, zentrale `0009_turnier.sql` und Rust-Doku gelesen.
+- Helfer umgesetzt: `parse_discord_id`, `discord_id_to_string`, `now_utc`, nullable JSONB-Mapper und `turnier-db::dynamic_sql`-Whitelist fuer variable IN-Listen, Reminder-Dedupe-Tabellen und Patch-Update-Builder.
+- ADR 0002, `rust/docs/db-contract.md` und `rust/docs/architecture.md` auf zentrale PG-Konventionen aktualisiert: static SQL compile-checked bevorzugt, dynamisches SQL nur begruendet/whitelisted.
+- Verifikation: direkter Testlauf ohne Test-DSN scheiterte erwartungsgemaess an fehlender Test-DSN-Umgebung; danach `cargo test -p turnier-core -p turnier-db --features testing` via `Deadlock-Bots/rust/scripts/central_test_db.sh` gruen.
+- Verifikation: `cargo fmt --check -p turnier-core -p turnier-db` gruen.
+
+---
+
+## Neue Aufgabe (2026-07-01): SP4 Turniere T0+T1 zentrale Postgres-Foundation
+
+### Ziel
+- Nur T0 und T1 aus `backend/docs/plans/2026-07-01-sp4-turniere-central-db.md` umsetzen.
+- T0: Boundary-Entscheidungen dokumentieren; keine Live-Daten schreiben, keine Secrets ausgeben.
+- T1: `turnier-db` von SQLite-Fassade auf zentrale `sqlx::PgPool`-Foundation mit `dl-central-db` umstellen.
+- Kein Commit/Push; Änderungen bleiben uncommitted fuer Claude-Review.
+
+### Status (2026-07-01)
+→ **Abgeschlossen fuer GPT-Worker** — T0/T1 umgesetzt, Review durch Claude ausstehend
+
+### Fortschritt
+- `WORKFLOW.md` und SP4-Plan gelesen; vorhandene uncommitted `WORKFLOW.md`-Aenderung und untracked Audit-Datei nicht zurueckgesetzt.
+- T0 Live-Codepfad geprueft: `deadlock-turniere.service` startet `scripts/run_turniere_backend_rust.sh` und damit `rust/target/release/turnier-bot`.
+- T0 Boundary-Entscheidungen: `dl-central-db` als relative Path-Dependency `../../Deadlock-Bots/rust/crates/dl-central-db`; SQLx-Cache-Ort `rust/.sqlx`; Steam-Bridge-SQLite in T6 auf zentrale `core/voice`-Tabellen umstellen.
+- T0 Schema-Oracle read-only geprueft: `turnier` vorhanden, 37/37 erwartete `turnier`-Tabellen vorhanden, `core` und `voice` vorhanden; keine DSN ausgegeben.
+- T1 umgesetzt: `turnier-db::Pool = sqlx::PgPool`, `connect_central()`, `test_pool()` hinter Feature `testing`, `CentralDbError`-Mapping und `run_migrations()` als bewusster PG-No-op.
+- T1 Tests ersetzt: lokale SQLite-Migrationstests raus, PG-Schema-Smokes gegen `dl_central_db::testing::test_pool()` rein.
+- Verifikation: `cargo build -p turnier-db --features testing`, `SQLX_OFFLINE=true cargo build -p turnier-db --features testing`, `cargo test -p turnier-db --features testing -- --include-ignored`, `cargo clippy -p turnier-db --all-targets --all-features -- -D warnings`, `cargo fmt --check -p turnier-db` gruen.
+- Hinweis: ungescoptes `cargo fmt --check` scheitert an vorhandenen Format-Diffs ausserhalb T0/T1; nicht auto-formatiert, um Scope nicht zu erweitern.
+
+---
+
+## Neue Aufgabe (2026-07-01): SP4 Turniere zentrale Postgres-Planung
+
+### Ziel
+- Nur Plan schreiben fuer die Umstellung von lokaler SQLite-`tournament.db` auf zentrale Postgres/TimescaleDB (`turnier.*`).
+- Referenzen aus `Deadlock-Bots` lesen: zentrale Migrationen, Ledger/Data-Landscape, SP1-Methodik.
+- Keine Live-Daten anfassen, keine Dienste neu starten, kein Push/Commit durch GPT-Worker.
+
+### Status (2026-07-01)
+→ **Abgeschlossen fuer GPT-Worker** — Plan geschrieben, Review/Commit durch Claude ausstehend
+
+### Fortschritt
+- `WORKFLOW.md` gelesen; vorhandener Arbeitsbaum hatte bereits eine untracked Audit-Datei, nicht angefasst.
+- Zentrales Schema `turnier.*` aus `Deadlock-Bots/rust/crates/dl-central-db/migrations/0009_turnier.sql` gelesen; `0001`-`0011` per Suche auf Schema-/Cross-FK-Kontext geprueft.
+- Mapping/Ledger gelesen: `rust/docs/_work/sp1/data-landscape.md` und `crates/dl-central-etl/ledger/tournament/turnier.toml`; `_sqlx_migrations` ist Meta, fachliche Turnier-Tabellen liegen in `turnier`.
+- Bestehende lokale Rust-/Python-Persistenzstellen inventarisiert: Rust nutzt `turnier-db::SqlitePool`, Python/Legacy nutzt weiter `aiosqlite`; Steam-Bridge-SQLite als eigenes Risiko notiert.
+- Neuer Plan angelegt: `backend/docs/plans/2026-07-01-sp4-turniere-central-db.md`.
+
+---
+
 ## Neue Aufgabe (2026-06-30): Fix Enforcement-Gaps Turniere
 
 ### Ziel

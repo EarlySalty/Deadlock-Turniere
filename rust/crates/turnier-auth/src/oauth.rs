@@ -334,10 +334,7 @@ mod tests {
 
     #[test]
     fn fehler_detail_aus_json_error_feld() {
-        assert_eq!(
-            error_detail_from_body(r#"{"error": "kaputt"}"#),
-            "kaputt"
-        );
+        assert_eq!(error_detail_from_body(r#"{"error": "kaputt"}"#), "kaputt");
     }
 
     #[test]

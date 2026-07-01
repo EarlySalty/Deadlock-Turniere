@@ -9,7 +9,9 @@ use std::collections::HashSet;
 
 use serde::Serialize;
 use serde_json::{json, Value};
+use sqlx::{Postgres, QueryBuilder};
 
+use turnier_core::{discord_id_to_string, parse_discord_id};
 use turnier_db::Pool;
 
 use crate::broker::BrokerClient;
@@ -62,7 +64,10 @@ pub struct FailedId {
 
 impl FailedId {
     fn new(discord_id: impl Into<String>, error: impl Into<String>) -> Self {
-        Self { discord_id: discord_id.into(), error: error.into() }
+        Self {
+            discord_id: discord_id.into(),
+            error: error.into(),
+        }
     }
 }
 
@@ -126,7 +131,12 @@ impl DiscordNotifier {
 
         match self.create_channel_inner(&payload).await {
             Ok(channel_id) => {
-                let _ = tasks::mark_done(&self.pool, task_id, Some(&json!({ "channel_id": channel_id }))).await;
+                let _ = tasks::mark_done(
+                    &self.pool,
+                    task_id,
+                    Some(&json!({ "channel_id": channel_id })),
+                )
+                .await;
                 Ok(channel_id)
             }
             Err(err) => {
@@ -138,13 +148,18 @@ impl DiscordNotifier {
 
     /// Postet das Broker-Create und extrahiert die nicht-leere `channel_id`.
     async fn create_channel_inner(&self, payload: &Value) -> BrokerResult<String> {
-        let result: Value = self.broker.post_internal(path::CREATE_CHANNEL, payload).await?;
+        let result: Value = self
+            .broker
+            .post_internal(path::CREATE_CHANNEL, payload)
+            .await?;
         let channel_id = result
             .get("channel_id")
             .and_then(value_to_id_string)
             .unwrap_or_default();
         if channel_id.is_empty() {
-            return Err(BrokerError::BadJson("Discord-Broker lieferte keine channel_id"));
+            return Err(BrokerError::BadJson(
+                "Discord-Broker lieferte keine channel_id",
+            ));
         }
         Ok(channel_id)
     }
@@ -176,7 +191,9 @@ impl DiscordNotifier {
         .await
         .map_err(map_db_err)?;
 
-        let outcome = self.send_match_lobby_info_inner(channel_id, party_code, &participant_ids).await;
+        let outcome = self
+            .send_match_lobby_info_inner(channel_id, party_code, &participant_ids)
+            .await;
         match outcome {
             Ok(result) => {
                 let _ = tasks::mark_done(&self.pool, task_id, Some(&result)).await;
@@ -204,7 +221,11 @@ impl DiscordNotifier {
             .field("Lobby-Code", format!("`{party_code}`"), false)
             .field(
                 "Teilnehmer",
-                if mention_line.is_empty() { "Keine Teilnehmer mit Discord-ID".to_string() } else { mention_line.clone() },
+                if mention_line.is_empty() {
+                    "Keine Teilnehmer mit Discord-ID".to_string()
+                } else {
+                    mention_line.clone()
+                },
                 false,
             );
 
@@ -218,7 +239,9 @@ impl DiscordNotifier {
             "embed": embed,
             "allowed_user_ids": allowed,
         });
-        self.broker.post_internal(path::SEND_RICH_MESSAGE, &payload).await
+        self.broker
+            .post_internal(path::SEND_RICH_MESSAGE, &payload)
+            .await
     }
 
     /// Löscht einen Match-Channel via Broker, Task `DELETE_CHANNEL`.
@@ -246,7 +269,9 @@ impl DiscordNotifier {
     async fn delete_match_channel_inner(&self, channel_id: &str) -> BrokerResult<Value> {
         let channel = require_snowflake(channel_id)?;
         let payload = json!({ "channel_id": channel });
-        self.broker.post_internal(path::DELETE_CHANNEL, &payload).await
+        self.broker
+            .post_internal(path::DELETE_CHANNEL, &payload)
+            .await
     }
 
     /// Wartet `delay_seconds` (Default aus Config) und löscht dann den Channel.
@@ -256,7 +281,9 @@ impl DiscordNotifier {
     /// Verzögerung lebt im Prozess; bei Neustart/Crash geht sie verloren. Das
     /// Verhalten wird hier 1:1 erhalten (kein DB-gestützter Scheduler).
     pub async fn delete_match_channel_later(&self, channel_id: &str, delay_seconds: Option<f64>) {
-        let delay = delay_seconds.unwrap_or(self.delete_delay_seconds as f64).max(0.0);
+        let delay = delay_seconds
+            .unwrap_or(self.delete_delay_seconds as f64)
+            .max(0.0);
         tokio::time::sleep(std::time::Duration::from_secs_f64(delay)).await;
         if let Err(err) = self.delete_match_channel(channel_id).await {
             tracing::error!(channel_id, error = %err, "Verzögertes Löschen des Discord-Match-Channels fehlgeschlagen");
@@ -279,8 +306,14 @@ impl DiscordNotifier {
             return Ok(NotifyUsersResult::default());
         }
 
-        let flags = self.load_notify_flags(&unique_ids, event).await.map_err(map_db_err)?;
-        let optout_ids = self.load_tournament_dm_optout_ids(&unique_ids).await.map_err(map_db_err)?;
+        let flags = self
+            .load_notify_flags(&unique_ids, event)
+            .await
+            .map_err(map_db_err)?;
+        let optout_ids = self
+            .load_tournament_dm_optout_ids(&unique_ids)
+            .await
+            .map_err(map_db_err)?;
 
         let mut summary = NotifyUsersResult::default();
         for discord_id in &unique_ids {
@@ -334,7 +367,9 @@ impl DiscordNotifier {
     async fn send_dm_inner(&self, discord_id: &str, message: &str) -> BrokerResult<Value> {
         let user_id = require_snowflake(discord_id)?;
         let payload = json!({ "user_id": user_id, "content": message });
-        self.broker.post_internal(path::SEND_MESSAGE, &payload).await
+        self.broker
+            .post_internal(path::SEND_MESSAGE, &payload)
+            .await
     }
 
     /// Lädt für die gegebenen IDs den DM-Master-Schalter und das event-relevante
@@ -348,27 +383,34 @@ impl DiscordNotifier {
     ) -> sqlx::Result<Vec<(String, bool, bool)>> {
         // event.column() ist whitelisted (festes Enum) — keine User-Eingabe in
         // der Spalten-Konkatenation.
-        let column = event.column();
-        let placeholders = std::iter::repeat_n("?", ids.len()).collect::<Vec<_>>().join(",");
-        let sql = format!(
-            "SELECT discord_id, notify_discord_dm AS dm, {column} AS ev \
-             FROM user_profiles WHERE discord_id IN ({placeholders})"
-        );
-
-        let mut query = sqlx::query(&sql);
-        for id in ids {
-            query = query.bind(id);
+        let parsed_ids = ids
+            .iter()
+            .filter_map(|id| parse_discord_id(id).ok().map(|value| (value, id.as_str())))
+            .collect::<Vec<_>>();
+        if parsed_ids.is_empty() {
+            return Ok(Vec::new());
         }
-        let rows = query.fetch_all(&self.pool).await?;
+
+        let column = event.column();
+        let mut query = QueryBuilder::<Postgres>::new(format!(
+            "SELECT discord_id, notify_discord_dm AS dm, {column} AS ev \
+             FROM turnier.user_profiles WHERE discord_id IN ("
+        ));
+        let mut separated = query.separated(", ");
+        for (id, _) in &parsed_ids {
+            separated.push_bind(*id);
+        }
+        separated.push_unseparated(")");
+
+        let rows = query.build().fetch_all(&self.pool).await?;
 
         use sqlx::Row;
         Ok(rows
             .into_iter()
             .map(|row| {
-                let id: String = row.get("discord_id");
-                // Schema: NOT NULL DEFAULT — Integer 0/1.
-                let dm: bool = row.get::<i64, _>("dm") != 0;
-                let ev: bool = row.get::<i64, _>("ev") != 0;
+                let id = discord_id_to_string(row.get::<i64, _>("discord_id"));
+                let dm: bool = row.get("dm");
+                let ev: bool = row.get("ev");
                 (id, dm, ev)
             })
             .collect())
@@ -380,18 +422,30 @@ impl DiscordNotifier {
             return Ok(HashSet::new());
         }
 
-        let placeholders = std::iter::repeat_n("?", ids.len()).collect::<Vec<_>>().join(",");
-        let sql = format!(
-            "SELECT DISTINCT discord_id FROM tournament_dm_optout \
-             WHERE discord_id IN ({placeholders})"
-        );
-
-        let mut query = sqlx::query_scalar::<_, String>(&sql);
-        for id in ids {
-            query = query.bind(id);
+        let parsed_ids = ids
+            .iter()
+            .filter_map(|id| parse_discord_id(id).ok().map(|value| (value, id.as_str())))
+            .collect::<Vec<_>>();
+        if parsed_ids.is_empty() {
+            return Ok(HashSet::new());
         }
-        let rows = query.fetch_all(&self.pool).await?;
-        Ok(rows.into_iter().collect())
+
+        let mut query = QueryBuilder::<Postgres>::new(
+            "SELECT DISTINCT discord_id FROM turnier.tournament_dm_optout WHERE discord_id IN (",
+        );
+        let mut separated = query.separated(", ");
+        for (id, _) in &parsed_ids {
+            separated.push_bind(*id);
+        }
+        separated.push_unseparated(")");
+
+        let rows: Vec<i64> = query.build_query_scalar().fetch_all(&self.pool).await?;
+        let opted_out = rows.into_iter().collect::<HashSet<_>>();
+        Ok(parsed_ids
+            .into_iter()
+            .filter(|(value, _)| opted_out.contains(value))
+            .map(|(_, original)| original.to_string())
+            .collect())
     }
 
     /// DM an jeden Caster + Sammel-Mention-Embed im Match-Channel.
@@ -402,7 +456,10 @@ impl DiscordNotifier {
         caster_discord_ids: &[String],
     ) -> BrokerResult<CasterNotifyResult> {
         let unique_ids = unique_preserve_order(caster_discord_ids);
-        let optout_ids = self.load_tournament_dm_optout_ids(&unique_ids).await.map_err(map_db_err)?;
+        let optout_ids = self
+            .load_tournament_dm_optout_ids(&unique_ids)
+            .await
+            .map_err(map_db_err)?;
         let dm_ids = unique_ids
             .into_iter()
             .filter(|discord_id| !optout_ids.contains(discord_id))
@@ -423,11 +480,15 @@ impl DiscordNotifier {
         for discord_id in &dm_ids {
             let content = format!(
                 "Du bist als Caster für Match #{match_id} eingetragen. Match-Channel: {}",
-                channel_url.clone().unwrap_or_else(|| format!("#{channel_id}"))
+                channel_url
+                    .clone()
+                    .unwrap_or_else(|| format!("#{channel_id}"))
             );
             match self.send_dm_inner(discord_id, &content).await {
                 Ok(_) => summary.sent.push(discord_id.clone()),
-                Err(err) => summary.failed.push(FailedId::new(discord_id.clone(), tasks::error_text(&err))),
+                Err(err) => summary
+                    .failed
+                    .push(FailedId::new(discord_id.clone(), tasks::error_text(&err))),
             }
         }
 
@@ -442,7 +503,10 @@ impl DiscordNotifier {
                 "embed": embed,
                 "allowed_user_ids": parse_all(&dm_ids),
             });
-            let _: Value = self.broker.post_internal(path::SEND_RICH_MESSAGE, &payload).await?;
+            let _: Value = self
+                .broker
+                .post_internal(path::SEND_RICH_MESSAGE, &payload)
+                .await?;
         }
 
         Ok(summary)
@@ -470,8 +534,11 @@ impl DiscordNotifier {
         // all_ids = beide Teams zusammen, gültige Snowflakes (Original ließ
         // ungültige via `if uid`-Filter heraus; hier verwerfen wir nicht
         // parsebare zusätzlich — dieselbe Wirkung: nur gültige int-IDs).
-        let combined: Vec<String> =
-            team1_discord_ids.iter().chain(team2_discord_ids.iter()).cloned().collect();
+        let combined: Vec<String> = team1_discord_ids
+            .iter()
+            .chain(team2_discord_ids.iter())
+            .cloned()
+            .collect();
         let all_ids = parse_all(&combined);
 
         let mut embed = Embed::new()
@@ -481,7 +548,12 @@ impl DiscordNotifier {
             .field(format!("🔴 {team2_name}"), team2_mentions, true);
 
         if let Some(heroes) = hero_assignments_text.filter(|h| !h.is_empty()) {
-            let joined = heroes.iter().take(20).cloned().collect::<Vec<_>>().join("\n");
+            let joined = heroes
+                .iter()
+                .take(20)
+                .cloned()
+                .collect::<Vec<_>>()
+                .join("\n");
             embed = embed.field("Hero-Zuteilung", joined, false);
         }
         if let Some(obj) = objective_text.filter(|o| !o.is_empty()) {
@@ -496,7 +568,9 @@ impl DiscordNotifier {
             "allowed_user_ids": all_ids,
             "idempotency_key": idempotency_key(&format!("lobby-ann-{match_id}")),
         });
-        self.broker.post_internal(path::SEND_RICH_MESSAGE, &payload).await
+        self.broker
+            .post_internal(path::SEND_RICH_MESSAGE, &payload)
+            .await
     }
 
     /// Postet das Ergebnis-Embed (Sieger, Dauer, K/D/A) in den Match-Channel.
@@ -533,7 +607,11 @@ impl DiscordNotifier {
         let mut embed = Embed::new()
             .title(format!("Match {match_id} — Ergebnis"))
             .description(format!("**Sieger: {winner_name}**\nDauer: {duration_str}"))
-            .field("Match ID (Deadlock)", deadlock_match_id.unwrap_or("—").to_string(), true)
+            .field(
+                "Match ID (Deadlock)",
+                deadlock_match_id.unwrap_or("—").to_string(),
+                true,
+            )
             .field("Teams", format!("{team1_name} vs {team2_name}"), true);
 
         if !stats_lines.is_empty() {
@@ -547,7 +625,9 @@ impl DiscordNotifier {
             "allowed_user_ids": Vec::<u64>::new(),
             "idempotency_key": idempotency_key(&format!("stats-{match_id}")),
         });
-        self.broker.post_internal(path::SEND_RICH_MESSAGE, &payload).await
+        self.broker
+            .post_internal(path::SEND_RICH_MESSAGE, &payload)
+            .await
     }
 
     // --- Voice/Rollen-Abfragen ------------------------------------------
@@ -566,7 +646,10 @@ impl DiscordNotifier {
                 Some(id) => id,
                 None => {
                     tracing::warn!(discord_id, "move_voice: ungültige Discord-ID");
-                    results.failed.push(FailedId::new(discord_id.clone(), INVALID_ID_ERROR.to_string()));
+                    results.failed.push(FailedId::new(
+                        discord_id.clone(),
+                        INVALID_ID_ERROR.to_string(),
+                    ));
                     continue;
                 }
             };
@@ -576,11 +659,17 @@ impl DiscordNotifier {
                 "channel_id": channel_id,
                 "idempotency_key": idempotency_key(&format!("move-{discord_id}-{channel_id}")),
             });
-            match self.broker.post_internal::<Value, _>(path::MOVE_VOICE, &payload).await {
+            match self
+                .broker
+                .post_internal::<Value, _>(path::MOVE_VOICE, &payload)
+                .await
+            {
                 Ok(_) => results.moved.push(discord_id.clone()),
                 Err(err) => {
                     tracing::warn!(discord_id, error = %err, "move_voice fehlgeschlagen");
-                    results.failed.push(FailedId::new(discord_id.clone(), tasks::error_text(&err)));
+                    results
+                        .failed
+                        .push(FailedId::new(discord_id.clone(), tasks::error_text(&err)));
                 }
             }
         }
@@ -590,8 +679,10 @@ impl DiscordNotifier {
     /// Liest die aktuellen Voice-Channel-Mitglieder über den Broker. Fehlendes
     /// oder nicht-Listen-`members` → leere Liste (wie im Original).
     pub async fn get_voice_channel_members(&self, channel_id: i64) -> BrokerResult<Vec<Value>> {
-        let result: Value =
-            self.broker.post_internal(path::VOICE_MEMBERS, &json!({ "channel_id": channel_id })).await?;
+        let result: Value = self
+            .broker
+            .post_internal(path::VOICE_MEMBERS, &json!({ "channel_id": channel_id }))
+            .await?;
         Ok(members_list(&result))
     }
 
@@ -599,7 +690,10 @@ impl DiscordNotifier {
     pub async fn get_role_members(&self, guild_id: i64, role_id: i64) -> BrokerResult<Vec<Value>> {
         let result: Value = self
             .broker
-            .post_internal(path::ROLE_MEMBERS, &json!({ "guild_id": guild_id, "role_id": role_id }))
+            .post_internal(
+                path::ROLE_MEMBERS,
+                &json!({ "guild_id": guild_id, "role_id": role_id }),
+            )
             .await?;
         Ok(members_list(&result))
     }
@@ -620,7 +714,10 @@ impl PlayerStat {
     /// Anzeigename mit derselben Präzedenz wie das Original
     /// (`hero` ∨ `player_name` ∨ `discord_name` ∨ `"?"`).
     fn display_name(&self) -> &str {
-        for value in [&self.hero, &self.player_name, &self.discord_name].into_iter().flatten() {
+        for value in [&self.hero, &self.player_name, &self.discord_name]
+            .into_iter()
+            .flatten()
+        {
             if !value.is_empty() {
                 return value;
             }
@@ -633,7 +730,10 @@ impl PlayerStat {
 
 /// `<@id> <@id> …` für die gegebenen (bereits getrimmten) IDs.
 fn mentions(ids: &[String]) -> String {
-    ids.iter().map(|id| format!("<@{id}>")).collect::<Vec<_>>().join(" ")
+    ids.iter()
+        .map(|id| format!("<@{id}>"))
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 /// Wie [`mentions`], aber leere Liste → `"—"` (für die Team-Felder).
@@ -669,7 +769,11 @@ fn require_snowflake(value: &str) -> BrokerResult<u64> {
 
 /// Liest `result["members"]` als Liste, sonst leere Liste.
 fn members_list(result: &Value) -> Vec<Value> {
-    result.get("members").and_then(|m| m.as_array()).cloned().unwrap_or_default()
+    result
+        .get("members")
+        .and_then(|m| m.as_array())
+        .cloned()
+        .unwrap_or_default()
 }
 
 /// Wandelt einen JSON-Wert (`channel_id`) in einen getrimmten ID-String:
@@ -685,7 +789,10 @@ fn value_to_id_string(value: &Value) -> Option<String> {
 /// Übersetzt einen DB-Fehler in einen [`BrokerError`]. Das Original ließ
 /// DB-Fehler beim Task-Logging durchschlagen; hier kapseln wir sie sichtbar.
 fn map_db_err(err: sqlx::Error) -> BrokerError {
-    BrokerError::Http { status: 500, detail: format!("discord_tasks-DB-Fehler: {err}") }
+    BrokerError::Http {
+        status: 500,
+        detail: format!("discord_tasks-DB-Fehler: {err}"),
+    }
 }
 
 #[cfg(test)]
@@ -719,8 +826,14 @@ mod tests {
 
     #[test]
     fn members_list_robust() {
-        assert_eq!(members_list(&json!({ "members": [1, 2] })), vec![json!(1), json!(2)]);
-        assert_eq!(members_list(&json!({ "members": "nope" })), Vec::<Value>::new());
+        assert_eq!(
+            members_list(&json!({ "members": [1, 2] })),
+            vec![json!(1), json!(2)]
+        );
+        assert_eq!(
+            members_list(&json!({ "members": "nope" })),
+            Vec::<Value>::new()
+        );
         assert_eq!(members_list(&json!({})), Vec::<Value>::new());
     }
 
@@ -733,14 +846,25 @@ mod tests {
 
     #[test]
     fn player_stat_display_praezedenz() {
-        let p = PlayerStat { hero: Some("Abrams".into()), player_name: Some("x".into()), ..Default::default() };
+        let p = PlayerStat {
+            hero: Some("Abrams".into()),
+            player_name: Some("x".into()),
+            ..Default::default()
+        };
         assert_eq!(p.display_name(), "Abrams");
-        let p2 = PlayerStat { player_name: Some("Spieler".into()), ..Default::default() };
+        let p2 = PlayerStat {
+            player_name: Some("Spieler".into()),
+            ..Default::default()
+        };
         assert_eq!(p2.display_name(), "Spieler");
         let p3 = PlayerStat::default();
         assert_eq!(p3.display_name(), "?");
         // Leerer hero-String fällt durch auf den nächsten Kandidaten.
-        let p4 = PlayerStat { hero: Some("".into()), discord_name: Some("D".into()), ..Default::default() };
+        let p4 = PlayerStat {
+            hero: Some("".into()),
+            discord_name: Some("D".into()),
+            ..Default::default()
+        };
         assert_eq!(p4.display_name(), "D");
     }
 }

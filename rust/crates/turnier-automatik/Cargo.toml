@@ -13,11 +13,16 @@ turnier-db = { path = "../turnier-db" }
 
 sqlx.workspace = true
 serde.workspace = true
+serde_json.workspace = true
 thiserror.workspace = true
 chrono.workspace = true
 
 [dev-dependencies]
 tokio = { workspace = true }
+
+[features]
+default = []
+testing = ["turnier-db/testing"]
 
 [lints]
 workspace = true

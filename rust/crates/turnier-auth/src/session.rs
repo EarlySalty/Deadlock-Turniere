@@ -10,7 +10,7 @@ use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
 use chrono::{DateTime, Duration, Utc};
 use rand::RngCore;
-use turnier_core::UserSession;
+use turnier_core::{discord_id_to_string, parse_discord_id, UserSession};
 use turnier_db::Pool;
 
 use crate::error::{AuthError, AuthResult};
@@ -29,11 +29,11 @@ const TOKEN_BYTES: usize = 48;
 /// Original.
 #[derive(Debug, Clone, sqlx::FromRow)]
 struct SessionRow {
-    discord_id: String,
+    discord_id: i64,
     discord_name: Option<String>,
     discord_avatar: Option<String>,
     discord_roles: Option<String>,
-    expires_at: String,
+    expires_at: DateTime<Utc>,
 }
 
 /// Erzeugt ein neues opakes Session-Token (base64url ohne Padding).
@@ -69,20 +69,24 @@ pub async fn create_session(
     roles: &[String],
 ) -> AuthResult<String> {
     let token = generate_token();
-    let expires_at = Utc::now() + Duration::days(SESSION_LIFETIME_DAYS);
+    let now = Utc::now();
+    let expires_at = now + Duration::days(SESSION_LIFETIME_DAYS);
     let roles_csv = roles.join(",");
+    let discord_id = parse_discord_id(discord_id)
+        .map_err(|_| AuthError::BadRequest("Discord-ID muss numerisch sein"))?;
 
     sqlx::query(
-        "INSERT INTO sessions \
-         (token, discord_id, discord_name, discord_avatar, discord_roles, expires_at) \
-         VALUES (?, ?, ?, ?, ?, ?)",
+        "INSERT INTO turnier.sessions \
+         (token, discord_id, discord_name, discord_avatar, discord_roles, expires_at, created_at) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7)",
     )
     .bind(&token)
     .bind(discord_id)
     .bind(discord_name)
     .bind(discord_avatar)
     .bind(roles_csv)
-    .bind(expires_at.to_rfc3339())
+    .bind(expires_at)
+    .bind(now)
     .execute(pool)
     .await?;
 
@@ -107,7 +111,7 @@ pub async fn resolve_session(
 ) -> AuthResult<UserSession> {
     let row: Option<SessionRow> = sqlx::query_as(
         "SELECT discord_id, discord_name, discord_avatar, discord_roles, expires_at \
-         FROM sessions WHERE token = ?",
+         FROM turnier.sessions WHERE token = $1",
     )
     .bind(token)
     .fetch_optional(pool)
@@ -117,8 +121,7 @@ pub async fn resolve_session(
         return Err(AuthError::Unauthorized("Session ungültig oder abgelaufen"));
     };
 
-    let expires_at = parse_expires_at(&row.expires_at)?;
-    if Utc::now() > expires_at {
+    if Utc::now() > row.expires_at {
         // Opportunistisch aufräumen — der Original-Code ließ die Zeile stehen.
         let _ = delete_session(pool, token).await;
         return Err(AuthError::Unauthorized("Session abgelaufen"));
@@ -128,7 +131,7 @@ pub async fn resolve_session(
     let flags = role_sets.flags(&roles);
 
     Ok(UserSession {
-        discord_id: row.discord_id,
+        discord_id: discord_id_to_string(row.discord_id),
         discord_name: row.discord_name,
         discord_avatar: row.discord_avatar,
         roles,
@@ -144,6 +147,7 @@ pub async fn resolve_session(
 /// Pfad für tz-naive Werte. Ein unparsbarer Wert ist ein echter Datenfehler und
 /// wird als ungültige Session (401) behandelt, nicht stillschweigend als UTC
 /// angenommen.
+#[cfg(test)]
 fn parse_expires_at(raw: &str) -> AuthResult<DateTime<Utc>> {
     DateTime::parse_from_rfc3339(raw)
         .map(|dt| dt.with_timezone(&Utc))
@@ -152,7 +156,7 @@ fn parse_expires_at(raw: &str) -> AuthResult<DateTime<Utc>> {
 
 /// Löscht die Session-Zeile zu einem Token (Logout / Opportunistic-Cleanup).
 pub async fn delete_session(pool: &Pool, token: &str) -> AuthResult<()> {
-    sqlx::query("DELETE FROM sessions WHERE token = ?")
+    sqlx::query("DELETE FROM turnier.sessions WHERE token = $1")
         .bind(token)
         .execute(pool)
         .await?;
@@ -162,12 +166,10 @@ pub async fn delete_session(pool: &Pool, token: &str) -> AuthResult<()> {
 /// Löscht alle abgelaufenen Sessions. Für einen periodischen Cleanup-Task.
 ///
 /// Behebt den Map-Befund „safe" (Tabelle wächst sonst monoton, kein Cleanup im
-/// Original). Vergleich als String-Vergleich auf RFC3339 ist nur korrekt, wenn
-/// alle Zeilen denselben Offset (`+00:00`) tragen — was `create_session`
-/// garantiert. Deshalb vergleichen wir gegen `Utc::now().to_rfc3339()`.
+/// Original).
 pub async fn cleanup_expired(pool: &Pool) -> AuthResult<u64> {
-    let now = Utc::now().to_rfc3339();
-    let result = sqlx::query("DELETE FROM sessions WHERE expires_at < ?")
+    let now = Utc::now();
+    let result = sqlx::query("DELETE FROM turnier.sessions WHERE expires_at < $1")
         .bind(now)
         .execute(pool)
         .await?;
@@ -183,7 +185,9 @@ mod tests {
         let token = generate_token();
         // 48 Bytes base64url-ohne-Padding = 64 Zeichen.
         assert_eq!(token.len(), 64);
-        assert!(token.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_'));
+        assert!(token
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_'));
     }
 
     #[test]
