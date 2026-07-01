@@ -23,8 +23,8 @@ use axum::Router;
 
 use crate::state::AppState;
 
-mod brackets;
 mod automatik;
+mod brackets;
 mod casters;
 mod group_matches;
 mod helpers;

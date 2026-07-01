@@ -1,12 +1,15 @@
 //! Mapping einer `tournaments`-Zeile auf das [`Tournament`]-DTO.
 //!
-//! Die Reminder-Offset-Spalten liegen als JSON-String in der DB und werden hier
-//! zu `Vec<i64>` geparst (Default `[]` bei Null/Parse-Fehler — wie das Original,
-//! das ein leeres bzw. fehlerhaftes Feld toleriert).
+//! Die Reminder-Offset-Spalten liegen in Postgres als JSONB und werden hier zu
+//! `Vec<i64>` geparst. Die Wire-Form bleibt bei Zeitstempeln und Discord-IDs
+//! String-kompatibel.
 
+use chrono::{DateTime, Utc};
+use serde_json::Value;
 use turnier_core::Tournament;
 use turnier_db::Pool;
 
+use crate::db;
 use crate::error::{WebError, WebResult};
 
 /// Typisierte Rohzeile eines Turniers. Enum-Spalten werden — wie überall in der
@@ -20,29 +23,29 @@ struct TournamentRow {
     team_size: i64,
     series_format: i64,
     final_series_format: Option<i64>,
-    registration_start: Option<String>,
-    registration_end: Option<String>,
-    checkin_start: Option<String>,
-    group_phase_start: Option<String>,
-    bracket_start: Option<String>,
+    registration_start: Option<DateTime<Utc>>,
+    registration_end: Option<DateTime<Utc>>,
+    checkin_start: Option<DateTime<Utc>>,
+    group_phase_start: Option<DateTime<Utc>>,
+    bracket_start: Option<DateTime<Utc>>,
     bracket_format: String,
     tournament_mode: String,
     tournament_game_mode: String,
-    auto_lobby_enabled: i64,
-    created_by: String,
-    created_at: String,
-    updated_at: String,
+    auto_lobby_enabled: bool,
+    created_by: i64,
+    created_at: DateTime<Utc>,
+    updated_at: DateTime<Utc>,
     invite_mode: String,
-    invite_window_start: Option<String>,
-    invite_window_end: Option<String>,
-    lobby_settings: Option<String>,
-    exclude_from_leaderboard: i64,
-    reminder_offsets: Option<String>,
-    start_reminder_offsets: Option<String>,
+    invite_window_start: Option<DateTime<Utc>>,
+    invite_window_end: Option<DateTime<Utc>>,
+    lobby_settings: Option<Value>,
+    exclude_from_leaderboard: bool,
+    reminder_offsets: Option<Value>,
+    start_reminder_offsets: Option<Value>,
     match_objective: String,
     no_show_grace_minutes: i64,
     rules: Option<String>,
-    is_test: i64,
+    is_test: bool,
 }
 
 /// String → Domänen-Enum (snake_case-serde); Fehler → 500.
@@ -61,35 +64,35 @@ impl TournamentRow {
             team_size: self.team_size,
             series_format: self.series_format,
             final_series_format: self.final_series_format,
-            registration_start: self.registration_start,
-            registration_end: self.registration_end,
-            checkin_start: self.checkin_start,
-            group_phase_start: self.group_phase_start,
-            bracket_start: self.bracket_start,
+            registration_start: db::opt_ts_to_string(self.registration_start),
+            registration_end: db::opt_ts_to_string(self.registration_end),
+            checkin_start: db::opt_ts_to_string(self.checkin_start),
+            group_phase_start: db::opt_ts_to_string(self.group_phase_start),
+            bracket_start: db::opt_ts_to_string(self.bracket_start),
             bracket_format: self.bracket_format,
             tournament_mode: parse_enum(&self.tournament_mode)?,
             tournament_game_mode: parse_enum(&self.tournament_game_mode)?,
-            auto_lobby_enabled: self.auto_lobby_enabled != 0,
-            created_by: self.created_by,
-            created_at: self.created_at,
-            updated_at: self.updated_at,
+            auto_lobby_enabled: self.auto_lobby_enabled,
+            created_by: db::discord_id_to_string(self.created_by),
+            created_at: db::ts_to_string(self.created_at),
+            updated_at: db::ts_to_string(self.updated_at),
             invite_mode: parse_enum(&self.invite_mode)?,
-            invite_window_start: self.invite_window_start,
-            invite_window_end: self.invite_window_end,
-            lobby_settings: self.lobby_settings,
-            exclude_from_leaderboard: self.exclude_from_leaderboard != 0,
+            invite_window_start: db::opt_ts_to_string(self.invite_window_start),
+            invite_window_end: db::opt_ts_to_string(self.invite_window_end),
+            lobby_settings: db::json_to_wire(self.lobby_settings),
+            exclude_from_leaderboard: self.exclude_from_leaderboard,
             reminder_offsets: turnier_core::json::parse_offsets(
-                self.reminder_offsets.as_deref(),
+                db::json_to_wire(self.reminder_offsets).as_deref(),
                 &turnier_core::json::default_reminder_offsets(),
             ),
             start_reminder_offsets: turnier_core::json::parse_offsets(
-                self.start_reminder_offsets.as_deref(),
+                db::json_to_wire(self.start_reminder_offsets).as_deref(),
                 &turnier_core::json::default_start_reminder_offsets(),
             ),
             match_objective: self.match_objective,
             no_show_grace_minutes: self.no_show_grace_minutes,
             rules: self.rules,
-            is_test: self.is_test != 0,
+            is_test: self.is_test,
         })
     }
 }
@@ -101,16 +104,16 @@ const TOURNAMENT_SELECT: &str =
             created_at, updated_at, invite_mode, invite_window_start, invite_window_end, \
             lobby_settings, exclude_from_leaderboard, reminder_offsets, start_reminder_offsets, \
             match_objective, no_show_grace_minutes, rules, is_test \
-     FROM tournaments";
+     FROM turnier.\"tournaments\"";
 
 /// Lädt ein Turnier als DTO (oder 404).
 pub async fn load_tournament_dto(pool: &Pool, tournament_id: i64) -> WebResult<Tournament> {
-    let row: Option<TournamentRow> =
-        sqlx::query_as(&format!("{TOURNAMENT_SELECT} WHERE id = ?"))
-            .bind(tournament_id)
-            .fetch_optional(pool)
-            .await?;
-    row.ok_or_else(|| WebError::not_found("Turnier nicht gefunden"))?.into_dto()
+    let row: Option<TournamentRow> = sqlx::query_as(&format!("{TOURNAMENT_SELECT} WHERE id = $1"))
+        .bind(tournament_id)
+        .fetch_optional(pool)
+        .await?;
+    row.ok_or_else(|| WebError::not_found("Turnier nicht gefunden"))?
+        .into_dto()
 }
 
 /// Lädt alle Turniere als DTO-Liste (`created_at DESC`).

@@ -5,7 +5,8 @@ use axum::routing::post;
 use axum::{Json, Router};
 use serde_json::{json, Value};
 
-use crate::error::{WebError, WebResult};
+use crate::db;
+use crate::error::{map_unique_conflict, WebError, WebResult};
 use crate::extract::AuthUser;
 use crate::state::AppState;
 
@@ -18,7 +19,10 @@ pub fn router() -> Router<AppState> {
             "/api/tournaments/{tournament_id}/signup",
             post(solo_signup).delete(cancel_solo_signup),
         )
-        .route("/api/tournaments/{tournament_id}/checkin", post(checkin_player))
+        .route(
+            "/api/tournaments/{tournament_id}/checkin",
+            post(checkin_player),
+        )
 }
 
 /// `POST /api/tournaments/{tournament_id}/signup` — Solo-Anmeldung (201).
@@ -30,33 +34,38 @@ async fn solo_signup(
 ) -> WebResult<(axum::http::StatusCode, Json<Value>)> {
     let pool = &state.pool;
     helpers::ensure_consent(pool, &user.discord_id).await?;
+    let user_discord_id = db::parse_discord_id(&user.discord_id)?;
 
     let t = helpers::load_tournament_or_404(pool, tournament_id).await?;
     helpers::ensure_registration_open(&t.status)?;
 
     // Bereits angemeldet?
     let signup_exists: Option<(i64,)> = sqlx::query_as(
-        "SELECT id FROM tournament_signups WHERE tournament_id = ? AND discord_id = ?",
+        r#"SELECT id FROM turnier."tournament_signups" WHERE tournament_id = $1 AND discord_id = $2"#,
     )
     .bind(tournament_id)
-    .bind(&user.discord_id)
+    .bind(user_discord_id)
     .fetch_optional(pool)
     .await?;
     if signup_exists.is_some() {
-        return Err(WebError::conflict("Du bist bereits für dieses Turnier angemeldet"));
+        return Err(WebError::conflict(
+            "Du bist bereits für dieses Turnier angemeldet",
+        ));
     }
 
     // Bereits in einem Team?
     let in_team: Option<(i64,)> = sqlx::query_as(
-        "SELECT tm.id FROM team_members tm JOIN teams t ON tm.team_id = t.id \
-         WHERE t.tournament_id = ? AND tm.discord_id = ?",
+        r#"SELECT tm.id FROM turnier."team_members" tm JOIN turnier."teams" t ON tm.team_id = t.id
+         WHERE t.tournament_id = $1 AND tm.discord_id = $2"#,
     )
     .bind(tournament_id)
-    .bind(&user.discord_id)
+    .bind(user_discord_id)
     .fetch_optional(pool)
     .await?;
     if in_team.is_some() {
-        return Err(WebError::conflict("Du bist bereits in einem Team dieses Turniers"));
+        return Err(WebError::conflict(
+            "Du bist bereits in einem Team dieses Turniers",
+        ));
     }
 
     let rank = helpers::load_rank_input(&state, &user.discord_id).await;
@@ -65,28 +74,27 @@ async fn solo_signup(
     let mut tx = pool.begin().await?;
 
     sqlx::query(
-        "INSERT INTO tournament_signups \
-         (tournament_id, discord_id, discord_name, steam_id, rank, rank_score) \
-         VALUES (?, ?, ?, ?, ?, ?)",
+        r#"INSERT INTO turnier."tournament_signups"
+         (tournament_id, discord_id, discord_name, steam_id, rank, rank_score, signed_up_at)
+         VALUES ($1, $2, $3, $4, $5, $6, now())"#,
     )
     .bind(tournament_id)
-    .bind(&user.discord_id)
+    .bind(user_discord_id)
     .bind(user.discord_name.as_deref())
     .bind(&rank.steam_id)
     .bind(&rank.rank)
     .bind(rank.rank_score)
     .execute(&mut *tx)
-    .await?;
+    .await
+    .map_err(|err| map_unique_conflict(err, "Du bist bereits für dieses Turnier angemeldet"))?;
 
     if team_size == 1 {
         // Bei 1vs1 ist jeder Teilnehmer sein eigenes Team — direkt anlegen.
         // BEWUSST 1:1 erhalten: Such-Schleife für eindeutigen name_key statt
         // UNIQUE-Retry (Original-Smell „behavior-change", routes.py:1119-1150).
-        let resolved_name = helpers::sanitize_discord_name(
-            user.discord_name.as_deref(),
-            Some(&user.discord_id),
-        )
-        .unwrap_or_else(|| user.discord_id.clone());
+        let resolved_name =
+            helpers::sanitize_discord_name(user.discord_name.as_deref(), Some(&user.discord_id))
+                .unwrap_or_else(|| user.discord_id.clone());
 
         let mut team_name = truncate_chars(&resolved_name, 32);
         let base_key = team_name.to_lowercase();
@@ -94,7 +102,7 @@ async fn solo_signup(
         let mut suffix = 1;
         loop {
             let exists: Option<(i64,)> = sqlx::query_as(
-                "SELECT id FROM teams WHERE tournament_id = ? AND name_key = ?",
+                r#"SELECT id FROM turnier."teams" WHERE tournament_id = $1 AND name_key = $2"#,
             )
             .bind(tournament_id)
             .bind(&name_key)
@@ -109,23 +117,24 @@ async fn solo_signup(
         }
 
         let team_id: i64 = sqlx::query_scalar(
-            "INSERT INTO teams (tournament_id, name, name_key, captain_discord_id) \
-             VALUES (?, ?, ?, ?) RETURNING id",
+            r#"INSERT INTO turnier."teams"
+             (tournament_id, name, name_key, captain_discord_id, created_at, recruitment_status)
+             VALUES ($1, $2, $3, $4, now(), 'open') RETURNING id"#,
         )
         .bind(tournament_id)
         .bind(&team_name)
         .bind(&name_key)
-        .bind(&user.discord_id)
+        .bind(user_discord_id)
         .fetch_one(&mut *tx)
         .await?;
 
         sqlx::query(
-            "INSERT INTO team_members \
-             (team_id, discord_id, discord_name, steam_id, rank, rank_score, role) \
-             VALUES (?, ?, ?, ?, ?, ?, 'captain')",
+            r#"INSERT INTO turnier."team_members"
+             (team_id, discord_id, discord_name, steam_id, rank, rank_score, role, joined_at)
+             VALUES ($1, $2, $3, $4, $5, $6, 'captain', now())"#,
         )
         .bind(team_id)
-        .bind(&user.discord_id)
+        .bind(user_discord_id)
         .bind(&resolved_name)
         .bind(&rank.steam_id)
         .bind(&rank.rank)
@@ -134,11 +143,12 @@ async fn solo_signup(
         .await?;
 
         sqlx::query(
-            "UPDATE tournament_signups SET team_id = ? WHERE tournament_id = ? AND discord_id = ?",
+            r#"UPDATE turnier."tournament_signups" SET team_id = $1
+             WHERE tournament_id = $2 AND discord_id = $3"#,
         )
         .bind(team_id)
         .bind(tournament_id)
-        .bind(&user.discord_id)
+        .bind(user_discord_id)
         .execute(&mut *tx)
         .await?;
     }
@@ -159,6 +169,7 @@ async fn cancel_solo_signup(
     Path(tournament_id): Path<i64>,
 ) -> WebResult<Json<Value>> {
     let pool = &state.pool;
+    let user_discord_id = db::parse_discord_id(&user.discord_id)?;
 
     let t = helpers::load_tournament_or_404(pool, tournament_id).await?;
     if t.status != "registration" {
@@ -166,10 +177,10 @@ async fn cancel_solo_signup(
     }
 
     let signup: Option<(Option<i64>,)> = sqlx::query_as(
-        "SELECT team_id FROM tournament_signups WHERE tournament_id = ? AND discord_id = ?",
+        r#"SELECT team_id FROM turnier."tournament_signups" WHERE tournament_id = $1 AND discord_id = $2"#,
     )
     .bind(tournament_id)
-    .bind(&user.discord_id)
+    .bind(user_discord_id)
     .fetch_optional(pool)
     .await?;
     let Some((team_id,)) = signup else {
@@ -181,13 +192,17 @@ async fn cancel_solo_signup(
         ));
     }
 
-    sqlx::query("DELETE FROM tournament_signups WHERE tournament_id = ? AND discord_id = ?")
-        .bind(tournament_id)
-        .bind(&user.discord_id)
-        .execute(pool)
-        .await?;
+    sqlx::query(
+        r#"DELETE FROM turnier."tournament_signups" WHERE tournament_id = $1 AND discord_id = $2"#,
+    )
+    .bind(tournament_id)
+    .bind(user_discord_id)
+    .execute(pool)
+    .await?;
 
-    Ok(Json(json!({ "status": "abgemeldet", "tournament_id": tournament_id })))
+    Ok(Json(
+        json!({ "status": "abgemeldet", "tournament_id": tournament_id }),
+    ))
 }
 
 /// `POST /api/tournaments/{tournament_id}/checkin` — Spieler-Check-in.
@@ -198,6 +213,7 @@ async fn checkin_player(
     Path(tournament_id): Path<i64>,
 ) -> WebResult<Json<Value>> {
     let pool = &state.pool;
+    let user_discord_id = db::parse_discord_id(&user.discord_id)?;
 
     let t = helpers::load_tournament_or_404(pool, tournament_id).await?;
     if t.status != "checkin" {
@@ -207,26 +223,28 @@ async fn checkin_player(
     let mut tx = pool.begin().await?;
 
     let signup_exists: Option<(i64,)> = sqlx::query_as(
-        "SELECT id FROM tournament_signups WHERE tournament_id = ? AND discord_id = ?",
+        r#"SELECT id FROM turnier."tournament_signups" WHERE tournament_id = $1 AND discord_id = $2"#,
     )
     .bind(tournament_id)
-    .bind(&user.discord_id)
+    .bind(user_discord_id)
     .fetch_optional(&mut *tx)
     .await?;
 
     if signup_exists.is_none() {
         // Lazy-Signup für Team-Mitglieder, die noch keinen Signup-Eintrag haben.
         let membership: Option<MembershipRow> = sqlx::query_as(
-            "SELECT tm.discord_name, tm.steam_id, tm.rank, tm.rank_score, tm.team_id \
-             FROM team_members tm JOIN teams t ON t.id = tm.team_id \
-             WHERE t.tournament_id = ? AND tm.discord_id = ?",
+            r#"SELECT tm.discord_name, tm.steam_id, tm.rank, tm.rank_score, tm.team_id
+             FROM turnier."team_members" tm JOIN turnier."teams" t ON t.id = tm.team_id
+             WHERE t.tournament_id = $1 AND tm.discord_id = $2"#,
         )
         .bind(tournament_id)
-        .bind(&user.discord_id)
+        .bind(user_discord_id)
         .fetch_optional(&mut *tx)
         .await?;
         let Some(m) = membership else {
-            return Err(WebError::forbidden("Du bist für dieses Turnier nicht angemeldet"));
+            return Err(WebError::forbidden(
+                "Du bist für dieses Turnier nicht angemeldet",
+            ));
         };
         // `user.discord_name or membership.discord_name` — leerer String fällt
         // zurück (Python-`or`-Semantik 1:1).
@@ -251,20 +269,23 @@ async fn checkin_player(
         .await?;
     }
 
-    let existing_checkin: Option<(String,)> = sqlx::query_as(
-        "SELECT checked_in_at FROM tournament_checkins WHERE tournament_id = ? AND discord_id = ?",
+    let existing_checkin: Option<(i64,)> = sqlx::query_as(
+        r#"SELECT id FROM turnier."tournament_checkins" WHERE tournament_id = $1 AND discord_id = $2"#,
     )
     .bind(tournament_id)
-    .bind(&user.discord_id)
+    .bind(user_discord_id)
     .fetch_optional(&mut *tx)
     .await?;
     let already_checked_in = existing_checkin.is_some();
     if !already_checked_in {
-        sqlx::query("INSERT INTO tournament_checkins (tournament_id, discord_id) VALUES (?, ?)")
-            .bind(tournament_id)
-            .bind(&user.discord_id)
-            .execute(&mut *tx)
-            .await?;
+        sqlx::query(
+            r#"INSERT INTO turnier."tournament_checkins" (tournament_id, discord_id, checked_in_at)
+             VALUES ($1, $2, now())"#,
+        )
+        .bind(tournament_id)
+        .bind(user_discord_id)
+        .execute(&mut *tx)
+        .await?;
     }
 
     helpers::audit(
@@ -281,7 +302,9 @@ async fn checkin_player(
 
     tx.commit().await?;
 
-    Ok(Json(json!({ "checked_in": true, "already_checked_in": already_checked_in })))
+    Ok(Json(
+        json!({ "checked_in": true, "already_checked_in": already_checked_in }),
+    ))
 }
 
 /// Mitgliedszeile für den Lazy-Signup beim Check-in.

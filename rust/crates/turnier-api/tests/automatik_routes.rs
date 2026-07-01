@@ -1,3 +1,5 @@
+#![cfg(feature = "testing")]
+
 use std::sync::Arc;
 
 use axum::body::{to_bytes, Body};
@@ -9,11 +11,16 @@ use tower::ServiceExt;
 
 use turnier_api::{build_router, AppState};
 use turnier_config::Config;
-use turnier_db::{connect_str, run_migrations, Pool};
+use turnier_db::{test_pool, Pool, TestDb};
 
-async fn setup() -> (Router, Pool, String) {
-    let pool = connect_str(":memory:", 1).await.expect("pool open");
-    run_migrations(&pool).await.expect("migrate");
+const MOD_USER_ID: &str = "910000000000000001";
+const CASTER_CONFLICT_ID: &str = "910000000000000002";
+const CASTER_USER_ID: &str = "910000000000000003";
+const CASTER_APPROVER_ID: &str = "910000000000000004";
+
+async fn setup() -> (Router, TestDb, Pool, String) {
+    let db = test_pool().await.expect("central test pool");
+    let pool = db.pool().clone();
 
     let mut config = Config::from_env();
     config.discord_admin_role_ids = "admin-role".to_string();
@@ -28,7 +35,7 @@ async fn setup() -> (Router, Pool, String) {
         .expect("state build");
     let token = turnier_auth::create_session(
         &pool,
-        "mod-user",
+        MOD_USER_ID,
         "Mod User",
         "",
         &["mod-role".to_string()],
@@ -36,7 +43,7 @@ async fn setup() -> (Router, Pool, String) {
     .await
     .expect("session");
 
-    (build_router(state), pool, token)
+    (build_router(state), db, pool, token)
 }
 
 async fn create_caster_session(pool: &Pool, discord_id: &str) -> String {
@@ -80,7 +87,9 @@ async fn send_json(
     uri: &str,
     body: Option<Value>,
 ) -> (StatusCode, Value) {
-    let body = body.map(|v| Body::from(v.to_string())).unwrap_or_else(Body::empty);
+    let body = body
+        .map(|v| Body::from(v.to_string()))
+        .unwrap_or_else(Body::empty);
     let request = Request::builder()
         .method(method)
         .uri(uri)
@@ -117,15 +126,14 @@ async fn create_preset(app: &Router, token: &str, name: &str) -> Value {
 
 #[tokio::test]
 async fn preset_admin_roundtrip() {
-    let (app, _pool, token) = setup().await;
+    let (app, _db, _pool, token) = setup().await;
 
     let created = create_preset(&app, &token, "Preset One").await;
     let preset_id = created["id"].as_i64().unwrap();
     assert_eq!(created["name"], "Preset One");
     assert_eq!(created["active"], true);
 
-    let (status, listed) =
-        send_json(&app, &token, Method::GET, "/api/admin/presets", None).await;
+    let (status, listed) = send_json(&app, &token, Method::GET, "/api/admin/presets", None).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(listed.as_array().unwrap().len(), 1);
 
@@ -178,15 +186,14 @@ async fn preset_admin_roundtrip() {
     assert_eq!(status, StatusCode::NO_CONTENT);
     assert_eq!(body, Value::Null);
 
-    let (status, listed) =
-        send_json(&app, &token, Method::GET, "/api/admin/presets", None).await;
+    let (status, listed) = send_json(&app, &token, Method::GET, "/api/admin/presets", None).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(listed.as_array().unwrap().len(), 0);
 }
 
 #[tokio::test]
 async fn manual_proposal_uses_preset_config() {
-    let (app, _pool, token) = setup().await;
+    let (app, _db, _pool, token) = setup().await;
     let preset = create_preset(&app, &token, "Manual Preset").await;
     let preset_id = preset["id"].as_i64().unwrap();
 
@@ -207,8 +214,7 @@ async fn manual_proposal_uses_preset_config() {
     assert_eq!(proposal["preset_id"], preset_id);
     assert!(!proposal["config_json"].as_str().unwrap().is_empty());
 
-    let config: Value =
-        serde_json::from_str(proposal["config_json"].as_str().unwrap()).unwrap();
+    let config: Value = serde_json::from_str(proposal["config_json"].as_str().unwrap()).unwrap();
     assert_eq!(config["name"], "Manual Cup");
     assert_eq!(config["category"], "fun");
     assert_eq!(config["preset_id"], preset_id);
@@ -216,8 +222,8 @@ async fn manual_proposal_uses_preset_config() {
 
 #[tokio::test]
 async fn invalid_proposal_transition_returns_conflict() {
-    let (app, pool, token) = setup().await;
-    let caster_token = create_caster_session(&pool, "caster-conflict-user").await;
+    let (app, _db, pool, token) = setup().await;
+    let caster_token = create_caster_session(&pool, CASTER_CONFLICT_ID).await;
     let preset = create_preset(&app, &token, "Transition Preset").await;
     let preset_id = preset["id"].as_i64().unwrap();
     let (status, proposal) = send_json(
@@ -245,7 +251,7 @@ async fn invalid_proposal_transition_returns_conflict() {
 
 #[tokio::test]
 async fn proposal_vote_requires_actor_caster_role() {
-    let (app, _pool, token) = setup().await;
+    let (app, _db, _pool, token) = setup().await;
     let preset = create_preset(&app, &token, "Caster Gate Preset").await;
     let preset_id = preset["id"].as_i64().unwrap();
     let (status, proposal) = send_json(
@@ -272,8 +278,8 @@ async fn proposal_vote_requires_actor_caster_role() {
 
 #[tokio::test]
 async fn proposal_vote_uses_authenticated_actor_id() {
-    let (app, pool, token) = setup().await;
-    let caster_token = create_caster_session(&pool, "caster-user").await;
+    let (app, _db, pool, token) = setup().await;
+    let caster_token = create_caster_session(&pool, CASTER_USER_ID).await;
 
     let preset = create_preset(&app, &token, "Actor Vote Preset").await;
     let preset_id = preset["id"].as_i64().unwrap();
@@ -298,20 +304,20 @@ async fn proposal_vote_uses_authenticated_actor_id() {
     .await;
     assert_eq!(status, StatusCode::NO_CONTENT);
 
-    let stored: String = sqlx::query_scalar(
-        "SELECT caster_discord_id FROM tournament_proposal_votes WHERE proposal_id = ?",
+    let stored: i64 = sqlx::query_scalar(
+        r#"SELECT caster_discord_id FROM turnier."tournament_proposal_votes" WHERE proposal_id = $1"#,
     )
     .bind(proposal_id)
     .fetch_one(&pool)
     .await
     .unwrap();
-    assert_eq!(stored, "caster-user");
+    assert_eq!(stored, CASTER_USER_ID.parse::<i64>().unwrap());
 }
 
 #[tokio::test]
 async fn proposal_event_approve_requires_actor_caster_role_even_after_caster_vote() {
-    let (app, pool, token) = setup().await;
-    let caster_token = create_caster_session(&pool, "caster-approver").await;
+    let (app, _db, pool, token) = setup().await;
+    let caster_token = create_caster_session(&pool, CASTER_APPROVER_ID).await;
     let preset = create_preset(&app, &token, "Event Caster Gate Preset").await;
     let preset_id = preset["id"].as_i64().unwrap();
     let (status, proposal) = send_json(
@@ -341,7 +347,7 @@ async fn proposal_event_approve_requires_actor_caster_role_even_after_caster_vot
         &caster_token,
         Method::POST,
         &format!("/api/admin/proposals/{proposal_id}/votes"),
-        Some(json!({ "caster_id": "caster-approver", "decision": "approve" })),
+        Some(json!({ "caster_id": CASTER_APPROVER_ID, "decision": "approve" })),
     )
     .await;
     assert_eq!(status, StatusCode::NO_CONTENT);
@@ -356,20 +362,20 @@ async fn proposal_event_approve_requires_actor_caster_role_even_after_caster_vot
     .await;
     assert_eq!(status, StatusCode::FORBIDDEN);
 
-    let stored: String = sqlx::query_scalar("SELECT state FROM tournament_proposals WHERE id = ?")
-        .bind(proposal_id)
-        .fetch_one(&pool)
-        .await
-        .unwrap();
+    let stored: String =
+        sqlx::query_scalar(r#"SELECT state FROM turnier."tournament_proposals" WHERE id = $1"#)
+            .bind(proposal_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
     assert_eq!(stored, "pending_approval");
 }
 
 #[tokio::test]
 async fn dm_optout_uses_own_session_discord_id() {
-    let (app, pool, token) = setup().await;
+    let (app, _db, pool, token) = setup().await;
 
-    let (status, initial) =
-        send_json(&app, &token, Method::GET, "/api/me/dm-optout", None).await;
+    let (status, initial) = send_json(&app, &token, Method::GET, "/api/me/dm-optout", None).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(initial["scopes"].as_array().unwrap().len(), 0);
 
@@ -384,22 +390,16 @@ async fn dm_optout_uses_own_session_discord_id() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(set["scopes"], json!(["fun"]));
 
-    let owner: String = sqlx::query_scalar(
-        "SELECT discord_id FROM tournament_dm_optout WHERE scope = 'fun'",
+    let owner: i64 = sqlx::query_scalar(
+        r#"SELECT discord_id FROM turnier."tournament_dm_optout" WHERE scope = 'fun'"#,
     )
     .fetch_one(&pool)
     .await
     .unwrap();
-    assert_eq!(owner, "mod-user");
+    assert_eq!(owner, MOD_USER_ID.parse::<i64>().unwrap());
 
-    let (status, cleared) = send_json(
-        &app,
-        &token,
-        Method::DELETE,
-        "/api/me/dm-optout/fun",
-        None,
-    )
-    .await;
+    let (status, cleared) =
+        send_json(&app, &token, Method::DELETE, "/api/me/dm-optout/fun", None).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(cleared["scopes"].as_array().unwrap().len(), 0);
 }

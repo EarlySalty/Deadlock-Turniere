@@ -11,12 +11,16 @@
 //! unabhängig kompiliert; eine spätere Konsolidierung in ein geteiltes
 //! `crate::loaders`-Modul ist möglich.
 
+use chrono::{DateTime, Utc};
+use serde_json::Value;
+
 use turnier_core::{
     BracketMatch, BracketMiniGroup, Group, GroupMatch, GroupTeam, MatchGame, Team, TeamMember,
     TournamentSignup,
 };
 use turnier_db::Pool;
 
+use crate::db;
 use crate::error::WebResult;
 use crate::state::AppState;
 
@@ -68,7 +72,7 @@ fn parse_enum<T: serde::de::DeserializeOwned>(value: &str) -> WebResult<T> {
 struct MemberRow {
     id: i64,
     team_id: i64,
-    discord_id: String,
+    discord_id: i64,
     team_member_discord_name: Option<String>,
     session_discord_name: Option<String>,
     profile_display_name: Option<String>,
@@ -76,36 +80,37 @@ struct MemberRow {
     rank: Option<String>,
     rank_score: i64,
     role: String,
-    joined_at: String,
+    joined_at: DateTime<Utc>,
 }
 
 const MEMBER_SELECT: &str =
     "SELECT tm.id, tm.team_id, tm.discord_id, tm.discord_name AS team_member_discord_name, \
             s.discord_name AS session_discord_name, p.display_name AS profile_display_name, \
             tm.steam_id, tm.rank, tm.rank_score, tm.role, tm.joined_at \
-     FROM team_members tm \
-     LEFT JOIN (SELECT discord_id, MAX(discord_name) AS discord_name FROM sessions \
+     FROM turnier.\"team_members\" tm \
+     LEFT JOIN (SELECT discord_id, MAX(discord_name) AS discord_name FROM turnier.\"sessions\" \
                 WHERE discord_name IS NOT NULL AND discord_name != '' GROUP BY discord_id) s \
        ON s.discord_id = tm.discord_id \
-     LEFT JOIN user_profiles p ON p.discord_id = tm.discord_id \
-     WHERE tm.team_id = ? ORDER BY tm.joined_at";
+     LEFT JOIN turnier.\"user_profiles\" p ON p.discord_id = tm.discord_id \
+     WHERE tm.team_id = $1 ORDER BY tm.joined_at";
 
 /// Wandelt eine Mitglieds-Rohzeile in das DTO und reichert den Rang an.
 async fn member_from_row(state: &AppState, row: MemberRow) -> WebResult<TeamMember> {
+    let discord_id = db::discord_id_to_string(row.discord_id);
     let discord_name = preferred_discord_name(
         &[
             row.profile_display_name.as_deref(),
             row.session_discord_name.as_deref(),
             row.team_member_discord_name.as_deref(),
         ],
-        Some(&row.discord_id),
+        Some(&discord_id),
     );
 
     // Rang-Anreicherung: Discord-first, DB-Fallback (`_enrich_rank_data`).
     let mut steam_id = row.steam_id;
     let mut rank = row.rank;
     let mut rank_score = row.rank_score;
-    if let Ok(Some(profile)) = state.rank_resolver.rank_profile(&row.discord_id).await {
+    if let Ok(Some(profile)) = state.rank_resolver.rank_profile(&discord_id).await {
         if profile.steam_id.is_some() {
             steam_id = profile.steam_id;
         }
@@ -118,19 +123,22 @@ async fn member_from_row(state: &AppState, row: MemberRow) -> WebResult<TeamMemb
     Ok(TeamMember {
         id: row.id,
         team_id: row.team_id,
-        discord_id: row.discord_id,
+        discord_id,
         discord_name,
         steam_id,
         rank,
         rank_score,
         role: parse_enum(&row.role)?,
-        joined_at: row.joined_at,
+        joined_at: db::ts_to_string(row.joined_at),
     })
 }
 
 /// Lädt die Mitglieder eines Teams (sortiert, angereichert).
 pub async fn load_team_members(state: &AppState, team_id: i64) -> WebResult<Vec<TeamMember>> {
-    let rows: Vec<MemberRow> = sqlx::query_as(MEMBER_SELECT).bind(team_id).fetch_all(&state.pool).await?;
+    let rows: Vec<MemberRow> = sqlx::query_as(MEMBER_SELECT)
+        .bind(team_id)
+        .fetch_all(&state.pool)
+        .await?;
     let mut members = Vec::with_capacity(rows.len());
     for row in rows {
         members.push(member_from_row(state, row).await?);
@@ -145,8 +153,8 @@ struct TeamRow {
     tournament_id: i64,
     name: String,
     name_key: String,
-    captain_discord_id: String,
-    created_at: String,
+    captain_discord_id: i64,
+    created_at: DateTime<Utc>,
     recruitment_status: String,
 }
 
@@ -154,8 +162,8 @@ struct TeamRow {
 /// `_load_team_detail`.
 pub async fn load_team_detail(state: &AppState, team_id: i64) -> WebResult<Team> {
     let row: TeamRow = sqlx::query_as(
-        "SELECT id, tournament_id, name, name_key, captain_discord_id, created_at, recruitment_status \
-         FROM teams WHERE id = ?",
+        r#"SELECT id, tournament_id, name, name_key, captain_discord_id, created_at, recruitment_status
+         FROM turnier."teams" WHERE id = $1"#,
     )
     .bind(team_id)
     .fetch_one(&state.pool)
@@ -166,8 +174,8 @@ pub async fn load_team_detail(state: &AppState, team_id: i64) -> WebResult<Team>
         tournament_id: row.tournament_id,
         name: row.name,
         name_key: row.name_key,
-        captain_discord_id: row.captain_discord_id,
-        created_at: row.created_at,
+        captain_discord_id: db::discord_id_to_string(row.captain_discord_id),
+        created_at: db::ts_to_string(row.created_at),
         recruitment_status: parse_enum(&row.recruitment_status)?,
         members,
     })
@@ -175,10 +183,13 @@ pub async fn load_team_detail(state: &AppState, team_id: i64) -> WebResult<Team>
 
 /// Lädt alle Teams eines Turniers inkl. Mitglieder. Portiert
 /// `_load_teams_for_tournament`.
-pub async fn load_teams_for_tournament(state: &AppState, tournament_id: i64) -> WebResult<Vec<Team>> {
+pub async fn load_teams_for_tournament(
+    state: &AppState,
+    tournament_id: i64,
+) -> WebResult<Vec<Team>> {
     let rows: Vec<TeamRow> = sqlx::query_as(
-        "SELECT id, tournament_id, name, name_key, captain_discord_id, created_at, recruitment_status \
-         FROM teams WHERE tournament_id = ?",
+        r#"SELECT id, tournament_id, name, name_key, captain_discord_id, created_at, recruitment_status
+         FROM turnier."teams" WHERE tournament_id = $1"#,
     )
     .bind(tournament_id)
     .fetch_all(&state.pool)
@@ -191,8 +202,8 @@ pub async fn load_teams_for_tournament(state: &AppState, tournament_id: i64) -> 
             tournament_id: row.tournament_id,
             name: row.name,
             name_key: row.name_key,
-            captain_discord_id: row.captain_discord_id,
-            created_at: row.created_at,
+            captain_discord_id: db::discord_id_to_string(row.captain_discord_id),
+            created_at: db::ts_to_string(row.created_at),
             recruitment_status: parse_enum(&row.recruitment_status)?,
             members,
         });
@@ -225,10 +236,10 @@ struct GroupMatchRow {
     party_code: Option<String>,
     deadlock_match_id: Option<String>,
     match_duration_s: Option<i64>,
-    match_stats: Option<String>,
-    hero_assignments: Option<String>,
-    scheduled_at: Option<String>,
-    played_at: Option<String>,
+    match_stats: Option<Value>,
+    hero_assignments: Option<Value>,
+    scheduled_at: Option<DateTime<Utc>>,
+    played_at: Option<DateTime<Utc>>,
 }
 
 /// Lädt alle Gruppen eines Turniers inkl. Tabellen und Matches. Portiert
@@ -242,7 +253,7 @@ pub async fn load_groups_for_tournament(pool: &Pool, tournament_id: i64) -> WebR
         seeding_order: i64,
     }
     let group_rows: Vec<GroupRow> = sqlx::query_as(
-        "SELECT id, tournament_id, name, seeding_order FROM groups WHERE tournament_id = ? ORDER BY seeding_order",
+        r#"SELECT id, tournament_id, name, seeding_order FROM turnier."groups" WHERE tournament_id = $1 ORDER BY seeding_order"#,
     )
     .bind(tournament_id)
     .fetch_all(pool)
@@ -251,8 +262,8 @@ pub async fn load_groups_for_tournament(pool: &Pool, tournament_id: i64) -> WebR
     let mut groups = Vec::with_capacity(group_rows.len());
     for g in group_rows {
         let team_rows: Vec<GroupTeamRow> = sqlx::query_as(
-            "SELECT gt.id, gt.group_id, gt.team_id, t.name AS team_name, gt.wins, gt.losses, gt.points \
-             FROM group_teams gt JOIN teams t ON gt.team_id = t.id WHERE gt.group_id = ?",
+            r#"SELECT gt.id, gt.group_id, gt.team_id, t.name AS team_name, gt.wins, gt.losses, gt.points
+             FROM turnier."group_teams" gt JOIN turnier."teams" t ON gt.team_id = t.id WHERE gt.group_id = $1"#,
         )
         .bind(g.id)
         .fetch_all(pool)
@@ -271,9 +282,9 @@ pub async fn load_groups_for_tournament(pool: &Pool, tournament_id: i64) -> WebR
             .collect();
 
         let match_rows: Vec<GroupMatchRow> = sqlx::query_as(
-            "SELECT id, group_id, team1_id, team2_id, winner_id, status, steam_party_id, party_code, \
-                    deadlock_match_id, match_duration_s, match_stats, hero_assignments, scheduled_at, played_at \
-             FROM group_matches WHERE group_id = ?",
+            r#"SELECT id, group_id, team1_id, team2_id, winner_id, status, steam_party_id, party_code,
+                    deadlock_match_id, match_duration_s, match_stats, hero_assignments, scheduled_at, played_at
+             FROM turnier."group_matches" WHERE group_id = $1"#,
         )
         .bind(g.id)
         .fetch_all(pool)
@@ -291,10 +302,10 @@ pub async fn load_groups_for_tournament(pool: &Pool, tournament_id: i64) -> WebR
                 party_code: r.party_code,
                 deadlock_match_id: r.deadlock_match_id,
                 match_duration_s: r.match_duration_s,
-                match_stats: r.match_stats,
-                hero_assignments: r.hero_assignments.as_deref().and_then(|s| serde_json::from_str(s).ok()),
-                scheduled_at: r.scheduled_at,
-                played_at: r.played_at,
+                match_stats: db::json_to_wire(r.match_stats),
+                hero_assignments: db::json_object(r.hero_assignments),
+                scheduled_at: db::opt_ts_to_string(r.scheduled_at),
+                played_at: db::opt_ts_to_string(r.played_at),
             });
         }
 
@@ -331,11 +342,11 @@ struct BracketRow {
     party_code: Option<String>,
     deadlock_match_id: Option<String>,
     match_duration_s: Option<i64>,
-    match_stats: Option<String>,
-    hero_assignments: Option<String>,
-    scheduled_at: Option<String>,
-    on_stream: i64,
-    played_at: Option<String>,
+    match_stats: Option<Value>,
+    hero_assignments: Option<Value>,
+    scheduled_at: Option<DateTime<Utc>>,
+    on_stream: bool,
+    played_at: Option<DateTime<Utc>>,
 }
 
 /// Lädt die Serien-Spiele eines Bracket-Matches (über den geteilten
@@ -349,10 +360,7 @@ async fn bracket_from_row(pool: &Pool, row: BracketRow) -> WebResult<BracketMatc
     let games = load_match_games(pool, row.id).await?;
     let series_wins_team1 = games.iter().filter(|g| g.winner_team == Some(1)).count() as i64;
     let series_wins_team2 = games.iter().filter(|g| g.winner_team == Some(2)).count() as i64;
-    let hero_assignments = row
-        .hero_assignments
-        .as_deref()
-        .and_then(|s| serde_json::from_str(s).ok());
+    let hero_assignments = db::json_object(row.hero_assignments);
 
     Ok(BracketMatch {
         id: row.id,
@@ -373,25 +381,25 @@ async fn bracket_from_row(pool: &Pool, row: BracketRow) -> WebResult<BracketMatc
         party_code: row.party_code,
         deadlock_match_id: row.deadlock_match_id,
         match_duration_s: row.match_duration_s,
-        match_stats: row.match_stats,
+        match_stats: db::json_to_wire(row.match_stats),
         hero_assignments,
         series_wins_team1,
         series_wins_team2,
         games,
-        scheduled_at: row.scheduled_at,
-        on_stream: row.on_stream != 0,
-        played_at: row.played_at,
+        scheduled_at: db::opt_ts_to_string(row.scheduled_at),
+        on_stream: row.on_stream,
+        played_at: db::opt_ts_to_string(row.played_at),
     })
 }
 
 /// Lädt alle Bracket-Matches eines Turniers. Portiert `_load_bracket_matches`.
 pub async fn load_bracket_matches(pool: &Pool, tournament_id: i64) -> WebResult<Vec<BracketMatch>> {
     let rows: Vec<BracketRow> = sqlx::query_as(
-        "SELECT id, tournament_id, round, position, bracket_type, mini_group_id, team1_id, team2_id, \
-                winner_id, status, source_match1_id, source_match2_id, loser_to_match_id, loser_to_slot, \
-                steam_party_id, party_code, deadlock_match_id, match_duration_s, match_stats, \
-                hero_assignments, scheduled_at, on_stream, played_at \
-         FROM bracket_matches WHERE tournament_id = ? ORDER BY round, position",
+        r#"SELECT id, tournament_id, round, position, bracket_type, mini_group_id, team1_id, team2_id,
+                winner_id, status, source_match1_id, source_match2_id, loser_to_match_id, loser_to_slot,
+                steam_party_id, party_code, deadlock_match_id, match_duration_s, match_stats,
+                hero_assignments, scheduled_at, on_stream, played_at
+         FROM turnier."bracket_matches" WHERE tournament_id = $1 ORDER BY round, position"#,
     )
     .bind(tournament_id)
     .fetch_all(pool)
@@ -419,8 +427,8 @@ pub async fn load_mini_groups_for_tournament(
         advances_to_slot: Option<i64>,
     }
     let mini_rows: Vec<MiniRow> = sqlx::query_as(
-        "SELECT id, tournament_id, round, position, advances_to_match_id, advances_to_slot \
-         FROM bracket_mini_groups WHERE tournament_id = ? ORDER BY round, position, id",
+        r#"SELECT id, tournament_id, round, position, advances_to_match_id, advances_to_slot
+         FROM turnier."bracket_mini_groups" WHERE tournament_id = $1 ORDER BY round, position, id"#,
     )
     .bind(tournament_id)
     .fetch_all(pool)
@@ -429,14 +437,14 @@ pub async fn load_mini_groups_for_tournament(
     let mut out = Vec::with_capacity(mini_rows.len());
     for row in mini_rows {
         let team_ids: Vec<i64> = sqlx::query_scalar(
-            "SELECT team_id FROM bracket_mini_group_teams \
-             WHERE mini_group_id = ? AND team_id IS NOT NULL ORDER BY seed_order, id",
+            r#"SELECT team_id FROM turnier."bracket_mini_group_teams"
+             WHERE mini_group_id = $1 AND team_id IS NOT NULL ORDER BY seed_order, id"#,
         )
         .bind(row.id)
         .fetch_all(pool)
         .await?;
         let match_ids: Vec<i64> = sqlx::query_scalar(
-            "SELECT id FROM bracket_matches WHERE mini_group_id = ? ORDER BY round, position, id",
+            r#"SELECT id FROM turnier."bracket_matches" WHERE mini_group_id = $1 ORDER BY round, position, id"#,
         )
         .bind(row.id)
         .fetch_all(pool)
@@ -460,7 +468,7 @@ pub async fn load_mini_groups_for_tournament(
 struct SignupRow {
     id: i64,
     tournament_id: i64,
-    discord_id: String,
+    discord_id: i64,
     signup_discord_name: Option<String>,
     session_discord_name: Option<String>,
     team_member_discord_name: Option<String>,
@@ -469,7 +477,7 @@ struct SignupRow {
     rank: Option<String>,
     rank_score: i64,
     team_id: Option<i64>,
-    signed_up_at: String,
+    signed_up_at: DateTime<Utc>,
 }
 
 /// Lädt alle Signups eines Turniers (angereichert). Portiert
@@ -479,19 +487,19 @@ pub async fn load_signups_for_tournament(
     tournament_id: i64,
 ) -> WebResult<Vec<TournamentSignup>> {
     let rows: Vec<SignupRow> = sqlx::query_as(
-        "SELECT ts.id, ts.tournament_id, ts.discord_id, \
-                ts.discord_name AS signup_discord_name, s.discord_name AS session_discord_name, \
-                tm.discord_name AS team_member_discord_name, p.display_name AS profile_display_name, \
-                ts.steam_id, ts.rank, ts.rank_score, ts.team_id, ts.signed_up_at \
-         FROM tournament_signups ts \
-         LEFT JOIN (SELECT discord_id, MAX(discord_name) AS discord_name FROM sessions \
-                    WHERE discord_name IS NOT NULL AND discord_name != '' GROUP BY discord_id) s \
-           ON s.discord_id = ts.discord_id \
-         LEFT JOIN (SELECT discord_id, MAX(discord_name) AS discord_name FROM team_members \
-                    WHERE discord_name IS NOT NULL AND discord_name != '' GROUP BY discord_id) tm \
-           ON tm.discord_id = ts.discord_id \
-         LEFT JOIN user_profiles p ON p.discord_id = ts.discord_id \
-         WHERE ts.tournament_id = ? ORDER BY ts.signed_up_at DESC",
+        r#"SELECT ts.id, ts.tournament_id, ts.discord_id,
+                ts.discord_name AS signup_discord_name, s.discord_name AS session_discord_name,
+                tm.discord_name AS team_member_discord_name, p.display_name AS profile_display_name,
+                ts.steam_id, ts.rank, ts.rank_score, ts.team_id, ts.signed_up_at
+         FROM turnier."tournament_signups" ts
+         LEFT JOIN (SELECT discord_id, MAX(discord_name) AS discord_name FROM turnier."sessions"
+                    WHERE discord_name IS NOT NULL AND discord_name != '' GROUP BY discord_id) s
+           ON s.discord_id = ts.discord_id
+         LEFT JOIN (SELECT discord_id, MAX(discord_name) AS discord_name FROM turnier."team_members"
+                    WHERE discord_name IS NOT NULL AND discord_name != '' GROUP BY discord_id) tm
+           ON tm.discord_id = ts.discord_id
+         LEFT JOIN turnier."user_profiles" p ON p.discord_id = ts.discord_id
+         WHERE ts.tournament_id = $1 ORDER BY ts.signed_up_at DESC"#,
     )
     .bind(tournament_id)
     .fetch_all(&state.pool)
@@ -506,13 +514,14 @@ pub async fn load_signups_for_tournament(
                 row.signup_discord_name.as_deref(),
                 row.team_member_discord_name.as_deref(),
             ],
-            Some(&row.discord_id),
+            Some(&db::discord_id_to_string(row.discord_id)),
         );
+        let discord_id = db::discord_id_to_string(row.discord_id);
 
         let mut steam_id = row.steam_id;
         let mut rank = row.rank;
         let mut rank_score = row.rank_score;
-        if let Ok(Some(profile)) = state.rank_resolver.rank_profile(&row.discord_id).await {
+        if let Ok(Some(profile)) = state.rank_resolver.rank_profile(&discord_id).await {
             if profile.steam_id.is_some() {
                 steam_id = profile.steam_id;
             }
@@ -525,13 +534,13 @@ pub async fn load_signups_for_tournament(
         signups.push(TournamentSignup {
             id: row.id,
             tournament_id: row.tournament_id,
-            discord_id: row.discord_id,
+            discord_id,
             discord_name,
             steam_id,
             rank,
             rank_score,
             team_id: row.team_id,
-            signed_up_at: row.signed_up_at,
+            signed_up_at: db::ts_to_string(row.signed_up_at),
         });
     }
     Ok(signups)

@@ -20,7 +20,11 @@ const SESSION_COOKIE: &str = "session_token";
 
 /// Liest das Session-Token: `Authorization: Bearer` hat Vorrang vor dem Cookie.
 fn extract_token(parts: &Parts) -> Option<String> {
-    if let Some(value) = parts.headers.get(AUTHORIZATION).and_then(|v| v.to_str().ok()) {
+    if let Some(value) = parts
+        .headers
+        .get(AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+    {
         if let Some(token) = value.strip_prefix("Bearer ") {
             let token = token.trim();
             if !token.is_empty() {
@@ -41,9 +45,12 @@ pub struct AuthUser(pub UserSession);
 impl FromRequestParts<AppState> for AuthUser {
     type Rejection = WebError;
 
-    async fn from_request_parts(parts: &mut Parts, state: &AppState) -> Result<Self, Self::Rejection> {
-        let token = extract_token(parts)
-            .ok_or_else(|| WebError::unauthorized("Nicht authentifiziert"))?;
+    async fn from_request_parts(
+        parts: &mut Parts,
+        state: &AppState,
+    ) -> Result<Self, Self::Rejection> {
+        let token =
+            extract_token(parts).ok_or_else(|| WebError::unauthorized("Nicht authentifiziert"))?;
         let session = turnier_auth::resolve_session(&state.pool, &token, &state.role_sets).await?;
         Ok(AuthUser(session))
     }
@@ -56,7 +63,10 @@ pub struct ModUser(pub UserSession);
 impl FromRequestParts<AppState> for ModUser {
     type Rejection = WebError;
 
-    async fn from_request_parts(parts: &mut Parts, state: &AppState) -> Result<Self, Self::Rejection> {
+    async fn from_request_parts(
+        parts: &mut Parts,
+        state: &AppState,
+    ) -> Result<Self, Self::Rejection> {
         let AuthUser(user) = AuthUser::from_request_parts(parts, state).await?;
         if !user.is_mod {
             return Err(WebError::forbidden("Moderator-Berechtigung erforderlich"));
@@ -72,7 +82,10 @@ pub struct AdminUser(pub UserSession);
 impl FromRequestParts<AppState> for AdminUser {
     type Rejection = WebError;
 
-    async fn from_request_parts(parts: &mut Parts, state: &AppState) -> Result<Self, Self::Rejection> {
+    async fn from_request_parts(
+        parts: &mut Parts,
+        state: &AppState,
+    ) -> Result<Self, Self::Rejection> {
         let AuthUser(user) = AuthUser::from_request_parts(parts, state).await?;
         if !user.is_admin {
             return Err(WebError::forbidden("Admin-Berechtigung erforderlich"));
@@ -89,9 +102,15 @@ pub struct OptionalUser(pub Option<UserSession>);
 impl FromRequestParts<AppState> for OptionalUser {
     type Rejection = std::convert::Infallible;
 
-    async fn from_request_parts(parts: &mut Parts, state: &AppState) -> Result<Self, Self::Rejection> {
+    async fn from_request_parts(
+        parts: &mut Parts,
+        state: &AppState,
+    ) -> Result<Self, Self::Rejection> {
         Ok(OptionalUser(
-            AuthUser::from_request_parts(parts, state).await.ok().map(|a| a.0),
+            AuthUser::from_request_parts(parts, state)
+                .await
+                .ok()
+                .map(|a| a.0),
         ))
     }
 }

@@ -34,7 +34,10 @@ pub fn build_router(state: AppState) -> Router {
         .merge(leaderboard::router())
         .merge(draft::router())
         .merge(test_mode::router(&state.config))
-        .layer(axum::middleware::from_fn_with_state(state.clone(), host_guard))
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            host_guard,
+        ))
         .layer(cors)
         .with_state(state)
 }

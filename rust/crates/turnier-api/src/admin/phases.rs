@@ -11,9 +11,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use sqlx::Row;
 
-use turnier_engine::{
-    assign_random_teams, finalize_checkin, FinalizeCheckinParams, SoloShuffler,
-};
+use turnier_engine::{assign_random_teams, finalize_checkin, FinalizeCheckinParams, SoloShuffler};
 
 use crate::error::{WebError, WebResult};
 use crate::extract::ModUser;
@@ -24,8 +22,14 @@ use super::helpers::load_tournament_or_404;
 /// Router der Phasen-Endpunkte.
 pub fn router() -> Router<AppState> {
     Router::new()
-        .route("/api/admin/tournaments/{tournament_id}/finalize-checkin", post(finalize_checkin_route))
-        .route("/api/admin/tournaments/{tournament_id}/assign-random", post(assign_random))
+        .route(
+            "/api/admin/tournaments/{tournament_id}/finalize-checkin",
+            post(finalize_checkin_route),
+        )
+        .route(
+            "/api/admin/tournaments/{tournament_id}/assign-random",
+            post(assign_random),
+        )
 }
 
 /// Query-Parameter `?confirm=bool` für die Check-in-Finalisierung.
@@ -209,5 +213,7 @@ async fn assign_random(
     )
     .await?;
 
-    Ok(Json(json!({ "status": "ok", "teams_created": teams_created })))
+    Ok(Json(
+        json!({ "status": "ok", "teams_created": teams_created }),
+    ))
 }

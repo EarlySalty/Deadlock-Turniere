@@ -56,12 +56,26 @@ pub async fn create_lobby(
     actor: &str,
 ) -> WebResult<Json<Value>> {
     let result = match kind {
-        MatchKind::Bracket => state.match_manager.create_lobby(tournament_id, match_id).await,
-        MatchKind::Group => state.match_manager.create_group_lobby(tournament_id, match_id).await,
+        MatchKind::Bracket => {
+            state
+                .match_manager
+                .create_lobby(tournament_id, match_id)
+                .await
+        }
+        MatchKind::Group => {
+            state
+                .match_manager
+                .create_group_lobby(tournament_id, match_id)
+                .await
+        }
     }
     .map_err(map_steam_error)?;
 
-    let action = if kind == MatchKind::Bracket { "match_create_lobby" } else { "group_match_create_lobby" };
+    let action = if kind == MatchKind::Bracket {
+        "match_create_lobby"
+    } else {
+        "group_match_create_lobby"
+    };
     super::helpers::audit(
         &state.pool,
         action,
@@ -93,12 +107,26 @@ pub async fn start_match(
     actor: &str,
 ) -> WebResult<Json<Value>> {
     let result = match kind {
-        MatchKind::Bracket => state.match_manager.start_match(tournament_id, match_id).await,
-        MatchKind::Group => state.match_manager.start_group_match(tournament_id, match_id).await,
+        MatchKind::Bracket => {
+            state
+                .match_manager
+                .start_match(tournament_id, match_id)
+                .await
+        }
+        MatchKind::Group => {
+            state
+                .match_manager
+                .start_group_match(tournament_id, match_id)
+                .await
+        }
     }
     .map_err(map_steam_error)?;
 
-    let action = if kind == MatchKind::Bracket { "match_start_steam" } else { "group_match_start_steam" };
+    let action = if kind == MatchKind::Bracket {
+        "match_start_steam"
+    } else {
+        "group_match_start_steam"
+    };
     super::helpers::audit(
         &state.pool,
         action,
@@ -111,7 +139,9 @@ pub async fn start_match(
     )
     .await?;
 
-    Ok(Json(json!({ "success": true, "match_id": result.get("match_id") })))
+    Ok(Json(
+        json!({ "success": true, "match_id": result.get("match_id") }),
+    ))
 }
 
 /// `fetch-result` für beide Match-Arten (gibt das rohe Ergebnis-Dict zurück).
@@ -123,8 +153,18 @@ pub async fn fetch_result(
     actor: &str,
 ) -> WebResult<Json<Value>> {
     let result = match kind {
-        MatchKind::Bracket => state.match_manager.fetch_match_result(tournament_id, match_id).await,
-        MatchKind::Group => state.match_manager.fetch_group_match_result(tournament_id, match_id).await,
+        MatchKind::Bracket => {
+            state
+                .match_manager
+                .fetch_match_result(tournament_id, match_id)
+                .await
+        }
+        MatchKind::Group => {
+            state
+                .match_manager
+                .fetch_group_match_result(tournament_id, match_id)
+                .await
+        }
     }
     .map_err(map_steam_error)?;
 
@@ -158,12 +198,26 @@ pub async fn leave_lobby(
     actor: &str,
 ) -> WebResult<Json<Value>> {
     let result = match kind {
-        MatchKind::Bracket => state.match_manager.leave_lobby(tournament_id, match_id).await,
-        MatchKind::Group => state.match_manager.leave_group_lobby(tournament_id, match_id).await,
+        MatchKind::Bracket => {
+            state
+                .match_manager
+                .leave_lobby(tournament_id, match_id)
+                .await
+        }
+        MatchKind::Group => {
+            state
+                .match_manager
+                .leave_group_lobby(tournament_id, match_id)
+                .await
+        }
     }
     .map_err(map_steam_error)?;
 
-    let action = if kind == MatchKind::Bracket { "match_leave_lobby" } else { "group_match_leave_lobby" };
+    let action = if kind == MatchKind::Bracket {
+        "match_leave_lobby"
+    } else {
+        "group_match_leave_lobby"
+    };
     super::helpers::audit(
         &state.pool,
         action,
@@ -188,11 +242,11 @@ pub async fn reset_match(
 ) -> WebResult<Json<Value>> {
     let select_sql = match kind {
         MatchKind::Bracket => {
-            "SELECT discord_channel_id, status FROM bracket_matches WHERE id = ? AND tournament_id = ?"
+            r#"SELECT discord_channel_id, status FROM turnier."bracket_matches" WHERE id = $1 AND tournament_id = $2"#
         }
         MatchKind::Group => {
-            "SELECT gm.discord_channel_id, gm.status FROM group_matches gm \
-             JOIN groups g ON g.id = gm.group_id WHERE gm.id = ? AND g.tournament_id = ?"
+            r#"SELECT gm.discord_channel_id, gm.status FROM turnier."group_matches" gm
+             JOIN turnier."groups" g ON g.id = gm.group_id WHERE gm.id = $1 AND g.tournament_id = $2"#
         }
     };
     let row = sqlx::query(select_sql)
@@ -216,14 +270,14 @@ pub async fn reset_match(
 
     let (update_sql, action) = match kind {
         MatchKind::Bracket => (
-            "UPDATE bracket_matches SET status = 'pending', steam_party_id = NULL, party_code = NULL, \
-             deadlock_match_id = NULL, discord_channel_id = NULL WHERE id = ? AND tournament_id = ?",
+            r#"UPDATE turnier."bracket_matches" SET status = 'pending', steam_party_id = NULL, party_code = NULL,
+             deadlock_match_id = NULL, discord_channel_id = NULL WHERE id = $1 AND tournament_id = $2"#,
             "match_reset",
         ),
         MatchKind::Group => (
-            "UPDATE group_matches SET status = 'pending', steam_party_id = NULL, party_code = NULL, \
-             deadlock_match_id = NULL, discord_channel_id = NULL \
-             WHERE id = ? AND group_id IN (SELECT id FROM groups WHERE tournament_id = ?)",
+            r#"UPDATE turnier."group_matches" SET status = 'pending', steam_party_id = NULL, party_code = NULL,
+             deadlock_match_id = NULL, discord_channel_id = NULL
+             WHERE id = $1 AND group_id IN (SELECT id FROM turnier."groups" WHERE tournament_id = $2)"#,
             "group_match_reset",
         ),
     };
@@ -268,15 +322,15 @@ pub async fn manual_lobby(
 
     let (update_sql, action, fail_detail) = match kind {
         MatchKind::Bracket => (
-            "UPDATE bracket_matches SET party_code = ?, steam_party_id = ?, status = 'lobby_created' \
-             WHERE id = ? AND tournament_id = ? AND status NOT IN ('completed', 'forfeit', 'cancelled')",
+            r#"UPDATE turnier."bracket_matches" SET party_code = $1, steam_party_id = $2, status = 'lobby_created'
+             WHERE id = $3 AND tournament_id = $4 AND status NOT IN ('completed', 'forfeit', 'cancelled')"#,
             "match_manual_lobby",
             "Match kann nicht manuell gesetzt werden",
         ),
         MatchKind::Group => (
-            "UPDATE group_matches SET party_code = ?, steam_party_id = ?, status = 'lobby_created' \
-             WHERE id = ? AND group_id IN (SELECT id FROM groups WHERE tournament_id = ?) \
-             AND status NOT IN ('completed', 'forfeit', 'cancelled')",
+            r#"UPDATE turnier."group_matches" SET party_code = $1, steam_party_id = $2, status = 'lobby_created'
+             WHERE id = $3 AND group_id IN (SELECT id FROM turnier."groups" WHERE tournament_id = $4)
+             AND status NOT IN ('completed', 'forfeit', 'cancelled')"#,
             "group_match_manual_lobby",
             "Gruppen-Match kann nicht manuell gesetzt werden",
         ),

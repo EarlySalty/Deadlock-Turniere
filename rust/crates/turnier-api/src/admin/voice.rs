@@ -7,6 +7,7 @@ use axum::{Json, Router};
 use serde::Deserialize;
 use serde_json::{json, Value};
 
+use crate::db;
 use crate::error::{WebError, WebResult};
 use crate::extract::AdminUser;
 use crate::state::AppState;
@@ -16,10 +17,19 @@ use super::helpers::team_member_discord_ids;
 /// Router der Voice-Endpunkte.
 pub fn router() -> Router<AppState> {
     Router::new()
-        .route("/api/admin/tournaments/{tournament_id}/voice/move-teams", post(move_teams))
-        .route("/api/admin/tournaments/{tournament_id}/voice/move-sammelpunkt", post(move_sammelpunkt))
+        .route(
+            "/api/admin/tournaments/{tournament_id}/voice/move-teams",
+            post(move_teams),
+        )
+        .route(
+            "/api/admin/tournaments/{tournament_id}/voice/move-sammelpunkt",
+            post(move_sammelpunkt),
+        )
         .route("/api/admin/voice/move-user", post(move_user))
-        .route("/api/admin/voice/channel-members/{channel_id}", get(channel_members))
+        .route(
+            "/api/admin/voice/channel-members/{channel_id}",
+            get(channel_members),
+        )
 }
 
 /// `?match_id=int`-Query für `move-teams` (Pflicht).
@@ -36,7 +46,7 @@ async fn move_teams(
     Query(query): Query<MatchIdQuery>,
 ) -> WebResult<Json<Value>> {
     let row = sqlx::query_as::<_, (Option<i64>, Option<i64>)>(
-        "SELECT team1_id, team2_id FROM bracket_matches WHERE id = ? AND tournament_id = ?",
+        r#"SELECT team1_id, team2_id FROM turnier."bracket_matches" WHERE id = $1 AND tournament_id = $2"#,
     )
     .bind(query.match_id)
     .bind(tournament_id)
@@ -58,11 +68,19 @@ async fn move_teams(
 
     let result1 = state
         .notifier
-        .move_users_to_voice_channel(&team1_ids, state.config.discord_team1_voice_channel_id, guild_id)
+        .move_users_to_voice_channel(
+            &team1_ids,
+            state.config.discord_team1_voice_channel_id,
+            guild_id,
+        )
         .await;
     let result2 = state
         .notifier
-        .move_users_to_voice_channel(&team2_ids, state.config.discord_team2_voice_channel_id, guild_id)
+        .move_users_to_voice_channel(
+            &team2_ids,
+            state.config.discord_team2_voice_channel_id,
+            guild_id,
+        )
         .await;
 
     Ok(Json(json!({ "team1": result1, "team2": result2 })))
@@ -74,21 +92,28 @@ async fn move_sammelpunkt(
     _admin: AdminUser,
     Path(tournament_id): Path<i64>,
 ) -> WebResult<Json<Value>> {
-    let rows: Vec<(Option<String>,)> = sqlx::query_as(
-        "SELECT DISTINCT tm.discord_id FROM team_members tm \
-         JOIN teams t ON t.id = tm.team_id \
-         WHERE t.tournament_id = ? AND tm.discord_id IS NOT NULL",
+    let rows: Vec<(i64,)> = sqlx::query_as(
+        r#"SELECT DISTINCT tm.discord_id FROM turnier."team_members" tm
+         JOIN turnier."teams" t ON t.id = tm.team_id
+         WHERE t.tournament_id = $1"#,
     )
     .bind(tournament_id)
     .fetch_all(&state.pool)
     .await?;
-    let all_ids: Vec<String> =
-        rows.into_iter().filter_map(|r| r.0).filter(|s| !s.is_empty()).collect();
+    let all_ids: Vec<String> = rows
+        .into_iter()
+        .map(|r| db::discord_id_to_string(r.0))
+        .filter(|s| !s.is_empty())
+        .collect();
 
     let guild_id: i64 = state.config.discord_guild_id.parse().unwrap_or(0);
     let result = state
         .notifier
-        .move_users_to_voice_channel(&all_ids, state.config.discord_sammelpunkt_channel_id, guild_id)
+        .move_users_to_voice_channel(
+            &all_ids,
+            state.config.discord_sammelpunkt_channel_id,
+            guild_id,
+        )
         .await;
     Ok(Json(serde_json::to_value(result).unwrap_or_default()))
 }
@@ -128,5 +153,7 @@ async fn channel_members(
             tracing::error!(channel_id, error = %err, "Voice-Channel-Mitglieder konnten nicht geladen werden");
             WebError::internal("Voice-Channel-Mitglieder konnten nicht geladen werden")
         })?;
-    Ok(Json(json!({ "channel_id": channel_id, "members": members })))
+    Ok(Json(
+        json!({ "channel_id": channel_id, "members": members }),
+    ))
 }

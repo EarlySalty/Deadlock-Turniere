@@ -11,7 +11,7 @@ use std::collections::HashMap;
 
 use chrono::{DateTime, Utc};
 use serde_json::Value;
-use sqlx::Row;
+use sqlx::{Postgres, Row};
 
 use turnier_core::{
     BracketMatch, BracketMiniGroup, Group, GroupMatch, GroupTeam, InviteMode, RankProfile,
@@ -20,7 +20,8 @@ use turnier_core::{
 };
 use turnier_db::Pool;
 
-use crate::error::{WebError, WebResult};
+use crate::db;
+use crate::error::{map_unique_conflict, WebError, WebResult};
 use crate::state::AppState;
 
 /// Aktuelle Consent-Version (Modul-Konstante `_CURRENT_CONSENT_VERSION`).
@@ -89,11 +90,11 @@ pub async fn resolve_discord_name(
     }
 
     let session_name: Option<(Option<String>,)> = sqlx::query_as(
-        "SELECT discord_name FROM sessions \
-         WHERE discord_id = ? AND discord_name IS NOT NULL AND discord_name != '' \
-         ORDER BY token DESC LIMIT 1",
+        r#"SELECT discord_name FROM turnier."sessions"
+         WHERE discord_id = $1 AND discord_name IS NOT NULL AND discord_name != ''
+         ORDER BY token DESC LIMIT 1"#,
     )
-    .bind(discord_id)
+    .bind(db::parse_discord_id(discord_id)?)
     .fetch_optional(pool)
     .await?;
     if let Some((Some(name),)) = session_name {
@@ -103,11 +104,11 @@ pub async fn resolve_discord_name(
     }
 
     let member_name: Option<(Option<String>,)> = sqlx::query_as(
-        "SELECT discord_name FROM team_members \
-         WHERE discord_id = ? AND discord_name IS NOT NULL AND discord_name != '' \
-         ORDER BY joined_at DESC LIMIT 1",
+        r#"SELECT discord_name FROM turnier."team_members"
+         WHERE discord_id = $1 AND discord_name IS NOT NULL AND discord_name != ''
+         ORDER BY joined_at DESC LIMIT 1"#,
     )
-    .bind(discord_id)
+    .bind(db::parse_discord_id(discord_id)?)
     .fetch_optional(pool)
     .await?;
     if let Some((Some(name),)) = member_name {
@@ -117,11 +118,11 @@ pub async fn resolve_discord_name(
     }
 
     let profile_name: Option<(Option<String>,)> = sqlx::query_as(
-        "SELECT display_name FROM user_profiles \
-         WHERE discord_id = ? AND display_name IS NOT NULL AND display_name != '' \
-         ORDER BY updated_at DESC LIMIT 1",
+        r#"SELECT display_name FROM turnier."user_profiles"
+         WHERE discord_id = $1 AND display_name IS NOT NULL AND display_name != ''
+         ORDER BY updated_at DESC LIMIT 1"#,
     )
-    .bind(discord_id)
+    .bind(db::parse_discord_id(discord_id)?)
     .fetch_optional(pool)
     .await?;
     if let Some((Some(name),)) = profile_name {
@@ -149,7 +150,11 @@ pub fn parse_timestamp(value: Option<&str>) -> Option<DateTime<Utc>> {
         return Some(dt.with_timezone(&Utc));
     }
     // Naiver ISO-Wert ohne Zone → als UTC interpretieren.
-    for fmt in ["%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S%.f"] {
+    for fmt in [
+        "%Y-%m-%dT%H:%M:%S",
+        "%Y-%m-%d %H:%M:%S",
+        "%Y-%m-%dT%H:%M:%S%.f",
+    ] {
         if let Ok(naive) = chrono::NaiveDateTime::parse_from_str(&normalized, fmt) {
             return Some(DateTime::<Utc>::from_naive_utc_and_offset(naive, Utc));
         }
@@ -197,18 +202,18 @@ const MEMBER_SELECT: &str = "SELECT tm.id, tm.team_id, tm.discord_id, \
     tm.discord_name AS team_member_discord_name, \
     s.discord_name AS session_discord_name, p.display_name AS profile_display_name, \
     tm.steam_id, tm.rank, tm.rank_score, tm.role, tm.joined_at \
-    FROM team_members tm \
-    LEFT JOIN (SELECT discord_id, MAX(discord_name) AS discord_name FROM sessions \
+    FROM turnier.\"team_members\" tm \
+    LEFT JOIN (SELECT discord_id, MAX(discord_name) AS discord_name FROM turnier.\"sessions\" \
         WHERE discord_name IS NOT NULL AND discord_name != '' GROUP BY discord_id) s \
         ON s.discord_id = tm.discord_id \
-    LEFT JOIN user_profiles p ON p.discord_id = tm.discord_id \
-    WHERE tm.team_id = ? ORDER BY tm.joined_at";
+    LEFT JOIN turnier.\"user_profiles\" p ON p.discord_id = tm.discord_id \
+    WHERE tm.team_id = $1 ORDER BY tm.joined_at";
 
 /// Eine angereicherte Member-Zeile (Namens-Kandidaten + Rangfelder).
 struct MemberRow {
     id: i64,
     team_id: i64,
-    discord_id: String,
+    discord_id: i64,
     team_member_discord_name: Option<String>,
     session_discord_name: Option<String>,
     profile_display_name: Option<String>,
@@ -216,7 +221,7 @@ struct MemberRow {
     rank: Option<String>,
     rank_score: i64,
     role: turnier_core::TeamRole,
-    joined_at: String,
+    joined_at: DateTime<Utc>,
 }
 
 impl MemberRow {
@@ -227,14 +232,17 @@ impl MemberRow {
                 self.session_discord_name.as_deref(),
                 self.team_member_discord_name.as_deref(),
             ],
-            Some(&self.discord_id),
+            Some(&db::discord_id_to_string(self.discord_id)),
         )
     }
 }
 
 /// Lädt die Member-Zeilen eines Teams (rohe Namens-Kandidaten + Rangfelder).
 async fn load_member_rows(pool: &Pool, team_id: i64) -> WebResult<Vec<MemberRow>> {
-    let rows = sqlx::query(MEMBER_SELECT).bind(team_id).fetch_all(pool).await?;
+    let rows = sqlx::query(MEMBER_SELECT)
+        .bind(team_id)
+        .fetch_all(pool)
+        .await?;
     let mut out = Vec::with_capacity(rows.len());
     for row in rows {
         out.push(MemberRow {
@@ -265,35 +273,43 @@ struct TeamRow {
     tournament_id: i64,
     name: String,
     name_key: String,
-    captain_discord_id: String,
-    created_at: String,
+    captain_discord_id: i64,
+    created_at: DateTime<Utc>,
     recruitment_status: RecruitmentStatus,
 }
 
 /// Baut einen `TeamMember` aus Zeile + Anreicherungs-Map.
 fn member_from_row(row: MemberRow, ranks: &HashMap<String, RankProfile>) -> TeamMember {
     let preferred = row.preferred_name();
-    let mut fields = RankFields { steam_id: row.steam_id, rank: row.rank, rank_score: row.rank_score };
-    apply_profile(&mut fields, ranks.get(&row.discord_id));
+    let discord_id = db::discord_id_to_string(row.discord_id);
+    let mut fields = RankFields {
+        steam_id: row.steam_id,
+        rank: row.rank,
+        rank_score: row.rank_score,
+    };
+    apply_profile(&mut fields, ranks.get(&discord_id));
     TeamMember {
         id: row.id,
         team_id: row.team_id,
-        discord_id: row.discord_id,
+        discord_id,
         discord_name: preferred,
         steam_id: fields.steam_id,
         rank: fields.rank,
         rank_score: fields.rank_score,
         role: row.role,
-        joined_at: row.joined_at,
+        joined_at: db::ts_to_string(row.joined_at),
     }
 }
 
 /// Lädt alle Teams eines Turniers inkl. Mitglieder (interne Sicht, rang-angereichert).
 /// Entspricht `_load_teams_for_tournament` (routes.py:119).
-pub async fn load_teams_for_tournament(state: &AppState, tournament_id: i64) -> WebResult<Vec<Team>> {
+pub async fn load_teams_for_tournament(
+    state: &AppState,
+    tournament_id: i64,
+) -> WebResult<Vec<Team>> {
     let pool = &state.pool;
     let team_rows: Vec<TeamRow> =
-        sqlx::query_as("SELECT * FROM teams WHERE tournament_id = ?")
+        sqlx::query_as(r#"SELECT * FROM turnier."teams" WHERE tournament_id = $1"#)
             .bind(tournament_id)
             .fetch_all(pool)
             .await?;
@@ -303,7 +319,10 @@ pub async fn load_teams_for_tournament(state: &AppState, tournament_id: i64) -> 
         let member_rows = load_member_rows(pool, t.id).await?;
         let ranks = enrich_for_ids(
             state,
-            member_rows.iter().map(|m| m.discord_id.clone()).collect(),
+            member_rows
+                .iter()
+                .map(|m| db::discord_id_to_string(m.discord_id))
+                .collect(),
         )
         .await?;
         let members = member_rows
@@ -315,8 +334,8 @@ pub async fn load_teams_for_tournament(state: &AppState, tournament_id: i64) -> 
             tournament_id: t.tournament_id,
             name: t.name,
             name_key: t.name_key,
-            captain_discord_id: t.captain_discord_id,
-            created_at: t.created_at,
+            captain_discord_id: db::discord_id_to_string(t.captain_discord_id),
+            created_at: db::ts_to_string(t.created_at),
             recruitment_status: t.recruitment_status,
             members,
         });
@@ -329,7 +348,7 @@ pub async fn load_teams_for_tournament(state: &AppState, tournament_id: i64) -> 
 /// (routes.py:159). Bewusst OHNE Rang-Anreicherung — 1:1 zum Original.
 pub async fn load_teams_public(pool: &Pool, tournament_id: i64) -> WebResult<Vec<TeamPublic>> {
     let team_rows: Vec<TeamRow> =
-        sqlx::query_as("SELECT * FROM teams WHERE tournament_id = ?")
+        sqlx::query_as(r#"SELECT * FROM turnier."teams" WHERE tournament_id = $1"#)
             .bind(tournament_id)
             .fetch_all(pool)
             .await?;
@@ -349,13 +368,13 @@ pub async fn load_teams_public(pool: &Pool, tournament_id: i64) -> WebResult<Vec
                     rank: m.rank,
                     rank_score: m.rank_score,
                     role: m.role,
-                    joined_at: m.joined_at,
+                    joined_at: db::ts_to_string(m.joined_at),
                 }
             })
             .collect();
 
         let app_count: i64 = sqlx::query_scalar(
-            "SELECT COUNT(*) FROM team_applications WHERE team_id = ? AND status = 'pending'",
+            r#"SELECT COUNT(*) FROM turnier."team_applications" WHERE team_id = $1 AND status = 'pending'"#,
         )
         .bind(t.id)
         .fetch_one(pool)
@@ -370,7 +389,7 @@ pub async fn load_teams_public(pool: &Pool, tournament_id: i64) -> WebResult<Vec
             name: t.name,
             name_key: t.name_key,
             members,
-            created_at: t.created_at,
+            created_at: db::ts_to_string(t.created_at),
             recruitment_status: t.recruitment_status,
             has_pending_applications,
         });
@@ -382,14 +401,17 @@ pub async fn load_teams_public(pool: &Pool, tournament_id: i64) -> WebResult<Vec
 /// Entspricht `_load_team_response` (routes.py:614).
 pub async fn load_team_response(state: &AppState, team_id: i64) -> WebResult<Team> {
     let pool = &state.pool;
-    let t: TeamRow = sqlx::query_as("SELECT * FROM teams WHERE id = ?")
+    let t: TeamRow = sqlx::query_as(r#"SELECT * FROM turnier."teams" WHERE id = $1"#)
         .bind(team_id)
         .fetch_one(pool)
         .await?;
     let member_rows = load_member_rows(pool, team_id).await?;
     let ranks = enrich_for_ids(
         state,
-        member_rows.iter().map(|m| m.discord_id.clone()).collect(),
+        member_rows
+            .iter()
+            .map(|m| db::discord_id_to_string(m.discord_id))
+            .collect(),
     )
     .await?;
     let members = member_rows
@@ -401,8 +423,8 @@ pub async fn load_team_response(state: &AppState, team_id: i64) -> WebResult<Tea
         tournament_id: t.tournament_id,
         name: t.name,
         name_key: t.name_key,
-        captain_discord_id: t.captain_discord_id,
-        created_at: t.created_at,
+        captain_discord_id: db::discord_id_to_string(t.captain_discord_id),
+        created_at: db::ts_to_string(t.created_at),
         recruitment_status: t.recruitment_status,
         members,
     })
@@ -435,7 +457,7 @@ async fn enrich_for_ids(
 struct SignupRow {
     id: i64,
     tournament_id: i64,
-    discord_id: String,
+    discord_id: i64,
     signup_discord_name: Option<String>,
     session_discord_name: Option<String>,
     team_member_discord_name: Option<String>,
@@ -444,11 +466,12 @@ struct SignupRow {
     rank: Option<String>,
     rank_score: i64,
     team_id: Option<i64>,
-    signed_up_at: String,
+    signed_up_at: DateTime<Utc>,
 }
 
 impl SignupRow {
     fn preferred_name(&self) -> Option<String> {
+        let discord_id = db::discord_id_to_string(self.discord_id);
         preferred_discord_name(
             &[
                 self.profile_display_name.as_deref(),
@@ -456,7 +479,7 @@ impl SignupRow {
                 self.signup_discord_name.as_deref(),
                 self.team_member_discord_name.as_deref(),
             ],
-            Some(&self.discord_id),
+            Some(&discord_id),
         )
     }
 }
@@ -467,15 +490,15 @@ const SIGNUP_SELECT: &str = "SELECT ts.id, ts.tournament_id, ts.discord_id, \
     ts.discord_name AS signup_discord_name, s.discord_name AS session_discord_name, \
     tm.discord_name AS team_member_discord_name, p.display_name AS profile_display_name, \
     ts.steam_id, ts.rank, ts.rank_score, ts.team_id, ts.signed_up_at \
-    FROM tournament_signups ts \
-    LEFT JOIN (SELECT discord_id, MAX(discord_name) AS discord_name FROM sessions \
+    FROM turnier.\"tournament_signups\" ts \
+    LEFT JOIN (SELECT discord_id, MAX(discord_name) AS discord_name FROM turnier.\"sessions\" \
         WHERE discord_name IS NOT NULL AND discord_name != '' GROUP BY discord_id) s \
         ON s.discord_id = ts.discord_id \
-    LEFT JOIN (SELECT discord_id, MAX(discord_name) AS discord_name FROM team_members \
+    LEFT JOIN (SELECT discord_id, MAX(discord_name) AS discord_name FROM turnier.\"team_members\" \
         WHERE discord_name IS NOT NULL AND discord_name != '' GROUP BY discord_id) tm \
         ON tm.discord_id = ts.discord_id \
-    LEFT JOIN user_profiles p ON p.discord_id = ts.discord_id \
-    WHERE ts.tournament_id = ? ORDER BY ts.signed_up_at DESC";
+    LEFT JOIN turnier.\"user_profiles\" p ON p.discord_id = ts.discord_id \
+    WHERE ts.tournament_id = $1 ORDER BY ts.signed_up_at DESC";
 
 async fn load_signup_rows(pool: &Pool, tournament_id: i64) -> WebResult<Vec<SignupRow>> {
     let rows = sqlx::query(SIGNUP_SELECT)
@@ -511,26 +534,32 @@ pub async fn load_signups_for_tournament(
     let rows = load_signup_rows(&state.pool, tournament_id).await?;
     let ranks = enrich_for_ids(
         state,
-        rows.iter().map(|r| r.discord_id.clone()).collect(),
+        rows.iter()
+            .map(|r| db::discord_id_to_string(r.discord_id))
+            .collect(),
     )
     .await?;
     let signups = rows
         .into_iter()
         .map(|r| {
             let preferred = r.preferred_name();
-            let mut fields =
-                RankFields { steam_id: r.steam_id, rank: r.rank, rank_score: r.rank_score };
-            apply_profile(&mut fields, ranks.get(&r.discord_id));
+            let discord_id = db::discord_id_to_string(r.discord_id);
+            let mut fields = RankFields {
+                steam_id: r.steam_id,
+                rank: r.rank,
+                rank_score: r.rank_score,
+            };
+            apply_profile(&mut fields, ranks.get(&discord_id));
             TournamentSignup {
                 id: r.id,
                 tournament_id: r.tournament_id,
-                discord_id: r.discord_id,
+                discord_id,
                 discord_name: preferred,
                 steam_id: fields.steam_id,
                 rank: fields.rank,
                 rank_score: fields.rank_score,
                 team_id: r.team_id,
-                signed_up_at: r.signed_up_at,
+                signed_up_at: db::ts_to_string(r.signed_up_at),
             }
         })
         .collect();
@@ -555,7 +584,7 @@ pub async fn load_signups_public(
                 rank: r.rank,
                 rank_score: r.rank_score,
                 team_id: r.team_id,
-                signed_up_at: r.signed_up_at,
+                signed_up_at: db::ts_to_string(r.signed_up_at),
             }
         })
         .collect();
@@ -577,18 +606,19 @@ pub async fn load_groups_for_tournament(pool: &Pool, tournament_id: i64) -> WebR
         seeding_order: i64,
     }
 
-    let group_rows: Vec<GroupStammRow> =
-        sqlx::query_as("SELECT * FROM groups WHERE tournament_id = ? ORDER BY seeding_order")
-            .bind(tournament_id)
-            .fetch_all(pool)
-            .await?;
+    let group_rows: Vec<GroupStammRow> = sqlx::query_as(
+        r#"SELECT * FROM turnier."groups" WHERE tournament_id = $1 ORDER BY seeding_order"#,
+    )
+    .bind(tournament_id)
+    .fetch_all(pool)
+    .await?;
 
     let mut groups = Vec::with_capacity(group_rows.len());
     for g in group_rows {
         let team_rows = sqlx::query(
-            "SELECT gt.id, gt.group_id, gt.team_id, t.name AS team_name, \
-                    gt.wins, gt.losses, gt.points \
-             FROM group_teams gt JOIN teams t ON gt.team_id = t.id WHERE gt.group_id = ?",
+            r#"SELECT gt.id, gt.group_id, gt.team_id, t.name AS team_name,
+                    gt.wins, gt.losses, gt.points
+             FROM turnier."group_teams" gt JOIN turnier."teams" t ON gt.team_id = t.id WHERE gt.group_id = $1"#,
         )
         .bind(g.id)
         .fetch_all(pool)
@@ -607,10 +637,10 @@ pub async fn load_groups_for_tournament(pool: &Pool, tournament_id: i64) -> WebR
         }
 
         let match_rows = sqlx::query(
-            "SELECT id, group_id, team1_id, team2_id, winner_id, status, steam_party_id, \
-                    party_code, deadlock_match_id, match_duration_s, match_stats, \
-                    hero_assignments, scheduled_at, played_at \
-             FROM group_matches WHERE group_id = ?",
+            r#"SELECT id, group_id, team1_id, team2_id, winner_id, status, steam_party_id,
+                    party_code, deadlock_match_id, match_duration_s, match_stats,
+                    hero_assignments, scheduled_at, played_at
+             FROM turnier."group_matches" WHERE group_id = $1"#,
         )
         .bind(g.id)
         .fetch_all(pool)
@@ -628,12 +658,10 @@ pub async fn load_groups_for_tournament(pool: &Pool, tournament_id: i64) -> WebR
                 party_code: row.try_get("party_code")?,
                 deadlock_match_id: row.try_get("deadlock_match_id")?,
                 match_duration_s: row.try_get("match_duration_s")?,
-                match_stats: row.try_get("match_stats")?,
-                hero_assignments: turnier_core::json::parse_object(
-                    row.try_get::<Option<String>, _>("hero_assignments")?.as_deref(),
-                ),
-                scheduled_at: row.try_get("scheduled_at")?,
-                played_at: row.try_get("played_at")?,
+                match_stats: db::json_to_wire(row.try_get("match_stats")?),
+                hero_assignments: db::json_object(row.try_get("hero_assignments")?),
+                scheduled_at: db::opt_ts_to_string(row.try_get("scheduled_at")?),
+                played_at: db::opt_ts_to_string(row.try_get("played_at")?),
             });
         }
 
@@ -653,7 +681,7 @@ pub async fn load_groups_for_tournament(pool: &Pool, tournament_id: i64) -> WebR
 /// (routes.py:239). `series_wins_*`/`games` defaulten wie im Pydantic-Modell.
 pub async fn load_bracket_matches(pool: &Pool, tournament_id: i64) -> WebResult<Vec<BracketMatch>> {
     let rows = sqlx::query(
-        "SELECT * FROM bracket_matches WHERE tournament_id = ? ORDER BY round, position",
+        r#"SELECT * FROM turnier."bracket_matches" WHERE tournament_id = $1 ORDER BY round, position"#,
     )
     .bind(tournament_id)
     .fetch_all(pool)
@@ -680,16 +708,14 @@ pub async fn load_bracket_matches(pool: &Pool, tournament_id: i64) -> WebResult<
             party_code: row.try_get("party_code")?,
             deadlock_match_id: row.try_get("deadlock_match_id")?,
             match_duration_s: row.try_get("match_duration_s")?,
-            match_stats: row.try_get("match_stats")?,
-            hero_assignments: turnier_core::json::parse_object(
-                row.try_get::<Option<String>, _>("hero_assignments")?.as_deref(),
-            ),
+            match_stats: db::json_to_wire(row.try_get("match_stats")?),
+            hero_assignments: db::json_object(row.try_get("hero_assignments")?),
             series_wins_team1: 0,
             series_wins_team2: 0,
             games: Vec::new(),
-            scheduled_at: row.try_get("scheduled_at")?,
-            on_stream: row.try_get::<Option<i64>, _>("on_stream")?.unwrap_or(1) != 0,
-            played_at: row.try_get("played_at")?,
+            scheduled_at: db::opt_ts_to_string(row.try_get("scheduled_at")?),
+            on_stream: row.try_get("on_stream")?,
+            played_at: db::opt_ts_to_string(row.try_get("played_at")?),
         });
     }
     Ok(out)
@@ -712,8 +738,8 @@ pub async fn load_mini_groups_for_tournament(
     }
 
     let rows: Vec<MiniGroupRow> = sqlx::query_as(
-        "SELECT id, tournament_id, round, position, advances_to_match_id, advances_to_slot \
-         FROM bracket_mini_groups WHERE tournament_id = ? ORDER BY round, position, id",
+        r#"SELECT id, tournament_id, round, position, advances_to_match_id, advances_to_slot
+         FROM turnier."bracket_mini_groups" WHERE tournament_id = $1 ORDER BY round, position, id"#,
     )
     .bind(tournament_id)
     .fetch_all(pool)
@@ -722,14 +748,14 @@ pub async fn load_mini_groups_for_tournament(
     let mut out = Vec::with_capacity(rows.len());
     for row in rows {
         let team_ids: Vec<i64> = sqlx::query_scalar(
-            "SELECT team_id FROM bracket_mini_group_teams \
-             WHERE mini_group_id = ? AND team_id IS NOT NULL ORDER BY seed_order, id",
+            r#"SELECT team_id FROM turnier."bracket_mini_group_teams"
+             WHERE mini_group_id = $1 AND team_id IS NOT NULL ORDER BY seed_order, id"#,
         )
         .bind(row.id)
         .fetch_all(pool)
         .await?;
         let match_ids: Vec<i64> = sqlx::query_scalar(
-            "SELECT id FROM bracket_matches WHERE mini_group_id = ? ORDER BY round, position, id",
+            r#"SELECT id FROM turnier."bracket_matches" WHERE mini_group_id = $1 ORDER BY round, position, id"#,
         )
         .bind(row.id)
         .fetch_all(pool)
@@ -789,7 +815,9 @@ pub struct TournamentRowData {
 
 impl TournamentRowData {
     /// Liest die DTO-relevanten Spalten aus einer `tournaments`-Zeile.
-    pub fn from_row(row: &sqlx::sqlite::SqliteRow) -> WebResult<Self> {
+    pub fn from_row(row: &sqlx::postgres::PgRow) -> WebResult<Self> {
+        let reminder_offsets = db::json_to_wire(row.try_get("reminder_offsets")?);
+        let start_reminder_offsets = db::json_to_wire(row.try_get("start_reminder_offsets")?);
         Ok(Self {
             id: row.try_get("id")?,
             name: row.try_get("name")?,
@@ -798,35 +826,35 @@ impl TournamentRowData {
             team_size: row.try_get("team_size")?,
             series_format: row.try_get("series_format")?,
             final_series_format: row.try_get("final_series_format")?,
-            registration_start: row.try_get("registration_start")?,
-            registration_end: row.try_get("registration_end")?,
-            checkin_start: row.try_get("checkin_start")?,
-            group_phase_start: row.try_get("group_phase_start")?,
-            bracket_start: row.try_get("bracket_start")?,
+            registration_start: db::opt_ts_to_string(row.try_get("registration_start")?),
+            registration_end: db::opt_ts_to_string(row.try_get("registration_end")?),
+            checkin_start: db::opt_ts_to_string(row.try_get("checkin_start")?),
+            group_phase_start: db::opt_ts_to_string(row.try_get("group_phase_start")?),
+            bracket_start: db::opt_ts_to_string(row.try_get("bracket_start")?),
             bracket_format: row.try_get("bracket_format")?,
             tournament_mode: row.try_get("tournament_mode")?,
             tournament_game_mode: row.try_get("tournament_game_mode")?,
-            auto_lobby_enabled: row.try_get::<i64, _>("auto_lobby_enabled")? != 0,
-            created_by: row.try_get("created_by")?,
-            created_at: row.try_get("created_at")?,
-            updated_at: row.try_get("updated_at")?,
+            auto_lobby_enabled: row.try_get("auto_lobby_enabled")?,
+            created_by: db::discord_id_to_string(row.try_get("created_by")?),
+            created_at: db::ts_to_string(row.try_get("created_at")?),
+            updated_at: db::ts_to_string(row.try_get("updated_at")?),
             invite_mode: row.try_get("invite_mode")?,
-            invite_window_start: row.try_get("invite_window_start")?,
-            invite_window_end: row.try_get("invite_window_end")?,
-            lobby_settings: row.try_get("lobby_settings")?,
-            exclude_from_leaderboard: row.try_get::<i64, _>("exclude_from_leaderboard")? != 0,
+            invite_window_start: db::opt_ts_to_string(row.try_get("invite_window_start")?),
+            invite_window_end: db::opt_ts_to_string(row.try_get("invite_window_end")?),
+            lobby_settings: db::json_to_wire(row.try_get("lobby_settings")?),
+            exclude_from_leaderboard: row.try_get("exclude_from_leaderboard")?,
             reminder_offsets: turnier_core::json::parse_offsets(
-                row.try_get::<Option<String>, _>("reminder_offsets")?.as_deref(),
+                reminder_offsets.as_deref(),
                 &turnier_core::json::default_reminder_offsets(),
             ),
             start_reminder_offsets: turnier_core::json::parse_offsets(
-                row.try_get::<Option<String>, _>("start_reminder_offsets")?.as_deref(),
+                start_reminder_offsets.as_deref(),
                 &turnier_core::json::default_start_reminder_offsets(),
             ),
             match_objective: row.try_get("match_objective")?,
             no_show_grace_minutes: row.try_get("no_show_grace_minutes")?,
             rules: row.try_get("rules")?,
-            is_test: row.try_get::<i64, _>("is_test")? != 0,
+            is_test: row.try_get("is_test")?,
         })
     }
 
@@ -869,9 +897,11 @@ impl TournamentRowData {
 
 /// Liest alle Turniere (DTO-Form) gemäß einer Filterbedingung.
 pub async fn list_tournament_dtos(pool: &Pool, where_order: &str) -> WebResult<Vec<Tournament>> {
-    let rows = sqlx::query(&format!("SELECT * FROM tournaments {where_order}"))
-        .fetch_all(pool)
-        .await?;
+    let rows = sqlx::query(&format!(
+        r#"SELECT * FROM turnier."tournaments" {where_order}"#
+    ))
+    .fetch_all(pool)
+    .await?;
     let mut out = Vec::with_capacity(rows.len());
     for row in rows {
         out.push(TournamentRowData::from_row(&row)?.into_tournament());
@@ -943,8 +973,8 @@ pub struct TournamentGuard {
 /// Entspricht `_load_tournament_or_404` (routes.py:413).
 pub async fn load_tournament_or_404(pool: &Pool, tournament_id: i64) -> WebResult<TournamentGuard> {
     let row = sqlx::query(
-        "SELECT id, name, status, team_size, invite_mode, invite_window_start, \
-                invite_window_end, is_test FROM tournaments WHERE id = ?",
+        r#"SELECT id, name, status, team_size, invite_mode, invite_window_start,
+                invite_window_end, is_test FROM turnier."tournaments" WHERE id = $1"#,
     )
     .bind(tournament_id)
     .fetch_optional(pool)
@@ -958,14 +988,13 @@ pub async fn load_tournament_or_404(pool: &Pool, tournament_id: i64) -> WebResul
         status: row.try_get("status")?,
         team_size: row.try_get("team_size")?,
         invite_mode: row.try_get("invite_mode")?,
-        invite_window_start: row.try_get("invite_window_start")?,
-        invite_window_end: row.try_get("invite_window_end")?,
-        is_test: row.try_get::<i64, _>("is_test")? != 0,
+        invite_window_start: db::opt_ts_to_string(row.try_get("invite_window_start")?),
+        invite_window_end: db::opt_ts_to_string(row.try_get("invite_window_end")?),
+        is_test: row.try_get("is_test")?,
     })
 }
 
 /// Eine Team-Stammzeile für Guards.
-#[derive(sqlx::FromRow)]
 pub struct TeamGuard {
     pub id: i64,
     pub tournament_id: i64,
@@ -980,15 +1009,24 @@ pub async fn load_team_or_404(
     tournament_id: i64,
     team_id: i64,
 ) -> WebResult<TeamGuard> {
-    sqlx::query_as::<_, TeamGuard>(
-        "SELECT id, tournament_id, name, captain_discord_id, recruitment_status \
-         FROM teams WHERE id = ? AND tournament_id = ?",
+    let row = sqlx::query(
+        r#"SELECT id, tournament_id, name, captain_discord_id, recruitment_status
+         FROM turnier."teams" WHERE id = $1 AND tournament_id = $2"#,
     )
     .bind(team_id)
     .bind(tournament_id)
     .fetch_optional(pool)
-    .await?
-    .ok_or_else(|| WebError::not_found("Team nicht gefunden"))
+    .await?;
+    let Some(row) = row else {
+        return Err(WebError::not_found("Team nicht gefunden"));
+    };
+    Ok(TeamGuard {
+        id: row.try_get("id")?,
+        tournament_id: row.try_get("tournament_id")?,
+        name: row.try_get("name")?,
+        captain_discord_id: db::discord_id_to_string(row.try_get("captain_discord_id")?),
+        recruitment_status: row.try_get("recruitment_status")?,
+    })
 }
 
 /// Prüft, ob die Anmeldung offen ist (status in registration|checkin) — 400 sonst.
@@ -1008,7 +1046,9 @@ pub fn is_mod_user(user: &UserSession) -> bool {
 /// Erzwingt Captain-Rechte (403 sonst). Entspricht `_ensure_captain` (routes.py:453).
 pub fn ensure_captain(user: &UserSession, captain_discord_id: &str) -> WebResult<()> {
     if user.discord_id != captain_discord_id {
-        return Err(WebError::forbidden("Nur der Captain darf diese Aktion ausführen"));
+        return Err(WebError::forbidden(
+            "Nur der Captain darf diese Aktion ausführen",
+        ));
     }
     Ok(())
 }
@@ -1019,7 +1059,9 @@ pub fn ensure_captain_or_mod(user: &UserSession, captain_discord_id: &str) -> We
     if user.discord_id == captain_discord_id || is_mod_user(user) {
         return Ok(());
     }
-    Err(WebError::forbidden("Nur Captain oder Mod dürfen diese Aktion ausführen"))
+    Err(WebError::forbidden(
+        "Nur Captain oder Mod dürfen diese Aktion ausführen",
+    ))
 }
 
 /// Prüft, ob Einladungen erlaubt sind, und liefert ggf. das Ablaufdatum
@@ -1028,9 +1070,15 @@ pub fn ensure_captain_or_mod(user: &UserSession, captain_discord_id: &str) -> We
 pub fn ensure_invites_enabled(t: &TournamentGuard) -> WebResult<Option<String>> {
     // Vergleich auf den rohen DB-String wie im Original (`mode == InviteMode.x.value`);
     // leerer/NULL-Wert defaultet auf "always".
-    let mode = t.invite_mode.clone().filter(|m| !m.is_empty()).unwrap_or_else(|| "always".to_string());
+    let mode = t
+        .invite_mode
+        .clone()
+        .filter(|m| !m.is_empty())
+        .unwrap_or_else(|| "always".to_string());
     if mode == "never" {
-        return Err(WebError::forbidden("Einladungen sind für dieses Turnier deaktiviert"));
+        return Err(WebError::forbidden(
+            "Einladungen sind für dieses Turnier deaktiviert",
+        ));
     }
     if mode == "window" {
         let now = Utc::now();
@@ -1041,7 +1089,9 @@ pub fn ensure_invites_enabled(t: &TournamentGuard) -> WebResult<Option<String>> 
                 return Ok(t.invite_window_end.clone());
             }
             _ => {
-                return Err(WebError::forbidden("Einladungen sind aktuell nicht erlaubt"));
+                return Err(WebError::forbidden(
+                    "Einladungen sind aktuell nicht erlaubt",
+                ));
             }
         }
     }
@@ -1051,10 +1101,10 @@ pub fn ensure_invites_enabled(t: &TournamentGuard) -> WebResult<Option<String>> 
 /// Zählt die Mitglieder eines Teams. Entspricht `_count_team_members` (routes.py:492).
 pub async fn count_team_members<'e, E>(executor: E, team_id: i64) -> WebResult<i64>
 where
-    E: sqlx::Executor<'e, Database = sqlx::Sqlite>,
+    E: sqlx::Executor<'e, Database = Postgres>,
 {
     let count: i64 =
-        sqlx::query_scalar("SELECT COUNT(*) FROM team_members WHERE team_id = ?")
+        sqlx::query_scalar(r#"SELECT COUNT(*) FROM turnier."team_members" WHERE team_id = $1"#)
             .bind(team_id)
             .fetch_one(executor)
             .await?;
@@ -1069,7 +1119,7 @@ pub async fn ensure_team_has_capacity<'e, E>(
     team_size: i64,
 ) -> WebResult<()>
 where
-    E: sqlx::Executor<'e, Database = sqlx::Sqlite>,
+    E: sqlx::Executor<'e, Database = Postgres>,
 {
     if count_team_members(executor, team_id).await? >= team_size {
         return Err(WebError::bad_request("Team ist bereits voll"));
@@ -1085,11 +1135,12 @@ pub async fn ensure_user_not_in_tournament_team<'e, E>(
     discord_id: &str,
 ) -> WebResult<()>
 where
-    E: sqlx::Executor<'e, Database = sqlx::Sqlite>,
+    E: sqlx::Executor<'e, Database = Postgres>,
 {
+    let discord_id = db::parse_discord_id(discord_id)?;
     let existing: Option<(i64,)> = sqlx::query_as(
-        "SELECT tm.id FROM team_members tm JOIN teams t ON tm.team_id = t.id \
-         WHERE t.tournament_id = ? AND tm.discord_id = ?",
+        r#"SELECT tm.id FROM turnier."team_members" tm JOIN turnier."teams" t ON tm.team_id = t.id
+         WHERE t.tournament_id = $1 AND tm.discord_id = $2"#,
     )
     .bind(tournament_id)
     .bind(discord_id)
@@ -1110,13 +1161,15 @@ where
 /// fehlt/zu alt → 403 `CONSENT_REQUIRED`.
 pub async fn ensure_consent<'e, E>(executor: E, discord_id: &str) -> WebResult<()>
 where
-    E: sqlx::Executor<'e, Database = sqlx::Sqlite>,
+    E: sqlx::Executor<'e, Database = Postgres>,
 {
-    let row: Option<(Option<i64>,)> =
-        sqlx::query_as("SELECT consent_version FROM user_consents WHERE discord_id = ?")
-            .bind(discord_id)
-            .fetch_optional(executor)
-            .await?;
+    let discord_id = db::parse_discord_id(discord_id)?;
+    let row: Option<(Option<i64>,)> = sqlx::query_as(
+        r#"SELECT consent_version FROM turnier."user_consents" WHERE discord_id = $1"#,
+    )
+    .bind(discord_id)
+    .fetch_optional(executor)
+    .await?;
     let version = row.and_then(|r| r.0).unwrap_or(0);
     if version < CURRENT_CONSENT_VERSION {
         return Err(WebError::forbidden("CONSENT_REQUIRED"));
@@ -1137,14 +1190,18 @@ pub async fn audit<'e, E>(
     details: &Value,
 ) -> WebResult<()>
 where
-    E: sqlx::Executor<'e, Database = sqlx::Sqlite>,
+    E: sqlx::Executor<'e, Database = Postgres>,
 {
-    sqlx::query("INSERT INTO audit_log (action, user_id, details) VALUES (?, ?, ?)")
-        .bind(action)
-        .bind(user_id)
-        .bind(details.to_string())
-        .execute(executor)
-        .await?;
+    let user_id = user_id.map(db::parse_actor_id).transpose()?;
+    sqlx::query(
+        r#"INSERT INTO turnier."audit_log" (action, user_id, details, created_at)
+           VALUES ($1, $2, $3, now())"#,
+    )
+    .bind(action)
+    .bind(user_id)
+    .bind(details)
+    .execute(executor)
+    .await?;
     Ok(())
 }
 
@@ -1169,22 +1226,27 @@ pub async fn load_rank_input(state: &AppState, discord_id: &str) -> RankInput {
             rank: profile.rank,
             rank_score: profile.rank_score,
         },
-        _ => RankInput { steam_id: None, rank: None, rank_score: 0 },
+        _ => RankInput {
+            steam_id: None,
+            rank: None,
+            rank_score: 0,
+        },
     }
 }
 
 /// Upsert in `tournament_signups`: aktualisiert den vorhandenen Eintrag oder legt
 /// einen neuen an. Entspricht `_upsert_signup` (routes.py:366).
 pub async fn upsert_signup(
-    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    tx: &mut sqlx::Transaction<'_, Postgres>,
     tournament_id: i64,
     discord_id: &str,
     discord_name: Option<&str>,
     rank: &RankInput,
     team_id: Option<i64>,
 ) -> WebResult<()> {
+    let discord_id = db::parse_discord_id(discord_id)?;
     let existing: Option<(i64,)> = sqlx::query_as(
-        "SELECT id FROM tournament_signups WHERE tournament_id = ? AND discord_id = ?",
+        r#"SELECT id FROM turnier."tournament_signups" WHERE tournament_id = $1 AND discord_id = $2"#,
     )
     .bind(tournament_id)
     .bind(discord_id)
@@ -1193,8 +1255,8 @@ pub async fn upsert_signup(
 
     if let Some((id,)) = existing {
         sqlx::query(
-            "UPDATE tournament_signups SET discord_name = ?, steam_id = ?, rank = ?, \
-             rank_score = ?, team_id = ? WHERE id = ?",
+            r#"UPDATE turnier."tournament_signups" SET discord_name = $1, steam_id = $2, rank = $3,
+             rank_score = $4, team_id = $5 WHERE id = $6"#,
         )
         .bind(discord_name)
         .bind(&rank.steam_id)
@@ -1206,9 +1268,9 @@ pub async fn upsert_signup(
         .await?;
     } else {
         sqlx::query(
-            "INSERT INTO tournament_signups \
-             (tournament_id, discord_id, discord_name, steam_id, rank, rank_score, team_id) \
-             VALUES (?, ?, ?, ?, ?, ?, ?)",
+            r#"INSERT INTO turnier."tournament_signups"
+             (tournament_id, discord_id, discord_name, steam_id, rank, rank_score, team_id, signed_up_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, now())"#,
         )
         .bind(tournament_id)
         .bind(discord_id)
@@ -1218,7 +1280,8 @@ pub async fn upsert_signup(
         .bind(rank.rank_score)
         .bind(team_id)
         .execute(&mut **tx)
-        .await?;
+        .await
+        .map_err(|err| map_unique_conflict(err, "Du bist bereits für dieses Turnier angemeldet"))?;
     }
     Ok(())
 }
@@ -1227,29 +1290,39 @@ pub async fn upsert_signup(
 /// aufgelöstem Namen). Entspricht `_add_user_to_team` (routes.py:581).
 pub async fn add_user_to_team(
     pool: &Pool,
-    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    tx: &mut sqlx::Transaction<'_, Postgres>,
     tournament_id: i64,
     team_id: i64,
     discord_id: &str,
     discord_name: Option<&str>,
     rank: &RankInput,
 ) -> WebResult<()> {
+    let discord_id_i64 = db::parse_discord_id(discord_id)?;
     // Name-Resolution liest aus mehreren Tabellen — über den Pool (read-only).
     // Entspricht dem Original, das im selben Connection-Kontext liest.
     let resolved_name = resolve_discord_name(pool, discord_id, discord_name).await?;
     sqlx::query(
-        "INSERT INTO team_members \
-         (team_id, discord_id, discord_name, steam_id, rank, rank_score, role) \
-         VALUES (?, ?, ?, ?, ?, ?, 'member')",
+        r#"INSERT INTO turnier."team_members"
+         (team_id, discord_id, discord_name, steam_id, rank, rank_score, role, joined_at)
+         VALUES ($1, $2, $3, $4, $5, $6, 'member', now())"#,
     )
     .bind(team_id)
-    .bind(discord_id)
+    .bind(discord_id_i64)
     .bind(&resolved_name)
     .bind(&rank.steam_id)
     .bind(&rank.rank)
     .bind(rank.rank_score)
     .execute(&mut **tx)
+    .await
+    .map_err(|err| map_unique_conflict(err, "Spieler ist bereits Mitglied in diesem Team"))?;
+    upsert_signup(
+        tx,
+        tournament_id,
+        discord_id,
+        Some(&resolved_name),
+        rank,
+        Some(team_id),
+    )
     .await?;
-    upsert_signup(tx, tournament_id, discord_id, Some(&resolved_name), rank, Some(team_id)).await?;
     Ok(())
 }

@@ -8,9 +8,7 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-use turnier_automatik::presets::{
-    self, Category, NewPreset, Preset, PresetConfig, PresetUpdate,
-};
+use turnier_automatik::presets::{self, Category, NewPreset, Preset, PresetConfig, PresetUpdate};
 use turnier_automatik::proposals::{
     self, Proposal, ProposalEvent, ProposalFeedback, ProposalSource, ProposalState, ProposalVote,
     VoteDecision,
@@ -40,10 +38,19 @@ pub fn router() -> Router<AppState> {
             get(get_preset).put(update_preset).delete(delete_preset),
         )
         .route("/api/admin/presets/{id}/active", patch(set_preset_active))
-        .route("/api/admin/proposals", get(list_proposals).post(create_manual_proposal))
+        .route(
+            "/api/admin/proposals",
+            get(list_proposals).post(create_manual_proposal),
+        )
         .route("/api/admin/proposals/{id}", get(get_proposal_detail))
-        .route("/api/admin/proposals/{id}/event", post(apply_proposal_event))
-        .route("/api/admin/proposals/{id}/votes", post(record_proposal_vote))
+        .route(
+            "/api/admin/proposals/{id}/event",
+            post(apply_proposal_event),
+        )
+        .route(
+            "/api/admin/proposals/{id}/votes",
+            post(record_proposal_vote),
+        )
         .route(
             "/api/admin/proposals/{id}/feedback",
             post(record_proposal_feedback),
@@ -480,7 +487,10 @@ async fn get_proposal_detail(
     Ok(Json(ProposalDetailDto {
         proposal: proposal.into(),
         votes: votes.into_iter().map(ProposalVoteDto::from).collect(),
-        feedback: feedback.into_iter().map(ProposalFeedbackDto::from).collect(),
+        feedback: feedback
+            .into_iter()
+            .map(ProposalFeedbackDto::from)
+            .collect(),
         approvals,
     }))
 }
@@ -569,14 +579,8 @@ async fn record_proposal_feedback(
     Json(body): Json<FeedbackBody>,
 ) -> WebResult<Json<FeedbackCreatedDto>> {
     load_proposal(&state.pool, id).await?;
-    let feedback_id = proposals::record_feedback(
-        &state.pool,
-        id,
-        &user.discord_id,
-        &body.raw_text,
-        None,
-    )
-    .await?;
+    let feedback_id =
+        proposals::record_feedback(&state.pool, id, &user.discord_id, &body.raw_text, None).await?;
     audit(
         &state.pool,
         "proposal_feedback",

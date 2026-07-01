@@ -23,10 +23,22 @@ pub struct WebError {
 /// Bequemer Result-Alias für Handler.
 pub type WebResult<T> = Result<T, WebError>;
 
+pub(crate) fn map_unique_conflict(err: sqlx::Error, detail: &'static str) -> WebError {
+    match &err {
+        sqlx::Error::Database(db_err) if db_err.code().as_deref() == Some("23505") => {
+            WebError::conflict(detail)
+        }
+        _ => err.into(),
+    }
+}
+
 impl WebError {
     /// Erzeugt einen Fehler mit explizitem Status und Meldung.
     pub fn new(status: StatusCode, detail: impl Into<String>) -> Self {
-        Self { status, detail: detail.into() }
+        Self {
+            status,
+            detail: detail.into(),
+        }
     }
 
     /// 400 Bad Request.
@@ -110,7 +122,6 @@ impl From<turnier_match::MatchError> for WebError {
             State(msg) => Self::conflict(msg),
             Invalid(msg) => Self::bad_request(msg),
             Db(e) => e.into(),
-            Tournament(e) => e.into(),
         }
     }
 }
@@ -124,7 +135,10 @@ impl From<turnier_match::SteamTaskError> for WebError {
             State(msg) => Self::conflict(msg),
             NotFound(msg) => Self::not_found(msg),
             Db(e) => e.into(),
-            Bridge(_) => Self::new(StatusCode::SERVICE_UNAVAILABLE, "Steam-Bridge nicht verfügbar"),
+            Bridge(_) => Self::new(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "Steam-Bridge nicht verfügbar",
+            ),
             InvalidResult(msg) => Self::new(StatusCode::BAD_GATEWAY, msg),
         }
     }
@@ -139,6 +153,7 @@ impl From<turnier_draft::DraftError> for WebError {
             SessionNotActive => Self::bad_request("Draft ist nicht aktiv"),
             HeroAlreadyTaken(msg) => Self::bad_request(msg),
             ActionConflict => Self::conflict("Draft-Aktion kollidiert"),
+            InvalidDiscordId(_) => Self::bad_request("Ungueltige Discord-ID"),
             Db(e) => e.into(),
         }
     }
@@ -150,6 +165,7 @@ impl From<turnier_scheduler::SchedulerError> for WebError {
         match err {
             InvalidTransition(msg) => Self::bad_request(msg),
             StatusConflict => Self::conflict("Turnierstatus wurde parallel geändert"),
+            InvalidActorId(_) => Self::bad_request("Ungueltige Actor-Discord-ID"),
             Tournament(e) => e.into(),
             Db(e) => e.into(),
         }
@@ -161,7 +177,12 @@ impl From<turnier_automatik::AutomatikError> for WebError {
         use turnier_automatik::AutomatikError::*;
         match err {
             InvalidTransition { .. } => Self::conflict("Dieser Statuswechsel ist nicht möglich"),
-            MissingApproval { .. } => Self::conflict("Für diesen Vorschlag liegt noch keine Caster-Freigabe vor."),
+            MissingApproval { .. } => {
+                Self::conflict("Für diesen Vorschlag liegt noch keine Caster-Freigabe vor.")
+            }
+            InvalidNumericId(_) => Self::bad_request("Ungueltige numerische ID"),
+            Json(_) => Self::bad_request("Ungueltiges JSON"),
+            Time(_) => Self::bad_request("Ungueltiger Zeitstempel"),
             Db(e) => e.into(),
         }
     }

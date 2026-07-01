@@ -2,6 +2,44 @@
 
 ---
 
+## Neue Aufgabe (2026-07-02): SP4 T10+T11 turnier-api zentrale Postgres
+
+### Ziel
+- `turnier-api` vollstaendig von alter SQLite-/`turnier-db`-Semantik auf zentrale `turnier.*`-Postgres-Tabellen portieren.
+- T10 Public/Account/Consent/Leaderboard und T11 Admin/Test/Ops/Loaders in einem Rutsch umsetzen, weil die Crate erst danach wieder kompilierbar ist.
+- Keine Secrets ausgeben, kein Commit/Push; bestehende untracked Audit-Datei bleibt unangetastet.
+
+### Kritiker-Review (2026-07-02)
+- Unabhaengige statische Review des uncommitted `turnier-api`-Diffs gestartet; Fokus Test-Mode-Wipe/Seed, Admin-Auth, Konflikt-Semantik, Consent-Patch, Discord-ID-Grenzen, `team_id=0` und Caster-Assign.
+- Review abgeschlossen: keine Code-Aenderungen an `turnier-api`; Findings betreffen Test-Mode-Guard, Unique-Konflikt-Mapping und orphan Cleanup bei Team-/Turnier-Deletes.
+
+### Rework (2026-07-02)
+- Befund 1: Test-Mode-Wipe/Seed braucht zusaetzlich `TURNIER_TEST_DB_CONFIRM=throwaway-only`; Wegwerf-DB-Harness setzt den Sentinel.
+- Befund 2: `23505`-Unique-Verletzungen werden zentral auf `409 Conflict` gemappt und in Public Signup/Team/Helper/Invitation-Pfaden getestet.
+- Befund 3: Team-/Turnier-Deletes entfernen `team_applications` und `team_invitations` vor dem Team-Loeschen; Regressionstests decken Admin-Turnier, Admin-Team und Public-Team-Aufloesung ab.
+- Rework-Verifikation gruen: Build, Clippy, Fmt und volle `turnier-api`-Testsuite via zentralem Wegwerf-Postgres-Harness.
+
+### Status (2026-07-02)
+-> **Abgeschlossen fuer GPT-Worker** — Review durch Claude ausstehend
+
+### Fortschritt
+- `WORKFLOW.md`, Git-Status und SP4-Planabschnitte T10/T11 gelesen.
+- `turnier-api` kompiliert nach erster Public/Test-Mode-Typmigration wieder, aber SQL-Audit zeigt noch alte SQLite-Runtime-Queries in Consent/Leaderboard/Operations/Public und Admin-Routen; Portierung laeuft weiter.
+- Public/Consent/Leaderboard/Operations/Admin/Test-Mode/Loaders auf `turnier.*`, `$n`-Binds, PG-Bools/JSONB/TIMESTAMPTZ und BIGINT-Discord-IDs umgestellt; `draft.rs`-Nebenrouter ebenfalls von altem Bracket-Match-SQL befreit.
+- Gemeinsamer `db`-Mapper fuer Discord-ID-Parsing/-Serialisierung, Zeit-/JSONB-Wire-Mapping und Admin-Captain-Kompatibilitaet (`0` intern, leerer String HTTP) ergaenzt.
+- Consent-Upsert nutzt `ON CONFLICT`; Profil-Patch laeuft ueber QueryBuilder mit statischer Spalten-Whitelist.
+- Test-Mode-Wipe/Seed loescht in FK-sicherer Reihenfolge und verweigert mutierende Pfade, wenn `CENTRAL_TEST_DSN` und aktive DSN nicht die gleiche Wegwerf-DB bezeichnen.
+- Neue PG-Integrationstests ergaenzt: Consent/Profile/Delete-Guard, Signup, Team-Join/Leave, Invitation-Autoaccept, Leaderboard-Profil, Admin-Tournament Create/Update, Test-Seed/Wipe/Simulate, Operations Confirm/Reject.
+- Offener Test-Gap: Caster-Assign-Route ist nicht deterministisch testbar, solange `AppState` keinen Notifier-Mock fuer Discord-Rollenmitglieder injiziert.
+- SQL-Audit gegen `turnier-api/src` und Tests: keine alten `INSERT OR`, `datetime('now')`, unqualifizierten Zieltabellen oder SQLite-Placeholder in Runtime-Queries gefunden.
+- Verifikation: `cargo build -p turnier-api` gruen.
+- Verifikation: `cargo clippy -p turnier-api --all-targets -- -D warnings` gruen.
+- Verifikation: `cargo fmt --check -p turnier-api` gruen.
+- Verifikation: `../Deadlock-Bots/rust/scripts/central_test_db.sh bash -lc 'cd /home/naniadm/Documents/Deadlock-Turniere/rust && cargo test -p turnier-api --features testing -- --include-ignored'` gruen (20 Integrationstests: 7 `automatik_routes`, 13 `central_routes`).
+- Kein Commit/Push, keine Dienste neu gestartet, keine Secret-Werte ausgegeben.
+
+---
+
 ## Neue Aufgabe (2026-07-01): SP4 T9 turnier-scheduler zentrale Postgres
 
 ### Ziel

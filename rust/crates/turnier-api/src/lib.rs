@@ -9,13 +9,14 @@
 //! Domänen-Crates und formt Responses.
 
 pub mod app;
+pub(crate) mod db;
 pub mod error;
 pub mod extract;
 pub mod state;
 
 // Router-Module (je eine Datei/Ordner — getrennt befüllbar).
-pub mod admin;
 pub mod account;
+pub mod admin;
 pub mod auth;
 pub mod consent;
 pub mod draft;

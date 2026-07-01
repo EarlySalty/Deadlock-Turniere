@@ -33,6 +33,10 @@ chrono.workspace = true
 tracing.workspace = true
 thiserror.workspace = true
 
+[features]
+default = []
+testing = ["turnier-db/testing"]
+
 [dev-dependencies]
 tokio = { workspace = true }
 

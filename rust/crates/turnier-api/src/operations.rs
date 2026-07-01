@@ -5,13 +5,14 @@
 use axum::extract::{Path, State};
 use axum::routing::{get, patch, post};
 use axum::{Json, Router};
-use chrono::{Duration, NaiveDateTime, Utc};
+use chrono::{DateTime, Duration, Utc};
 use serde::Deserialize;
 use serde_json::{json, Value};
 
 use turnier_core::{MatchResultReport, MatchResultReportCreate};
 use turnier_match::{ApplyBracketParams, MatchError};
 
+use crate::db;
 use crate::error::{WebError, WebResult};
 use crate::extract::{AuthUser, ModUser};
 use crate::state::AppState;
@@ -30,8 +31,14 @@ pub fn router() -> Router<AppState> {
             "/api/admin/tournaments/{tournament_id}/action-items",
             get(get_action_items),
         )
-        .route("/api/admin/result-reports/{report_id}/confirm", post(confirm_result_report))
-        .route("/api/admin/result-reports/{report_id}/reject", post(reject_result_report))
+        .route(
+            "/api/admin/result-reports/{report_id}/confirm",
+            post(confirm_result_report),
+        )
+        .route(
+            "/api/admin/result-reports/{report_id}/reject",
+            post(reject_result_report),
+        )
         .route(
             "/api/admin/tournaments/{tournament_id}/matches/{match_id}/stream",
             patch(set_match_stream_flag),
@@ -53,7 +60,8 @@ async fn load_bracket_match(
     match_id: i64,
 ) -> WebResult<BracketMatchRow> {
     sqlx::query_as::<_, BracketMatchRow>(
-        "SELECT team1_id, team2_id, status FROM bracket_matches WHERE id = ? AND tournament_id = ?",
+        r#"SELECT team1_id, team2_id, status FROM turnier."bracket_matches"
+         WHERE id = $1 AND tournament_id = $2"#,
     )
     .bind(match_id)
     .bind(tournament_id)
@@ -69,12 +77,15 @@ async fn audit(
     user_id: &str,
     details: Value,
 ) -> WebResult<()> {
-    sqlx::query("INSERT INTO audit_log (action, user_id, details) VALUES (?, ?, ?)")
-        .bind(action)
-        .bind(user_id)
-        .bind(details.to_string())
-        .execute(pool)
-        .await?;
+    sqlx::query(
+        r#"INSERT INTO turnier."audit_log" (action, user_id, details, created_at)
+         VALUES ($1, $2, $3, now())"#,
+    )
+    .bind(action)
+    .bind(db::parse_actor_id(user_id)?)
+    .bind(details)
+    .execute(pool)
+    .await?;
     Ok(())
 }
 
@@ -82,13 +93,13 @@ async fn audit(
 async fn team_captains(pool: &turnier_db::Pool, team_ids: &[i64]) -> WebResult<Vec<String>> {
     let mut captains = Vec::new();
     for &team_id in team_ids {
-        let row: Option<(String,)> =
-            sqlx::query_as("SELECT captain_discord_id FROM teams WHERE id = ?")
+        let row: Option<(i64,)> =
+            sqlx::query_as(r#"SELECT captain_discord_id FROM turnier."teams" WHERE id = $1"#)
                 .bind(team_id)
                 .fetch_optional(pool)
                 .await?;
         if let Some((captain,)) = row {
-            captains.push(captain);
+            captains.push(db::discord_id_to_string(captain));
         }
     }
     Ok(captains)
@@ -96,12 +107,15 @@ async fn team_captains(pool: &turnier_db::Pool, team_ids: &[i64]) -> WebResult<V
 
 /// Die Discord-IDs aller Mitglieder eines Teams.
 async fn team_member_ids(pool: &turnier_db::Pool, team_id: i64) -> WebResult<Vec<String>> {
-    let rows: Vec<(Option<String>,)> =
-        sqlx::query_as("SELECT discord_id FROM team_members WHERE team_id = ?")
+    let rows: Vec<(i64,)> =
+        sqlx::query_as(r#"SELECT discord_id FROM turnier."team_members" WHERE team_id = $1"#)
             .bind(team_id)
             .fetch_all(pool)
             .await?;
-    Ok(rows.into_iter().filter_map(|r| r.0).collect())
+    Ok(rows
+        .into_iter()
+        .map(|r| db::discord_id_to_string(r.0))
+        .collect())
 }
 
 /// Eine vollständige `match_result_reports`-Zeile.
@@ -111,15 +125,15 @@ struct ReportRow {
     match_type: String,
     match_id: i64,
     tournament_id: i64,
-    reported_by: String,
+    reported_by: i64,
     winner_team_id: Option<i64>,
     deadlock_match_id: Option<String>,
-    is_no_show: i64,
+    is_no_show: bool,
     no_show_team_id: Option<i64>,
     status: String,
-    created_at: String,
-    resolved_at: Option<String>,
-    resolved_by: Option<String>,
+    created_at: DateTime<Utc>,
+    resolved_at: Option<DateTime<Utc>>,
+    resolved_by: Option<i64>,
 }
 
 impl ReportRow {
@@ -129,15 +143,15 @@ impl ReportRow {
             match_type: self.match_type,
             match_id: self.match_id,
             tournament_id: self.tournament_id,
-            reported_by: self.reported_by,
+            reported_by: db::discord_id_to_string(self.reported_by),
             winner_team_id: self.winner_team_id,
             deadlock_match_id: self.deadlock_match_id,
-            is_no_show: self.is_no_show != 0,
+            is_no_show: self.is_no_show,
             no_show_team_id: self.no_show_team_id,
             status: self.status,
-            created_at: self.created_at,
-            resolved_at: self.resolved_at,
-            resolved_by: self.resolved_by,
+            created_at: db::ts_to_string(self.created_at),
+            resolved_at: self.resolved_at.map(db::ts_to_string),
+            resolved_by: self.resolved_by.map(db::discord_id_to_string),
         }
     }
 }
@@ -151,6 +165,7 @@ async fn report_match_result(
     Json(body): Json<MatchResultReportCreate>,
 ) -> WebResult<(axum::http::StatusCode, Json<MatchResultReport>)> {
     let pool = &state.pool;
+    let user_discord_id = db::parse_discord_id(&user.discord_id)?;
     let m = load_bracket_match(pool, tournament_id, match_id).await?;
 
     if FINISHED_MATCH_STATUSES.contains(&m.status.as_str()) {
@@ -160,7 +175,9 @@ async fn report_match_result(
         )));
     }
     let (Some(team1_id), Some(team2_id)) = (m.team1_id, m.team2_id) else {
-        return Err(WebError::bad_request("Match hat noch nicht beide Teams gesetzt"));
+        return Err(WebError::bad_request(
+            "Match hat noch nicht beide Teams gesetzt",
+        ));
     };
 
     let captains = team_captains(pool, &[team1_id, team2_id]).await?;
@@ -174,35 +191,39 @@ async fn report_match_result(
 
     if body.is_no_show {
         if !matches!(body.no_show_team_id, Some(t) if t == team1_id || t == team2_id) {
-            return Err(WebError::bad_request("no_show_team_id muss eines der beiden Teams sein"));
+            return Err(WebError::bad_request(
+                "no_show_team_id muss eines der beiden Teams sein",
+            ));
         }
     } else if !matches!(body.winner_team_id, Some(t) if t == team1_id || t == team2_id) {
-        return Err(WebError::bad_request("winner_team_id muss eines der beiden Teams sein"));
+        return Err(WebError::bad_request(
+            "winner_team_id muss eines der beiden Teams sein",
+        ));
     }
 
     // Vorherige offene Meldung desselben Melders ersetzen.
     sqlx::query(
-        "DELETE FROM match_result_reports \
-         WHERE match_type = 'bracket' AND match_id = ? AND reported_by = ? AND status = ?",
+        r#"DELETE FROM turnier."match_result_reports"
+         WHERE match_type = 'bracket' AND match_id = $1 AND reported_by = $2 AND status = $3"#,
     )
     .bind(match_id)
-    .bind(&user.discord_id)
+    .bind(user_discord_id)
     .bind(OPEN_REPORT_STATUS)
     .execute(pool)
     .await?;
 
     let report_id: i64 = sqlx::query_scalar(
-        "INSERT INTO match_result_reports \
-         (match_type, match_id, tournament_id, reported_by, winner_team_id, \
-          deadlock_match_id, is_no_show, no_show_team_id, status) \
-         VALUES ('bracket', ?, ?, ?, ?, ?, ?, ?, 'pending') RETURNING id",
+        r#"INSERT INTO turnier."match_result_reports"
+         (match_type, match_id, tournament_id, reported_by, winner_team_id,
+          deadlock_match_id, is_no_show, no_show_team_id, status, created_at)
+         VALUES ('bracket', $1, $2, $3, $4, $5, $6, $7, 'pending', now()) RETURNING id"#,
     )
     .bind(match_id)
     .bind(tournament_id)
-    .bind(&user.discord_id)
+    .bind(user_discord_id)
     .bind(body.winner_team_id)
     .bind(&body.deadlock_match_id)
-    .bind(i64::from(body.is_no_show))
+    .bind(body.is_no_show)
     .bind(body.no_show_team_id)
     .fetch_one(pool)
     .await?;
@@ -230,7 +251,7 @@ async fn report_match_result(
     };
 
     let report_row: ReportRow =
-        sqlx::query_as("SELECT * FROM match_result_reports WHERE id = ?")
+        sqlx::query_as(r#"SELECT * FROM turnier."match_result_reports" WHERE id = $1"#)
             .bind(report_id)
             .fetch_one(pool)
             .await?;
@@ -263,59 +284,56 @@ async fn get_action_items(
 ) -> WebResult<Json<Value>> {
     let pool = &state.pool;
 
-    let grace: Option<(Option<i64>,)> =
-        sqlx::query_as("SELECT no_show_grace_minutes FROM tournaments WHERE id = ?")
+    let grace: Option<(i64,)> =
+        sqlx::query_as(r#"SELECT no_show_grace_minutes FROM turnier."tournaments" WHERE id = $1"#)
             .bind(tournament_id)
             .fetch_optional(pool)
             .await?;
     let Some((grace_minutes,)) = grace else {
         return Err(WebError::not_found("Turnier nicht gefunden"));
     };
-    let grace_minutes = grace_minutes.unwrap_or(10);
 
     let rows: Vec<ActionItemRow> = sqlx::query_as(
-        "SELECT r.id, r.match_id, r.reported_by, r.winner_team_id, r.deadlock_match_id, \
-                r.is_no_show, r.no_show_team_id, r.created_at, \
-                bm.round AS match_round, bm.on_stream, \
-                t1.name AS team1_name, t2.name AS team2_name, \
-                tw.name AS winner_name, tn.name AS no_show_name \
-         FROM match_result_reports r \
-         JOIN bracket_matches bm ON bm.id = r.match_id \
-         LEFT JOIN teams t1 ON t1.id = bm.team1_id \
-         LEFT JOIN teams t2 ON t2.id = bm.team2_id \
-         LEFT JOIN teams tw ON tw.id = r.winner_team_id \
-         LEFT JOIN teams tn ON tn.id = r.no_show_team_id \
-         WHERE r.tournament_id = ? AND r.match_type = 'bracket' AND r.status = 'pending' \
-         ORDER BY r.created_at",
+        r#"SELECT r.id, r.match_id, r.reported_by, r.winner_team_id, r.deadlock_match_id,
+                r.is_no_show, r.no_show_team_id, r.created_at,
+                bm.round AS match_round, bm.on_stream,
+                t1.name AS team1_name, t2.name AS team2_name,
+                tw.name AS winner_name, tn.name AS no_show_name
+         FROM turnier."match_result_reports" r
+         JOIN turnier."bracket_matches" bm ON bm.id = r.match_id
+         LEFT JOIN turnier."teams" t1 ON t1.id = bm.team1_id
+         LEFT JOIN turnier."teams" t2 ON t2.id = bm.team2_id
+         LEFT JOIN turnier."teams" tw ON tw.id = r.winner_team_id
+         LEFT JOIN turnier."teams" tn ON tn.id = r.no_show_team_id
+         WHERE r.tournament_id = $1 AND r.match_type = 'bracket' AND r.status = 'pending'
+         ORDER BY r.created_at"#,
     )
     .bind(tournament_id)
     .fetch_all(pool)
     .await?;
 
-    let now = Utc::now().naive_utc();
+    let now = Utc::now();
     let items: Vec<Value> = rows
         .into_iter()
         .map(|row| {
-            let is_no_show = row.is_no_show != 0;
-            let grace_expired = is_no_show
-                && parse_db_timestamp(&row.created_at)
-                    .map(|created| now >= created + Duration::minutes(grace_minutes))
-                    .unwrap_or(false);
+            let is_no_show = row.is_no_show;
+            let grace_expired =
+                is_no_show && now >= row.created_at + Duration::minutes(grace_minutes);
             json!({
                 "report_id": row.id,
                 "match_id": row.match_id,
                 "match_round": row.match_round,
-                "on_stream": row.on_stream != 0,
+                "on_stream": row.on_stream,
                 "team1_name": row.team1_name,
                 "team2_name": row.team2_name,
-                "reported_by": row.reported_by,
+                "reported_by": db::discord_id_to_string(row.reported_by),
                 "is_no_show": is_no_show,
                 "winner_team_id": row.winner_team_id,
                 "winner_name": row.winner_name,
                 "no_show_team_id": row.no_show_team_id,
                 "no_show_name": row.no_show_name,
                 "deadlock_match_id": row.deadlock_match_id,
-                "created_at": row.created_at,
+                "created_at": db::ts_to_string(row.created_at),
                 "grace_minutes": grace_minutes,
                 "grace_expired": grace_expired,
             })
@@ -333,14 +351,14 @@ async fn get_action_items(
 struct ActionItemRow {
     id: i64,
     match_id: i64,
-    reported_by: String,
+    reported_by: i64,
     winner_team_id: Option<i64>,
     deadlock_match_id: Option<String>,
-    is_no_show: i64,
+    is_no_show: bool,
     no_show_team_id: Option<i64>,
-    created_at: String,
+    created_at: DateTime<Utc>,
     match_round: i64,
-    on_stream: i64,
+    on_stream: bool,
     team1_name: Option<String>,
     team2_name: Option<String>,
     winner_name: Option<String>,
@@ -349,7 +367,7 @@ struct ActionItemRow {
 
 /// Lädt eine Meldung oder liefert 404.
 async fn load_report(pool: &turnier_db::Pool, report_id: i64) -> WebResult<ReportRow> {
-    sqlx::query_as::<_, ReportRow>("SELECT * FROM match_result_reports WHERE id = ?")
+    sqlx::query_as::<_, ReportRow>(r#"SELECT * FROM turnier."match_result_reports" WHERE id = $1"#)
         .bind(report_id)
         .fetch_optional(pool)
         .await?
@@ -366,13 +384,20 @@ async fn confirm_result_report(
     let pool = &state.pool;
     let report = load_report(pool, report_id).await?;
     if report.status != "pending" {
-        return Err(WebError::bad_request(format!("Meldung ist bereits {}", report.status)));
+        return Err(WebError::bad_request(format!(
+            "Meldung ist bereits {}",
+            report.status
+        )));
     }
     let m = load_bracket_match(pool, report.tournament_id, report.match_id).await?;
     let (team1_id, team2_id) = (m.team1_id, m.team2_id);
 
-    let (winner_id, result_source, force) = if report.is_no_show != 0 {
-        let winner = if report.no_show_team_id == team2_id { team1_id } else { team2_id };
+    let (winner_id, result_source, force) = if report.is_no_show {
+        let winner = if report.no_show_team_id == team2_id {
+            team1_id
+        } else {
+            team2_id
+        };
         (winner, "no_show", true)
     } else {
         (report.winner_team_id, "self_report", false)
@@ -406,25 +431,27 @@ async fn confirm_result_report(
         })?;
 
     // Diese Meldung bestätigen, konkurrierende verwerfen, ggf. deadlock_match_id setzen.
+    let actor_id = db::parse_actor_id(&user.discord_id)?;
     sqlx::query(
-        "UPDATE match_result_reports SET status = 'confirmed', resolved_at = datetime('now'), \
-         resolved_by = ? WHERE id = ?",
+        r#"UPDATE turnier."match_result_reports"
+         SET status = 'confirmed', resolved_at = now(), resolved_by = $1 WHERE id = $2"#,
     )
-    .bind(&user.discord_id)
+    .bind(actor_id)
     .bind(report_id)
     .execute(pool)
     .await?;
     sqlx::query(
-        "UPDATE match_result_reports SET status = 'rejected', resolved_at = datetime('now'), \
-         resolved_by = ? WHERE match_type = 'bracket' AND match_id = ? AND status = 'pending' AND id != ?",
+        r#"UPDATE turnier."match_result_reports"
+         SET status = 'rejected', resolved_at = now(), resolved_by = $1
+         WHERE match_type = 'bracket' AND match_id = $2 AND status = 'pending' AND id != $3"#,
     )
-    .bind(&user.discord_id)
+    .bind(actor_id)
     .bind(report.match_id)
     .bind(report_id)
     .execute(pool)
     .await?;
     if let Some(deadlock_match_id) = &report.deadlock_match_id {
-        sqlx::query("UPDATE bracket_matches SET deadlock_match_id = ? WHERE id = ?")
+        sqlx::query(r#"UPDATE turnier."bracket_matches" SET deadlock_match_id = $1 WHERE id = $2"#)
             .bind(deadlock_match_id)
             .bind(report.match_id)
             .execute(pool)
@@ -462,13 +489,17 @@ async fn reject_result_report(
     let pool = &state.pool;
     let report = load_report(pool, report_id).await?;
     if report.status != "pending" {
-        return Err(WebError::bad_request(format!("Meldung ist bereits {}", report.status)));
+        return Err(WebError::bad_request(format!(
+            "Meldung ist bereits {}",
+            report.status
+        )));
     }
+    let actor_id = db::parse_actor_id(&user.discord_id)?;
     sqlx::query(
-        "UPDATE match_result_reports SET status = 'rejected', resolved_at = datetime('now'), \
-         resolved_by = ? WHERE id = ?",
+        r#"UPDATE turnier."match_result_reports"
+         SET status = 'rejected', resolved_at = now(), resolved_by = $1 WHERE id = $2"#,
     )
-    .bind(&user.discord_id)
+    .bind(actor_id)
     .bind(report_id)
     .execute(pool)
     .await?;
@@ -498,8 +529,10 @@ async fn set_match_stream_flag(
 ) -> WebResult<Json<Value>> {
     let pool = &state.pool;
     load_bracket_match(pool, tournament_id, match_id).await?;
-    sqlx::query("UPDATE bracket_matches SET on_stream = ? WHERE id = ? AND tournament_id = ?")
-        .bind(i64::from(body.on_stream))
+    sqlx::query(
+        r#"UPDATE turnier."bracket_matches" SET on_stream = $1 WHERE id = $2 AND tournament_id = $3"#,
+    )
+        .bind(body.on_stream)
         .bind(match_id)
         .bind(tournament_id)
         .execute(pool)
@@ -511,13 +544,7 @@ async fn set_match_stream_flag(
         json!({ "match_id": match_id, "on_stream": body.on_stream }),
     )
     .await?;
-    Ok(Json(json!({ "status": "ok", "match_id": match_id, "on_stream": body.on_stream })))
-}
-
-/// Parst einen DB-Zeitstempel (`datetime('now')`-Format oder ISO) als naive UTC.
-fn parse_db_timestamp(value: &str) -> Option<NaiveDateTime> {
-    let cleaned = value.trim().replace('Z', "");
-    NaiveDateTime::parse_from_str(&cleaned, "%Y-%m-%d %H:%M:%S")
-        .or_else(|_| NaiveDateTime::parse_from_str(&cleaned, "%Y-%m-%dT%H:%M:%S"))
-        .ok()
+    Ok(Json(
+        json!({ "status": "ok", "match_id": match_id, "on_stream": body.on_stream }),
+    ))
 }

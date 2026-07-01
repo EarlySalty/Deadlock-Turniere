@@ -8,9 +8,11 @@ use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::routing::{delete, get};
 use axum::{Json, Router};
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use crate::db;
 use crate::error::{WebError, WebResult};
 use crate::extract::ModUser;
 use crate::state::AppState;
@@ -125,9 +127,9 @@ async fn load_tournament_casters_inner(
         None => load_caster_role_members(state, false).await?,
     };
 
-    let rows: Vec<(String, Option<String>, Option<String>)> = sqlx::query_as(
-        "SELECT discord_id, assigned_at, assigned_by FROM tournament_casters \
-         WHERE tournament_id = ? ORDER BY assigned_at, discord_id",
+    let rows: Vec<(i64, Option<DateTime<Utc>>, Option<i64>)> = sqlx::query_as(
+        r#"SELECT discord_id, assigned_at, assigned_by FROM turnier."tournament_casters"
+         WHERE tournament_id = $1 ORDER BY assigned_at, discord_id"#,
     )
     .bind(tournament_id)
     .fetch_all(&state.pool)
@@ -135,10 +137,16 @@ async fn load_tournament_casters_inner(
 
     Ok(rows
         .into_iter()
-        .filter(|(id, _, _)| !id.is_empty())
+        .filter(|(id, _, _)| *id != 0)
         .map(|(discord_id, assigned_at, assigned_by)| {
+            let discord_id = db::discord_id_to_string(discord_id);
             let display_name = display_names.get(&discord_id).cloned().flatten();
-            MatchCasterOut { discord_id, display_name, assigned_at, assigned_by }
+            MatchCasterOut {
+                discord_id,
+                display_name,
+                assigned_at: assigned_at.map(db::ts_to_string),
+                assigned_by: assigned_by.map(db::discord_id_to_string),
+            }
         })
         .collect())
 }
@@ -174,7 +182,9 @@ async fn list_tournament_casters(
     Path(tournament_id): Path<i64>,
 ) -> WebResult<Json<Vec<MatchCasterOut>>> {
     load_tournament_or_404(&state.pool, tournament_id).await?;
-    Ok(Json(load_tournament_casters_inner(&state, tournament_id, None).await?))
+    Ok(Json(
+        load_tournament_casters_inner(&state, tournament_id, None).await?,
+    ))
 }
 
 /// Body von `assign_tournament_caster` (`discord_id`).
@@ -195,13 +205,17 @@ async fn assign_tournament_caster(
         return Err(WebError::bad_request("Discord-User ist kein Caster"));
     }
 
+    let caster_id = db::parse_discord_id(&body.discord_id)?;
+    let actor_id = db::parse_actor_id(&user.discord_id)?;
     load_tournament_or_404(&state.pool, tournament_id).await?;
     sqlx::query(
-        "INSERT OR IGNORE INTO tournament_casters (tournament_id, discord_id, assigned_by) VALUES (?, ?, ?)",
+        r#"INSERT INTO turnier."tournament_casters" (tournament_id, discord_id, assigned_by, assigned_at)
+           VALUES ($1, $2, $3, now())
+           ON CONFLICT (tournament_id, discord_id) DO NOTHING"#,
     )
     .bind(tournament_id)
-    .bind(&body.discord_id)
-    .bind(&user.discord_id)
+    .bind(caster_id)
+    .bind(actor_id)
     .execute(&state.pool)
     .await?;
     audit(
@@ -212,7 +226,9 @@ async fn assign_tournament_caster(
     )
     .await?;
 
-    Ok(Json(load_tournament_casters_inner(&state, tournament_id, Some(display_names)).await?))
+    Ok(Json(
+        load_tournament_casters_inner(&state, tournament_id, Some(display_names)).await?,
+    ))
 }
 
 /// `DELETE .../tournaments/{id}/casters/{discord_id}` — Turnier-Caster entfernen.
@@ -222,11 +238,13 @@ async fn remove_tournament_caster(
     Path((tournament_id, discord_id)): Path<(i64, String)>,
 ) -> WebResult<Json<Vec<MatchCasterOut>>> {
     load_tournament_or_404(&state.pool, tournament_id).await?;
-    sqlx::query("DELETE FROM tournament_casters WHERE tournament_id = ? AND discord_id = ?")
-        .bind(tournament_id)
-        .bind(&discord_id)
-        .execute(&state.pool)
-        .await?;
+    sqlx::query(
+        r#"DELETE FROM turnier."tournament_casters" WHERE tournament_id = $1 AND discord_id = $2"#,
+    )
+    .bind(tournament_id)
+    .bind(db::parse_discord_id(&discord_id)?)
+    .execute(&state.pool)
+    .await?;
     audit(
         &state.pool,
         "tournament_caster_remove",
@@ -235,7 +253,9 @@ async fn remove_tournament_caster(
     )
     .await?;
 
-    Ok(Json(load_tournament_casters_inner(&state, tournament_id, None).await?))
+    Ok(Json(
+        load_tournament_casters_inner(&state, tournament_id, None).await?,
+    ))
 }
 
 /// `GET .../matches/{match_id}/casters` — Match-Caster (gibt faktisch die
@@ -246,7 +266,9 @@ async fn list_match_casters(
     Path((tournament_id, match_id)): Path<(i64, i64)>,
 ) -> WebResult<Json<Vec<MatchCasterOut>>> {
     ensure_bracket_match_exists(&state.pool, tournament_id, match_id).await?;
-    Ok(Json(load_tournament_casters_inner(&state, tournament_id, None).await?))
+    Ok(Json(
+        load_tournament_casters_inner(&state, tournament_id, None).await?,
+    ))
 }
 
 /// `POST .../matches/{match_id}/casters` — 410 Gone (deprecated).

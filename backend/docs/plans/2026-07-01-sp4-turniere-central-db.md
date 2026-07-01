@@ -231,13 +231,13 @@ Verifikationsstand 2026-07-01: `cargo build -p turnier-scheduler` gruen; `cargo 
 
 **Files:** `rust/crates/turnier-api/src/{public,account.rs,consent.rs,leaderboard.rs,operations.rs}`, zugehoerige Tests.
 
-- [ ] DTO-Grenze pruefen: Discord IDs bleiben HTTP-kompatibel als String, DB intern `BIGINT`.
-- [ ] `INSERT OR REPLACE user_consents` -> `ON CONFLICT (discord_id) DO UPDATE`.
-- [ ] Dynamic Patch-Updates in `consent.rs` auf QueryBuilder mit Spalten-Whitelist.
-- [ ] Public Loader auf `turnier.*` und PG-Bools/JSONB/Times umstellen; keine `team_id = 0`-SQLite-Sentinel-Logik ohne explizite Kompatibilitaetsentscheidung.
-- [ ] Leaderboard-History ueber `turnier.player_points`, `turnier.rank_cache`, `turnier.team_members`, `turnier.teams`, `turnier.tournaments`.
-- [ ] Tests fuer Consent-Create/Update/Delete-Guard, Signup, Team-Join/Leave, Invitation-Autoaccept, Leaderboard-Profile.
-- [ ] Verifikation: `cargo build -p turnier-api`, zielgerichtete API-Tests, Clippy/Fmt.
+- [x] DTO-Grenze pruefen: Discord IDs bleiben HTTP-kompatibel als String, DB intern `BIGINT`.
+- [x] `INSERT OR REPLACE user_consents` -> `ON CONFLICT (discord_id) DO UPDATE`.
+- [x] Dynamic Patch-Updates in `consent.rs` auf QueryBuilder mit Spalten-Whitelist.
+- [x] Public Loader auf `turnier.*` und PG-Bools/JSONB/Times umstellen; keine `team_id = 0`-SQLite-Sentinel-Logik ohne explizite Kompatibilitaetsentscheidung.
+- [x] Leaderboard-History ueber `turnier.player_points`, `turnier.rank_cache`, `turnier.team_members`, `turnier.teams`, `turnier.tournaments`.
+- [x] Tests fuer Consent-Create/Update/Delete-Guard, Signup, Team-Join/Leave, Invitation-Autoaccept, Leaderboard-Profile.
+- [x] Verifikation: `cargo build -p turnier-api`, zielgerichtete API-Tests, Clippy/Fmt.
 
 ## Task T11: `turnier-api` Admin/Test/Ops/Loaders
 
@@ -245,13 +245,17 @@ Verifikationsstand 2026-07-01: `cargo build -p turnier-scheduler` gruen; `cargo 
 
 **Files:** `rust/crates/turnier-api/src/admin/**`, `rust/crates/turnier-api/src/test_mode.rs`, API-Tests.
 
-- [ ] Admin-Tournament create/update: JSONB-Felder, nullable Patch-Semantik, `updated_at = now()`, `RETURNING id`.
-- [ ] Admin-Team/Member-Transaktionen: `Transaction<'_, Postgres>`, Snowflake-Casts, unique Konflikte als fachliche 409/422 beibehalten.
-- [ ] Match-Admin-Shortcuts duerfen nicht an `datetime('now')`, 0/1-Bools oder unqualifizierte Tabellen gebunden bleiben.
-- [ ] Test-Mode-Wipe/Seed gegen PG mit FK-/Delete-Reihenfolge pruefen; keine Live-Testdaten loeschen ausser in Wegwerf-DB.
-- [ ] Loaders fuer Admin-Detailansicht auf JSONB/Bools/Times und vollqualifizierte Tabellen.
-- [ ] Tests fuer Tournament-Create/Update, Caster-Assign, Test-Seed/Wipe/Simulate, Operations Confirm/Reject.
-- [ ] Verifikation: `cargo build -p turnier-api`, `cargo test -p turnier-api --features testing -- --include-ignored`, Clippy/Fmt.
+- [x] Admin-Tournament create/update: JSONB-Felder, nullable Patch-Semantik, `updated_at = now()`, `RETURNING id`.
+- [x] Admin-Team/Member-Transaktionen: `Transaction<'_, Postgres>`, Snowflake-Casts, unique Konflikte als fachliche 409/422 beibehalten.
+- [x] Match-Admin-Shortcuts duerfen nicht an `datetime('now')`, 0/1-Bools oder unqualifizierte Tabellen gebunden bleiben.
+- [x] Test-Mode-Wipe/Seed gegen PG mit FK-/Delete-Reihenfolge pruefen; keine Live-Testdaten loeschen ausser in Wegwerf-DB.
+- [x] Loaders fuer Admin-Detailansicht auf JSONB/Bools/Times und vollqualifizierte Tabellen.
+- [ ] Tests fuer Tournament-Create/Update, Caster-Assign, Test-Seed/Wipe/Simulate, Operations Confirm/Reject. Stand 2026-07-02: Tournament-Create/Update, Test-Seed/Wipe/Simulate und Operations Confirm/Reject abgedeckt; Caster-Assign bleibt offen, weil `AppState` keinen Notifier-Mock fuer Discord-Rollenmitglieder injiziert.
+- [x] Verifikation: `cargo build -p turnier-api`, `cargo test -p turnier-api --features testing -- --include-ignored`, Clippy/Fmt.
+
+Verifikationsstand 2026-07-02: `cargo build -p turnier-api` gruen; `cargo clippy -p turnier-api --all-targets -- -D warnings` gruen; `cargo fmt --check -p turnier-api` gruen; `../Deadlock-Bots/rust/scripts/central_test_db.sh bash -lc 'cd /home/naniadm/Documents/Deadlock-Turniere/rust && cargo test -p turnier-api --features testing -- --include-ignored'` gruen.
+
+Rework 2026-07-02: Kritiker-Befunde gefixt: Test-Mode-Wipe/Seed verlangt zusaetzlichen Harness-Sentinel `TURNIER_TEST_DB_CONFIRM=throwaway-only`; `23505`-Unique-Verletzungen in Public Signup/Team/Helper/Invitation-Pfaden mappen auf `409 Conflict`; Admin-/Public-Team- und Admin-Turnier-Deletes entfernen `team_applications`/`team_invitations` vor dem Team-Loeschen. Rework-Verifikation gruen, volle `turnier-api`-Suite: 20 Integrationstests.
 
 ## Task T12: Composition Root, Config, Python-Legacy-Fence
 
