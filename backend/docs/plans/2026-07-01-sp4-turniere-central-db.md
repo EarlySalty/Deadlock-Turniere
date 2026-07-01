@@ -185,13 +185,15 @@ Verifikationsstand 2026-07-01: `cargo test -p turnier-core -p turnier-db --featu
 
 **Files:** `rust/crates/turnier-match/src/**`, `rust/crates/turnier-match/tests/**`.
 
-- [ ] `bracket_matches`, `group_matches`, `match_results`, `match_games`, `teams`, `team_members`, `groups`, `group_teams`, `tournaments`, `tournament_casters` auf PG portieren.
-- [ ] `last_insert_rowid()` in `series.rs` und Tests -> `RETURNING id`.
-- [ ] `played_at = datetime('now')` -> `played_at = now()` oder gebundener `DateTime<Utc>`.
-- [ ] `match_stats`, `hero_assignments` als JSONB; `COALESCE($n, match_stats)` mit korrekten Typcasts.
-- [ ] Bool-Felder `is_test`, `auto_lobby_enabled`, `on_stream` als `bool`.
-- [ ] Tests fuer Bracket-/Group-Ergebnis, Series, Auto-Lobby-Testskip, Caster-Fallback, JSONB-Stats.
-- [ ] Verifikation: `cargo build -p turnier-match`, `cargo test -p turnier-match --features testing -- --include-ignored`, Clippy/Fmt.
+- [x] `bracket_matches`, `group_matches`, `match_results`, `match_games`, `teams`, `team_members`, `groups`, `group_teams`, `tournaments`, `tournament_casters` auf PG portieren.
+- [x] `last_insert_rowid()` in `series.rs` und Tests -> `RETURNING id`.
+- [x] `played_at = datetime('now')` -> `played_at = now()` oder gebundener `DateTime<Utc>`.
+- [x] `match_stats`, `hero_assignments` als JSONB; `COALESCE($n, match_stats)` mit korrekten Typcasts.
+- [x] Bool-Felder `is_test`, `auto_lobby_enabled`, `on_stream` als `bool`.
+- [x] Tests fuer Bracket-/Group-Ergebnis, Series, Auto-Lobby-Testskip, Caster-Fallback, JSONB-Stats.
+- [x] Verifikation: `cargo build -p turnier-match`, `cargo test -p turnier-match --features testing -- --include-ignored`, Clippy/Fmt.
+
+Verifikationsstand 2026-07-01: `cargo build -p turnier-match` gruen; `cargo test -p turnier-match --features testing -- --include-ignored` via zentralem Wegwerf-PG-Runner `Deadlock-Bots/rust/scripts/central_test_db.sh` gruen; `cargo clippy -p turnier-match --all-targets --all-features -- -D warnings` gruen; `cargo fmt --check -p turnier-match` gruen.
 
 ## Task T8: `turnier-engine`
 

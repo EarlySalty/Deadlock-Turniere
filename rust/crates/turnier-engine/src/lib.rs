@@ -24,6 +24,7 @@ pub mod mini_groups;
 pub mod points;
 pub mod status;
 
+#[cfg(feature = "persist")]
 mod persist;
 
 pub use error::{TournamentError, TournamentResult};
@@ -33,11 +34,11 @@ pub use engine::groups::auto_num_groups;
 pub use engine::naming::name_key;
 pub use engine::slots::BracketSlot;
 pub use status::{
-    determine_tournament_mode, is_valid_transition, valid_next_statuses,
-    AUTO_GROUP_STAGE_THRESHOLD,
+    determine_tournament_mode, is_valid_transition, valid_next_statuses, AUTO_GROUP_STAGE_THRESHOLD,
 };
 
 // Persistenz-API.
+#[cfg(feature = "persist")]
 pub use persist::{
     advance_bracket_winner, assign_random_teams, build_checkin_snapshot_token,
     complete_mini_group_round_robin, finalize_checkin, generate_bracket, generate_bracket_in_tx,

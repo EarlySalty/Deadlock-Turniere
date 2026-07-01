@@ -17,10 +17,10 @@ turnier-core = { path = "../turnier-core" }
 turnier-db = { path = "../turnier-db" }
 turnier-config = { path = "../turnier-config" }
 turnier-discord = { path = "../turnier-discord" }
-turnier-engine = { path = "../turnier-engine" }
 turnier-draft = { path = "../turnier-draft" }
+turnier-engine = { path = "../turnier-engine", default-features = false }
 
-sqlx.workspace = true
+sqlx = { workspace = true, features = ["sqlite"] }
 tokio.workspace = true
 async-trait.workspace = true
 chrono.workspace = true
@@ -32,6 +32,10 @@ tracing.workspace = true
 
 [dev-dependencies]
 tokio = { workspace = true }
+
+[features]
+default = []
+testing = ["turnier-db/testing"]
 
 [lints]
 workspace = true

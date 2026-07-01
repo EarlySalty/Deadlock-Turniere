@@ -2,6 +2,74 @@
 
 ---
 
+## Neue Aufgabe (2026-07-01): Rework SP4 T7 Mini-Group-Tiebreak
+
+### Ziel
+- `complete_mini_group_round_robin_pg` in `turnier-match` wieder auf die volle Mini-Group-Tiebreaker-Kette bringen.
+- Reine Logik aus `turnier_engine::mini_groups` wiederverwenden, ohne die SQLite-Persistenzschicht in `turnier-match` mitzuziehen.
+- Regressionstest fuer Head-to-Head/Point-Diff gegen Seed-Fallback ergaenzen.
+- `advance_bracket_winner_pg`/`advance_in_tx_pg` kurz gegen alte Engine-Propagation pruefen.
+
+### Status (2026-07-01)
+→ **Abgeschlossen fuer GPT-Worker** — Rework umgesetzt, Review durch Claude ausstehend
+
+### Fortschritt
+- `WORKFLOW.md`, Git-Status, `turnier_match::result`, `turnier_engine::mini_groups` und alte Engine-Persistenz fuer Mini-Groups/Advance gelesen.
+- `turnier-engine` per `persist`-Default-Feature aufgeteilt; `turnier-match` bindet `turnier-engine` mit `default-features = false` und nutzt nur `mini_groups`.
+- `complete_mini_group_round_robin_pg` laedt jetzt `team1_id`, `team2_id`, `winner_id`, `status`, `match_stats` und wertet ueber `aggregate` + `select_mini_group_winner` aus.
+- Regressionstest ergaenzt: 4er-Mini-Group mit 2er-Wins-Tie, besserem Seed/Point-Diff fuer Team 1, aber Head-to-Head-Sieg fuer Team 2.
+- `advance_bracket_winner_pg`/`advance_in_tx_pg` gegen `turnier_engine::persist::advance` gegengelesen: Source-Propagation, Loser-Ziel, Grand-Final-Reset und Legacy-Fallback sind paritaer vorhanden.
+- Verifikation: `cargo build -p turnier-match` gruen.
+- Verifikation: `cargo clippy -p turnier-match --all-targets --all-features -- -D warnings` gruen.
+- Verifikation: `cargo fmt --check -p turnier-match` gruen.
+- Verifikation: `../Deadlock-Bots/rust/scripts/central_test_db.sh bash -lc 'cd /home/naniadm/Documents/Deadlock-Turniere/rust && cargo test -p turnier-match --features testing -- --include-ignored'` gruen.
+- Kein Commit/Push, keine Dienste neu gestartet, keine Secret-Werte ausgegeben.
+
+---
+
+## Neue Aufgabe (2026-07-01): Kritiker-Review SP4 T7 turnier-match
+
+### Ziel
+- Uncommitted T7-Diff von `turnier-match` gegen `HEAD` vollstaendig lesen und aktiv auf echte Portierungsbugs pruefen.
+- Fokus: `RETURNING id`, Zeitstempel/TIMESTAMPTZ, JSONB-Binds, PG-Bools, Bracket/Series-Zustandslogik, Dynamic-SQL-Whitelist und Testabdeckung.
+- Keine Codeaenderungen an Produktiv-/Testcode, kein Commit/Push.
+
+### Status (2026-07-01)
+→ **Abgeschlossen** — Review-Befund an Claude zurückzugeben
+
+### Fortschritt
+- `WORKFLOW.md`, `git status`, Basis-Commit und T7-Diffstat gelesen; bestehende uncommitted Aenderungen bleiben unangetastet.
+- Vollstaendigen T7-Diff gegen `HEAD` und relevante Vorversionen/Schema gelesen: `series`, `result`, `repo`, `modes`, `auto_lobby`, `lobby`, `steam_bridge`, Tests und Plan.
+- Befund: `complete_mini_group_round_robin_pg` bildet die bisherige Engine-Tiebreaker-Kette nicht ab und entscheidet Gleichstaende nur nach Wins/Seed/Team-ID.
+- Geprueft ohne Produktiv-/Testcodeaenderung: `RETURNING id`, TIMESTAMPTZ-Binds, JSONB-Binds/Casts, PG-Bools, Dynamic-SQL-Whitelist und Testabdeckung.
+- Verifikation: `git diff --check HEAD -- rust/crates/turnier-match` gruen; keine Cargo-Tests neu ausgefuehrt, da externe T7-Verifikation bereits vorlag und Review statisch war.
+
+---
+
+## Neue Aufgabe (2026-07-01): SP4 Turniere T7 turnier-match
+
+### Ziel
+- T7 (`turnier-match`) aus `backend/docs/plans/2026-07-01-sp4-turniere-central-db.md` auf zentrale Postgres-Tabellen unter `turnier.*` portieren.
+- MatchManager, Ergebnisverarbeitung, Series, Modes, Auto-Lobby und Repos ohne SQLite-Fachqueries betreiben.
+- Tests/Build/Clippy/Fmt fuer `turnier-match` ausfuehren; keine Secrets ausgeben, kein Commit/Push.
+
+### Status (2026-07-01)
+→ **Abgeschlossen fuer GPT-Worker** — T7 umgesetzt, Review durch Claude ausstehend
+
+### Fortschritt
+- `WORKFLOW.md`, T7-Planabschnitt, Git-Status und `turnier-match`-SQLite-Stellen gelesen.
+- Ausgangsstand: Branch `central-postgres-sp4`, nur untracked Audit-Datei ausserhalb T7 sichtbar; kein Commit/Push.
+- `turnier-match` von der noch SQLite-typisierten `turnier-engine`-Persistenz entkoppelt: Bracket-Gewinner-Propagation und Mini-Group-Abschluss lokal in PG umgesetzt, damit T7 unabhaengig von T8 baubar ist.
+- Fachqueries in `series`, `result`, `repo`, `modes` und `auto_lobby` auf `turnier.*`, `$n`-Binds, PG-Bools, `TIMESTAMPTZ` und JSONB umgestellt; variable Team-`IN`-Listen nutzen die Dynamic-SQL-Whitelist-Helfer.
+- Tests von In-Memory-SQLite auf zentrale Wegwerf-PG-DB (`turnier-db/testing`) umgestellt; Caster-Fallback und JSONB-Stats abgedeckt.
+- Verifikation: `cargo build -p turnier-match` gruen.
+- Verifikation: `cargo test -p turnier-match --features testing -- --include-ignored` via `Deadlock-Bots/rust/scripts/central_test_db.sh` gruen; direkter Lauf ohne Test-DSN scheiterte erwartungsgemaess an fehlender DSN-Umgebung.
+- Verifikation: `cargo clippy -p turnier-match --all-targets --all-features -- -D warnings` gruen.
+- Verifikation: `cargo fmt --check -p turnier-match` gruen; dafuer scoped `cargo fmt -p turnier-match` ausgefuehrt.
+- Kein Commit/Push, keine Dienste neu gestartet, keine Secret-Werte ausgegeben.
+
+---
+
 ## Neue Aufgabe (2026-07-01): SP4 Turniere Welle1 T3-T5 Umsetzung
 
 ### Ziel

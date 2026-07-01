@@ -27,8 +27,8 @@ impl MatchManager {
         }
 
         let bracket_ids: Vec<i64> = sqlx::query(
-            "SELECT id FROM bracket_matches \
-             WHERE tournament_id = ? \
+            "SELECT id FROM turnier.bracket_matches \
+             WHERE tournament_id = $1 \
                AND team1_id IS NOT NULL AND team2_id IS NOT NULL \
                AND status IN ('pending', 'checkin') AND steam_party_id IS NULL \
              ORDER BY round, position, id",
@@ -41,9 +41,9 @@ impl MatchManager {
         .collect();
 
         let group_ids: Vec<i64> = sqlx::query(
-            "SELECT gm.id FROM group_matches gm \
-             JOIN groups g ON g.id = gm.group_id \
-             WHERE g.tournament_id = ? \
+            "SELECT gm.id FROM turnier.group_matches gm \
+             JOIN turnier.groups g ON g.id = gm.group_id \
+             WHERE g.tournament_id = $1 \
                AND gm.team1_id IS NOT NULL AND gm.team2_id IS NOT NULL \
                AND gm.status IN ('pending', 'checkin') AND gm.steam_party_id IS NULL \
              ORDER BY gm.id",
@@ -86,9 +86,9 @@ impl MatchManager {
         }
 
         let next_ids: Vec<i64> = sqlx::query(
-            "SELECT id FROM bracket_matches \
-             WHERE tournament_id = ? \
-               AND (source_match1_id = ? OR source_match2_id = ?) \
+            "SELECT id FROM turnier.bracket_matches \
+             WHERE tournament_id = $1 \
+               AND (source_match1_id = $2 OR source_match2_id = $3) \
                AND team1_id IS NOT NULL AND team2_id IS NOT NULL \
                AND status IN ('pending', 'checkin') AND steam_party_id IS NULL \
              ORDER BY round, position, id",
@@ -117,7 +117,7 @@ impl MatchManager {
     /// gesetzt hat. Entspricht dem gemeinsamen Gate beider Funktionen.
     async fn auto_lobby_active(&self, tournament_id: i64) -> MatchResult<bool> {
         let row = sqlx::query(
-            "SELECT auto_lobby_enabled, is_test FROM tournaments WHERE id = ?",
+            "SELECT auto_lobby_enabled, is_test FROM turnier.tournaments WHERE id = $1",
         )
         .bind(tournament_id)
         .fetch_optional(&self.pool)
@@ -125,8 +125,8 @@ impl MatchManager {
         let Some(row) = row else {
             return Ok(false);
         };
-        let is_test = row.get::<i64, _>("is_test") != 0;
-        let enabled = row.get::<i64, _>("auto_lobby_enabled") != 0;
+        let is_test = row.get::<bool, _>("is_test");
+        let enabled = row.get::<bool, _>("auto_lobby_enabled");
         Ok(!is_test && enabled)
     }
 }

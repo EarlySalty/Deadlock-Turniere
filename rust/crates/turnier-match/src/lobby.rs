@@ -31,7 +31,8 @@ impl MatchManager {
     /// Erstellt eine Steam-Custom-Lobby für ein Bracket-Match.
     /// Entspricht `create_lobby`.
     pub async fn create_lobby(&self, tournament_id: i64, match_id: i64) -> SteamTaskResult<Value> {
-        self.create_lobby_for_match(MatchKind::Bracket, tournament_id, match_id).await
+        self.create_lobby_for_match(MatchKind::Bracket, tournament_id, match_id)
+            .await
     }
 
     /// Erstellt eine Steam-Custom-Lobby für ein Group-Match.
@@ -41,7 +42,8 @@ impl MatchManager {
         tournament_id: i64,
         match_id: i64,
     ) -> SteamTaskResult<Value> {
-        self.create_lobby_for_match(MatchKind::Group, tournament_id, match_id).await
+        self.create_lobby_for_match(MatchKind::Group, tournament_id, match_id)
+            .await
     }
 
     /// Setzt den Bot auf den Spectator-Slot (nur Bracket). Entspricht
@@ -51,7 +53,9 @@ impl MatchManager {
         tournament_id: i64,
         match_id: i64,
     ) -> SteamTaskResult<Value> {
-        let party_id = self.get_party_id(MatchKind::Bracket, tournament_id, match_id).await?;
+        let party_id = self
+            .get_party_id(MatchKind::Bracket, tournament_id, match_id)
+            .await?;
         self.run_steam_task(
             "Spectator-Slot setzen",
             "GC_LOBBY_SET_SPECTATOR",
@@ -64,7 +68,9 @@ impl MatchManager {
     /// Setzt den Bot in der Lobby auf ready (nur Bracket). Entspricht
     /// `set_bot_ready`.
     pub async fn set_bot_ready(&self, tournament_id: i64, match_id: i64) -> SteamTaskResult<Value> {
-        let party_id = self.get_party_id(MatchKind::Bracket, tournament_id, match_id).await?;
+        let party_id = self
+            .get_party_id(MatchKind::Bracket, tournament_id, match_id)
+            .await?;
         self.run_steam_task(
             "Ready-Status setzen",
             "GC_LOBBY_READY",
@@ -76,7 +82,8 @@ impl MatchManager {
 
     /// Startet ein Bracket-Match. Entspricht `start_match`.
     pub async fn start_match(&self, tournament_id: i64, match_id: i64) -> SteamTaskResult<Value> {
-        self.start_match_for_match(MatchKind::Bracket, tournament_id, match_id).await
+        self.start_match_for_match(MatchKind::Bracket, tournament_id, match_id)
+            .await
     }
 
     /// Startet ein Group-Match. Entspricht `start_group_match`.
@@ -85,12 +92,14 @@ impl MatchManager {
         tournament_id: i64,
         match_id: i64,
     ) -> SteamTaskResult<Value> {
-        self.start_match_for_match(MatchKind::Group, tournament_id, match_id).await
+        self.start_match_for_match(MatchKind::Group, tournament_id, match_id)
+            .await
     }
 
     /// Lässt den Bot eine Bracket-Lobby verlassen. Entspricht `leave_lobby`.
     pub async fn leave_lobby(&self, tournament_id: i64, match_id: i64) -> SteamTaskResult<Value> {
-        self.leave_lobby_for_match(MatchKind::Bracket, tournament_id, match_id).await
+        self.leave_lobby_for_match(MatchKind::Bracket, tournament_id, match_id)
+            .await
     }
 
     /// Lässt den Bot eine Group-Lobby verlassen. Entspricht `leave_group_lobby`.
@@ -99,7 +108,8 @@ impl MatchManager {
         tournament_id: i64,
         match_id: i64,
     ) -> SteamTaskResult<Value> {
-        self.leave_lobby_for_match(MatchKind::Group, tournament_id, match_id).await
+        self.leave_lobby_for_match(MatchKind::Group, tournament_id, match_id)
+            .await
     }
 
     /// Holt das Bracket-Ergebnis vom GC und übernimmt es. Entspricht
@@ -109,7 +119,8 @@ impl MatchManager {
         tournament_id: i64,
         match_id: i64,
     ) -> SteamTaskResult<Value> {
-        self.fetch_match_result_for_match(MatchKind::Bracket, tournament_id, match_id).await
+        self.fetch_match_result_for_match(MatchKind::Bracket, tournament_id, match_id)
+            .await
     }
 
     /// Holt das Group-Ergebnis vom GC und übernimmt es. Entspricht
@@ -119,7 +130,8 @@ impl MatchManager {
         tournament_id: i64,
         match_id: i64,
     ) -> SteamTaskResult<Value> {
-        self.fetch_match_result_for_match(MatchKind::Group, tournament_id, match_id).await
+        self.fetch_match_result_for_match(MatchKind::Group, tournament_id, match_id)
+            .await
     }
 
     async fn fetch_match_result_for_match(
@@ -140,8 +152,7 @@ impl MatchManager {
             )
             .await?;
 
-        let winning_team =
-            coerce_optional_int(result.get("winning_team"), "winning_team")?;
+        let winning_team = coerce_optional_int(result.get("winning_team"), "winning_team")?;
         let winner_id = coerce_optional_int(result.get("winner_id"), "winner_id")?;
         let duration_s = coerce_optional_int(result.get("duration_s"), "duration_s")?;
         let players = result.get("players").and_then(|v| v.as_array()).cloned();
@@ -157,7 +168,8 @@ impl MatchManager {
                     source: "automatic".to_string(),
                     force: false,
                 };
-                self.apply_bracket_match_result(tournament_id, match_id, params).await?
+                self.apply_bracket_match_result(tournament_id, match_id, params)
+                    .await?
             }
             MatchKind::Group => {
                 let deadlock_match_id = extract_deadlock_match_id(&result);
@@ -169,7 +181,8 @@ impl MatchManager {
                     players,
                     source: "automatic".to_string(),
                 };
-                self.apply_group_match_result(tournament_id, match_id, params).await?
+                self.apply_group_match_result(tournament_id, match_id, params)
+                    .await?
             }
         };
 
@@ -237,10 +250,13 @@ impl MatchManager {
         preset_key: &str,
         enabled: bool,
     ) -> SteamTaskResult<Value> {
-        let preset = presets::get_preset(preset_key)
-            .ok_or_else(|| SteamTaskError::state(format!("Unbekanntes Event-Preset: {preset_key}")))?;
+        let preset = presets::get_preset(preset_key).ok_or_else(|| {
+            SteamTaskError::state(format!("Unbekanntes Event-Preset: {preset_key}"))
+        })?;
         let convars = preset.convars_for(enabled);
-        let result = self.apply_match_convars(tournament_id, match_id, &convars).await?;
+        let result = self
+            .apply_match_convars(tournament_id, match_id, &convars)
+            .await?;
         let mut out = as_object(result);
         out.insert("preset_key".into(), json!(preset.key));
         out.insert("enabled".into(), json!(enabled));
@@ -259,7 +275,8 @@ impl MatchManager {
     ) -> SteamTaskResult<Value> {
         let m = repo::get_match(&self.pool, kind, tournament_id, match_id).await?;
         require_match_ready_for_lobby(&m)?;
-        self.ensure_no_duplicate_lobby_request(kind, match_id, &m).await?;
+        self.ensure_no_duplicate_lobby_request(kind, match_id, &m)
+            .await?;
 
         let lobby_settings = repo::get_lobby_settings(&self.pool, tournament_id).await?;
         let participants = repo::load_participants(&self.pool, &m).await?;
@@ -278,10 +295,10 @@ impl MatchManager {
         for (k, v) in &mode_payload.convars {
             merged_convars.insert(k.clone(), v.clone());
         }
-        let hero_assignments_json = if mode_payload.hero_assignments_is_empty() {
+        let hero_assignments = if mode_payload.hero_assignments_is_empty() {
             None
         } else {
-            Some(serde_json::to_string(&mode_payload.hero_assignments).unwrap_or_default())
+            Some(&mode_payload.hero_assignments)
         };
 
         let mut create_payload = serde_json::Map::new();
@@ -315,11 +332,13 @@ impl MatchManager {
             m.scope_value,
             &party_id,
             &party_code,
-            hero_assignments_json.as_deref(),
+            hero_assignments,
         )
         .await?;
 
-        let invite_result = self.invite_match_participants(&party_id, &steam_ids).await?;
+        let invite_result = self
+            .invite_match_participants(&party_id, &steam_ids)
+            .await?;
 
         let mut discord_channel_id: Option<String> = None;
         if !is_test {
@@ -371,7 +390,10 @@ impl MatchManager {
         let team1_name = m.team1_label();
         let team2_name = m.team2_label();
 
-        let channel_id = match notifier.create_match_channel(match_id, &team1_name, &team2_name).await {
+        let channel_id = match notifier
+            .create_match_channel(match_id, &team1_name, &team2_name)
+            .await
+        {
             Ok(id) => id,
             Err(err) => {
                 tracing::error!(
@@ -383,7 +405,8 @@ impl MatchManager {
         };
 
         if let Err(err) =
-            repo::set_discord_channel_id(&self.pool, kind, match_id, m.scope_value, &channel_id).await
+            repo::set_discord_channel_id(&self.pool, kind, match_id, m.scope_value, &channel_id)
+                .await
         {
             tracing::error!(match_id, error = %err, "discord_channel_id persistieren fehlgeschlagen");
             return None;
@@ -400,8 +423,9 @@ impl MatchManager {
         // Caster benachrichtigen (best-effort, im Original innerhalb des try-Blocks).
         match repo::load_match_casters(&self.pool, kind, match_id).await {
             Ok(caster_ids) if !caster_ids.is_empty() => {
-                if let Err(err) =
-                    notifier.notify_casters_match_created(match_id, &channel_id, &caster_ids).await
+                if let Err(err) = notifier
+                    .notify_casters_match_created(match_id, &channel_id, &caster_ids)
+                    .await
                 {
                     tracing::error!(match_id, error = %err, "notify_casters_match_created fehlgeschlagen");
                     return None;
@@ -434,8 +458,11 @@ impl MatchManager {
             }
         };
 
-        let hero_lines: Option<&[String]> =
-            if announcement_lines.is_empty() { None } else { Some(&announcement_lines) };
+        let hero_lines: Option<&[String]> = if announcement_lines.is_empty() {
+            None
+        } else {
+            Some(&announcement_lines)
+        };
         if let Err(err) = notifier
             .send_lobby_announcement(
                 match_id,
@@ -476,7 +503,11 @@ impl MatchManager {
             .steam_party_id
             .clone()
             .filter(|s| !s.is_empty())
-            .ok_or_else(|| SteamTaskError::state(format!("Für Match {match_id} ist keine Party-ID gespeichert")))?;
+            .ok_or_else(|| {
+                SteamTaskError::state(format!(
+                    "Für Match {match_id} ist keine Party-ID gespeichert"
+                ))
+            })?;
 
         self.run_steam_task(
             "Spectator-Slot setzen",
@@ -517,7 +548,11 @@ impl MatchManager {
                     "Euer Match zwischen {team1_name} und {team2_name} läuft jetzt. Lobby-Code: {code}"
                 );
                 if let Err(err) = notifier
-                    .notify_users(&participant_discord_ids, NotificationEvent::MatchStart, &message)
+                    .notify_users(
+                        &participant_discord_ids,
+                        NotificationEvent::MatchStart,
+                        &message,
+                    )
                     .await
                 {
                     tracing::error!(
@@ -555,8 +590,14 @@ impl MatchManager {
         let match_id_value = coerce_optional_int(raw.as_ref(), "match_id")?;
         let deadlock_str = match_id_value.map(|i| i.to_string());
 
-        repo::set_in_progress(&self.pool, kind, match_id, m.scope_value, deadlock_str.as_deref())
-            .await?;
+        repo::set_in_progress(
+            &self.pool,
+            kind,
+            match_id,
+            m.scope_value,
+            deadlock_str.as_deref(),
+        )
+        .await?;
 
         let mut out = as_object(result);
         out.insert("success".into(), json!(true));
@@ -601,9 +642,11 @@ impl MatchManager {
         match_id: i64,
     ) -> SteamTaskResult<String> {
         let m = repo::get_match(&self.pool, kind, tournament_id, match_id).await?;
-        m.steam_party_id
-            .filter(|s| !s.is_empty())
-            .ok_or_else(|| SteamTaskError::state(format!("Für Match {match_id} ist keine Party-ID gespeichert")))
+        m.steam_party_id.filter(|s| !s.is_empty()).ok_or_else(|| {
+            SteamTaskError::state(format!(
+                "Für Match {match_id} ist keine Party-ID gespeichert"
+            ))
+        })
     }
 
     /// Verhindert eine doppelte Lobby-Anfrage. Entspricht
@@ -614,8 +657,14 @@ impl MatchManager {
         match_id: i64,
         m: &MatchRow,
     ) -> SteamTaskResult<()> {
-        if m.steam_party_id.as_deref().filter(|s| !s.is_empty()).is_some() {
-            return Err(SteamTaskError::state("Für dieses Match existiert bereits eine Lobby"));
+        if m.steam_party_id
+            .as_deref()
+            .filter(|s| !s.is_empty())
+            .is_some()
+        {
+            return Err(SteamTaskError::state(
+                "Für dieses Match existiert bereits eine Lobby",
+            ));
         }
         if let Some(bridge) = self.bridge.as_ref() {
             let active = bridge
@@ -673,9 +722,9 @@ impl MatchManager {
             TaskOutcome::TimedOut { task_id, timeout_s } => {
                 Err(SteamTaskError::Timeout { task_id, timeout_s })
             }
-            TaskOutcome::Failed { error, .. } => {
-                Err(SteamTaskError::failed(format!("{action} fehlgeschlagen: {error}")))
-            }
+            TaskOutcome::Failed { error, .. } => Err(SteamTaskError::failed(format!(
+                "{action} fehlgeschlagen: {error}"
+            ))),
             TaskOutcome::Done(value) => {
                 // success:false im DONE-Ergebnis → Fehler (Original: result.get
                 // ("success") is False).
@@ -684,7 +733,9 @@ impl MatchManager {
                         .get("error")
                         .and_then(|v| v.as_str())
                         .unwrap_or("unbekannter Fehler");
-                    return Err(SteamTaskError::failed(format!("{action} fehlgeschlagen: {err}")));
+                    return Err(SteamTaskError::failed(format!(
+                        "{action} fehlgeschlagen: {err}"
+                    )));
                 }
                 Ok(value)
             }
@@ -717,7 +768,11 @@ impl MatchManager {
                 team2_name,
                 winner_name,
                 duration_s,
-                if players.is_empty() { None } else { Some(players) },
+                if players.is_empty() {
+                    None
+                } else {
+                    Some(players)
+                },
             )
             .await
         {
@@ -733,7 +788,9 @@ impl MatchManager {
         };
         let delay = self.channel_delete_delay_seconds as f64;
         tokio::spawn(async move {
-            notifier.delete_match_channel_later(&channel_id, Some(delay)).await;
+            notifier
+                .delete_match_channel_later(&channel_id, Some(delay))
+                .await;
         });
     }
 }
@@ -742,15 +799,23 @@ impl MatchManager {
 
 fn require_match_ready_for_lobby(m: &MatchRow) -> SteamTaskResult<()> {
     if m.winner_id.is_some() || !VALID_LOBBY_STATUSES.contains(&m.status.as_str()) {
-        return Err(SteamTaskError::state("Für dieses Match kann keine Lobby erstellt werden"));
+        return Err(SteamTaskError::state(
+            "Für dieses Match kann keine Lobby erstellt werden",
+        ));
     }
     if m.team1_id.is_none() || m.team2_id.is_none() {
         return Err(SteamTaskError::state(
             "Beide Teams müssen gesetzt sein, bevor eine Lobby erstellt wird",
         ));
     }
-    if m.steam_party_id.as_deref().filter(|s| !s.is_empty()).is_some() {
-        return Err(SteamTaskError::state("Für dieses Match existiert bereits eine Lobby"));
+    if m.steam_party_id
+        .as_deref()
+        .filter(|s| !s.is_empty())
+        .is_some()
+    {
+        return Err(SteamTaskError::state(
+            "Für dieses Match existiert bereits eine Lobby",
+        ));
     }
     Ok(())
 }
@@ -761,10 +826,20 @@ fn require_match_ready_for_start(m: &MatchRow) -> SteamTaskResult<()> {
             "Ein Match kann nur aus dem Status 'lobby_created' gestartet werden",
         ));
     }
-    if m.steam_party_id.as_deref().filter(|s| !s.is_empty()).is_none() {
-        return Err(SteamTaskError::state("Für dieses Match existiert noch keine Lobby"));
+    if m.steam_party_id
+        .as_deref()
+        .filter(|s| !s.is_empty())
+        .is_none()
+    {
+        return Err(SteamTaskError::state(
+            "Für dieses Match existiert noch keine Lobby",
+        ));
     }
-    if m.deadlock_match_id.as_deref().filter(|s| !s.is_empty()).is_some() {
+    if m.deadlock_match_id
+        .as_deref()
+        .filter(|s| !s.is_empty())
+        .is_some()
+    {
         return Err(SteamTaskError::state(
             "Für dieses Match wurde bereits eine Deadlock-Match-ID gespeichert",
         ));
@@ -778,8 +853,14 @@ fn require_match_ready_for_leave(m: &MatchRow) -> SteamTaskResult<()> {
             "Die Lobby kann nur im Status 'lobby_created' oder 'in_progress' verlassen werden",
         ));
     }
-    if m.steam_party_id.as_deref().filter(|s| !s.is_empty()).is_none() {
-        return Err(SteamTaskError::state("Für dieses Match ist keine Party-ID gespeichert"));
+    if m.steam_party_id
+        .as_deref()
+        .filter(|s| !s.is_empty())
+        .is_none()
+    {
+        return Err(SteamTaskError::state(
+            "Für dieses Match ist keine Party-ID gespeichert",
+        ));
     }
     Ok(())
 }
@@ -790,8 +871,16 @@ fn require_match_ready_for_result_fetch(m: &MatchRow) -> SteamTaskResult<()> {
             "Match-Ergebnisse können nur aus laufenden Matches abgerufen werden",
         ));
     }
-    let has_party = m.steam_party_id.as_deref().filter(|s| !s.is_empty()).is_some();
-    let has_deadlock = m.deadlock_match_id.as_deref().filter(|s| !s.is_empty()).is_some();
+    let has_party = m
+        .steam_party_id
+        .as_deref()
+        .filter(|s| !s.is_empty())
+        .is_some();
+    let has_deadlock = m
+        .deadlock_match_id
+        .as_deref()
+        .filter(|s| !s.is_empty())
+        .is_some();
     if !has_party && !has_deadlock {
         return Err(SteamTaskError::state(
             "Für dieses Match ist weder eine Party-ID noch eine Deadlock-Match-ID gespeichert",
@@ -819,8 +908,14 @@ fn require_match_has_live_lobby(m: &MatchRow) -> SteamTaskResult<()> {
             "Live-Events koennen nur fuer Matches mit aktiver oder laufender Lobby gesetzt werden",
         ));
     }
-    if m.steam_party_id.as_deref().filter(|s| !s.is_empty()).is_none() {
-        return Err(SteamTaskError::state("Fuer dieses Match ist keine Party-ID gespeichert"));
+    if m.steam_party_id
+        .as_deref()
+        .filter(|s| !s.is_empty())
+        .is_none()
+    {
+        return Err(SteamTaskError::state(
+            "Fuer dieses Match ist keine Party-ID gespeichert",
+        ));
     }
     Ok(())
 }
@@ -869,7 +964,9 @@ fn coerce_required_str(value: Option<&Value>, field_name: &str) -> SteamTaskResu
         _ => String::new(),
     };
     if s.is_empty() {
-        return Err(SteamTaskError::failed(format!("{field_name} fehlt im Steam-Ergebnis")));
+        return Err(SteamTaskError::failed(format!(
+            "{field_name} fehlt im Steam-Ergebnis"
+        )));
     }
     Ok(s)
 }
@@ -883,13 +980,17 @@ fn coerce_optional_int(value: Option<&Value>, field_name: &str) -> SteamTaskResu
             .as_i64()
             .or_else(|| n.as_f64().map(|f| f as i64))
             .map(Some)
-            .ok_or_else(|| SteamTaskError::failed(format!("{field_name} muss eine ganze Zahl sein"))),
-        Some(Value::String(s)) => s
-            .trim()
-            .parse::<i64>()
-            .map(Some)
-            .map_err(|_| SteamTaskError::failed(format!("{field_name} muss eine ganze Zahl sein"))),
-        _ => Err(SteamTaskError::failed(format!("{field_name} muss eine ganze Zahl sein"))),
+            .ok_or_else(|| {
+                SteamTaskError::failed(format!("{field_name} muss eine ganze Zahl sein"))
+            }),
+        Some(Value::String(s)) => {
+            s.trim().parse::<i64>().map(Some).map_err(|_| {
+                SteamTaskError::failed(format!("{field_name} muss eine ganze Zahl sein"))
+            })
+        }
+        _ => Err(SteamTaskError::failed(format!(
+            "{field_name} muss eine ganze Zahl sein"
+        ))),
     }
 }
 
@@ -942,9 +1043,9 @@ fn resolve_party_codes(result: &Value) -> SteamTaskResult<(String, String)> {
     let party_code = pick(&["party_code", "party_code_display", "join_code"]);
     let join_code = pick(&["join_code", "party_code", "party_code_display"]);
     match (party_code, join_code) {
-        (None, None) => {
-            Err(SteamTaskError::failed("Lobby-Erstellung lieferte keinen Party-Code"))
-        }
+        (None, None) => Err(SteamTaskError::failed(
+            "Lobby-Erstellung lieferte keinen Party-Code",
+        )),
         (Some(pc), None) => Ok((pc.clone(), pc)),
         (None, Some(jc)) => Ok((jc.clone(), jc)),
         (Some(pc), Some(jc)) => Ok((pc, jc)),

@@ -3,9 +3,7 @@
 //! Orchestriert Steam-Custom-Lobbys (erstellen/starten/verlassen) über die
 //! externe `steam_tasks`-Bridge-DB, Hero-Assignments je Spielmodus, Live-Event-
 //! ConVar-Presets, Best-of-N-Serien und die VEREINHEITLICHTE Ergebnisverarbeitung
-//! (Bracket + Group) mit Gewinner-Propagation ins Bracket (über
-//! [`turnier_engine::advance_bracket_winner`] /
-//! [`turnier_engine::complete_mini_group_round_robin`]).
+//! (Bracket + Group) mit Gewinner-Propagation ins Bracket.
 //!
 //! ## Modul-Schnitt (der Python-Monolith `manager.py` ist aufgebrochen)
 //! - [`kind`] — [`MatchKind`] (Enum statt stringly-typed `match_type`).

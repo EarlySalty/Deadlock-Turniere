@@ -11,15 +11,10 @@
 use serde_json::Value;
 use sqlx::Row;
 
+use turnier_core::now_utc;
 use turnier_db::Pool;
 
 use crate::error::MatchError;
-
-/// Aktueller UTC-Zeitstempel im ISO-8601-Format (entspricht
-/// `datetime.now(timezone.utc).isoformat()`).
-fn now_iso() -> String {
-    chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Micros, false)
-}
 
 /// Stellt sicher, dass Spiel `game_number` der Serie existiert; gibt `game.id`
 /// zurück. Idempotent (SELECT, sonst INSERT). Portiert `ensure_game_exists`.
@@ -28,26 +23,27 @@ pub async fn ensure_game_exists(
     bracket_match_id: i64,
     game_number: i64,
 ) -> Result<i64, MatchError> {
-    let now = now_iso();
-    let existing =
-        sqlx::query("SELECT id FROM match_games WHERE bracket_match_id = ? AND game_number = ?")
-            .bind(bracket_match_id)
-            .bind(game_number)
-            .fetch_optional(pool)
-            .await?;
-    if let Some(row) = existing {
-        return Ok(row.get::<i64, _>("id"));
-    }
-    let result = sqlx::query(
-        "INSERT INTO match_games (bracket_match_id, game_number, status, created_at) \
-         VALUES (?, ?, 'pending', ?)",
+    let now = now_utc();
+    let existing = sqlx::query(
+        "SELECT id FROM turnier.match_games WHERE bracket_match_id = $1 AND game_number = $2",
     )
     .bind(bracket_match_id)
     .bind(game_number)
-    .bind(&now)
-    .execute(pool)
+    .fetch_optional(pool)
     .await?;
-    Ok(result.last_insert_rowid())
+    if let Some(row) = existing {
+        return Ok(row.get::<i64, _>("id"));
+    }
+    let (id,) = sqlx::query_as::<_, (i64,)>(
+        "INSERT INTO turnier.match_games (bracket_match_id, game_number, status, created_at) \
+         VALUES ($1, $2, 'pending', $3) RETURNING id",
+    )
+    .bind(bracket_match_id)
+    .bind(game_number)
+    .bind(now)
+    .fetch_one(pool)
+    .await?;
+    Ok(id)
 }
 
 /// Ergebnis von [`record_game_result`] (Wire-Form `{series_done,
@@ -102,41 +98,36 @@ pub async fn record_game_result(
         return Err(MatchError::invalid("winner_team muss 1 oder 2 sein"));
     }
 
-    let now = now_iso();
+    let now = now_utc();
     let game_id = ensure_game_exists(pool, bracket_match_id, game_number).await?;
 
-    let match_stats_json = match stats.match_stats {
-        Some(v) => Some(serde_json::to_string(v).map_err(|_| {
-            MatchError::invalid("match_stats enthält nicht serialisierbare Daten")
-        })?),
-        None => None,
-    };
+    let match_stats_json = stats.match_stats.cloned();
 
     sqlx::query(
-        "UPDATE match_games \
-         SET winner_team = ?, \
-             steam_party_id = COALESCE(?, steam_party_id), \
-             deadlock_match_id = COALESCE(?, deadlock_match_id), \
-             duration_s = COALESCE(?, duration_s), \
-             match_stats = COALESCE(?, match_stats), \
+        "UPDATE turnier.match_games \
+         SET winner_team = $1, \
+             steam_party_id = COALESCE($2::text, steam_party_id), \
+             deadlock_match_id = COALESCE($3::text, deadlock_match_id), \
+             duration_s = COALESCE($4, duration_s), \
+             match_stats = COALESCE($5::jsonb, match_stats), \
              status = 'completed', \
-             completed_at = ? \
-         WHERE id = ?",
+             completed_at = $6 \
+         WHERE id = $7",
     )
     .bind(winner_team)
     .bind(stats.steam_party_id)
     .bind(stats.deadlock_match_id)
     .bind(stats.duration_s)
     .bind(match_stats_json)
-    .bind(&now)
+    .bind(now)
     .bind(game_id)
     .execute(pool)
     .await?;
 
     // Alle abgeschlossenen Spiele dieser Serie.
     let completed_rows = sqlx::query(
-        "SELECT winner_team FROM match_games \
-         WHERE bracket_match_id = ? AND status = 'completed'",
+        "SELECT winner_team FROM turnier.match_games \
+         WHERE bracket_match_id = $1 AND status = 'completed'",
     )
     .bind(bracket_match_id)
     .fetch_all(pool)
@@ -154,11 +145,11 @@ pub async fn record_game_result(
     let fmt_row = sqlx::query(
         "SELECT t.series_format AS series_format, t.final_series_format AS final_series_format, \
                 bm.bracket_type AS bracket_type, bm.round AS round, \
-                (SELECT MAX(round) FROM bracket_matches \
+                (SELECT MAX(round) FROM turnier.bracket_matches \
                  WHERE tournament_id = t.id AND bracket_type = 'winners') AS max_winners_round \
-         FROM tournaments t \
-         JOIN bracket_matches bm ON bm.tournament_id = t.id \
-         WHERE bm.id = ?",
+         FROM turnier.tournaments t \
+         JOIN turnier.bracket_matches bm ON bm.tournament_id = t.id \
+         WHERE bm.id = $1",
     )
     .bind(bracket_match_id)
     .fetch_optional(pool)
@@ -197,7 +188,11 @@ pub async fn record_game_result(
         series_winner_team: series_winner,
         wins_team1: wins1,
         wins_team2: wins2,
-        next_game_number: if series_done { None } else { Some(game_number + 1) },
+        next_game_number: if series_done {
+            None
+        } else {
+            Some(game_number + 1)
+        },
     })
 }
 
@@ -209,7 +204,7 @@ pub async fn get_series_games(
     let rows = sqlx::query(
         "SELECT id, bracket_match_id, game_number, status, steam_party_id, party_code, \
                 deadlock_match_id, winner_team, duration_s, match_stats, created_at, completed_at \
-         FROM match_games WHERE bracket_match_id = ? ORDER BY game_number",
+         FROM turnier.match_games WHERE bracket_match_id = $1 ORDER BY game_number",
     )
     .bind(bracket_match_id)
     .fetch_all(pool)
@@ -218,7 +213,9 @@ pub async fn get_series_games(
     Ok(rows
         .into_iter()
         .map(|r| {
-            let match_stats: Option<String> = r.get("match_stats");
+            let match_stats: Option<Value> = r.get("match_stats");
+            let created_at: chrono::DateTime<chrono::Utc> = r.get("created_at");
+            let completed_at: Option<chrono::DateTime<chrono::Utc>> = r.get("completed_at");
             turnier_core::MatchGame {
                 id: r.get("id"),
                 bracket_match_id: r.get("bracket_match_id"),
@@ -229,9 +226,9 @@ pub async fn get_series_games(
                 deadlock_match_id: r.get("deadlock_match_id"),
                 winner_team: r.get("winner_team"),
                 duration_s: r.get("duration_s"),
-                match_stats: match_stats.and_then(|s| serde_json::from_str(&s).ok()),
-                created_at: r.get("created_at"),
-                completed_at: r.get("completed_at"),
+                match_stats,
+                created_at: created_at.to_rfc3339(),
+                completed_at: completed_at.map(|value| value.to_rfc3339()),
             }
         })
         .collect())
@@ -263,7 +260,14 @@ impl crate::MatchManager {
         winner_team: i64,
         stats: &GameStats<'_>,
     ) -> Result<GameResultOutcome, MatchError> {
-        record_game_result(&self.pool, bracket_match_id, game_number, winner_team, stats).await
+        record_game_result(
+            &self.pool,
+            bracket_match_id,
+            game_number,
+            winner_team,
+            stats,
+        )
+        .await
     }
 
     /// Liefert alle Spiele einer Serie. Façade über [`get_series_games`].
