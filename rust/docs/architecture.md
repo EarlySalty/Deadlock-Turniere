@@ -20,11 +20,14 @@ Domänen-Crates kennen das Fundament, die Web-/App-Schicht kennt die Domäne.
             turnier-core   ·   turnier-config   ·   turnier-db          (Fundament)
 ```
 
-- **turnier-core** — Domänen-Enums + Wire-DTOs (1:1 zu den Pydantic-Modellen). Kein I/O.
+- **turnier-core** — Domänen-Enums, Wire-DTOs (1:1 zu den Pydantic-Modellen)
+  und Grenzkonventions-Helfer fuer Discord-ID-, Zeit- und JSONB-Mapping.
 - **turnier-config** — geschichtete Konfiguration (Datei → Env → Default) + Ableitungen
   (Rollen-Sets, CORS, allowed_hosts).
-- **turnier-db** — `SqlitePool`, PRAGMA-Setup (WAL/FK/busy_timeout), konsolidierte
-  Migration (aus der Live-DB generiert), Fehler-Typ.
+- **turnier-db** — `PgPool`-Foundation zur zentralen Postgres/TimescaleDB ueber
+  `dl-central-db`, Fehler-Typ, Testpool-Adapter und Whitelist-Anker fuer
+  erlaubtes dynamisches SQL. Produktive Migrationen laufen zentral ueber
+  `dl-central-migrate`, nicht durch diese Crate.
 - **turnier-auth** — opake Session-Tokens (kein JWT), RBAC (`User < Mod < Admin`),
   delegierter OAuth-Client gegen den Master-Broker.
 - **turnier-steam** — dreistufiger Rang-Resolver (Cache → Steam-Bridge → Discord-Rollen);
@@ -62,20 +65,29 @@ Domänen-Crates kennen das Fundament, die Web-/App-Schicht kennt die Domäne.
 
 ## Geteilter Zustand (`AppState`)
 
-`AppState` hält billig-klonbare Handles: den `SqlitePool`, die `Arc<Config>`, die
+`AppState` hält billig-klonbare Handles: den `PgPool`, die `Arc<Config>`, die
 `RoleSets`, den `OAuthClient`, den `Arc<MatchManager>`, den `Arc<dyn RankResolver>`
 und den `Arc<DiscordNotifier>`. Effekt-Dienste (Discord/Steam) degradieren sauber,
 wenn sie nicht konfiguriert sind.
 
 ## Datenbank
 
-Rust und der Python-Stand teilen sich dieselbe SQLite-Datei
-(`backend/data/tournament.db`). Das Schema ist der Vertrag (siehe
-[`db-contract.md`](db-contract.md)); die Migration ist 1:1 aus dem effektiven
-Live-Schema generiert und idempotent (No-op auf der bestehenden DB).
+Das Rust-Backend nutzt als Zielzustand die zentrale Postgres/TimescaleDB. Die
+fachlichen Turnierdaten liegen in `turnier.*`; zentrale Cross-Schema-Lookups
+nutzen explizit qualifizierte Tabellen wie `core.*` oder `voice.*`. Das Schema
+ist der Vertrag (siehe [`db-contract.md`](db-contract.md)); produktive
+Migrationen besitzt `dl-central-db` im Schwesterrepo.
+
+Python unter `backend/` ist Legacy-Flaeche und kein stiller produktiver
+SQLite-Schreibpfad fuer den Rust-Cutover. Die Steam-Bridge-SQLite-Flaeche wird
+separat in SP4/T6 entfernt oder abgegrenzt.
 
 ## Persistenz-Stil
 
-Laufzeit-geprüfte sqlx-Queries (`query`/`query_as` + `FromRow`), keine compile-
-time-Makros (siehe [`adr/0002`](adr/0002-runtime-checked-sqlx.md)). Mutierende
-Operationen laufen in einer `sqlx::Transaction`.
+Statische PG-Queries sollen compile-checked sein
+(`sqlx::query!`/`query_as!` + `rust/.sqlx`-Offline-Cache; siehe
+[`adr/0002`](adr/0002-runtime-checked-sqlx.md)). Runtime-/Builder-SQL bleibt nur
+fuer echte dynamische Struktur erlaubt: variable `IN`-Listen,
+Reminder-Dedupe-Tabellennamen aus Whitelist und Patch-Update-Builder mit
+statischer Spalten-Whitelist. Mutierende Operationen laufen in einer
+`sqlx::Transaction<'_, Postgres>` oder ueber einen kompatiblen PG-Executor.

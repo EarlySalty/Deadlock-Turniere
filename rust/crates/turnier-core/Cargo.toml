@@ -5,10 +5,12 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 
-# Reine Domänenschicht: Enums + Wire-DTOs. Kein I/O, keine Geschäftslogik.
+# Reine Domänenschicht: Enums, Wire-DTOs und kleine Grenzkonventions-Helfer.
+# Kein I/O, keine Geschäftslogik.
 # sqlx ist nur für die `Type`-Ableitung der Enums dabei (TEXT-Mapping), damit
 # dieselben Typen in Queries der Persistenzschicht verwendbar sind.
 [dependencies]
+chrono.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sqlx.workspace = true

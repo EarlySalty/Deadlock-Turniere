@@ -86,11 +86,11 @@ Abhaengigkeit: T1/T2 zuerst, weil alle Crates `turnier_db::Pool` und die neuen T
 
 **Files:** keine Codeaenderung; optional Arbeitsnotiz im Ticket-PR.
 
-- [ ] **Schema-Oracle read-only pruefen:** zentrale DB enthaelt Schema `turnier` und alle Tabellen aus `0009_turnier.sql`. Nur Counts/Booleans ausgeben, keine DSN. Wenn etwas fehlt: stoppen, nicht migrieren.
-- [ ] **Dependency-Boundary festlegen:** `dl-central-db` als relative Sibling-Path-Dependency im Turniere-Workspace (`../../Deadlock-Bots/rust/crates/dl-central-db`) oder erst als vendored/shared crate. Default fuer lokale SP4-Umsetzung: relative Path-Dependency, weil die zentrale Infra dort bereits existiert.
-- [ ] **sqlx-Cache-Ort festlegen:** eigener Cache in `Deadlock-Turniere/rust/.sqlx` oder crate-lokal. Muss mit `SQLX_OFFLINE=true cargo build --workspace` funktionieren.
-- [ ] **Live-Codepfad pruefen:** systemd/run-script zeigt auf Rust `turnier-bot`. Falls Python live ist, T12 wird Blocker statt Doku-Fence.
-- [ ] **Steam-Bridge Scope entscheiden:** Rank-Bridge-SQLite entweder in T6 auf zentrale `core/voice`-Tabellen umstellen oder explizit als separater nicht-`turnier.*` SP deklarieren. Empfehlung: in T6 umstellen, damit Turniere keine alte SQLite-Bridge braucht.
+- [x] **Schema-Oracle read-only pruefen:** zentrale DB enthaelt Schema `turnier` und alle Tabellen aus `0009_turnier.sql`. Nur Counts/Booleans ausgeben, keine DSN. Wenn etwas fehlt: stoppen, nicht migrieren. Ergebnis 2026-07-01: `turnier_schema=t`, `expected_turnier_tables=37`, `actual_expected_tables=37`, `missing_turnier_tables=0`, `core_schema=t`, `voice_schema=t`.
+- [x] **Dependency-Boundary festlegen:** `dl-central-db` als relative Sibling-Path-Dependency im Turniere-Workspace (`../../Deadlock-Bots/rust/crates/dl-central-db`) oder erst als vendored/shared crate. Default fuer lokale SP4-Umsetzung: relative Path-Dependency, weil die zentrale Infra dort bereits existiert. Entscheidung 2026-07-01: relative Path-Dependency.
+- [x] **sqlx-Cache-Ort festlegen:** eigener Cache in `Deadlock-Turniere/rust/.sqlx` oder crate-lokal. Muss mit `SQLX_OFFLINE=true cargo build --workspace` funktionieren. Entscheidung 2026-07-01: `Deadlock-Turniere/rust/.sqlx`.
+- [x] **Live-Codepfad pruefen:** systemd/run-script zeigt auf Rust `turnier-bot`. Falls Python live ist, T12 wird Blocker statt Doku-Fence. Ergebnis 2026-07-01: `deadlock-turniere.service` nutzt Drop-in `30-rust-cutover.conf` und startet `scripts/run_turniere_backend_rust.sh` -> `rust/target/release/turnier-bot`.
+- [x] **Steam-Bridge Scope entscheiden:** Rank-Bridge-SQLite entweder in T6 auf zentrale `core/voice`-Tabellen umstellen oder explizit als separater nicht-`turnier.*` SP deklarieren. Empfehlung: in T6 umstellen, damit Turniere keine alte SQLite-Bridge braucht. Entscheidung 2026-07-01: Empfehlung folgen, Umstellung in T6.
 
 **DoD:** Boundary-Entscheidungen dokumentiert, keine Live-DB geschrieben, keine Secrets ausgegeben.
 
@@ -105,11 +105,13 @@ Abhaengigkeit: T1/T2 zuerst, weil alle Crates `turnier_db::Pool` und die neuen T
 
 **Produces:** `turnier_db::Pool = sqlx::PgPool`, `turnier_db::connect_central()`, `turnier_db::test_pool()` hinter `testing`, Fehler-Mapping von `CentralDbError`.
 
-- [ ] `sqlx`-Feature auf `postgres`, `runtime-tokio`, `chrono`, `json`, `macros`, `migrate` umstellen; `sqlite` fuer Haupt-App entfernen. Falls Steam-Bridge noch SQLite braucht, isoliert in deren Crate belassen.
-- [ ] `dl-central-db` als Dependency anbinden; `connect_central()` ruft `dl_central_db::connect_pool(&dl_central_db::dsn_from_env()?)`.
-- [ ] `run_migrations()` aus produktivem Startpfad entfernen oder als bewusstes No-op mit Kommentar ersetzen: zentraler Prod-Migrator bleibt `dl-central-migrate`.
-- [ ] Test-Helfer auf `dl_central_db::testing::test_pool()` umstellen; lokale SQLite-Migrationstests ersetzen durch PG-Schema-Smoke (`turnier.tournaments`, `turnier.tournament_dm_optout`, `core/voice` falls T6).
+- [x] `sqlx`-Feature auf `postgres`, `runtime-tokio`, `chrono`, `json`, `macros`, `migrate` umstellen; `sqlite` fuer Haupt-App entfernen. Falls Steam-Bridge noch SQLite braucht, isoliert in deren Crate belassen.
+- [x] `dl-central-db` als Dependency anbinden; `connect_central()` ruft `dl_central_db::connect_pool(&dl_central_db::dsn_from_env()?)`.
+- [x] `run_migrations()` aus produktivem Startpfad entfernen oder als bewusstes No-op mit Kommentar ersetzen: zentraler Prod-Migrator bleibt `dl-central-migrate`.
+- [x] Test-Helfer auf `dl_central_db::testing::test_pool()` umstellen; lokale SQLite-Migrationstests ersetzen durch PG-Schema-Smoke (`turnier.tournaments`, `turnier.tournament_dm_optout`, `core/voice` falls T6).
 - [ ] Verifikation: `cd rust && cargo build -p turnier-db --features testing`, `cargo test -p turnier-db --features testing -- --include-ignored`, `cargo clippy -p turnier-db --all-targets --all-features -- -D warnings`, `cargo fmt --check`.
+
+Verifikationsstand 2026-07-01: Build, PG-Tests, Clippy und `SQLX_OFFLINE=true cargo build -p turnier-db --features testing` fuer `turnier-db` gruen; `cargo fmt --check -p turnier-db` gruen. Der ungescopte Workspace-Check `cargo fmt --check` scheitert an bereits vorhandenen Format-Diffs ausserhalb von T0/T1 und wurde nicht automatisch formatiert, um den Ticket-Scope nicht zu erweitern.
 
 ## Task T2: Typ-/Query-Konventionen und zentrale Hilfen
 
@@ -120,10 +122,12 @@ Abhaengigkeit: T1/T2 zuerst, weil alle Crates `turnier_db::Pool` und die neuen T
 
 **Produces:** gemeinsame Helfer fuer Discord-ID-Casts, Boolean/JSON/Time-Mapping, QueryBuilder-Whitelist-Muster.
 
-- [ ] ADR aktualisieren: SQLite-runtime-checked Grundsatz gilt nicht mehr unveraendert; fuer PG static SQL bevorzugt compile-checked, dynamisches SQL begruendet.
-- [ ] Helfer: `parse_discord_id(&str) -> Result<i64, ...>`, `discord_id_to_string(i64)`, `now_utc()`, JSONB-Mapper fuer nullable Felder.
-- [ ] Liste der erlaubten dynamischen SQL-Stellen definieren: variable `IN`-Listen, sortierte Whitelist-Tabellennamen fuer Reminder-Dedupe, Patch-Update-Builder.
-- [ ] Verifikation: `cargo test -p turnier-core -p turnier-db --features testing`, `cargo fmt --check`.
+- [x] ADR aktualisieren: SQLite-runtime-checked Grundsatz gilt nicht mehr unveraendert; fuer PG static SQL bevorzugt compile-checked, dynamisches SQL begruendet.
+- [x] Helfer: `parse_discord_id(&str) -> Result<i64, ...>`, `discord_id_to_string(i64)`, `now_utc()`, JSONB-Mapper fuer nullable Felder.
+- [x] Liste der erlaubten dynamischen SQL-Stellen definieren: variable `IN`-Listen, sortierte Whitelist-Tabellennamen fuer Reminder-Dedupe, Patch-Update-Builder.
+- [x] Verifikation: `cargo test -p turnier-core -p turnier-db --features testing`, `cargo fmt --check`.
+
+Verifikationsstand 2026-07-01: `cargo test -p turnier-core -p turnier-db --features testing` via zentralem Wegwerf-PG-Runner `Deadlock-Bots/rust/scripts/central_test_db.sh` gruen; `cargo fmt --check -p turnier-core -p turnier-db` gruen. Direkter Testlauf ohne Test-DSN scheitert erwartungsgemaess an fehlender `CENTRAL_TEST_DSN`/`DATABASE_URL`/`DEADLOCK_CENTRAL_DSN`-Umgebung.
 
 ## Task T3: `turnier-auth` + `turnier-discord`
 

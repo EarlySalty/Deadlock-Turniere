@@ -1,51 +1,78 @@
-# DB-Vertrag — Single Source of Truth
+# DB-Vertrag -- zentrale Postgres/TimescaleDB
 
-Die maßgebliche Schemadefinition ist die konsolidierte Migration
-[`crates/turnier-db/migrations/0001_initial.sql`](../crates/turnier-db/migrations/0001_initial.sql).
-Sie wurde **1:1 aus dem effektiven Live-Schema** (`backend/data/tournament.db`)
-generiert — inklusive aller historisch per `ALTER TABLE` nachgezogenen Spalten,
-die im Python-`db.py`-Literal NICHT vollständig abgebildet waren. Ein
-Integrationstest (`crates/turnier-db/tests/migration.rs`) beweist:
+Die massgebliche Schemadefinition fuer das Rust-Turnierbackend liegt nicht mehr
+in `turnier-db/migrations`, sondern in der zentralen Migration
+`/home/naniadm/Documents/Deadlock-Bots/rust/crates/dl-central-db/migrations/0009_turnier.sql`.
+Das Ledger
+`/home/naniadm/Documents/Deadlock-Bots/rust/crates/dl-central-etl/ledger/tournament/turnier.toml`
+ist die Mapping-Referenz fuer die Alt-SQLite-Daten. Lokale SQLite-Migrationen in
+`crates/turnier-db/migrations` bleiben nur Altvertragsreferenz und werden vom
+produktiven Rust-Backend nicht mehr angewendet.
 
-- frische DB → die Migration baut alle 31 Tabellen auf;
-- Kopie der Live-DB → die Migration läuft idempotent durch (No-op, alle CREATEs
-  sind `IF NOT EXISTS`).
+## Instanz und Ownership
 
-## Geteilte Datenbank
+- Runtime-Pool: `turnier_db::Pool = sqlx::PgPool`.
+- Verbindungsaufbau: `turnier_db::connect_central()` liest
+  `DEADLOCK_CENTRAL_DSN` ueber `dl-central-db`. DSNs werden nie geloggt oder in
+  Dateien geschrieben.
+- Migrations-Owner: ausschliesslich `dl-central-migrate` aus dem Schwesterrepo.
+  `turnier-db::run_migrations()` ist im PG-Pfad ein bewusster No-op.
+- Tests: echte Wegwerf-PG via `dl_central_db::testing::test_pool()` bzw.
+  `Deadlock-Bots/rust/scripts/central_test_db.sh`.
 
-Rust und der Python-Stand nutzen **dieselbe Datei**. Konsequenzen:
+## Schema
 
-- Migrationen dürfen die bestehenden FK-/CHECK-Constraints **nicht** verändern
-  (sie sind No-ops auf der Live-DB). Korrekturen am Constraint-Design sind
-  Opt-in-Folgefixe (siehe [`known-issues.md`](known-issues.md)), keine stillen
-  Schema-Eingriffe.
-- Zeitstempel werden tz-aware als ISO-8601 (`to_rfc3339`, Offset `+00:00`)
-  geschrieben — kompatibel zu Pythons `isoformat()`, sodass beide Seiten beide
-  Schreibweisen lesen.
-- Bool-Spalten sind `INTEGER` (0/1); die Row-Mapper konvertieren explizit.
-
-## Tabellen (31)
+Alle fachlichen Turnierdaten liegen im Schema `turnier`. `_sqlx_migrations` war
+SQLite-Tooling-Meta und wird nicht nach PG uebernommen.
 
 | Bereich | Tabellen |
 |---------|----------|
-| Turnier | `tournaments` (30 Spalten), `audit_log` |
-| Teams | `teams`, `team_members`, `team_applications`, `team_invitations` |
-| Anmeldung/Check-in | `tournament_signups`, `checkins`, `tournament_checkins` |
-| Gruppenphase | `groups`, `group_teams`, `group_matches` |
-| Bracket | `bracket_matches` (26 Spalten), `bracket_mini_groups`, `bracket_mini_group_teams`, `match_games` |
-| Draft | `draft_sessions`, `draft_actions` |
-| Ergebnis | `match_results`, `match_result_reports` |
-| Caster/Stream | `match_casters`, `tournament_casters` |
-| Reminder (Dedupe) | `sent_tournament_reminders`, `sent_start_reminders`, `sent_match_reminders` |
-| Nutzer | `sessions`, `user_profiles`, `user_consents`, `player_points`, `rank_cache` |
-| Integration | `discord_tasks` |
+| Turnier | `turnier."tournaments"`, `turnier."audit_log"` |
+| Teams | `turnier."teams"`, `turnier."team_members"`, `turnier."team_applications"`, `turnier."team_invitations"` |
+| Anmeldung/Check-in | `turnier."tournament_signups"`, `turnier."checkins"`, `turnier."tournament_checkins"` |
+| Gruppenphase | `turnier."groups"`, `turnier."group_teams"`, `turnier."group_matches"` |
+| Bracket | `turnier."bracket_matches"`, `turnier."bracket_mini_groups"`, `turnier."bracket_mini_group_teams"`, `turnier."match_games"` |
+| Draft | `turnier."draft_sessions"`, `turnier."draft_actions"` |
+| Ergebnis | `turnier."match_results"`, `turnier."match_result_reports"` |
+| Caster/Stream | `turnier."match_casters"`, `turnier."tournament_casters"` |
+| Reminder | `turnier."sent_tournament_reminders"`, `turnier."sent_start_reminders"`, `turnier."sent_match_reminders"` |
+| Nutzer | `turnier."sessions"`, `turnier."user_profiles"`, `turnier."user_consents"`, `turnier."player_points"`, `turnier."rank_cache"` |
+| Automatik | `turnier."tournament_presets"`, `turnier."tournament_proposals"`, `turnier."tournament_proposal_votes"`, `turnier."tournament_proposal_feedback"`, `turnier."tournament_signals"`, `turnier."tournament_dm_optout"` |
+| Integration | `turnier."discord_tasks"` |
 
-Plus 1 Trigger (`cleanup_tournament_checkins_after_tournament_delete`).
+Der aktuelle zentrale Vertrag enthaelt 37 fachliche `turnier`-Tabellen.
 
-## Externe Datenbanken
+## Typkonventionen
 
-- **Steam-Bridge-DB** (`STEAM_BRIDGE_DB_PATH`): read-only Lookup für Ränge
-  (`steam_links`, `deadlock_subrank_roles`). Separate Datei, eigener Pool; fehlt
-  sie, entfällt die Bridge-Stufe (Fallback auf Discord-Rollen).
-- **Steam-Tasks-Queue** (`steam_tasks` in derselben Bridge-DB): Lobby-Aufträge an
-  den Steam-/GC-Worker; fehlt die DB, degradieren die Lobby-Operationen sauber.
+- Tabellen werden immer schemaqualifiziert angesprochen; keine `search_path`-
+  Abhaengigkeit.
+- IDs aus `BIGINT GENERATED BY DEFAULT AS IDENTITY` werden per
+  `INSERT ... RETURNING id` gelesen. `last_insert_rowid()` ist verboten.
+- Discord-Snowflakes: HTTP/DTO weiter `String`, DB-Binds `i64` nach
+  `turnier_core::parse_discord_id`, DB-Reads zurueck mit
+  `turnier_core::discord_id_to_string`.
+- Zeit: `TIMESTAMPTZ` <-> `chrono::DateTime<Utc>`, neue Schreibpfade nutzen
+  `turnier_core::now_utc()` oder PG-`now()` bewusst.
+- JSON: `JSONB` <-> `serde_json::Value`; nullable JSONB-Felder werden ueber
+  `turnier_core::json::{normalize_nullable_jsonb,to_nullable_jsonb,
+  jsonb_to_wire_string,wire_string_to_jsonb}` gemappt.
+- Bool: `BOOLEAN` <-> `bool`; keine `0`/`1`-Filter.
+
+## Query-Vertrag
+
+Statische PG-Queries sollen compile-checked per `sqlx::query!`/`query_as!` und
+`rust/.sqlx`-Offline-Cache sein. Runtime-/Builder-SQL bleibt nur fuer die in
+ADR 0002 definierte dynamische Struktur erlaubt:
+
+- variable `IN`-Listen,
+- sortierte Reminder-Dedupe-Tabellen-Whitelist,
+- Patch-Update-Builder mit statischer Spalten-Whitelist.
+
+Alle dynamischen Werte bleiben Bind-Parameter.
+
+## Legacy-Flaechen
+
+Python unter `backend/` und die alte Steam-Bridge-SQLite-Flaeche sind waehrend
+SP4 separat zu behandeln. Sie duerfen nach dem Cutover nicht still als
+produktive SQLite-Schreibpfade erreichbar bleiben; T6/T12 entscheiden bzw.
+dokumentieren diese Grenzen.
