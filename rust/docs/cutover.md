@@ -78,14 +78,26 @@ Rollback-Varianten:
   Variante braucht eine klare Datenstrategie fuer seit dem PG-Cutover entstandene
   Aenderungen.
 
-## Empfohlener Folge-Schritt vor Live
+## Endpunkt-Paritäts-Audit (durchgeführt 2026-07-02)
 
-Ein **endpunkt-genauer Paritäts-Audit** der zwei grossen Router (`public` aus
-`routes.py`, `admin` aus `admin_routes.py`): Diese wurden parallel portiert und
-sind durch Build/Clippy/Tests + Review abgesichert, haben aber (anders als die
-Engine) keine endpunktweisen Paritätstests. Ein Audit gegen das Python-Original
-(Request/Response-Form, Statuscodes, Auth-Gates) ist vor dem Scharfschalten
-ratsam — analog zum Vorgehen bei den anderen Rust-Rewrites.
+Siehe [`audit/2026-07-02-endpoint-parity-audit.md`](audit/2026-07-02-endpoint-parity-audit.md):
+79/79 Python-Endpunkte (23 public, 56 admin) haben ein Rust-Pendant, keine
+fehlenden Pfade, keine Auth-Gate-Abweichung bei Normalpfaden. Vier akzeptierte
+Restrisiken (0 kritisch, 1 hoch, 3 mittel) betreffen ausschließlich
+Fehlerfall-/Edge-Case-Verhalten bei ungültigen Requests, nicht den Happy-Path:
+
+- FastAPI-422-Listenform wird nicht überall 1:1 nachgebildet (teils 400/String).
+- Rust parst Discord-IDs in einigen Admin-Endpunkten strikter zu `i64` (Python
+  akzeptierte auch nicht-numerische Werte und lieferte dann 404/No-Op).
+- `groups/generate.num_groups` und `apply-event-preset.enabled` akzeptieren in
+  Rust keine String-Koerzion mehr (`"3"`/`"false"` wie in Python).
+
+Bewusst als Cutover-Risiko akzeptiert: echte Discord-Snowflakes sind immer
+numerisch, betrifft nur Admin-Tooling/Tests mit Dummy-Werten. Row-Count-Vergleich
+SQLite vs. zentrale Postgres vor dem Cutover: alle 9 stichprobenartig geprüften
+Tabellen (`tournaments`, `teams`, `team_members`, `tournament_signups`,
+`bracket_matches`, `group_matches`, `sessions`, `user_consents`, `rank_cache`)
+identisch — kein Delta seit dem SP1-ETL-Snapshot, kein Reconciliation-Bedarf.
 
 ## Bewusst zurückgestellt / dokumentiert
 
