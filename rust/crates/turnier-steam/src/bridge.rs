@@ -63,10 +63,10 @@ pub struct BridgeReader {
 impl BridgeReader {
     /// Öffnet den read-only Pool auf die Bridge-DB unter `db_path`.
     ///
-    /// Gibt `Ok(None)`, wenn der Pfad leer ist ODER die Datei nicht existiert —
-    /// das entspricht der Python-Semantik (`if not STEAM_BRIDGE_DB_PATH: return`
-    /// bzw. der read-only-Connect schlägt fehl → der Resolver fällt zur
-    /// Discord-Stufe durch). Statt still zu scheitern wird einmalig gewarnt.
+    /// Gibt `Ok(None)`, wenn der Pfad leer ist, die Datei nicht existiert oder
+    /// der read-only-Connect fehlschlägt. Die Bridge ist optional; ein kaputter
+    /// Pfad darf den Turnier-Boot nicht abbrechen, sondern deaktiviert nur die
+    /// Rang-Anreicherung über die Bridge.
     pub async fn open(db_path: &str, guild_id: &str) -> SteamResult<Option<Self>> {
         if db_path.trim().is_empty() {
             tracing::warn!("Steam-Bridge-DB-Pfad nicht konfiguriert — Bridge-Lookup übersprungen");
@@ -86,10 +86,21 @@ impl BridgeReader {
             .create_if_missing(false)
             .busy_timeout(Duration::from_secs(5));
 
-        let pool = SqlitePoolOptions::new()
+        let pool = match SqlitePoolOptions::new()
             .max_connections(2)
             .connect_with(options)
-            .await?;
+            .await
+        {
+            Ok(pool) => pool,
+            Err(err) => {
+                tracing::warn!(
+                    path = db_path,
+                    error = %err,
+                    "Steam-Bridge-DB kann nicht geöffnet werden — Bridge-Lookup übersprungen, Fallback auf Discord-Rollen"
+                );
+                return Ok(None);
+            }
+        };
 
         Ok(Some(Self {
             pool,
@@ -183,5 +194,33 @@ impl BridgeReader {
         } else {
             None
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    use super::*;
+
+    #[tokio::test]
+    async fn open_existing_but_unopenable_path_degrades_to_none() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time")
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!(
+            "turnier-steam-bridge-dir-{}-{unique}",
+            std::process::id()
+        ));
+        std::fs::create_dir(&dir).expect("temp bridge dir");
+        let path = dir.to_str().expect("utf-8 temp path");
+
+        let reader = BridgeReader::open(path, "123456789012345678")
+            .await
+            .expect("bridge open degrades");
+
+        assert!(reader.is_none());
+        std::fs::remove_dir_all(dir).expect("remove temp bridge dir");
     }
 }

@@ -15,9 +15,13 @@ Verdrahtet in `turnier-bot`: HTTP-API (axum, ~213 Endpunkte) + Scheduler-Loop
 (Phasenuebergaenge + Reminder) im selben Prozess, gegen die zentrale
 Postgres/TimescaleDB.
 
-## Verifikation, die schon gelaufen ist
+## Verifikation und Freigabe
 
-- Build/Test/Clippy workspace-weit; `--check`-Boot erfolgreich.
+- Build/Test/Clippy workspace-weit sind Teil der technischen Barriere.
+- Der Boot-Smoke `cargo run -p turnier-bot -- --check` wurde noch nicht als
+  freigegebener Cutover-Schritt gegen die Zielumgebung ausgefuehrt. Er steht in
+  der Cutover-Vorbereitung aus und braucht die explizite Review-/Operator-
+  Freigabe inklusive passender Oracle-Erwartung.
 - Migration == Live-Schema (Diff-Test) + idempotent auf Live-DB-Kopie.
 - Engine-Parität über die 7 portierten Python-Tests (Double-Elim-Verdrahtung,
   Seeding, Mini-Groups, auto-num-groups, Team-Naming) — wertgenau gegen das
@@ -39,6 +43,40 @@ Postgres/TimescaleDB.
    bestehende Avatar-Verzeichnis setzen.
 5. **Erststart** gegen die echte DB prüfen (Dashboard/Frontend gegen die API),
    dann den Python-Dienst stoppen und `turnier-bot` den Port übernehmen lassen.
+
+## T13-Handoff-Barriere
+
+Der echte User-Service heisst `deadlock-turniere.service`. Aktueller Stand der
+Unit: `30-rust-cutover.conf` biegt `ExecStart` auf
+`scripts/run_turniere_backend_rust.sh` um. Dieses Ticket startet den Dienst nicht
+neu; ein Restart ist erst nach expliziter Operator-Freigabe erlaubt:
+
+```bash
+systemctl --user restart deadlock-turniere.service
+```
+
+Vor einer Freigabe muessen diese Artefakte greifbar sein:
+
+- **Vorheriges Release-Binary:** den vor Cutover aktiven Stand von
+  `rust/target/release/turnier-bot` mit Zeitstempel sichern oder aus dem letzten
+  freigegebenen Release reproduzierbar bereitstellen.
+- **SQLite-Rollback-Datei:** `backend/data/tournament.db` nur als explizites
+  Rollback-/Forensik-Artefakt sichern. Nach PG-Cutover darf Python nicht still
+  gegen diese Datei produktiv weiterlaufen.
+- **Infisical/DSN:** `DEADLOCK_CENTRAL_DSN` kommt ausschliesslich ueber
+  Infisical/den Service-Launcher. Den Wert nicht ausgeben, nicht in Shell-History
+  kopieren und nicht in Dateien schreiben; Diagnose nur als gesetzt/nicht gesetzt
+  oder als read-only Counts/Booleans.
+
+Rollback-Varianten:
+
+- **Rust-Binary-Rollback:** gesichertes vorheriges `turnier-bot`-Release
+  zuruecklegen und `deadlock-turniere.service` erst nach Freigabe neu starten.
+- **Python-/SQLite-Rollback:** Drop-in `30-rust-cutover.conf` entfernen oder
+  deaktivieren, `systemctl --user daemon-reload` ausfuehren, die bewusst
+  gewaehlte SQLite-Datei bereitstellen und erst nach Freigabe neu starten. Diese
+  Variante braucht eine klare Datenstrategie fuer seit dem PG-Cutover entstandene
+  Aenderungen.
 
 ## Empfohlener Folge-Schritt vor Live
 

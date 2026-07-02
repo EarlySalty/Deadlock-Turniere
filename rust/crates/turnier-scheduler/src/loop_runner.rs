@@ -116,25 +116,6 @@ impl Scheduler {
             return false;
         };
 
-        // Single-Active-Invariante: vor der Aktivierung (→ registration) darf kein
-        // anderes Nicht-Test-Turnier aktiv sein.
-        if next_status == "registration" {
-            match self.has_other_active_tournament(row.id).await {
-                Ok(true) => {
-                    tracing::warn!(
-                        tournament_id = row.id,
-                        "Scheduler überspringt Turnier: anderes aktives Turnier blockiert Aktivierung"
-                    );
-                    return false;
-                }
-                Ok(false) => {}
-                Err(err) => {
-                    tracing::error!(tournament_id = row.id, error = %err, "Aktiv-Check fehlgeschlagen");
-                    return false;
-                }
-            }
-        }
-
         match advance_tournament_status(
             &self.pool,
             &self.matchmgr,
@@ -153,6 +134,14 @@ impl Scheduler {
                     tournament_id = row.id,
                     next_status,
                     "Scheduler konnte Turnier nicht verschieben: {msg}"
+                );
+                return false;
+            }
+            Err(crate::SchedulerError::ActiveTournamentConflict(msg)) => {
+                tracing::warn!(
+                    tournament_id = row.id,
+                    next_status,
+                    "Scheduler überspringt Turnier: {msg}"
                 );
                 return false;
             }
@@ -228,22 +217,6 @@ impl Scheduler {
             _ => {}
         }
         Ok(())
-    }
-
-    /// `true`, wenn ein ANDERES Nicht-Test-Turnier aktiv ist
-    /// (registration/checkin/group_phase/bracket). Portiert
-    /// `_has_other_active_tournament` (Z.102-110).
-    async fn has_other_active_tournament(&self, tournament_id: i64) -> sqlx::Result<bool> {
-        let row: Option<(i32,)> = sqlx::query_as(
-            "SELECT 1 FROM turnier.tournaments \
-             WHERE id != $1 \
-               AND status IN ('registration', 'checkin', 'group_phase', 'bracket') \
-               AND is_test = false LIMIT 1",
-        )
-        .bind(tournament_id)
-        .fetch_optional(&self.pool)
-        .await?;
-        Ok(row.is_some())
     }
 }
 

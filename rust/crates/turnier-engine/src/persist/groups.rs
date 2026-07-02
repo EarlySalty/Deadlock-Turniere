@@ -23,7 +23,7 @@ pub async fn generate_groups(
 
 /// Snake-Draft-Gruppenbildung innerhalb einer bestehenden Transaktion. Auch von
 /// `finalize_checkin` (advance_to_group_phase) genutzt.
-pub(crate) async fn generate_groups_in_tx(
+pub async fn generate_groups_in_tx(
     tx: &mut Transaction<'_, Postgres>,
     tournament_id: i64,
     num_groups: Option<usize>,
@@ -137,7 +137,7 @@ pub async fn generate_group_matches(
 
 /// Round-Robin-Matches innerhalb einer bestehenden Transaktion. Liefert die
 /// Match-Anzahl.
-pub(crate) async fn generate_group_matches_in_tx(
+pub async fn generate_group_matches_in_tx(
     tx: &mut Transaction<'_, Postgres>,
     tournament_id: i64,
 ) -> TournamentResult<i64> {

@@ -42,8 +42,8 @@ pub use status::{
 pub use persist::{
     advance_bracket_winner, assign_random_teams, build_checkin_snapshot_token,
     complete_mini_group_round_robin, finalize_checkin, generate_bracket, generate_bracket_in_tx,
-    generate_group_matches, generate_groups, recalculate_player_points,
-    recalculate_player_points_in_tx, AddedPlayer, CreatedTeam, FinalizeCheckinParams,
-    FinalizeCheckinResult, NoShuffle, RemovedPlayer, RngShuffler, SoloPlayer, SoloShuffler,
-    TeamWarning,
+    generate_group_matches, generate_group_matches_in_tx, generate_groups, generate_groups_in_tx,
+    recalculate_player_points, recalculate_player_points_in_tx, AddedPlayer, CreatedTeam,
+    FinalizeCheckinParams, FinalizeCheckinResult, NoShuffle, RemovedPlayer, RngShuffler,
+    SoloPlayer, SoloShuffler, TeamWarning,
 };

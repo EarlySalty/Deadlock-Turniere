@@ -14,9 +14,6 @@
 //!    der Loop stirbt nie (behebt den Tot-Loop des Originals).
 //!
 //! ## Bewusst erhaltene Befunde (`bugs_preserved`)
-//! - **Generierung vor dem UPDATE** (behavior-change): Gruppen/Matches/Bracket
-//!   werden vor dem Optimistic-Lock erzeugt — bei parallelem Statuswechsel können
-//!   verwaiste Datensätze entstehen. 1:1 zum Original.
 //! - **`completed`-Zweig** (needs-decision): der Scheduler erzeugt nie `completed`
 //!   als next_status; der Zweig greift nur bei externen Aufrufern (turnier-api).
 //! - **5-Minuten-Reminder-Fenster ohne Catch-up** (needs-decision): verpasste
@@ -41,4 +38,7 @@ pub use time::{
     is_due, is_within_window, offset_label, parse_reminder_offsets, DEFAULT_REMINDER_OFFSETS,
     REMINDER_WINDOW_MINUTES,
 };
-pub use transition::{advance_tournament_status, get_due_next_status, DueStatusRow};
+pub use transition::{
+    acquire_single_active_tournament_lock, advance_tournament_status, get_due_next_status,
+    DueStatusRow, SINGLE_ACTIVE_TOURNAMENT_ADVISORY_LOCK_KEY,
+};

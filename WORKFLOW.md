@@ -2,6 +2,65 @@
 
 ---
 
+## Neue Aufgabe (2026-07-02): Rework T13-Kritiker — 4 Befunde
+
+### Ziel
+- Vier Abschluss-Kritiker-Befunde praezise fixen: atomare Status-/Gruppen-/Bracket-Transition, Single-Active-Advisory-Lock, Steam-Bridge-Fallback, Cutover-Runbook-Korrektur.
+- Workspace-weite Verifikation ausfuehren; kein Commit/Push.
+
+### Fortschritt
+- `WORKFLOW.md`, Git-Status und betroffene Scheduler-/Engine-/API-/Steam-/Doku-Dateien gelesen; bestehende uncommitted T13-Aenderungen bleiben erhalten.
+- Engine-Gruppenfunktionen als `_in_tx`-Varianten exportiert und Scheduler-Statuswechsel so umgebaut, dass Status-CAS, Gruppen-/Bracket-Erzeugung, Audit und Punkte-Recompute in einer DB-Transaktion laufen.
+- Gemeinsamer `pg_advisory_xact_lock` fuer Single-Active-Tournament eingefuehrt; Scheduler-Transition und Admin-Helfer nutzen denselben Lock-Key vor der Active-Pruefung.
+- Steam-Bridge-Open degradiert bei Connect-Fehlern mit Warning zu `None`; Cutover-Runbook behauptet keinen bereits erfolgreichen `--check`-Boot mehr.
+- Regressionstests ergaenzt: parallele Gruppenphase-Erzeugung erzeugt Gruppen/Matches nur einmal; parallele Registration-Aktivierung erlaubt nur ein aktives Nicht-Test-Turnier; Steam-Bridge-Open degradiert bei existierendem, aber unoefnnbarem Pfad.
+- Workspace-Verifikation gruen: `SQLX_OFFLINE=true cargo build --workspace`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo fmt --check`.
+- Workspace-Test gruen via zentralem Wegwerf-PG-Wrapper: `cargo test --workspace --features testing -- --include-ignored` (280 Tests, 0 fehlgeschlagen).
+
+### Status (2026-07-02)
+-> **Abgeschlossen fuer GPT-Worker** — Review durch Claude ausstehend
+
+---
+
+## Neue Aufgabe (2026-07-02): Abschluss-Kritiker SP4 Turniere T0-T13
+
+### Ziel
+- Unabhaengiger Review ohne Codeaenderungen des kompletten SP4-Turniere-Backends mit Fokus auf T9 Scheduler, T12 Composition Root, T13 Steam-Rank-Cache, Cross-Ticket-Integration, SQLite-Bridge-Abgrenzung, Kritiker-Checkliste und Cutover-Runbook.
+- Keine Commits, keine Service-Restarts, keine Secret-Ausgabe.
+
+### Fortschritt
+- `WORKFLOW.md`, Branch und Working-Tree-Status gelesen; bestehende uncommitted Aenderungen bleiben unangetastet.
+- T9 Scheduler (`transition.rs`, `reminders.rs`, `time.rs`, `loop_runner.rs`) vollstaendig gelesen; Punkte-Recompute laeuft in derselben Transaktion mit Advisory-Xact-Lock, aber Status-Seiteneffekte und Single-Active-Pruefung haben offene Concurrency-Risiken.
+- T12 Composition Root (`turnier-bot`, `AppState`, `turnier-config`, `turnier-db`) gelesen; `--check` startet keinen Scheduler und wird vom Test-DB-Confirm-Guard nicht blockiert.
+- T13 Rank-Cache/Resolver/Bridge und `resolver_db.rs` gelesen; `rank_cache` ist PG/`turnier.*`, externe Steam-Bridge bleibt separate SQLite-Worker-DB.
+- Cutover-Runbook und echte systemd-User-Unit read-only geprueft; kein Restart, keine Secret-Ausgabe, keine Cargo-Verifikation neu ausgefuehrt.
+- Review abgeschlossen; Findings werden an Claude zurueckgegeben.
+
+---
+
+## Neue Aufgabe (2026-07-02): SP4 T13 Workspace-Barriere + Cutover-Handoff
+
+### Ziel
+- Workspace-weit sicherstellen, dass die Turniere-Portierung PG-only kompiliert/testet.
+- Bekannten `connect_str`-Altbestand in `turnier-steam`-Tests und weitere SQLite-Aera-API-Reste suchen/fixen.
+- Cutover-Runbook pruefen/ergaenzen; keine Live-Restarts, keine Freigaben, kein Commit/Push.
+
+### Fortschritt
+- T13-Planabschnitt, Kritiker-Checkliste, `WORKFLOW.md` und Git-Status gelesen; bestehende untracked Audit-Datei bleibt unangetastet.
+- Bekannter `turnier-steam/tests/resolver_db.rs`-Bruch behoben: Test nutzt jetzt `turnier_db::test_pool()`/zentrale Wegwerf-PG-DB statt `connect_str` + SQLite-Migration.
+- Zusatzaudit-Fund behoben: `turnier-steam::RankCache` nutzte noch unqualifizierte SQLite-SQL gegen `turnier_db::Pool`; jetzt `turnier."rank_cache"`, `$n`-Binds, BIGINT-Discord-ID und TIMESTAMPTZ-TTL.
+- Zielcheck `turnier-steam`: `cargo build -p turnier-steam --features testing`, `cargo test -p turnier-steam --features testing -- --include-ignored` via zentralem Test-DB-Wrapper und `cargo fmt --check -p turnier-steam` gruen.
+- `rg`-SQLite-Audit wiederholt; verbleibende Treffer sind Legacy-Doku/-Migrationen, `DATABASE_PATH`-Fence-Kommentare, externe Steam-Bridge-SQLite-Flaechen oder ein alter Kommentarname.
+- Schemaqualifikations-Heuristik gegen alle `turnier`-Tabellen in Rust-Queries: keine nackten `FROM`/`JOIN`/`INSERT`/`UPDATE`-Zieltabellen gefunden.
+- `cargo sqlx prepare --workspace -- --all-targets --all-features` via Wegwerf-Zentral-DB gruen; `.sqlx`-Workspace-Cache neu erzeugt.
+- `SQLX_OFFLINE=true cargo build --workspace` gruen.
+- Vollverifikation gruen: `cargo test --workspace --features testing -- --include-ignored` via zentralem Wegwerf-PG-Wrapper, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo fmt --check`.
+- systemd-Metadaten read-only geprueft: echter User-Service `deadlock-turniere.service`, Drop-in `30-rust-cutover.conf` zeigt auf `scripts/run_turniere_backend_rust.sh`; kein Restart ausgefuehrt.
+- `rust/docs/cutover.md` um T13-Handoff-Barriere ergaenzt: vorheriges Release-Binary + SQLite-Datei als Rollback-Artefakte, `DEADLOCK_CENTRAL_DSN` nur via Infisical, Service-Restart nur nach expliziter Freigabe.
+- Read-only Daten-Gegenprobe ueber Infisical-geladene zentrale DSN: `turnier`-Schema vorhanden, 37/37 erwartete Tabellen vorhanden, 0 fehlend; Counts fuer `tournaments`, `teams`, `team_members`, `tournament_signups`, `bracket_matches`, `group_matches`, `rank_cache`, `player_points`, `sessions`, `user_profiles`, `user_consents` matchen die SP1-Erwartung.
+
+---
+
 ## Neue Aufgabe (2026-07-02): SP4 T12 turnier-bot Composition Root
 
 ### Ziel

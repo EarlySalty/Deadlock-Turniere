@@ -133,7 +133,10 @@ mod tests {
 
     #[test]
     fn score_for_name_matches_score_for_tier() {
-        assert_eq!(rank_score_for_name("Archon", Some(4)), rank_score(Some(7), Some(4)));
+        assert_eq!(
+            rank_score_for_name("Archon", Some(4)),
+            rank_score(Some(7), Some(4))
+        );
         // Unbekannter Name verhält sich wie Tier 0.
         assert_eq!(rank_score_for_name("Nope", Some(4)), 3);
     }

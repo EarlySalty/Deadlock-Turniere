@@ -23,7 +23,9 @@ pub use checkin::{
     FinalizeCheckinParams, FinalizeCheckinResult, NoShuffle, RemovedPlayer, RngShuffler,
     SoloPlayer, SoloShuffler, TeamWarning,
 };
-pub use groups::{generate_group_matches, generate_groups};
+pub use groups::{
+    generate_group_matches, generate_group_matches_in_tx, generate_groups, generate_groups_in_tx,
+};
 pub use mini_group_complete::complete_mini_group_round_robin;
 pub use points::{recalculate_player_points, recalculate_player_points_in_tx};
 

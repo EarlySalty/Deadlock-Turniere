@@ -8,7 +8,7 @@
 
 use serde_json::Value;
 use sqlx::postgres::PgRow;
-use sqlx::{Executor, Postgres, QueryBuilder, Row};
+use sqlx::{Executor, PgConnection, Postgres, QueryBuilder, Row};
 
 use turnier_core::LobbySettingsPreset;
 
@@ -112,13 +112,12 @@ where
 ///
 /// `ignore_tournament_id` schließt das eigene Turnier aus (Update/Advance). Bei
 /// Verletzung → 409 mit der Original-Detailmeldung (`#<id> <name> (<status>)`).
-pub async fn ensure_single_active_tournament<'e, E>(
-    executor: E,
+pub async fn ensure_single_active_tournament(
+    conn: &mut PgConnection,
     ignore_tournament_id: Option<i64>,
-) -> WebResult<()>
-where
-    E: Executor<'e, Database = Postgres>,
-{
+) -> WebResult<()> {
+    turnier_scheduler::acquire_single_active_tournament_lock(&mut *conn).await?;
+
     let mut query = QueryBuilder::<Postgres>::new(
         r#"SELECT id, name, status FROM turnier."tournaments" WHERE status IN ("#,
     );
@@ -132,7 +131,7 @@ where
         query.push_bind(id);
     }
 
-    if let Some(row) = query.build().fetch_optional(executor).await? {
+    if let Some(row) = query.build().fetch_optional(&mut *conn).await? {
         let id: i64 = row.get("id");
         let name: String = row.get("name");
         let status: String = row.get("status");

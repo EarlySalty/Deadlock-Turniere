@@ -190,9 +190,9 @@ async fn assign_random(
     _mod: ModUser,
     Path(tournament_id): Path<i64>,
 ) -> WebResult<Json<Value>> {
-    // Die SqliteRow ist nicht `Send` und darf nicht über das `assign_random_teams`-
-    // await gehalten werden (sonst ist das Handler-Future nicht `Send`) — daher die
-    // benötigten Werte in einem Block extrahieren und die Row vorher fallenlassen.
+    // Die DB-Row darf nicht über das `assign_random_teams`-await gehalten werden
+    // (sonst ist das Handler-Future nicht `Send`) — daher die benötigten Werte in
+    // einem Block extrahieren und die Row vorher fallenlassen.
     let (status, team_size): (String, i64) = {
         let tournament = load_tournament_or_404(&state.pool, tournament_id).await?;
         (tournament.get("status"), tournament.get("team_size"))

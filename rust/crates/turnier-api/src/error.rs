@@ -165,6 +165,7 @@ impl From<turnier_scheduler::SchedulerError> for WebError {
         match err {
             InvalidTransition(msg) => Self::bad_request(msg),
             StatusConflict => Self::conflict("Turnierstatus wurde parallel geändert"),
+            ActiveTournamentConflict(msg) => Self::conflict(msg),
             InvalidActorId(_) => Self::bad_request("Ungueltige Actor-Discord-ID"),
             Tournament(e) => e.into(),
             Db(e) => e.into(),

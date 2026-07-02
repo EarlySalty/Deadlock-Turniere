@@ -280,13 +280,23 @@ Verifikationsstand 2026-07-02: `cargo build -p turnier-bot --bin turnier-bot` gr
 
 **Goal:** Code ist PG-only und reviewbar; Live-Cutover bleibt ein separater, freigegebener Schritt.
 
-- [ ] SQLite-Reste pruefen: `rg -n "Sqlite|sqlite|last_insert_rowid|INSERT OR|datetime\\('now'\\)|strftime|json_extract|backend/data/tournament.db|DATABASE_PATH" rust/crates rust/docs scripts` und jeden Treffer als erlaubt (z.B. Legacy-Doku/Steam ausser Scope) oder Bug klassifizieren.
-- [ ] Schemaqualifikation pruefen: keine produktiven Queries mit unqualifizierten Turnier-Tabellen.
-- [ ] Offline-/Compile-Vertrag: `cargo sqlx prepare --workspace` bzw. festgelegte per-crate Prepare-Kommandos; `.sqlx` aktualisiert; `SQLX_OFFLINE=true cargo build --workspace`.
-- [ ] Vollverifikation: `cargo test --workspace --features testing -- --include-ignored`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo fmt --check`.
-- [ ] Daten-Gegenprobe read-only: Counts zentraler Tabellen gegen SP1-Ledger-Erwartung nur als Zahlen/Booleans, keine Nutzdaten-Dumps.
-- [ ] Cutover-Runbook schreiben: vorheriger Release-Binary + SQLite-Datei als Rollback, zentrale DSN via Infisical, systemd `deadlock-turniere.service` erst nach expliziter Freigabe neu starten.
+- [x] SQLite-Reste pruefen: `rg -n "Sqlite|sqlite|last_insert_rowid|INSERT OR|datetime\\('now'\\)|strftime|json_extract|backend/data/tournament.db|DATABASE_PATH" rust/crates rust/docs scripts` und jeden Treffer als erlaubt (z.B. Legacy-Doku/Steam ausser Scope) oder Bug klassifizieren.
+- [x] Schemaqualifikation pruefen: keine produktiven Queries mit unqualifizierten Turnier-Tabellen.
+- [x] Offline-/Compile-Vertrag: `cargo sqlx prepare --workspace` bzw. festgelegte per-crate Prepare-Kommandos; `.sqlx` aktualisiert; `SQLX_OFFLINE=true cargo build --workspace`.
+- [x] Vollverifikation: `cargo test --workspace --features testing -- --include-ignored`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo fmt --check`.
+- [x] Daten-Gegenprobe read-only: Counts zentraler Tabellen gegen SP1-Ledger-Erwartung nur als Zahlen/Booleans, keine Nutzdaten-Dumps.
+- [x] Cutover-Runbook schreiben: vorheriger Release-Binary + SQLite-Datei als Rollback, zentrale DSN via Infisical, systemd `deadlock-turniere.service` erst nach expliziter Freigabe neu starten.
 - [ ] Frischer Kritiker auf den gesamten Diff; offene Risiken dokumentieren.
+
+Verifikationsstand 2026-07-02: `turnier-steam::RankCache` und der
+`resolver_db`-Test wurden von SQLite-App-DB auf zentrale PG-Testdatenbank
+umgestellt; `cargo sqlx prepare --workspace -- --all-targets --all-features`,
+`SQLX_OFFLINE=true cargo build --workspace`, `cargo test --workspace --features
+testing -- --include-ignored`, `cargo clippy --workspace --all-targets
+--all-features -- -D warnings` und `cargo fmt --check` sind gruen. Read-only
+Datencheck: `turnier`-Schema vorhanden, 37/37 erwartete Tabellen vorhanden, 0
+fehlend; gepruefte zentrale Counts matchen SP1. Externer frischer Kritiker ist
+noch ausstehend; diese T13-Uebergabe enthaelt nur die Worker-Selbsteinschaetzung.
 
 ## Kritiker-Checkliste
 

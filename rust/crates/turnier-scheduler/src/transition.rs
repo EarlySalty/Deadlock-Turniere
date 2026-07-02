@@ -7,13 +7,14 @@
 //! Lock, auditet, berechnet bei `completed` die Punkte neu und plant Auto-Lobbys.
 
 use chrono::{DateTime, Utc};
+use sqlx::{PgConnection, Postgres, Transaction};
 
 use turnier_core::{now_utc, parse_discord_id, TournamentStatus};
 use turnier_db::Pool;
 use turnier_discord::DiscordNotifier;
 use turnier_engine::{
-    generate_bracket, generate_group_matches, generate_groups, is_valid_transition,
-    recalculate_player_points_in_tx, valid_next_statuses,
+    generate_bracket_in_tx, generate_group_matches_in_tx, generate_groups_in_tx,
+    is_valid_transition, recalculate_player_points_in_tx, valid_next_statuses,
 };
 use turnier_match::MatchManager;
 
@@ -34,6 +35,26 @@ pub struct DueStatusRow {
     pub checkin_start: Option<DateTime<Utc>>,
     pub group_phase_start: Option<DateTime<Utc>>,
     pub bracket_start: Option<DateTime<Utc>>,
+}
+
+/// Gemeinsamer PG-Advisory-Xact-Lock für die Single-Active-Tournament-Invariante.
+///
+/// Scheduler und Admin-Routen verwenden denselben Key, damit der Check
+/// "existiert schon ein anderes aktives Nicht-Test-Turnier?" und der folgende
+/// Statuswechsel nicht gegeneinander rennen.
+pub const SINGLE_ACTIVE_TOURNAMENT_ADVISORY_LOCK_KEY: i64 = i64::from_be_bytes(*b"trnactv1");
+
+const ACTIVE_NON_TEST_STATUSES: [&str; 4] = ["registration", "checkin", "group_phase", "bracket"];
+
+/// Nimmt den gemeinsamen Single-Active-Advisory-Lock für die laufende
+/// Transaktion. Der Lock wird von Postgres automatisch beim Commit/Rollback
+/// freigegeben.
+pub async fn acquire_single_active_tournament_lock(conn: &mut PgConnection) -> SchedulerResult<()> {
+    sqlx::query("SELECT pg_advisory_xact_lock($1)")
+        .bind(SINGLE_ACTIVE_TOURNAMENT_ADVISORY_LOCK_KEY)
+        .execute(conn)
+        .await?;
+    Ok(())
 }
 
 /// Ermittelt den nächsten fälligen Status anhand der Zeitstempel und des Modus.
@@ -90,12 +111,12 @@ fn parse_status(value: &str) -> Option<TournamentStatus> {
 ///
 /// 1. Übergang gegen die Status-Übergangstabelle validieren
 ///    ([`is_valid_transition`]); ungültig → [`SchedulerError::InvalidTransition`].
-/// 2. Bei `group_phase`: Gruppen + Gruppen-Matches generieren; bei `bracket`: das
-///    Bracket generieren. (Generierung läuft VOR dem UPDATE — wie im Original;
-///    siehe `bugs_preserved`.)
-/// 3. Status per Optimistic-Lock setzen
+/// 2. Status per Optimistic-Lock setzen
 ///    (`UPDATE ... WHERE id = $n AND status = current`); traf keine Zeile →
 ///    [`SchedulerError::StatusConflict`].
+/// 3. Bei `group_phase`: Gruppen + Gruppen-Matches generieren; bei `bracket`: das
+///    Bracket generieren. Generierung und Status-CAS laufen in derselben
+///    Transaktion.
 /// 4. Audit-Log schreiben: `tournament_auto_advance` bei `source == "scheduler"`,
 ///    sonst `tournament_advance`; `details` = JSON-Metadata.
 /// 5. Bei `completed` und nicht `exclude_from_leaderboard`: Punkte neu berechnen.
@@ -147,19 +168,12 @@ pub async fn advance_tournament_status(
         "source": source,
     });
 
-    // --- 2. Seiteneffekt-Generierung (VOR dem UPDATE, wie im Original) ---
-    if next_status == "group_phase" {
-        let group_ids = generate_groups(pool, tournament_id, None).await?;
-        let match_count = generate_group_matches(pool, tournament_id).await?;
-        metadata["groups_created"] = serde_json::json!(group_ids.len());
-        metadata["matches_created"] = serde_json::json!(match_count);
-    } else if next_status == "bracket" {
-        let match_count = generate_bracket(pool, tournament_id).await?;
-        metadata["bracket_matches_created"] = serde_json::json!(match_count);
-    }
-
-    // --- 3.-5. Statuswechsel + Audit + ggf. Punkte: EINE Transaktion ---
+    // --- 2.-5. Statuswechsel + Seiteneffekte + Audit + ggf. Punkte: EINE Transaktion ---
     let mut tx = pool.begin().await?;
+
+    if next_status == "registration" {
+        ensure_single_active_registration_in_tx(&mut tx, tournament_id).await?;
+    }
 
     let now = now_utc();
     let res = sqlx::query(
@@ -174,6 +188,16 @@ pub async fn advance_tournament_status(
     .await?;
     if res.rows_affected() == 0 {
         return Err(SchedulerError::StatusConflict);
+    }
+
+    if next_status == "group_phase" {
+        let group_ids = generate_groups_in_tx(&mut tx, tournament_id, None).await?;
+        let match_count: i64 = generate_group_matches_in_tx(&mut tx, tournament_id).await?;
+        metadata["groups_created"] = serde_json::json!(group_ids.len());
+        metadata["matches_created"] = serde_json::json!(match_count);
+    } else if next_status == "bracket" {
+        let match_count: i64 = generate_bracket_in_tx(&mut tx, tournament_id).await?;
+        metadata["bracket_matches_created"] = serde_json::json!(match_count);
     }
 
     let action = if source == "scheduler" {
@@ -211,6 +235,45 @@ pub async fn advance_tournament_status(
     schedule_lobbies_best_effort(matchmgr, tournament_id, next_status).await;
 
     Ok(metadata)
+}
+
+async fn ensure_single_active_registration_in_tx(
+    tx: &mut Transaction<'_, Postgres>,
+    tournament_id: i64,
+) -> SchedulerResult<()> {
+    acquire_single_active_tournament_lock(&mut *tx).await?;
+
+    let target: Option<(bool,)> =
+        sqlx::query_as("SELECT is_test FROM turnier.tournaments WHERE id = $1")
+            .bind(tournament_id)
+            .fetch_optional(&mut **tx)
+            .await?;
+    let Some((is_test,)) = target else {
+        return Err(SchedulerError::StatusConflict);
+    };
+    if is_test {
+        return Ok(());
+    }
+
+    let row: Option<(i64, String, String)> = sqlx::query_as(
+        "SELECT id, name, status FROM turnier.tournaments \
+         WHERE id != $1 \
+           AND status = ANY($2) \
+           AND is_test = false \
+         ORDER BY id \
+         LIMIT 1",
+    )
+    .bind(tournament_id)
+    .bind(ACTIVE_NON_TEST_STATUSES.as_slice())
+    .fetch_optional(&mut **tx)
+    .await?;
+
+    if let Some((id, name, status)) = row {
+        return Err(SchedulerError::ActiveTournamentConflict(format!(
+            "Es gibt bereits ein aktives Turnier: #{id} {name} ({status})"
+        )));
+    }
+    Ok(())
 }
 
 /// Plant Auto-Lobbys nach `group_phase`/`bracket` — Fehler werden nur geloggt

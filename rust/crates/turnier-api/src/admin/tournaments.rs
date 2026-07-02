@@ -190,7 +190,7 @@ async fn create_tournament(
         determine_tournament_mode(body.team_size as usize, body.force_tournament_mode);
 
     let mut tx = state.pool.begin().await?;
-    ensure_single_active_tournament(&mut *tx, None).await?;
+    ensure_single_active_tournament(&mut tx, None).await?;
 
     // Insert inkl. lobby_settings (safe-Fix: das nachgelagerte UPDATE entfällt).
     let tournament_id: i64 = sqlx::query_scalar(
@@ -338,7 +338,7 @@ async fn update_tournament(
                 ));
             }
             if helpers::ACTIVE_TOURNAMENT_STATUSES.contains(&new_status_s) {
-                ensure_single_active_tournament(&mut *tx, Some(tournament_id)).await?;
+                ensure_single_active_tournament(&mut tx, Some(tournament_id)).await?;
             }
         }
     }
@@ -797,7 +797,7 @@ async fn advance_tournament(
             )));
         };
         if helpers::ACTIVE_TOURNAMENT_STATUSES.contains(&next_status) {
-            ensure_single_active_tournament(&mut *tx, Some(tournament_id)).await?;
+            ensure_single_active_tournament(&mut tx, Some(tournament_id)).await?;
         }
         tx.commit().await?;
         (current_status, next_status)
@@ -845,6 +845,7 @@ async fn advance_status_shared(
         turnier_scheduler::SchedulerError::StatusConflict => {
             WebError::conflict("Turnierstatus wurde parallel geändert")
         }
+        turnier_scheduler::SchedulerError::ActiveTournamentConflict(msg) => WebError::conflict(msg),
         other => other.into(),
     })
 }
