@@ -24,7 +24,10 @@ use super::steam_ops::{self, ManualLobbyBody};
 /// Router der Bracket-Match-Endpunkte.
 pub fn router() -> Router<AppState> {
     Router::new()
-        .route("/api/admin/tournaments/{tournament_id}/matches/{match_id}/result", post(set_match_result))
+        .route(
+            "/api/admin/tournaments/{tournament_id}/matches/{match_id}/result",
+            post(set_match_result),
+        )
         .route(
             "/api/admin/tournaments/{tournament_id}/matches/{match_id}/games/{game_number}/start",
             post(start_series_game),
@@ -33,14 +36,38 @@ pub fn router() -> Router<AppState> {
             "/api/admin/tournaments/{tournament_id}/matches/{match_id}/games/{game_number}/result",
             post(submit_series_game_result),
         )
-        .route("/api/admin/tournaments/{tournament_id}/matches/{match_id}/create-lobby", post(create_lobby))
-        .route("/api/admin/tournaments/{tournament_id}/matches/{match_id}/start", post(start_match))
-        .route("/api/admin/tournaments/{tournament_id}/matches/{match_id}/fetch-result", post(fetch_result))
-        .route("/api/admin/tournaments/{tournament_id}/matches/{match_id}/leave-lobby", post(leave_lobby))
-        .route("/api/admin/tournaments/{tournament_id}/matches/{match_id}/reset", post(reset_match))
-        .route("/api/admin/tournaments/{tournament_id}/matches/{match_id}/manual-lobby", post(manual_lobby))
-        .route("/api/admin/tournaments/{tournament_id}/matches/{match_id}/event-presets", get(event_presets))
-        .route("/api/admin/tournaments/{tournament_id}/matches/{match_id}/apply-convars", post(apply_convars))
+        .route(
+            "/api/admin/tournaments/{tournament_id}/matches/{match_id}/create-lobby",
+            post(create_lobby),
+        )
+        .route(
+            "/api/admin/tournaments/{tournament_id}/matches/{match_id}/start",
+            post(start_match),
+        )
+        .route(
+            "/api/admin/tournaments/{tournament_id}/matches/{match_id}/fetch-result",
+            post(fetch_result),
+        )
+        .route(
+            "/api/admin/tournaments/{tournament_id}/matches/{match_id}/leave-lobby",
+            post(leave_lobby),
+        )
+        .route(
+            "/api/admin/tournaments/{tournament_id}/matches/{match_id}/reset",
+            post(reset_match),
+        )
+        .route(
+            "/api/admin/tournaments/{tournament_id}/matches/{match_id}/manual-lobby",
+            post(manual_lobby),
+        )
+        .route(
+            "/api/admin/tournaments/{tournament_id}/matches/{match_id}/event-presets",
+            get(event_presets),
+        )
+        .route(
+            "/api/admin/tournaments/{tournament_id}/matches/{match_id}/apply-convars",
+            post(apply_convars),
+        )
         .route(
             "/api/admin/tournaments/{tournament_id}/matches/{match_id}/apply-event-preset",
             post(apply_event_preset),
@@ -75,7 +102,7 @@ async fn set_match_result(
 
     // Turnier prüfen.
     let tournament_exists: Option<i64> =
-        sqlx::query_scalar("SELECT id FROM tournaments WHERE id = ?")
+        sqlx::query_scalar(r#"SELECT id FROM turnier."tournaments" WHERE id = $1"#)
             .bind(tournament_id)
             .fetch_optional(&state.pool)
             .await?;
@@ -84,11 +111,13 @@ async fn set_match_result(
     }
 
     // Zuerst Bracket-Match.
-    let bracket = sqlx::query("SELECT id FROM bracket_matches WHERE id = ? AND tournament_id = ?")
-        .bind(match_id)
-        .bind(tournament_id)
-        .fetch_optional(&state.pool)
-        .await?;
+    let bracket = sqlx::query(
+        r#"SELECT id FROM turnier."bracket_matches" WHERE id = $1 AND tournament_id = $2"#,
+    )
+    .bind(match_id)
+    .bind(tournament_id)
+    .fetch_optional(&state.pool)
+    .await?;
 
     if bracket.is_some() {
         let outcome = state
@@ -131,9 +160,9 @@ async fn set_match_result(
 
     // Dann Group-Match (Geschäftslogik inline wie im Original; force ignoriert).
     let group_match = sqlx::query(
-        "SELECT gm.id, gm.group_id, gm.team1_id, gm.team2_id, gm.status \
-         FROM group_matches gm JOIN groups g ON gm.group_id = g.id \
-         WHERE gm.id = ? AND g.tournament_id = ?",
+        r#"SELECT gm.id, gm.group_id, gm.team1_id, gm.team2_id, gm.status
+         FROM turnier."group_matches" gm JOIN turnier."groups" g ON gm.group_id = g.id
+         WHERE gm.id = $1 AND g.tournament_id = $2"#,
     )
     .bind(match_id)
     .bind(tournament_id)
@@ -151,13 +180,19 @@ async fn set_match_result(
         let team2_id: i64 = gm.get("team2_id");
         let group_id: i64 = gm.get("group_id");
         if winner_id != team1_id && winner_id != team2_id {
-            return Err(WebError::bad_request("winner_id muss eines der beiden Teams im Match sein"));
+            return Err(WebError::bad_request(
+                "winner_id muss eines der beiden Teams im Match sein",
+            ));
         }
-        let loser_id = if winner_id == team1_id { team2_id } else { team1_id };
+        let loser_id = if winner_id == team1_id {
+            team2_id
+        } else {
+            team1_id
+        };
 
         let mut tx = state.pool.begin().await?;
         sqlx::query(
-            "UPDATE group_matches SET winner_id = ?, status = 'completed', played_at = datetime('now') WHERE id = ?",
+            r#"UPDATE turnier."group_matches" SET winner_id = $1, status = 'completed', played_at = now() WHERE id = $2"#,
         )
         .bind(winner_id)
         .bind(match_id)
@@ -166,19 +201,19 @@ async fn set_match_result(
         // Standings inkrementell (Befund admin_routes.py:2236 — +3 fix, nicht
         // idempotent; 1:1 erhalten, needs-decision).
         sqlx::query(
-            "UPDATE group_teams SET wins = wins + 1, points = points + 3 WHERE group_id = ? AND team_id = ?",
+            r#"UPDATE turnier."group_teams" SET wins = wins + 1, points = points + 3 WHERE group_id = $1 AND team_id = $2"#,
         )
         .bind(group_id)
         .bind(winner_id)
         .execute(&mut *tx)
         .await?;
-        sqlx::query("UPDATE group_teams SET losses = losses + 1 WHERE group_id = ? AND team_id = ?")
+        sqlx::query(r#"UPDATE turnier."group_teams" SET losses = losses + 1 WHERE group_id = $1 AND team_id = $2"#)
             .bind(group_id)
             .bind(loser_id)
             .execute(&mut *tx)
             .await?;
         sqlx::query(
-            "INSERT INTO match_results (group_match_id, winning_team, source) VALUES (?, ?, 'manual')",
+            r#"INSERT INTO turnier."match_results" (group_match_id, winning_team, source) VALUES ($1, $2, 'manual')"#,
         )
         .bind(match_id)
         .bind(winner_id)
@@ -216,22 +251,27 @@ async fn start_series_game(
     _admin: AdminUser,
     Path((tournament_id, match_id, game_number)): Path<(i64, i64, i64)>,
 ) -> WebResult<Json<Value>> {
-    let bm = sqlx::query("SELECT status FROM bracket_matches WHERE id = ? AND tournament_id = ?")
-        .bind(match_id)
-        .bind(tournament_id)
-        .fetch_optional(&state.pool)
-        .await?
-        .ok_or_else(|| {
-            WebError::not_found("Match nicht gefunden oder gehört nicht zu diesem Turnier")
-        })?;
+    let bm = sqlx::query(
+        r#"SELECT status FROM turnier."bracket_matches" WHERE id = $1 AND tournament_id = $2"#,
+    )
+    .bind(match_id)
+    .bind(tournament_id)
+    .fetch_optional(&state.pool)
+    .await?
+    .ok_or_else(|| {
+        WebError::not_found("Match nicht gefunden oder gehört nicht zu diesem Turnier")
+    })?;
     let status: String = bm.get("status");
     if ["completed", "forfeit", "cancelled"].contains(&status.as_str()) {
         return Err(WebError::bad_request("Match bereits abgeschlossen"));
     }
 
-    let game_id = turnier_match::series::ensure_game_exists(&state.pool, match_id, game_number).await?;
+    let game_id =
+        turnier_match::series::ensure_game_exists(&state.pool, match_id, game_number).await?;
     let games = turnier_match::series::get_series_games(&state.pool, match_id).await?;
-    Ok(Json(json!({ "game_id": game_id, "game_number": game_number, "games": games })))
+    Ok(Json(
+        json!({ "game_id": game_id, "game_number": game_number, "games": games }),
+    ))
 }
 
 /// Body von `submit_series_game_result` (`winner_team` 1/2, `duration_s` opt.).
@@ -258,28 +298,38 @@ async fn submit_series_game_result(
         return Err(WebError::unprocessable("duration_s muss >= 0 sein"));
     }
 
-    let bm = sqlx::query("SELECT status FROM bracket_matches WHERE id = ? AND tournament_id = ?")
-        .bind(match_id)
-        .bind(tournament_id)
-        .fetch_optional(&state.pool)
-        .await?
-        .ok_or_else(|| {
-            WebError::not_found("Match nicht gefunden oder gehört nicht zu diesem Turnier")
-        })?;
+    let bm = sqlx::query(
+        r#"SELECT status FROM turnier."bracket_matches" WHERE id = $1 AND tournament_id = $2"#,
+    )
+    .bind(match_id)
+    .bind(tournament_id)
+    .fetch_optional(&state.pool)
+    .await?
+    .ok_or_else(|| {
+        WebError::not_found("Match nicht gefunden oder gehört nicht zu diesem Turnier")
+    })?;
     let status: String = bm.get("status");
     if ["completed", "forfeit", "cancelled"].contains(&status.as_str()) {
         return Err(WebError::bad_request("Match bereits abgeschlossen"));
     }
 
     turnier_match::series::ensure_game_exists(&state.pool, match_id, game_number).await?;
-    let stats = turnier_match::GameStats { duration_s: body.duration_s, ..Default::default() };
-    let series_result =
-        turnier_match::series::record_game_result(&state.pool, match_id, game_number, body.winner_team, &stats)
-            .await?;
+    let stats = turnier_match::GameStats {
+        duration_s: body.duration_s,
+        ..Default::default()
+    };
+    let series_result = turnier_match::series::record_game_result(
+        &state.pool,
+        match_id,
+        game_number,
+        body.winner_team,
+        &stats,
+    )
+    .await?;
 
     if series_result.series_done {
         let match_row =
-            sqlx::query("SELECT team1_id, team2_id FROM bracket_matches WHERE id = ? AND tournament_id = ?")
+            sqlx::query(r#"SELECT team1_id, team2_id FROM turnier."bracket_matches" WHERE id = $1 AND tournament_id = $2"#)
                 .bind(match_id)
                 .bind(tournament_id)
                 .fetch_optional(&state.pool)
@@ -333,7 +383,14 @@ async fn create_lobby(
     ModUser(user): ModUser,
     Path((tournament_id, match_id)): Path<(i64, i64)>,
 ) -> WebResult<Json<Value>> {
-    steam_ops::create_lobby(&state, MatchKind::Bracket, tournament_id, match_id, &user.discord_id).await
+    steam_ops::create_lobby(
+        &state,
+        MatchKind::Bracket,
+        tournament_id,
+        match_id,
+        &user.discord_id,
+    )
+    .await
 }
 
 /// `POST .../matches/{match_id}/start` — Bracket-Match über Steam-Bot starten.
@@ -342,7 +399,14 @@ async fn start_match(
     ModUser(user): ModUser,
     Path((tournament_id, match_id)): Path<(i64, i64)>,
 ) -> WebResult<Json<Value>> {
-    steam_ops::start_match(&state, MatchKind::Bracket, tournament_id, match_id, &user.discord_id).await
+    steam_ops::start_match(
+        &state,
+        MatchKind::Bracket,
+        tournament_id,
+        match_id,
+        &user.discord_id,
+    )
+    .await
 }
 
 /// `POST .../matches/{match_id}/fetch-result` — Match-Ergebnis aus Deadlock laden.
@@ -351,7 +415,14 @@ async fn fetch_result(
     ModUser(user): ModUser,
     Path((tournament_id, match_id)): Path<(i64, i64)>,
 ) -> WebResult<Json<Value>> {
-    steam_ops::fetch_result(&state, MatchKind::Bracket, tournament_id, match_id, &user.discord_id).await
+    steam_ops::fetch_result(
+        &state,
+        MatchKind::Bracket,
+        tournament_id,
+        match_id,
+        &user.discord_id,
+    )
+    .await
 }
 
 /// `POST .../matches/{match_id}/leave-lobby` — Steam-Bot Bracket-Lobby verlassen.
@@ -360,7 +431,14 @@ async fn leave_lobby(
     ModUser(user): ModUser,
     Path((tournament_id, match_id)): Path<(i64, i64)>,
 ) -> WebResult<Json<Value>> {
-    steam_ops::leave_lobby(&state, MatchKind::Bracket, tournament_id, match_id, &user.discord_id).await
+    steam_ops::leave_lobby(
+        &state,
+        MatchKind::Bracket,
+        tournament_id,
+        match_id,
+        &user.discord_id,
+    )
+    .await
 }
 
 /// `POST .../matches/{match_id}/reset` — Bracket-Match auf pending zurücksetzen (Admin).
@@ -369,7 +447,14 @@ async fn reset_match(
     AdminUser(user): AdminUser,
     Path((tournament_id, match_id)): Path<(i64, i64)>,
 ) -> WebResult<Json<Value>> {
-    steam_ops::reset_match(&state, MatchKind::Bracket, tournament_id, match_id, &user.discord_id).await
+    steam_ops::reset_match(
+        &state,
+        MatchKind::Bracket,
+        tournament_id,
+        match_id,
+        &user.discord_id,
+    )
+    .await
 }
 
 /// `POST .../matches/{match_id}/manual-lobby` — party_code/steam_party_id setzen.
@@ -379,8 +464,15 @@ async fn manual_lobby(
     Path((tournament_id, match_id)): Path<(i64, i64)>,
     Json(body): Json<ManualLobbyBody>,
 ) -> WebResult<Json<Value>> {
-    steam_ops::manual_lobby(&state, MatchKind::Bracket, tournament_id, match_id, body, &user.discord_id)
-        .await
+    steam_ops::manual_lobby(
+        &state,
+        MatchKind::Bracket,
+        tournament_id,
+        match_id,
+        body,
+        &user.discord_id,
+    )
+    .await
 }
 
 /// `GET .../matches/{match_id}/event-presets` — Live-Event-Presets fürs Panel.

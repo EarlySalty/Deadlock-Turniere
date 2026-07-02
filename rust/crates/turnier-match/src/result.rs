@@ -3,8 +3,7 @@
 //! Bündelt, was im Original auf `result_processor.apply_bracket_match_result`
 //! und `manager._apply_group_match_result` verteilt war: beide Pfade liegen hier
 //! NEBENEINANDER. Der Bracket-Pfad persistiert das Ergebnis, propagiert den
-//! Gewinner (über [`turnier_engine::advance_bracket_winner`]), schließt ggf. die
-//! Mini-Group ab, triggert die Auto-Lobby für Folge-Runden und postet
+//! Gewinner, schließt ggf. die Mini-Group ab, triggert die Auto-Lobby für Folge-Runden und postet
 //! Stats/Channel-Cleanup nach Discord. Der Group-Pfad aktualisiert zusätzlich die
 //! `group_teams`-Tabelle.
 //!
@@ -23,9 +22,11 @@
 //!   result_processor.py:166) — bewusst erhalten.
 
 use serde_json::Value;
-use sqlx::Row;
+use sqlx::{Postgres, Row, Transaction};
 
+use turnier_core::{discord_id_to_string, now_utc};
 use turnier_discord::PlayerStat;
+use turnier_engine::mini_groups::{aggregate, select_mini_group_winner, MiniGroupMatch};
 
 use crate::error::{MatchError, MatchResult};
 use crate::MatchManager;
@@ -93,7 +94,10 @@ pub struct ApplyBracketParams {
 impl ApplyBracketParams {
     /// Default-Parameter mit der Standard-Quelle `automatic`.
     pub fn automatic() -> Self {
-        Self { source: "automatic".to_string(), ..Self::default() }
+        Self {
+            source: "automatic".to_string(),
+            ..Self::default()
+        }
     }
 }
 
@@ -111,7 +115,10 @@ pub struct ApplyGroupParams {
 impl ApplyGroupParams {
     /// Default-Parameter mit der Standard-Quelle `manual`.
     pub fn manual() -> Self {
-        Self { source: "manual".to_string(), ..Self::default() }
+        Self {
+            source: "manual".to_string(),
+            ..Self::default()
+        }
     }
 }
 
@@ -127,8 +134,8 @@ struct BracketResultRow {
     status: String,
     mini_group_id: Option<i64>,
     match_duration_s: Option<i64>,
-    match_stats: Option<String>,
-    discord_channel_id: Option<String>,
+    match_stats: Option<Value>,
+    discord_channel_id: Option<i64>,
 }
 
 impl MatchManager {
@@ -143,14 +150,15 @@ impl MatchManager {
         let match_row: Option<BracketResultRow> = sqlx::query_as::<_, BracketResultRow>(
             "SELECT id, round, position, team1_id, team2_id, winner_id, status, \
                     mini_group_id, match_duration_s, match_stats, discord_channel_id \
-             FROM bracket_matches WHERE id = ? AND tournament_id = ?",
+             FROM turnier.bracket_matches WHERE id = $1 AND tournament_id = $2",
         )
         .bind(match_id)
         .bind(tournament_id)
         .fetch_optional(&self.pool)
         .await?;
-        let match_row = match_row
-            .ok_or_else(|| MatchError::not_found(format!("Bracket-Match {match_id} nicht gefunden")))?;
+        let match_row = match_row.ok_or_else(|| {
+            MatchError::not_found(format!("Bracket-Match {match_id} nicht gefunden"))
+        })?;
 
         if TERMINAL_STATUSES.contains(&match_row.status.as_str()) && !params.force {
             return Err(MatchError::state(format!(
@@ -186,29 +194,36 @@ impl MatchManager {
             && match_row.winner_id.is_some()
             && match_row.winner_id != Some(winner_id_value)
         {
-            self.reset_bracket_downstream(tournament_id, match_row.id, match_row.round, match_row.position)
-                .await?;
+            self.reset_bracket_downstream(
+                tournament_id,
+                match_row.id,
+                match_row.round,
+                match_row.position,
+            )
+            .await?;
         }
 
         let duration_value = params.duration_s.or(match_row.match_duration_s);
         let (player_stats_json, return_players) =
-            resolve_player_stats(params.players.as_ref(), match_row.match_stats.as_deref())?;
+            resolve_player_stats(params.players.as_ref(), match_row.match_stats.as_ref())?;
 
         // Persistenz in einer Transaktion (DELETE + UPDATE + INSERT).
+        let now = now_utc();
         let mut tx = self.pool.begin().await.map_err(turnier_db::DbError::from)?;
-        sqlx::query("DELETE FROM match_results WHERE bracket_match_id = ?")
+        sqlx::query("DELETE FROM turnier.match_results WHERE bracket_match_id = $1")
             .bind(match_id)
             .execute(&mut *tx)
             .await?;
         sqlx::query(
-            "UPDATE bracket_matches \
-             SET winner_id = ?, status = 'completed', match_duration_s = ?, \
-                 match_stats = ?, played_at = datetime('now') \
-             WHERE id = ? AND tournament_id = ?",
+            "UPDATE turnier.bracket_matches \
+             SET winner_id = $1, status = 'completed', match_duration_s = $2, \
+                 match_stats = $3::jsonb, played_at = $4 \
+             WHERE id = $5 AND tournament_id = $6",
         )
         .bind(winner_id_value)
         .bind(duration_value)
-        .bind(player_stats_json.as_deref())
+        .bind(player_stats_json.as_ref())
+        .bind(now)
         .bind(match_id)
         .bind(tournament_id)
         .execute(&mut *tx)
@@ -216,37 +231,41 @@ impl MatchManager {
         // Bug-preserved (needs-decision): hier wird winner_id_value in winning_team
         // geschrieben (nicht der Slot) — exakt wie das Original.
         sqlx::query(
-            "INSERT INTO match_results (bracket_match_id, winning_team, duration_s, player_stats, source) \
-             VALUES (?, ?, ?, ?, ?)",
+            "INSERT INTO turnier.match_results \
+                 (bracket_match_id, winning_team, duration_s, player_stats, source, created_at) \
+             VALUES ($1, $2, $3, $4::jsonb, $5, $6)",
         )
         .bind(match_id)
         .bind(winner_id_value)
         .bind(duration_value)
-        .bind(player_stats_json.as_deref())
+        .bind(player_stats_json.as_ref())
         .bind(&params.source)
+        .bind(now)
         .execute(&mut *tx)
         .await?;
         tx.commit().await.map_err(turnier_db::DbError::from)?;
 
         // Channel-Cleanup (fire-and-forget) — Snapshot-Quelle bewusst Pre-Update.
-        let discord_channel_id = match_row.discord_channel_id.clone();
+        let discord_channel_id = match_row.discord_channel_id.map(discord_id_to_string);
         if let Some(channel_id) = discord_channel_id.clone().filter(|s| !s.is_empty()) {
             self.spawn_delete_channel_later(channel_id);
         }
 
         // Gewinner propagieren.
-        turnier_engine::advance_bracket_winner(&self.pool, tournament_id, match_id, winner_id_value)
-            .await?;
+        advance_bracket_winner_pg(&self.pool, tournament_id, match_id, winner_id_value).await?;
 
         // Mini-Group ggf. abschließen.
         let mut mini_group_winner_id: Option<i64> = None;
         if let Some(mini_group_id) = match_row.mini_group_id {
             mini_group_winner_id =
-                turnier_engine::complete_mini_group_round_robin(&self.pool, mini_group_id).await?;
+                complete_mini_group_round_robin_pg(&self.pool, mini_group_id).await?;
         }
 
         // Auto-Lobby für Folge-Match (best-effort).
-        if let Err(err) = self.schedule_auto_lobby_for_next_round(tournament_id, match_id).await {
+        if let Err(err) = self
+            .schedule_auto_lobby_for_next_round(tournament_id, match_id)
+            .await
+        {
             tracing::error!(
                 tournament_id, match_id, error = %err,
                 "Auto-Lobby für Folge-Match fehlgeschlagen"
@@ -254,7 +273,10 @@ impl MatchManager {
         }
         // Auto-Lobby nach Mini-Group-Abschluss (best-effort).
         if mini_group_winner_id.is_some() {
-            if let Err(err) = self.schedule_auto_lobbies_for_tournament(tournament_id).await {
+            if let Err(err) = self
+                .schedule_auto_lobbies_for_tournament(tournament_id)
+                .await
+            {
                 tracing::error!(
                     tournament_id, error = %err,
                     "Auto-Lobby nach Mini-Group-Abschluss fehlgeschlagen"
@@ -263,8 +285,14 @@ impl MatchManager {
         }
 
         // Stats in den Discord-Channel posten (best-effort, nur wenn players da).
-        let has_players = params.players.as_ref().map(|p| !p.is_empty()).unwrap_or(false);
-        if let (Some(channel_id), true) = (discord_channel_id.filter(|s| !s.is_empty()), has_players) {
+        let has_players = params
+            .players
+            .as_ref()
+            .map(|p| !p.is_empty())
+            .unwrap_or(false);
+        if let (Some(channel_id), true) =
+            (discord_channel_id.filter(|s| !s.is_empty()), has_players)
+        {
             self.post_bracket_stats(
                 tournament_id,
                 match_id,
@@ -294,9 +322,9 @@ impl MatchManager {
     ) -> MatchResult<ApplyResultOutcome> {
         let row = sqlx::query(
             "SELECT gm.group_id, gm.team1_id, gm.team2_id, gm.status \
-             FROM group_matches gm \
-             JOIN groups g ON g.id = gm.group_id \
-             WHERE gm.id = ? AND g.tournament_id = ?",
+             FROM turnier.group_matches gm \
+             JOIN turnier.groups g ON g.id = gm.group_id \
+             WHERE gm.id = $1 AND g.tournament_id = $2",
         )
         .bind(match_id)
         .bind(tournament_id)
@@ -329,38 +357,47 @@ impl MatchManager {
         }
         let winner_id = winner_id
             .filter(|w| Some(*w) == team1_id || Some(*w) == team2_id)
-            .ok_or_else(|| MatchError::invalid("winner_id muss eines der beiden Teams im Match sein"))?;
+            .ok_or_else(|| {
+                MatchError::invalid("winner_id muss eines der beiden Teams im Match sein")
+            })?;
 
         let winning_team_value = if Some(winner_id) == team1_id { 1 } else { 2 };
-        let loser_id = if winning_team_value == 1 { team2_id } else { team1_id };
-        let match_stats = params.players.as_ref().map(|players| {
-            serde_json::to_string(&serde_json::json!({ "players": players })).unwrap_or_default()
-        });
+        let loser_id = if winning_team_value == 1 {
+            team2_id
+        } else {
+            team1_id
+        };
+        let match_stats = params
+            .players
+            .as_ref()
+            .map(|players| serde_json::json!({ "players": players }));
         let player_stats = params
             .players
             .as_ref()
-            .map(|players| serde_json::to_string(players).unwrap_or_default());
+            .map(|players| Value::Array(players.clone()));
 
+        let now = now_utc();
         let mut tx = self.pool.begin().await.map_err(turnier_db::DbError::from)?;
         sqlx::query(
-            "UPDATE group_matches \
-             SET winner_id = ?, status = 'completed', \
-                 deadlock_match_id = COALESCE(?, deadlock_match_id), \
-                 match_duration_s = COALESCE(?, match_duration_s), \
-                 match_stats = COALESCE(?, match_stats), \
-                 played_at = datetime('now') \
-             WHERE id = ?",
+            "UPDATE turnier.group_matches \
+             SET winner_id = $1, status = 'completed', \
+                 deadlock_match_id = COALESCE($2::text, deadlock_match_id), \
+                 match_duration_s = COALESCE($3, match_duration_s), \
+                 match_stats = COALESCE($4::jsonb, match_stats), \
+                 played_at = $5 \
+             WHERE id = $6",
         )
         .bind(winner_id)
         .bind(params.deadlock_match_id.as_deref())
         .bind(params.duration_s)
-        .bind(match_stats.as_deref())
+        .bind(match_stats.as_ref())
+        .bind(now)
         .bind(match_id)
         .execute(&mut *tx)
         .await?;
         sqlx::query(
-            "UPDATE group_teams SET wins = wins + 1, points = points + 3 \
-             WHERE group_id = ? AND team_id = ?",
+            "UPDATE turnier.group_teams SET wins = wins + 1, points = points + 3 \
+             WHERE group_id = $1 AND team_id = $2",
         )
         .bind(group_id)
         .bind(winner_id)
@@ -368,28 +405,30 @@ impl MatchManager {
         .await?;
         if let Some(loser_id) = loser_id {
             sqlx::query(
-                "UPDATE group_teams SET losses = losses + 1 WHERE group_id = ? AND team_id = ?",
+                "UPDATE turnier.group_teams SET losses = losses + 1 WHERE group_id = $1 AND team_id = $2",
             )
             .bind(group_id)
             .bind(loser_id)
             .execute(&mut *tx)
             .await?;
         }
-        sqlx::query("DELETE FROM match_results WHERE group_match_id = ?")
+        sqlx::query("DELETE FROM turnier.match_results WHERE group_match_id = $1")
             .bind(match_id)
             .execute(&mut *tx)
             .await?;
         // Bug-preserved (needs-decision): Group-Pfad schreibt den Slot (1/2) in
         // winning_team — anders als der Bracket-Pfad.
         sqlx::query(
-            "INSERT INTO match_results (group_match_id, winning_team, duration_s, player_stats, source) \
-             VALUES (?, ?, ?, ?, ?)",
+            "INSERT INTO turnier.match_results \
+                 (group_match_id, winning_team, duration_s, player_stats, source, created_at) \
+             VALUES ($1, $2, $3, $4::jsonb, $5, $6)",
         )
         .bind(match_id)
         .bind(winning_team_value)
         .bind(params.duration_s)
-        .bind(player_stats.as_deref())
+        .bind(player_stats.as_ref())
         .bind(&params.source)
+        .bind(now)
         .execute(&mut *tx)
         .await?;
         tx.commit().await.map_err(turnier_db::DbError::from)?;
@@ -415,8 +454,9 @@ impl MatchManager {
         position: i64,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = MatchResult<()>> + Send + 'a>> {
         Box::pin(async move {
-            let next = load_next_bracket_match(&self.pool, tournament_id, match_id, round, position)
-                .await?;
+            let next =
+                load_next_bracket_match(&self.pool, tournament_id, match_id, round, position)
+                    .await?;
             let Some(next) = next else {
                 return Ok(());
             };
@@ -434,28 +474,28 @@ impl MatchManager {
             // Zwei feste Query-Zweige statt dynamischem Spaltennamen.
             if slot_is_team1 {
                 sqlx::query(
-                    "UPDATE bracket_matches \
+                    "UPDATE turnier.bracket_matches \
                      SET team1_id = NULL, winner_id = NULL, status = 'pending', \
                          steam_party_id = NULL, party_code = NULL, deadlock_match_id = NULL, \
                          match_duration_s = NULL, match_stats = NULL, played_at = NULL \
-                     WHERE id = ?",
+                     WHERE id = $1",
                 )
                 .bind(next.id)
                 .execute(&self.pool)
                 .await?;
             } else {
                 sqlx::query(
-                    "UPDATE bracket_matches \
+                    "UPDATE turnier.bracket_matches \
                      SET team2_id = NULL, winner_id = NULL, status = 'pending', \
                          steam_party_id = NULL, party_code = NULL, deadlock_match_id = NULL, \
                          match_duration_s = NULL, match_stats = NULL, played_at = NULL \
-                     WHERE id = ?",
+                     WHERE id = $1",
                 )
                 .bind(next.id)
                 .execute(&self.pool)
                 .await?;
             }
-            sqlx::query("DELETE FROM match_results WHERE bracket_match_id = ?")
+            sqlx::query("DELETE FROM turnier.match_results WHERE bracket_match_id = $1")
                 .bind(next.id)
                 .execute(&self.pool)
                 .await?;
@@ -478,11 +518,11 @@ impl MatchManager {
         let stats_row = sqlx::query(
             "SELECT bm.deadlock_match_id, t1.name AS team1_name, t2.name AS team2_name, \
                     winner.name AS winner_name \
-             FROM bracket_matches bm \
-             LEFT JOIN teams t1 ON t1.id = bm.team1_id \
-             LEFT JOIN teams t2 ON t2.id = bm.team2_id \
-             LEFT JOIN teams winner ON winner.id = bm.winner_id \
-             WHERE bm.id = ? AND bm.tournament_id = ?",
+             FROM turnier.bracket_matches bm \
+             LEFT JOIN turnier.teams t1 ON t1.id = bm.team1_id \
+             LEFT JOIN turnier.teams t2 ON t2.id = bm.team2_id \
+             LEFT JOIN turnier.teams winner ON winner.id = bm.winner_id \
+             WHERE bm.id = $1 AND bm.tournament_id = $2",
         )
         .bind(match_id)
         .bind(tournament_id)
@@ -491,15 +531,29 @@ impl MatchManager {
 
         let (deadlock_match_id, team1_name, team2_name, winner_name) = match stats_row {
             Ok(Some(row)) => (
-                row.get::<Option<String>, _>("deadlock_match_id").filter(|s| !s.is_empty()),
-                row.get::<Option<String>, _>("team1_name").unwrap_or_else(|| "Team 1".to_string()),
-                row.get::<Option<String>, _>("team2_name").unwrap_or_else(|| "Team 2".to_string()),
-                row.get::<Option<String>, _>("winner_name").unwrap_or_else(|| "Unbekannt".to_string()),
+                row.get::<Option<String>, _>("deadlock_match_id")
+                    .filter(|s| !s.is_empty()),
+                row.get::<Option<String>, _>("team1_name")
+                    .unwrap_or_else(|| "Team 1".to_string()),
+                row.get::<Option<String>, _>("team2_name")
+                    .unwrap_or_else(|| "Team 2".to_string()),
+                row.get::<Option<String>, _>("winner_name")
+                    .unwrap_or_else(|| "Unbekannt".to_string()),
             ),
-            Ok(None) => (None, "Team 1".to_string(), "Team 2".to_string(), "Unbekannt".to_string()),
+            Ok(None) => (
+                None,
+                "Team 1".to_string(),
+                "Team 2".to_string(),
+                "Unbekannt".to_string(),
+            ),
             Err(err) => {
                 tracing::error!(match_id, error = %err, "Stats-Zeile laden fehlgeschlagen");
-                (None, "Team 1".to_string(), "Team 2".to_string(), "Unbekannt".to_string())
+                (
+                    None,
+                    "Team 1".to_string(),
+                    "Team 2".to_string(),
+                    "Unbekannt".to_string(),
+                )
             }
         };
 
@@ -528,6 +582,305 @@ struct NextBracketMatch {
     source_match2_id: Option<i64>,
 }
 
+#[derive(Debug, Clone, sqlx::FromRow)]
+struct MatchSnapshot {
+    id: i64,
+    round: i64,
+    position: i64,
+    bracket_type: String,
+    team1_id: Option<i64>,
+    team2_id: Option<i64>,
+    loser_to_match_id: Option<i64>,
+    loser_to_slot: Option<i64>,
+}
+
+async fn advance_bracket_winner_pg(
+    pool: &turnier_db::Pool,
+    tournament_id: i64,
+    match_id: i64,
+    winner_id: i64,
+) -> MatchResult<()> {
+    let mut tx = pool.begin().await.map_err(turnier_db::DbError::from)?;
+    let snapshot: Option<MatchSnapshot> = sqlx::query_as::<_, MatchSnapshot>(
+        "SELECT id, round, position, bracket_type, team1_id, team2_id, \
+                loser_to_match_id, loser_to_slot \
+         FROM turnier.bracket_matches WHERE id = $1",
+    )
+    .bind(match_id)
+    .fetch_optional(&mut *tx)
+    .await?;
+    let Some(snapshot) = snapshot else {
+        tx.commit().await.map_err(turnier_db::DbError::from)?;
+        return Ok(());
+    };
+
+    advance_in_tx_pg(&mut tx, tournament_id, &snapshot, winner_id).await?;
+    tx.commit().await.map_err(turnier_db::DbError::from)?;
+    Ok(())
+}
+
+async fn propagate_resolved_entry_pg(
+    tx: &mut Transaction<'_, Postgres>,
+    winner_id: i64,
+    source_match_id: Option<i64>,
+    source_mini_group_id: Option<i64>,
+) -> MatchResult<()> {
+    if let Some(source_match_id) = source_match_id {
+        sqlx::query("UPDATE turnier.bracket_matches SET team1_id = $1 WHERE source_match1_id = $2")
+            .bind(winner_id)
+            .bind(source_match_id)
+            .execute(&mut **tx)
+            .await?;
+        sqlx::query("UPDATE turnier.bracket_matches SET team2_id = $1 WHERE source_match2_id = $2")
+            .bind(winner_id)
+            .bind(source_match_id)
+            .execute(&mut **tx)
+            .await?;
+        sqlx::query(
+            "UPDATE turnier.bracket_mini_group_teams SET team_id = $1 WHERE source_match_id = $2",
+        )
+        .bind(winner_id)
+        .bind(source_match_id)
+        .execute(&mut **tx)
+        .await?;
+        return Ok(());
+    }
+
+    if let Some(source_mini_group_id) = source_mini_group_id {
+        sqlx::query(
+            "UPDATE turnier.bracket_matches SET team1_id = $1 WHERE source_mini_group1_id = $2",
+        )
+        .bind(winner_id)
+        .bind(source_mini_group_id)
+        .execute(&mut **tx)
+        .await?;
+        sqlx::query(
+            "UPDATE turnier.bracket_matches SET team2_id = $1 WHERE source_mini_group2_id = $2",
+        )
+        .bind(winner_id)
+        .bind(source_mini_group_id)
+        .execute(&mut **tx)
+        .await?;
+        sqlx::query(
+            "UPDATE turnier.bracket_mini_group_teams SET team_id = $1 WHERE source_mini_group_id = $2",
+        )
+        .bind(winner_id)
+        .bind(source_mini_group_id)
+        .execute(&mut **tx)
+        .await?;
+    }
+
+    Ok(())
+}
+
+async fn advance_in_tx_pg(
+    tx: &mut Transaction<'_, Postgres>,
+    tournament_id: i64,
+    m: &MatchSnapshot,
+    winner_id: i64,
+) -> MatchResult<()> {
+    propagate_resolved_entry_pg(tx, winner_id, Some(m.id), None).await?;
+
+    if let (Some(loser_to_match_id), Some(loser_to_slot)) = (m.loser_to_match_id, m.loser_to_slot) {
+        let loser_id = if Some(winner_id) == m.team1_id {
+            m.team2_id
+        } else if Some(winner_id) == m.team2_id {
+            m.team1_id
+        } else {
+            None
+        };
+        if let Some(loser_id) = loser_id {
+            if loser_to_slot == 1 {
+                sqlx::query("UPDATE turnier.bracket_matches SET team1_id = $1 WHERE id = $2")
+                    .bind(loser_id)
+                    .bind(loser_to_match_id)
+                    .execute(&mut **tx)
+                    .await?;
+            } else {
+                sqlx::query("UPDATE turnier.bracket_matches SET team2_id = $1 WHERE id = $2")
+                    .bind(loser_id)
+                    .bind(loser_to_match_id)
+                    .execute(&mut **tx)
+                    .await?;
+            }
+        }
+    }
+
+    if m.bracket_type == "grand_final" {
+        let other_gf: Option<(i64, i64)> = sqlx::query_as(
+            "SELECT id, round FROM turnier.bracket_matches \
+             WHERE tournament_id = $1 AND bracket_type = 'grand_final' AND id != $2 \
+             ORDER BY round ASC LIMIT 1",
+        )
+        .bind(tournament_id)
+        .bind(m.id)
+        .fetch_optional(&mut **tx)
+        .await?;
+        let Some((other_id, other_round)) = other_gf else {
+            return Ok(());
+        };
+        if m.round < other_round {
+            if Some(winner_id) == m.team2_id {
+                sqlx::query(
+                    "UPDATE turnier.bracket_matches SET team1_id = $1, team2_id = $2 WHERE id = $3",
+                )
+                .bind(m.team1_id)
+                .bind(m.team2_id)
+                .bind(other_id)
+                .execute(&mut **tx)
+                .await?;
+            } else {
+                sqlx::query(
+                    "UPDATE turnier.bracket_matches SET status = 'cancelled' WHERE id = $1",
+                )
+                .bind(other_id)
+                .execute(&mut **tx)
+                .await?;
+            }
+        }
+        return Ok(());
+    }
+
+    let next_match: Option<(i64,)> = sqlx::query_as(
+        "SELECT id FROM turnier.bracket_matches \
+         WHERE tournament_id = $1 AND (source_match1_id = $2 OR source_match2_id = $3) LIMIT 1",
+    )
+    .bind(tournament_id)
+    .bind(m.id)
+    .bind(m.id)
+    .fetch_optional(&mut **tx)
+    .await?;
+    if next_match.is_some() {
+        return Ok(());
+    }
+
+    if m.bracket_type != "winners" {
+        return Ok(());
+    }
+    let legacy: Option<(i64,)> = sqlx::query_as(
+        "SELECT id FROM turnier.bracket_matches \
+         WHERE tournament_id = $1 AND round = $2 AND position = $3",
+    )
+    .bind(tournament_id)
+    .bind(m.round + 1)
+    .bind(m.position / 2)
+    .fetch_optional(&mut **tx)
+    .await?;
+    let Some((legacy_id,)) = legacy else {
+        return Ok(());
+    };
+    if m.position % 2 == 0 {
+        sqlx::query("UPDATE turnier.bracket_matches SET team1_id = $1 WHERE id = $2")
+            .bind(winner_id)
+            .bind(legacy_id)
+            .execute(&mut **tx)
+            .await?;
+    } else {
+        sqlx::query("UPDATE turnier.bracket_matches SET team2_id = $1 WHERE id = $2")
+            .bind(winner_id)
+            .bind(legacy_id)
+            .execute(&mut **tx)
+            .await?;
+    }
+    Ok(())
+}
+
+#[derive(Debug, Clone, sqlx::FromRow)]
+struct MiniGroupMatchRow {
+    team1_id: Option<i64>,
+    team2_id: Option<i64>,
+    winner_id: Option<i64>,
+    status: String,
+    match_stats: Option<Value>,
+}
+
+async fn complete_mini_group_round_robin_pg(
+    pool: &turnier_db::Pool,
+    mini_group_id: i64,
+) -> MatchResult<Option<i64>> {
+    let mut tx = pool.begin().await.map_err(turnier_db::DbError::from)?;
+
+    let mini_group: Option<(Option<i64>, Option<i64>)> = sqlx::query_as(
+        "SELECT advances_to_match_id, advances_to_slot \
+         FROM turnier.bracket_mini_groups WHERE id = $1",
+    )
+    .bind(mini_group_id)
+    .fetch_optional(&mut *tx)
+    .await?;
+    let Some((advances_to_match_id, advances_to_slot)) = mini_group else {
+        tx.commit().await.map_err(turnier_db::DbError::from)?;
+        return Ok(None);
+    };
+
+    let team_rows: Vec<(i64, i64)> = sqlx::query_as(
+        "SELECT team_id, seed_order FROM turnier.bracket_mini_group_teams \
+         WHERE mini_group_id = $1 AND team_id IS NOT NULL ORDER BY seed_order, id",
+    )
+    .bind(mini_group_id)
+    .fetch_all(&mut *tx)
+    .await?;
+    if team_rows.len() < 2 {
+        tx.commit().await.map_err(turnier_db::DbError::from)?;
+        return Ok(None);
+    }
+
+    let match_rows: Vec<MiniGroupMatchRow> = sqlx::query_as::<_, MiniGroupMatchRow>(
+        "SELECT team1_id, team2_id, winner_id, status, match_stats \
+         FROM turnier.bracket_matches WHERE mini_group_id = $1 ORDER BY round, position, id",
+    )
+    .bind(mini_group_id)
+    .fetch_all(&mut *tx)
+    .await?;
+    if match_rows.is_empty()
+        || match_rows.iter().any(|row| {
+            row.status != "completed"
+                || row.winner_id.is_none()
+                || row.team1_id.is_none()
+                || row.team2_id.is_none()
+        })
+    {
+        tx.commit().await.map_err(turnier_db::DbError::from)?;
+        return Ok(None);
+    }
+
+    let team_ids: Vec<i64> = team_rows.iter().map(|(team_id, _)| *team_id).collect();
+    let seed_order: std::collections::HashMap<i64, i64> = team_rows
+        .iter()
+        .map(|(team_id, seed_order)| (*team_id, *seed_order))
+        .collect();
+    let mini_matches: Vec<MiniGroupMatch> = match_rows
+        .iter()
+        .map(|row| MiniGroupMatch {
+            team1_id: row.team1_id.expect("checked team1_id"),
+            team2_id: row.team2_id.expect("checked team2_id"),
+            winner_id: row.winner_id.expect("checked winner_id"),
+            match_stats: row.match_stats.clone(),
+        })
+        .collect();
+    let (wins, point_diff, h2h) = aggregate(&team_ids, &mini_matches);
+    let winner_team_id = select_mini_group_winner(&team_ids, &wins, &point_diff, &seed_order, &h2h);
+
+    if let (Some(target_match_id), Some(slot)) = (advances_to_match_id, advances_to_slot) {
+        if slot == 1 {
+            sqlx::query("UPDATE turnier.bracket_matches SET team1_id = $1 WHERE id = $2")
+                .bind(winner_team_id)
+                .bind(target_match_id)
+                .execute(&mut *tx)
+                .await?;
+        } else if slot == 2 {
+            sqlx::query("UPDATE turnier.bracket_matches SET team2_id = $1 WHERE id = $2")
+                .bind(winner_team_id)
+                .bind(target_match_id)
+                .execute(&mut *tx)
+                .await?;
+        }
+    }
+
+    propagate_resolved_entry_pg(&mut tx, winner_team_id, None, Some(mini_group_id)).await?;
+    tx.commit().await.map_err(turnier_db::DbError::from)?;
+    Ok(Some(winner_team_id))
+}
+
 /// Lädt das Folge-Match: zuerst über source_match-Verweise, sonst über
 /// round+1/position//2. Portiert `_load_next_bracket_match`.
 async fn load_next_bracket_match(
@@ -539,8 +892,8 @@ async fn load_next_bracket_match(
 ) -> MatchResult<Option<NextBracketMatch>> {
     let by_source: Option<NextBracketMatch> = sqlx::query_as::<_, NextBracketMatch>(
         "SELECT id, round, position, source_match1_id, source_match2_id \
-         FROM bracket_matches \
-         WHERE tournament_id = ? AND (source_match1_id = ? OR source_match2_id = ?) LIMIT 1",
+         FROM turnier.bracket_matches \
+         WHERE tournament_id = $1 AND (source_match1_id = $2 OR source_match2_id = $3) LIMIT 1",
     )
     .bind(tournament_id)
     .bind(match_id)
@@ -552,7 +905,7 @@ async fn load_next_bracket_match(
     }
     let legacy: Option<NextBracketMatch> = sqlx::query_as::<_, NextBracketMatch>(
         "SELECT id, round, position, source_match1_id, source_match2_id \
-         FROM bracket_matches WHERE tournament_id = ? AND round = ? AND position = ? LIMIT 1",
+         FROM turnier.bracket_matches WHERE tournament_id = $1 AND round = $2 AND position = $3 LIMIT 1",
     )
     .bind(tournament_id)
     .bind(round + 1)
@@ -589,7 +942,9 @@ fn resolve_bracket_winner(
     winner_id: Option<i64>,
 ) -> MatchResult<(i64, i64)> {
     if winning_team.is_none() && winner_id.is_none() {
-        return Err(MatchError::invalid("winner_id oder winning_team ist erforderlich"));
+        return Err(MatchError::invalid(
+            "winner_id oder winning_team ist erforderlich",
+        ));
     }
 
     let (winner_id_value, winning_team_value) = match (winner_id, winning_team) {
@@ -598,7 +953,9 @@ fn resolve_bracket_winner(
             0 => (team1_id, 0),
             1 => (team2_id, 1),
             other => {
-                return Err(MatchError::invalid(format!("Ungültiger winning_team-Wert: {other}")))
+                return Err(MatchError::invalid(format!(
+                    "Ungültiger winning_team-Wert: {other}"
+                )))
             }
         },
         // Nur winner_id gegeben: Slot ableiten.
@@ -609,11 +966,15 @@ fn resolve_bracket_winner(
         // Beide gegeben: Konsistenz prüfen.
         (Some(wid), Some(wt)) => {
             if wt != 0 && wt != 1 {
-                return Err(MatchError::invalid(format!("Ungültiger winning_team-Wert: {wt}")));
+                return Err(MatchError::invalid(format!(
+                    "Ungültiger winning_team-Wert: {wt}"
+                )));
             }
             let expected = resolve_winning_team(team1_id, team2_id, wid)?;
             if wt != expected {
-                return Err(MatchError::invalid("winning_team passt nicht zum übergebenen winner_id"));
+                return Err(MatchError::invalid(
+                    "winning_team passt nicht zum übergebenen winner_id",
+                ));
             }
             (wid, wt)
         }
@@ -637,7 +998,9 @@ fn resolve_winning_team(team1_id: i64, team2_id: i64, winner_id: i64) -> MatchRe
     if winner_id == team2_id {
         return Ok(1);
     }
-    Err(MatchError::invalid(format!("winner_id {winner_id} gehört nicht zu diesem Match")))
+    Err(MatchError::invalid(format!(
+        "winner_id {winner_id} gehört nicht zu diesem Match"
+    )))
 }
 
 /// Löst die Spieler-Stats auf: explizite `players`-Liste serialisieren, sonst die
@@ -645,27 +1008,30 @@ fn resolve_winning_team(team1_id: i64, team2_id: i64, winner_id: i64) -> MatchRe
 /// Rückgabe: `(player_stats_json, decoded_players)`.
 fn resolve_player_stats(
     players: Option<&Vec<Value>>,
-    existing_match_stats: Option<&str>,
-) -> MatchResult<(Option<String>, Vec<Value>)> {
+    existing_match_stats: Option<&Value>,
+) -> MatchResult<(Option<Value>, Vec<Value>)> {
     if let Some(players) = players {
-        let json = serde_json::to_string(players)
-            .map_err(|_| MatchError::invalid("players enthält nicht serialisierbare Daten"))?;
-        return Ok((Some(json), players.clone()));
+        return Ok((Some(Value::Array(players.clone())), players.clone()));
     }
-    let Some(existing) = existing_match_stats.filter(|s| !s.is_empty()) else {
+    let Some(existing) = existing_match_stats else {
         return Ok((None, Vec::new()));
     };
-    let decoded: Value = serde_json::from_str(existing)
-        .map_err(|_| MatchError::invalid("match_stats enthält ungültiges JSON"))?;
-    let Value::Array(list) = decoded else {
-        return Err(MatchError::invalid("match_stats enthält keine gültige Spielerliste"));
+    let Value::Array(list) = existing else {
+        return Err(MatchError::invalid(
+            "match_stats enthält keine gültige Spielerliste",
+        ));
     };
-    Ok((Some(existing.to_string()), list))
+    Ok((Some(existing.clone()), list.clone()))
 }
 
 /// Baut einen [`PlayerStat`] aus einem JSON-Spielerobjekt.
 fn player_stat_from_value(value: &Value) -> PlayerStat {
-    let get_str = |key: &str| value.get(key).and_then(|v| v.as_str()).map(|s| s.to_string());
+    let get_str = |key: &str| {
+        value
+            .get(key)
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string())
+    };
     let get_int = |key: &str| value.get(key).and_then(|v| v.as_i64()).unwrap_or(0);
     PlayerStat {
         hero: get_str("hero"),
@@ -720,35 +1086,29 @@ mod tests {
     #[test]
     fn player_stats_explizit() {
         let players = vec![json!({ "hero": "Abrams" })];
-        let (json_str, decoded) = resolve_player_stats(Some(&players), None).unwrap();
-        assert!(json_str.is_some());
+        let (json_value, decoded) = resolve_player_stats(Some(&players), None).unwrap();
+        assert_eq!(json_value, Some(Value::Array(players.clone())));
         assert_eq!(decoded.len(), 1);
     }
 
     #[test]
     fn player_stats_aus_bestehend() {
-        let existing = r#"[{"hero":"Bebop"}]"#;
-        let (json_str, decoded) = resolve_player_stats(None, Some(existing)).unwrap();
-        assert_eq!(json_str.as_deref(), Some(existing));
+        let existing = json!([{ "hero": "Bebop" }]);
+        let (json_value, decoded) = resolve_player_stats(None, Some(&existing)).unwrap();
+        assert_eq!(json_value, Some(existing));
         assert_eq!(decoded.len(), 1);
     }
 
     #[test]
     fn player_stats_leer() {
-        let (json_str, decoded) = resolve_player_stats(None, None).unwrap();
-        assert!(json_str.is_none());
-        assert!(decoded.is_empty());
-        // Leerer String → ebenfalls leer.
-        let (json_str, decoded) = resolve_player_stats(None, Some("")).unwrap();
-        assert!(json_str.is_none());
+        let (json_value, decoded) = resolve_player_stats(None, None).unwrap();
+        assert!(json_value.is_none());
         assert!(decoded.is_empty());
     }
 
     #[test]
-    fn player_stats_ungueltiges_json_fehler() {
-        assert!(resolve_player_stats(None, Some("nicht json")).is_err());
-        // Gültiges JSON, aber keine Liste.
-        assert!(resolve_player_stats(None, Some(r#"{"x":1}"#)).is_err());
+    fn player_stats_jsonb_aber_keine_liste_fehler() {
+        assert!(resolve_player_stats(None, Some(&json!({ "x": 1 }))).is_err());
     }
 
     #[test]

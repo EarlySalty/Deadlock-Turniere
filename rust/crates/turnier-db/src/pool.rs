@@ -1,69 +1,33 @@
-//! Aufbau des geteilten `SqlitePool` und Anwenden der Migration.
-//!
-//! Gegenüber dem Python-Original (eine frische Verbindung pro Request, ohne
-//! `busy_timeout`) nutzt der Port EINEN Pool mit gesetztem Busy-Timeout — das
-//! beseitigt das Lock-Risiko unter Last (`SQLITE_BUSY`).
+//! Aufbau des geteilten `PgPool` zur zentralen Postgres/TimescaleDB.
 
-use std::path::Path;
-use std::str::FromStr;
-use std::time::Duration;
-
-use sqlx::sqlite::{
-    SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous,
-};
-use sqlx::SqlitePool;
+use sqlx::PgPool;
 
 use crate::error::DbResult;
 
-/// Geteilter Verbindungspool auf die Turnier-SQLite-Datenbank.
-pub type Pool = SqlitePool;
+/// Geteilter Verbindungspool auf die zentrale Turnier-Postgres-Datenbank.
+pub type Pool = PgPool;
 
-/// Eingebettete, konsolidierte Migration (siehe `migrations/0001_initial.sql`).
-/// `sqlx::migrate!` liest die Dateien zur Compile-Zeit ein — kein DB-Zugriff zum
-/// Bauen nötig.
-pub static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");
+#[cfg(feature = "testing")]
+pub use dl_central_db::TestDb;
 
-/// Öffnet den Pool auf die Datei unter `db_path` und konfiguriert die PRAGMAs
-/// (WAL, Foreign Keys an, Busy-Timeout, `synchronous=NORMAL`). Legt die Datei
-/// bei Bedarf an.
-pub async fn connect(db_path: &Path, max_connections: u32) -> DbResult<Pool> {
-    let options = SqliteConnectOptions::new()
-        .filename(db_path)
-        .create_if_missing(true)
-        .journal_mode(SqliteJournalMode::Wal)
-        .synchronous(SqliteSynchronous::Normal)
-        .foreign_keys(true)
-        .busy_timeout(Duration::from_secs(5));
-
-    let pool = SqlitePoolOptions::new()
-        .max_connections(max_connections.max(1))
-        .connect_with(options)
-        .await?;
-
+/// Baut den zentralen Pool aus `DEADLOCK_CENTRAL_DSN`.
+pub async fn connect_central() -> DbResult<Pool> {
+    let dsn = dl_central_db::dsn_from_env()?;
+    let pool = dl_central_db::connect_pool(&dsn).await?;
     Ok(pool)
 }
 
-/// Variante, die den Pfad als String (z. B. aus der Config) entgegennimmt.
-pub async fn connect_str(db_path: &str, max_connections: u32) -> DbResult<Pool> {
-    let options = SqliteConnectOptions::from_str(db_path)
-        .unwrap_or_else(|_| SqliteConnectOptions::new().filename(db_path))
-        .create_if_missing(true)
-        .journal_mode(SqliteJournalMode::Wal)
-        .synchronous(SqliteSynchronous::Normal)
-        .foreign_keys(true)
-        .busy_timeout(Duration::from_secs(5));
-
-    let pool = SqlitePoolOptions::new()
-        .max_connections(max_connections.max(1))
-        .connect_with(options)
-        .await?;
-
+/// Baut eine wegwerfbare zentrale Testdatenbank auf und wendet die zentralen
+/// Migrationen an.
+#[cfg(feature = "testing")]
+pub async fn test_pool() -> DbResult<TestDb> {
+    let pool = dl_central_db::test_pool().await?;
     Ok(pool)
 }
 
-/// Wendet alle ausstehenden Migrationen idempotent an. Auf der bestehenden
-/// Live-DB ist das ein No-op (alle Tabellen existieren bereits).
-pub async fn run_migrations(pool: &Pool) -> DbResult<()> {
-    MIGRATOR.run(pool).await?;
+/// Produktive PG-Migrationen werden zentral durch `dl-central-migrate`
+/// ausgefuehrt. Dieser Kompatibilitaets-Hook bleibt absichtlich ein No-op, bis
+/// die Composition Root in T12 entfernt/umgestellt wird.
+pub async fn run_migrations(_pool: &Pool) -> DbResult<()> {
     Ok(())
 }

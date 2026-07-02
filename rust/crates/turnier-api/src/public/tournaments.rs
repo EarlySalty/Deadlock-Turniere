@@ -9,6 +9,7 @@ use sqlx::Row;
 
 use turnier_core::{BracketMatch, Group, Tournament, TournamentDetailPublic};
 
+use crate::db;
 use crate::error::{WebError, WebResult};
 use crate::extract::AuthUser;
 use crate::state::AppState;
@@ -20,17 +21,25 @@ pub fn router() -> Router<AppState> {
     Router::new()
         .route("/api/tournaments", get(list_tournaments))
         .route("/api/tournaments/{tournament_id}", get(get_tournament))
-        .route("/api/tournaments/{tournament_id}/me", get(get_my_tournament_status))
+        .route(
+            "/api/tournaments/{tournament_id}/me",
+            get(get_my_tournament_status),
+        )
         .route("/api/tournaments/{tournament_id}/bracket", get(get_bracket))
         .route("/api/tournaments/{tournament_id}/groups", get(get_groups))
-        .route("/api/tournaments/{tournament_id}/checkin-status", get(get_checkin_status))
+        .route(
+            "/api/tournaments/{tournament_id}/checkin-status",
+            get(get_checkin_status),
+        )
 }
 
 /// `GET /api/tournaments` — alle nicht-draft-Turniere, absteigend nach created_at.
 async fn list_tournaments(State(state): State<AppState>) -> WebResult<Json<Vec<Tournament>>> {
-    let tournaments =
-        helpers::list_tournament_dtos(&state.pool, "WHERE status != 'draft' ORDER BY created_at DESC")
-            .await?;
+    let tournaments = helpers::list_tournament_dtos(
+        &state.pool,
+        "WHERE status != 'draft' ORDER BY created_at DESC",
+    )
+    .await?;
     Ok(Json(tournaments))
 }
 
@@ -41,7 +50,7 @@ async fn get_tournament(
     Path(tournament_id): Path<i64>,
 ) -> WebResult<Json<TournamentDetailPublic>> {
     let pool = &state.pool;
-    let row = sqlx::query("SELECT * FROM tournaments WHERE id = ?")
+    let row = sqlx::query(r#"SELECT * FROM turnier."tournaments" WHERE id = $1"#)
         .bind(tournament_id)
         .fetch_optional(pool)
         .await?;
@@ -79,37 +88,38 @@ async fn get_my_tournament_status(
 ) -> WebResult<Json<Value>> {
     let pool = &state.pool;
 
-    let member: Option<(i64, String)> = sqlx::query_as(
-        "SELECT tm.team_id, t.captain_discord_id FROM team_members tm \
-         JOIN teams t ON tm.team_id = t.id \
-         WHERE t.tournament_id = ? AND tm.discord_id = ?",
+    let user_discord_id = db::parse_discord_id(&user.discord_id)?;
+    let member: Option<(i64, i64)> = sqlx::query_as(
+        r#"SELECT tm.team_id, t.captain_discord_id FROM turnier."team_members" tm
+         JOIN turnier."teams" t ON tm.team_id = t.id
+         WHERE t.tournament_id = $1 AND tm.discord_id = $2"#,
     )
     .bind(tournament_id)
-    .bind(&user.discord_id)
+    .bind(user_discord_id)
     .fetch_optional(pool)
     .await?;
 
     let signup: Option<(i64,)> = sqlx::query_as(
-        "SELECT id FROM tournament_signups \
-         WHERE tournament_id = ? AND discord_id = ? AND (team_id IS NULL OR team_id = 0)",
+        r#"SELECT id FROM turnier."tournament_signups"
+         WHERE tournament_id = $1 AND discord_id = $2 AND team_id IS NULL"#,
     )
     .bind(tournament_id)
-    .bind(&user.discord_id)
+    .bind(user_discord_id)
     .fetch_optional(pool)
     .await?;
 
     let checkin: Option<(i64,)> = sqlx::query_as(
-        "SELECT id FROM tournament_checkins WHERE tournament_id = ? AND discord_id = ?",
+        r#"SELECT id FROM turnier."tournament_checkins" WHERE tournament_id = $1 AND discord_id = $2"#,
     )
     .bind(tournament_id)
-    .bind(&user.discord_id)
+    .bind(user_discord_id)
     .fetch_optional(pool)
     .await?;
 
     let team_id = member.as_ref().map(|(tid, _)| *tid);
     let is_captain = member
         .as_ref()
-        .map(|(_, captain)| captain == &user.discord_id)
+        .map(|(_, captain)| *captain == user_discord_id)
         .unwrap_or(false);
     let signup_id = signup.map(|(id,)| id);
 
@@ -128,14 +138,17 @@ async fn get_bracket(
     Path(tournament_id): Path<i64>,
 ) -> WebResult<Json<Vec<BracketMatch>>> {
     let pool = &state.pool;
-    let exists: Option<(i64,)> = sqlx::query_as("SELECT id FROM tournaments WHERE id = ?")
-        .bind(tournament_id)
-        .fetch_optional(pool)
-        .await?;
+    let exists: Option<(i64,)> =
+        sqlx::query_as(r#"SELECT id FROM turnier."tournaments" WHERE id = $1"#)
+            .bind(tournament_id)
+            .fetch_optional(pool)
+            .await?;
     if exists.is_none() {
         return Err(WebError::not_found("Turnier nicht gefunden"));
     }
-    Ok(Json(helpers::load_bracket_matches(pool, tournament_id).await?))
+    Ok(Json(
+        helpers::load_bracket_matches(pool, tournament_id).await?,
+    ))
 }
 
 /// `GET /api/tournaments/{tournament_id}/groups` — Gruppen-Standings.
@@ -145,14 +158,17 @@ async fn get_groups(
     Path(tournament_id): Path<i64>,
 ) -> WebResult<Json<Vec<Group>>> {
     let pool = &state.pool;
-    let exists: Option<(i64,)> = sqlx::query_as("SELECT id FROM tournaments WHERE id = ?")
-        .bind(tournament_id)
-        .fetch_optional(pool)
-        .await?;
+    let exists: Option<(i64,)> =
+        sqlx::query_as(r#"SELECT id FROM turnier."tournaments" WHERE id = $1"#)
+            .bind(tournament_id)
+            .fetch_optional(pool)
+            .await?;
     if exists.is_none() {
         return Err(WebError::not_found("Turnier nicht gefunden"));
     }
-    Ok(Json(helpers::load_groups_for_tournament(pool, tournament_id).await?))
+    Ok(Json(
+        helpers::load_groups_for_tournament(pool, tournament_id).await?,
+    ))
 }
 
 /// `GET /api/tournaments/{tournament_id}/checkin-status` — Check-in-Übersicht.
@@ -162,43 +178,47 @@ async fn get_checkin_status(
     Path(tournament_id): Path<i64>,
 ) -> WebResult<Json<Value>> {
     let pool = &state.pool;
-    let exists: Option<(i64,)> = sqlx::query_as("SELECT id FROM tournaments WHERE id = ?")
-        .bind(tournament_id)
-        .fetch_optional(pool)
-        .await?;
+    let exists: Option<(i64,)> =
+        sqlx::query_as(r#"SELECT id FROM turnier."tournaments" WHERE id = $1"#)
+            .bind(tournament_id)
+            .fetch_optional(pool)
+            .await?;
     if exists.is_none() {
         return Err(WebError::not_found("Turnier nicht gefunden"));
     }
 
-    let signup_ids: Vec<String> =
-        sqlx::query_scalar("SELECT discord_id FROM tournament_signups WHERE tournament_id = ?")
-            .bind(tournament_id)
-            .fetch_all(pool)
-            .await?;
-    let member_ids: Vec<String> = sqlx::query_scalar(
-        "SELECT tm.discord_id FROM team_members tm \
-         JOIN teams t ON t.id = tm.team_id WHERE t.tournament_id = ?",
+    let signup_ids: Vec<i64> = sqlx::query_scalar(
+        r#"SELECT discord_id FROM turnier."tournament_signups" WHERE tournament_id = $1"#,
+    )
+    .bind(tournament_id)
+    .fetch_all(pool)
+    .await?;
+    let member_ids: Vec<i64> = sqlx::query_scalar(
+        r#"SELECT tm.discord_id FROM turnier."team_members" tm
+         JOIN turnier."teams" t ON t.id = tm.team_id WHERE t.tournament_id = $1"#,
     )
     .bind(tournament_id)
     .fetch_all(pool)
     .await?;
 
-    let mut registered: std::collections::HashSet<String> = signup_ids.into_iter().collect();
+    let mut registered: std::collections::HashSet<i64> = signup_ids.into_iter().collect();
     registered.extend(member_ids);
 
     let checked_in_names: Vec<String> = sqlx::query_scalar(
-        "SELECT COALESCE(NULLIF(ts.discord_name, ''), NULLIF(s.discord_name, ''), \
-                NULLIF(tm.discord_name, ''), 'Unbekannt') AS discord_name \
-         FROM tournament_checkins tc \
-         LEFT JOIN tournament_signups ts \
-             ON ts.tournament_id = tc.tournament_id AND ts.discord_id = tc.discord_id \
-         LEFT JOIN (SELECT discord_id, MAX(discord_name) AS discord_name FROM sessions \
-             WHERE discord_name IS NOT NULL AND discord_name != '' GROUP BY discord_id) s \
-             ON s.discord_id = tc.discord_id \
-         LEFT JOIN (SELECT discord_id, MAX(discord_name) AS discord_name FROM team_members \
-             WHERE discord_name IS NOT NULL AND discord_name != '' GROUP BY discord_id) tm \
-             ON tm.discord_id = tc.discord_id \
-         WHERE tc.tournament_id = ? ORDER BY tc.checked_in_at, tc.id",
+        r#"SELECT COALESCE(NULLIF(ts.discord_name, ''), NULLIF(s.discord_name, ''),
+                NULLIF(tm.discord_name, ''), 'Unbekannt') AS discord_name
+         FROM turnier."tournament_checkins" tc
+         LEFT JOIN turnier."tournament_signups" ts
+             ON ts.tournament_id = tc.tournament_id AND ts.discord_id = tc.discord_id
+         LEFT JOIN (
+             SELECT discord_id, MAX(discord_name) AS discord_name FROM turnier."sessions"
+             WHERE discord_name IS NOT NULL AND discord_name != '' GROUP BY discord_id
+         ) s ON s.discord_id = tc.discord_id
+         LEFT JOIN (
+             SELECT discord_id, MAX(discord_name) AS discord_name FROM turnier."team_members"
+             WHERE discord_name IS NOT NULL AND discord_name != '' GROUP BY discord_id
+         ) tm ON tm.discord_id = tc.discord_id
+         WHERE tc.tournament_id = $1 ORDER BY tc.checked_in_at, tc.id"#,
     )
     .bind(tournament_id)
     .fetch_all(pool)

@@ -25,17 +25,30 @@ impl EventPreset {
     /// Die anzuwendenden ConVars je nach Aktivierungszustand
     /// (`convars` bei `enabled`, sonst `reset_convars`).
     pub fn convars_for(&self, enabled: bool) -> serde_json::Map<String, Value> {
-        let pairs = if enabled { self.convars } else { self.reset_convars };
-        pairs.iter().map(|(k, v)| ((*k).to_string(), v.clone())).collect()
+        let pairs = if enabled {
+            self.convars
+        } else {
+            self.reset_convars
+        };
+        pairs
+            .iter()
+            .map(|(k, v)| ((*k).to_string(), v.clone()))
+            .collect()
     }
 
     /// Wire-Form fürs Admin-Panel (entspricht einem Eintrag aus
     /// `list_match_event_presets`).
     pub fn to_value(&self) -> Value {
-        let convars: serde_json::Map<String, Value> =
-            self.convars.iter().map(|(k, v)| ((*k).to_string(), v.clone())).collect();
-        let reset: serde_json::Map<String, Value> =
-            self.reset_convars.iter().map(|(k, v)| ((*k).to_string(), v.clone())).collect();
+        let convars: serde_json::Map<String, Value> = self
+            .convars
+            .iter()
+            .map(|(k, v)| ((*k).to_string(), v.clone()))
+            .collect();
+        let reset: serde_json::Map<String, Value> = self
+            .reset_convars
+            .iter()
+            .map(|(k, v)| ((*k).to_string(), v.clone()))
+            .collect();
         json!({
             "key": self.key,
             "label": self.label,
@@ -93,7 +106,9 @@ fn normalize_convar_value(name: &str, value: &Value) -> Result<Value, MatchError
     };
     let stripped = s.trim();
     if stripped.is_empty() {
-        return Err(MatchError::state(format!("ConVar-Wert fuer {name} darf nicht leer sein")));
+        return Err(MatchError::state(format!(
+            "ConVar-Wert fuer {name} darf nicht leer sein"
+        )));
     }
     let lowered = stripped.to_lowercase();
     if lowered == "true" || lowered == "on" {

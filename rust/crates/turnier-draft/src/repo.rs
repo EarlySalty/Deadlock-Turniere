@@ -1,4 +1,4 @@
-//! Persistenz-Schicht des Draft-Subsystems (sqlx::SqlitePool).
+//! Persistenz-Schicht des Draft-Subsystems (sqlx::PgPool).
 //!
 //! Portiert `start_draft`, `take_action`, `get_draft_state` aus
 //! `backend/draft/engine.py`. Die reine Sequenz-Logik lebt in [`crate::sequence`];
@@ -12,13 +12,71 @@
 //! überschreiben (last-write-wins). Hier scheitert die zweite Aktion mit
 //! [`DraftError::ActionConflict`]. Welche Picks gültig sind, bleibt unverändert.
 
-use sqlx::{Connection, Sqlite, Transaction};
+use chrono::{DateTime, Utc};
+use sqlx::{Postgres, QueryBuilder, Transaction};
+use turnier_core::{discord_id_to_string, now_utc, parse_discord_id};
 use turnier_db::Pool;
 
 use crate::error::{DraftError, DraftResult};
 use crate::heroes::is_valid_hero;
 use crate::sequence::{self, DEFAULT_SEQUENCE, SEQUENCE_LEN};
 use crate::state::{ActionOutcome, DraftAction, DraftSession, DraftState};
+
+#[derive(Debug, sqlx::FromRow)]
+struct DraftSessionRow {
+    id: i64,
+    bracket_match_id: i64,
+    status: String,
+    current_action_index: i64,
+    started_by: Option<i64>,
+    started_at: Option<DateTime<Utc>>,
+    completed_at: Option<DateTime<Utc>>,
+    created_at: DateTime<Utc>,
+}
+
+impl From<DraftSessionRow> for DraftSession {
+    fn from(row: DraftSessionRow) -> Self {
+        Self {
+            id: row.id,
+            bracket_match_id: row.bracket_match_id,
+            status: row.status,
+            current_action_index: row.current_action_index,
+            started_by: row.started_by.map(discord_id_to_string),
+            started_at: row.started_at.map(|value| value.to_rfc3339()),
+            completed_at: row.completed_at.map(|value| value.to_rfc3339()),
+            created_at: row.created_at.to_rfc3339(),
+        }
+    }
+}
+
+#[derive(Debug, sqlx::FromRow)]
+struct DraftActionRow {
+    id: i64,
+    session_id: i64,
+    sequence_index: i64,
+    action_type: sequence::ActionType,
+    team_slot: i64,
+    hero_name: Option<String>,
+    taken_by: Option<i64>,
+    taken_at: Option<DateTime<Utc>>,
+    is_admin_forced: bool,
+}
+
+impl From<DraftActionRow> for DraftAction {
+    fn from(row: DraftActionRow) -> Self {
+        Self {
+            id: row.id,
+            session_id: row.session_id,
+            sequence_index: row.sequence_index,
+            action_type: row.action_type,
+            team_slot: row.team_slot,
+            hero_name: row.hero_name,
+            taken_by: row.taken_by.map(discord_id_to_string),
+            taken_at: row.taken_at.map(|value| value.to_rfc3339()),
+            is_admin_forced: row.is_admin_forced,
+        }
+    }
+}
 
 /// Erstellt eine neue Draft-Session für `bracket_match_id` oder gibt eine
 /// bestehende (`pending`/`in_progress`) zurück. Idempotent — wie `start_draft`.
@@ -29,17 +87,14 @@ use crate::state::{ActionOutcome, DraftAction, DraftSession, DraftState};
 ///
 /// `started_by` ist im Original ein freier String; turnier-api leitet ihn aus der
 /// Admin-Identität (`user.discord_id`) ab.
-pub async fn start_draft(
-    pool: &Pool,
-    bracket_match_id: i64,
-    started_by: &str,
-) -> DraftResult<i64> {
-    let now = now_iso();
+pub async fn start_draft(pool: &Pool, bracket_match_id: i64, started_by: &str) -> DraftResult<i64> {
+    let now = now_utc();
+    let started_by = parse_numeric_id(started_by)?;
     let mut tx = pool.begin().await?;
 
     let existing: Option<(i64,)> = sqlx::query_as(
-        "SELECT id FROM draft_sessions \
-         WHERE bracket_match_id = ? AND status IN ('pending', 'in_progress')",
+        "SELECT id FROM turnier.draft_sessions \
+         WHERE bracket_match_id = $1 AND status IN ('pending', 'in_progress')",
     )
     .bind(bracket_match_id)
     .fetch_optional(&mut *tx)
@@ -50,32 +105,35 @@ pub async fn start_draft(
     }
 
     let session_row: (i64,) = sqlx::query_as(
-        "INSERT INTO draft_sessions \
+        "INSERT INTO turnier.draft_sessions \
              (bracket_match_id, status, current_action_index, started_by, started_at, created_at) \
-         VALUES (?, 'in_progress', 0, ?, ?, ?) RETURNING id",
+         VALUES ($1, 'in_progress', 0, $2, $3, $4) RETURNING id",
     )
     .bind(bracket_match_id)
     .bind(started_by)
-    .bind(&now)
-    .bind(&now)
+    .bind(now)
+    .bind(now)
     .fetch_one(&mut *tx)
     .await?;
     let session_id = session_row.0;
 
-    // Ein einziges Multi-Row-INSERT für alle 18 Aktionszeilen.
-    let mut sql = String::from(
-        "INSERT INTO draft_actions (session_id, sequence_index, action_type, team_slot) VALUES ",
+    let mut query = QueryBuilder::<Postgres>::new(
+        "INSERT INTO turnier.draft_actions \
+             (session_id, sequence_index, action_type, team_slot, is_admin_forced) ",
     );
-    sql.push_str(&vec!["(?, ?, ?, ?)"; SEQUENCE_LEN].join(", "));
-    let mut query = sqlx::query(&sql);
-    for (idx, step) in DEFAULT_SEQUENCE.iter().enumerate() {
-        query = query
-            .bind(session_id)
-            .bind(idx as i64)
-            .bind(step.action_type.as_str())
-            .bind(step.team_slot.as_i64());
-    }
-    query.execute(&mut *tx).await?;
+    query.push_values(
+        DEFAULT_SEQUENCE.iter().enumerate(),
+        |mut row, (idx, step)| {
+            row.push_bind(session_id)
+                .push_bind(idx as i64)
+                .push_bind(step.action_type.as_str())
+                .push_bind(step.team_slot.as_i64())
+                .push_bind(false);
+        },
+    );
+    query.push(" RETURNING id");
+    let action_ids: Vec<(i64,)> = query.build_query_as().fetch_all(&mut *tx).await?;
+    debug_assert_eq!(action_ids.len(), SEQUENCE_LEN);
 
     tx.commit().await?;
     Ok(session_id)
@@ -90,12 +148,7 @@ pub async fn start_draft(
 /// 2. Session `in_progress`? sonst [`DraftError::SessionNotActive`].
 /// 3. Held in dieser Session schon vergeben? sonst [`DraftError::HeroAlreadyTaken`].
 ///
-/// Alles in EINER Transaktion mit `BEGIN IMMEDIATE`: der Schreib-Lock wird sofort
-/// genommen, sodass nebenläufige `take_action`-Aufrufe serialisiert sind und die
-/// zweite Aktion den bereits vorgerückten Index liest. Ein gewöhnliches
-/// (deferred) `BEGIN` würde im WAL-Modus einen veralteten Snapshot von
-/// `current_action_index` lesen und erst beim Schreiben den Lock nehmen — beide
-/// Aktionen kämen durch. Zusätzlich rückt der Index per Compare-and-Swap vor
+/// Alles in EINER Postgres-Transaktion. Zusätzlich rückt der Index per Compare-and-Swap vor
 /// (`WHERE current_action_index = ? AND status = 'in_progress'`); 0 betroffene
 /// Zeilen ⇒ [`DraftError::ActionConflict`].
 pub async fn take_action(
@@ -109,13 +162,14 @@ pub async fn take_action(
         return Err(DraftError::UnknownHero(hero_name.to_string()));
     }
 
-    let now = now_iso();
-    let mut conn = pool.acquire().await?;
-    let mut tx: Transaction<'_, Sqlite> = conn.begin_with("BEGIN IMMEDIATE").await?;
+    let now = now_utc();
+    let taken_by = parse_numeric_id(taken_by)?;
+    let mut tx = pool.begin().await?;
 
     // (1) Index der aktuellen Session lesen — nur wenn in_progress.
     let session: Option<(i64,)> = sqlx::query_as(
-        "SELECT current_action_index FROM draft_sessions WHERE id = ? AND status = 'in_progress'",
+        "SELECT current_action_index FROM turnier.draft_sessions \
+         WHERE id = $1 AND status = 'in_progress'",
     )
     .bind(session_id)
     .fetch_optional(&mut *tx)
@@ -125,26 +179,27 @@ pub async fn take_action(
     };
 
     // (2) Doppel-Pick-Prüfung: ist der Held in dieser Session schon vergeben?
-    let already: Option<(i64,)> =
-        sqlx::query_as("SELECT id FROM draft_actions WHERE session_id = ? AND hero_name = ?")
-            .bind(session_id)
-            .bind(hero_name)
-            .fetch_optional(&mut *tx)
-            .await?;
+    let already: Option<(i64,)> = sqlx::query_as(
+        "SELECT id FROM turnier.draft_actions WHERE session_id = $1 AND hero_name = $2",
+    )
+    .bind(session_id)
+    .bind(hero_name)
+    .fetch_optional(&mut *tx)
+    .await?;
     if already.is_some() {
         return Err(DraftError::HeroAlreadyTaken(hero_name.to_string()));
     }
 
     // (3) Held an die aktuelle Position schreiben.
     sqlx::query(
-        "UPDATE draft_actions \
-         SET hero_name = ?, taken_by = ?, taken_at = ?, is_admin_forced = ? \
-         WHERE session_id = ? AND sequence_index = ?",
+        "UPDATE turnier.draft_actions \
+         SET hero_name = $1, taken_by = $2, taken_at = $3, is_admin_forced = $4 \
+         WHERE session_id = $5 AND sequence_index = $6",
     )
     .bind(hero_name)
     .bind(taken_by)
-    .bind(&now)
-    .bind(i64::from(force))
+    .bind(now)
+    .bind(force)
     .bind(session_id)
     .bind(idx)
     .execute(&mut *tx)
@@ -155,12 +210,12 @@ pub async fn take_action(
     let complete = sequence::is_complete(next_idx as usize);
     let res = if complete {
         sqlx::query(
-            "UPDATE draft_sessions \
-             SET current_action_index = ?, status = 'completed', completed_at = ? \
-             WHERE id = ? AND current_action_index = ? AND status = 'in_progress'",
+            "UPDATE turnier.draft_sessions \
+             SET current_action_index = $1, status = 'completed', completed_at = $2 \
+             WHERE id = $3 AND current_action_index = $4 AND status = 'in_progress'",
         )
         .bind(next_idx)
-        .bind(&now)
+        .bind(now)
         .bind(session_id)
         .bind(idx)
         .execute(&mut *tx)
@@ -169,9 +224,9 @@ pub async fn take_action(
         // completed_at NICHT anfassen, solange nicht abgeschlossen (im Original
         // wurde es bei jeder Zwischenaktion unnötig auf NULL gesetzt — safe-Fix).
         sqlx::query(
-            "UPDATE draft_sessions \
-             SET current_action_index = ? \
-             WHERE id = ? AND current_action_index = ? AND status = 'in_progress'",
+            "UPDATE turnier.draft_sessions \
+             SET current_action_index = $1 \
+             WHERE id = $2 AND current_action_index = $3 AND status = 'in_progress'",
         )
         .bind(next_idx)
         .bind(session_id)
@@ -212,24 +267,29 @@ pub async fn get_draft_state(pool: &Pool, session_id: i64) -> DraftResult<DraftS
 /// genutzt; als eigene Funktion gehalten, damit turnier-api den Vollzustand bei Bedarf
 /// in derselben Transaktion wie eine Aktion aufbauen kann.
 async fn load_state(
-    tx: &mut Transaction<'_, Sqlite>,
+    tx: &mut Transaction<'_, Postgres>,
     session_id: i64,
 ) -> DraftResult<DraftState> {
-    let session: Option<DraftSession> =
-        sqlx::query_as::<_, DraftSession>("SELECT * FROM draft_sessions WHERE id = ?")
+    let session: Option<DraftSessionRow> =
+        sqlx::query_as::<_, DraftSessionRow>("SELECT * FROM turnier.draft_sessions WHERE id = $1")
             .bind(session_id)
             .fetch_optional(&mut **tx)
             .await?;
     let Some(session) = session else {
         return Err(DraftError::SessionNotFound);
     };
+    let session = DraftSession::from(session);
 
-    let actions: Vec<DraftAction> = sqlx::query_as::<_, DraftAction>(
-        "SELECT * FROM draft_actions WHERE session_id = ? ORDER BY sequence_index",
+    let actions: Vec<DraftActionRow> = sqlx::query_as::<_, DraftActionRow>(
+        "SELECT * FROM turnier.draft_actions WHERE session_id = $1 ORDER BY sequence_index",
     )
     .bind(session_id)
     .fetch_all(&mut **tx)
     .await?;
+    let actions = actions
+        .into_iter()
+        .map(DraftAction::from)
+        .collect::<Vec<_>>();
 
     let idx = session.current_action_index;
     let current = if idx >= 0 {
@@ -265,9 +325,6 @@ async fn load_state(
     })
 }
 
-/// Aktueller UTC-Zeitstempel als ISO-8601-String — dasselbe Format wie das
-/// Python-Original (`datetime.now(timezone.utc).isoformat()`), damit der
-/// Format-Vertrag mit bestehenden Zeilen gewahrt bleibt.
-fn now_iso() -> String {
-    chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Micros, false)
+fn parse_numeric_id(value: &str) -> DraftResult<i64> {
+    parse_discord_id(value).map_err(|_| DraftError::InvalidDiscordId(value.to_string()))
 }

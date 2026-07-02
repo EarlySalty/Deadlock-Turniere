@@ -6,13 +6,15 @@ use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::routing::{delete, get, patch, post, put};
 use axum::{Json, Router};
+use chrono::{DateTime, Utc};
 use serde::Deserialize;
 use serde_json::{json, Value};
-use sqlx::{Row, Sqlite, Transaction};
+use sqlx::{Postgres, Row, Transaction};
 
 use turnier_core::{ApplicationStatus, RecruitmentStatus, Team, TeamApplication, TournamentSignup};
 
-use crate::error::{WebError, WebResult};
+use crate::db;
+use crate::error::{map_unique_conflict, WebError, WebResult};
 use crate::extract::{AdminUser, ModUser};
 use crate::state::AppState;
 
@@ -26,10 +28,22 @@ use super::loaders::load_team_detail;
 /// Router der Team-/Teilnehmer-Endpunkte.
 pub fn router() -> Router<AppState> {
     Router::new()
-        .route("/api/admin/tournaments/{tournament_id}/teams", post(create_team))
-        .route("/api/admin/tournaments/{tournament_id}/teams/{team_id}", put(rename_team).delete(delete_team))
-        .route("/api/admin/tournaments/{tournament_id}/teams/{team_id}/recruiting", patch(update_recruiting))
-        .route("/api/admin/tournaments/{tournament_id}/teams/{team_id}/applications", get(list_applications))
+        .route(
+            "/api/admin/tournaments/{tournament_id}/teams",
+            post(create_team),
+        )
+        .route(
+            "/api/admin/tournaments/{tournament_id}/teams/{team_id}",
+            put(rename_team).delete(delete_team),
+        )
+        .route(
+            "/api/admin/tournaments/{tournament_id}/teams/{team_id}/recruiting",
+            patch(update_recruiting),
+        )
+        .route(
+            "/api/admin/tournaments/{tournament_id}/teams/{team_id}/applications",
+            get(list_applications),
+        )
         .route(
             "/api/admin/tournaments/{tournament_id}/teams/{team_id}/applications/{app_id}/accept",
             post(accept_application),
@@ -38,15 +52,30 @@ pub fn router() -> Router<AppState> {
             "/api/admin/tournaments/{tournament_id}/teams/{team_id}/applications/{app_id}/reject",
             post(reject_application),
         )
-        .route("/api/admin/tournaments/{tournament_id}/teams/{team_id}/captain", put(change_captain))
+        .route(
+            "/api/admin/tournaments/{tournament_id}/teams/{team_id}/captain",
+            put(change_captain),
+        )
         .route(
             "/api/admin/tournaments/{tournament_id}/teams/{team_id}/members/{discord_id}",
             delete(remove_member),
         )
-        .route("/api/admin/tournaments/{tournament_id}/teams/{team_id}/members/move", post(move_member))
-        .route("/api/admin/tournaments/{tournament_id}/teams/{team_id}/signups/assign", post(assign_signup))
-        .route("/api/admin/tournaments/{tournament_id}/teams/{team_id}/add-member", post(add_member))
-        .route("/api/admin/tournaments/{tournament_id}/signups/{signup_id}", delete(delete_signup))
+        .route(
+            "/api/admin/tournaments/{tournament_id}/teams/{team_id}/members/move",
+            post(move_member),
+        )
+        .route(
+            "/api/admin/tournaments/{tournament_id}/teams/{team_id}/signups/assign",
+            post(assign_signup),
+        )
+        .route(
+            "/api/admin/tournaments/{tournament_id}/teams/{team_id}/add-member",
+            post(add_member),
+        )
+        .route(
+            "/api/admin/tournaments/{tournament_id}/signups/{signup_id}",
+            delete(delete_signup),
+        )
 }
 
 /// Body mit einem `name`-Feld (create/rename).
@@ -61,15 +90,17 @@ fn validate_team_name(raw: Option<&str>) -> WebResult<String> {
     let name = raw.unwrap_or("").trim().to_string();
     let len = name.chars().count();
     if !(2..=32).contains(&len) {
-        return Err(WebError::bad_request("Team-Name muss zwischen 2 und 32 Zeichen lang sein"));
+        return Err(WebError::bad_request(
+            "Team-Name muss zwischen 2 und 32 Zeichen lang sein",
+        ));
     }
     Ok(name)
 }
 
 /// Bestimmt die Rolle eines neuen Mitglieds (`captain`, wenn Team leer oder ohne
 /// Captain). Portiert die 4× duplizierte Heuristik.
-fn member_role(member_count: i64, captain_discord_id: &str) -> &'static str {
-    if member_count == 0 || captain_discord_id.is_empty() {
+fn member_role(member_count: i64, captain_discord_id: i64) -> &'static str {
+    if member_count == 0 || captain_discord_id == 0 {
         "captain"
     } else {
         "member"
@@ -90,24 +121,29 @@ async fn create_team(
     ensure_participant_management_allowed(tournament.get::<String, _>("status").as_str())?;
     let name_key = turnier_engine::name_key(&name);
 
-    let exists: Option<i64> =
-        sqlx::query_scalar("SELECT id FROM teams WHERE tournament_id = ? AND name_key = ?")
-            .bind(tournament_id)
-            .bind(&name_key)
-            .fetch_optional(&mut *tx)
-            .await?;
+    let exists: Option<i64> = sqlx::query_scalar(
+        r#"SELECT id FROM turnier."teams" WHERE tournament_id = $1 AND name_key = $2"#,
+    )
+    .bind(tournament_id)
+    .bind(&name_key)
+    .fetch_optional(&mut *tx)
+    .await?;
     if exists.is_some() {
-        return Err(WebError::conflict("Ein Team mit diesem Namen existiert bereits"));
+        return Err(WebError::conflict(
+            "Ein Team mit diesem Namen existiert bereits",
+        ));
     }
 
     let team_id: i64 = sqlx::query(
-        "INSERT INTO teams (tournament_id, name, name_key, captain_discord_id) VALUES (?, ?, ?, '') RETURNING id",
+        r#"INSERT INTO turnier."teams" (tournament_id, name, name_key, captain_discord_id, created_at, recruitment_status)
+           VALUES ($1, $2, $3, 0, now(), 'open') RETURNING id"#,
     )
     .bind(tournament_id)
     .bind(&name)
     .bind(&name_key)
     .fetch_one(&mut *tx)
-    .await?
+    .await
+    .map_err(|err| map_unique_conflict(err, "Ein Team mit diesem Namen existiert bereits"))?
     .get("id");
 
     audit(
@@ -139,7 +175,7 @@ async fn rename_team(
     let name_key = turnier_engine::name_key(&name);
 
     let exists: Option<i64> = sqlx::query_scalar(
-        "SELECT id FROM teams WHERE tournament_id = ? AND name_key = ? AND id != ?",
+        r#"SELECT id FROM turnier."teams" WHERE tournament_id = $1 AND name_key = $2 AND id != $3"#,
     )
     .bind(tournament_id)
     .bind(&name_key)
@@ -147,15 +183,18 @@ async fn rename_team(
     .fetch_optional(&mut *tx)
     .await?;
     if exists.is_some() {
-        return Err(WebError::conflict("Ein Team mit diesem Namen existiert bereits"));
+        return Err(WebError::conflict(
+            "Ein Team mit diesem Namen existiert bereits",
+        ));
     }
 
-    sqlx::query("UPDATE teams SET name = ?, name_key = ? WHERE id = ?")
+    sqlx::query(r#"UPDATE turnier."teams" SET name = $1, name_key = $2 WHERE id = $3"#)
         .bind(&name)
         .bind(&name_key)
         .bind(team_id)
         .execute(&mut *tx)
-        .await?;
+        .await
+        .map_err(|err| map_unique_conflict(err, "Ein Team mit diesem Namen existiert bereits"))?;
     audit(
         &mut *tx,
         "team_rename_admin",
@@ -199,7 +238,7 @@ async fn update_recruiting(
     ensure_participant_management_allowed(tournament.get::<String, _>("status").as_str())?;
     load_team_or_404(&mut *tx, tournament_id, team_id).await?;
 
-    sqlx::query("UPDATE teams SET recruitment_status = ? WHERE id = ?")
+    sqlx::query(r#"UPDATE turnier."teams" SET recruitment_status = $1 WHERE id = $2"#)
         .bind(status_str)
         .bind(team_id)
         .execute(&mut *tx)
@@ -213,7 +252,9 @@ async fn update_recruiting(
     .await?;
     tx.commit().await?;
 
-    Ok(Json(json!({ "status": "ok", "team_id": team_id, "recruitment_status": status_str })))
+    Ok(Json(
+        json!({ "status": "ok", "team_id": team_id, "recruitment_status": status_str }),
+    ))
 }
 
 /// `GET .../teams/{team_id}/applications` — Bewerbungen eines Teams listen.
@@ -232,11 +273,11 @@ async fn list_applications(
         team_id: i64,
         discord_name: String,
         status: String,
-        created_at: String,
+        created_at: DateTime<Utc>,
     }
     let rows: Vec<AppRow> = sqlx::query_as(
-        "SELECT id, team_id, discord_name, status, created_at FROM team_applications \
-         WHERE team_id = ? ORDER BY created_at DESC, id DESC",
+        r#"SELECT id, team_id, discord_name, status, created_at FROM turnier."team_applications"
+         WHERE team_id = $1 ORDER BY created_at DESC, id DESC"#,
     )
     .bind(team_id)
     .fetch_all(&state.pool)
@@ -250,7 +291,7 @@ async fn list_applications(
             team_id: r.team_id,
             discord_name: r.discord_name,
             status,
-            created_at: r.created_at,
+            created_at: db::ts_to_string(r.created_at),
         });
     }
     Ok(Json(apps))
@@ -267,38 +308,43 @@ async fn accept_application(
     ensure_participant_management_allowed(tournament.get::<String, _>("status").as_str())?;
     let team_size: i64 = tournament.get("team_size");
     let target_team = load_team_or_404(&mut *tx, tournament_id, team_id).await?;
-    let captain: String = target_team.get("captain_discord_id");
+    let captain: i64 = target_team.get("captain_discord_id");
     let application = load_team_application_or_404(&mut *tx, team_id, app_id).await?;
 
     let app_status: String = application.get("status");
     if app_status != "pending" {
-        return Err(WebError::bad_request("Nur ausstehende Bewerbungen können angenommen werden"));
+        return Err(WebError::bad_request(
+            "Nur ausstehende Bewerbungen können angenommen werden",
+        ));
     }
-    let app_discord_id: String = application.get("discord_id");
+    let app_discord_id_i64: i64 = application.get("discord_id");
+    let app_discord_id = db::discord_id_to_string(app_discord_id_i64);
     let app_discord_name: Option<String> = application.get("discord_name");
 
     ensure_team_has_capacity(&mut *tx, team_id, team_size).await?;
 
     // Bereits in einem Team dieses Turniers?
     let already: Option<i64> = sqlx::query_scalar(
-        "SELECT 1 FROM team_members tm JOIN teams t ON tm.team_id = t.id \
-         WHERE t.tournament_id = ? AND tm.discord_id = ?",
+        r#"SELECT 1::BIGINT FROM turnier."team_members" tm JOIN turnier."teams" t ON tm.team_id = t.id
+         WHERE t.tournament_id = $1 AND tm.discord_id = $2"#,
     )
     .bind(tournament_id)
-    .bind(&app_discord_id)
+    .bind(app_discord_id_i64)
     .fetch_optional(&mut *tx)
     .await?;
     if already.is_some() {
-        return Err(WebError::conflict("Spieler ist bereits Mitglied in einem Team dieses Turniers"));
+        return Err(WebError::conflict(
+            "Spieler ist bereits Mitglied in einem Team dieses Turniers",
+        ));
     }
 
     // Signup-Daten (falls vorhanden) übernehmen.
     let signup = sqlx::query(
-        "SELECT discord_name, steam_id, rank, rank_score, team_id \
-         FROM tournament_signups WHERE tournament_id = ? AND discord_id = ?",
+        r#"SELECT discord_name, steam_id, rank, rank_score, team_id
+         FROM turnier."tournament_signups" WHERE tournament_id = $1 AND discord_id = $2"#,
     )
     .bind(tournament_id)
-    .bind(&app_discord_id)
+    .bind(app_discord_id_i64)
     .fetch_optional(&mut *tx)
     .await?;
 
@@ -310,7 +356,9 @@ async fn accept_application(
         let s_team_id: Option<i64> = s.get("team_id");
         // Bereits einem ANDEREN Team zugeordnet (None oder eigenes Team sind ok).
         if s_team_id.is_some() && s_team_id != Some(team_id) {
-            return Err(WebError::conflict("Spieler ist bereits einem anderen Team zugeordnet"));
+            return Err(WebError::conflict(
+                "Spieler ist bereits einem anderen Team zugeordnet",
+            ));
         }
         let s_name: Option<String> = s.get("discord_name");
         if let Some(n) = s_name {
@@ -324,9 +372,19 @@ async fn accept_application(
     }
 
     let count = count_team_members(&mut *tx, team_id).await?;
-    let role = member_role(count, &captain);
+    let role = member_role(count, captain);
 
-    insert_member(&mut tx, team_id, &app_discord_id, effective_name.as_deref(), steam_id.as_deref(), rank.as_deref(), rank_score, role).await?;
+    insert_member(
+        &mut tx,
+        team_id,
+        &app_discord_id,
+        effective_name.as_deref(),
+        steam_id.as_deref(),
+        rank.as_deref(),
+        rank_score,
+        role,
+    )
+    .await?;
     upsert_signup_for_team(
         &mut tx,
         tournament_id,
@@ -341,7 +399,7 @@ async fn accept_application(
     if role == "captain" {
         set_captain(&mut tx, team_id, &app_discord_id).await?;
     }
-    sqlx::query("UPDATE team_applications SET status = ? WHERE id = ?")
+    sqlx::query(r#"UPDATE turnier."team_applications" SET status = $1 WHERE id = $2"#)
         .bind("accepted")
         .bind(app_id)
         .execute(&mut *tx)
@@ -381,11 +439,13 @@ async fn reject_application(
     let application = load_team_application_or_404(&mut *tx, team_id, app_id).await?;
     let app_status: String = application.get("status");
     if app_status != "pending" {
-        return Err(WebError::bad_request("Nur ausstehende Bewerbungen können abgelehnt werden"));
+        return Err(WebError::bad_request(
+            "Nur ausstehende Bewerbungen können abgelehnt werden",
+        ));
     }
-    let app_discord_id: String = application.get("discord_id");
+    let app_discord_id = db::discord_id_to_string(application.get("discord_id"));
 
-    sqlx::query("UPDATE team_applications SET status = ? WHERE id = ?")
+    sqlx::query(r#"UPDATE turnier."team_applications" SET status = $1 WHERE id = $2"#)
         .bind("rejected")
         .bind(app_id)
         .execute(&mut *tx)
@@ -426,15 +486,15 @@ async fn delete_team(
 
     // Mitglieder als Solo-Signups zurücklegen.
     let members = sqlx::query(
-        "SELECT discord_id, discord_name, steam_id, rank, rank_score FROM team_members \
-         WHERE team_id = ? ORDER BY joined_at",
+        r#"SELECT discord_id, discord_name, steam_id, rank, rank_score FROM turnier."team_members"
+         WHERE team_id = $1 ORDER BY joined_at"#,
     )
     .bind(team_id)
     .fetch_all(&mut *tx)
     .await?;
     for m in &members {
         let snap = MemberSnapshot {
-            discord_id: m.get("discord_id"),
+            discord_id: db::discord_id_to_string(m.get("discord_id")),
             discord_name: m.get("discord_name"),
             steam_id: m.get("steam_id"),
             rank: m.get("rank"),
@@ -443,16 +503,24 @@ async fn delete_team(
         upsert_signup_from_member(&mut tx, tournament_id, &snap).await?;
     }
 
-    sqlx::query("UPDATE tournament_signups SET team_id = NULL WHERE tournament_id = ? AND team_id = ?")
+    sqlx::query(r#"UPDATE turnier."tournament_signups" SET team_id = NULL WHERE tournament_id = $1 AND team_id = $2"#)
         .bind(tournament_id)
         .bind(team_id)
         .execute(&mut *tx)
         .await?;
-    sqlx::query("DELETE FROM team_members WHERE team_id = ?")
+    sqlx::query(r#"DELETE FROM turnier."team_members" WHERE team_id = $1"#)
         .bind(team_id)
         .execute(&mut *tx)
         .await?;
-    sqlx::query("DELETE FROM teams WHERE id = ?")
+    sqlx::query(r#"DELETE FROM turnier."team_applications" WHERE team_id = $1"#)
+        .bind(team_id)
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query(r#"DELETE FROM turnier."team_invitations" WHERE team_id = $1"#)
+        .bind(team_id)
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query(r#"DELETE FROM turnier."teams" WHERE id = $1"#)
         .bind(team_id)
         .execute(&mut *tx)
         .await?;
@@ -487,29 +555,31 @@ async fn change_captain(
     if discord_id.is_empty() {
         return Err(WebError::bad_request("discord_id ist erforderlich"));
     }
+    let discord_id_i64 = db::parse_discord_id(&discord_id)?;
 
     let mut tx = state.pool.begin().await?;
     let tournament = load_tournament_or_404(&mut *tx, tournament_id).await?;
     ensure_participant_management_allowed(tournament.get::<String, _>("status").as_str())?;
     load_team_or_404(&mut *tx, tournament_id, team_id).await?;
 
-    let is_member: Option<i64> =
-        sqlx::query_scalar("SELECT 1 FROM team_members WHERE team_id = ? AND discord_id = ?")
-            .bind(team_id)
-            .bind(&discord_id)
-            .fetch_optional(&mut *tx)
-            .await?;
+    let is_member: Option<i64> = sqlx::query_scalar(
+        r#"SELECT 1::BIGINT FROM turnier."team_members" WHERE team_id = $1 AND discord_id = $2"#,
+    )
+    .bind(team_id)
+    .bind(discord_id_i64)
+    .fetch_optional(&mut *tx)
+    .await?;
     if is_member.is_none() {
         return Err(WebError::not_found("Mitglied nicht im Team gefunden"));
     }
 
-    sqlx::query("UPDATE team_members SET role = 'member' WHERE team_id = ?")
+    sqlx::query(r#"UPDATE turnier."team_members" SET role = 'member' WHERE team_id = $1"#)
         .bind(team_id)
         .execute(&mut *tx)
         .await?;
-    sqlx::query("UPDATE team_members SET role = 'captain' WHERE team_id = ? AND discord_id = ?")
+    sqlx::query(r#"UPDATE turnier."team_members" SET role = 'captain' WHERE team_id = $1 AND discord_id = $2"#)
         .bind(team_id)
-        .bind(&discord_id)
+        .bind(discord_id_i64)
         .execute(&mut *tx)
         .await?;
     set_captain(&mut tx, team_id, &discord_id).await?;
@@ -535,29 +605,32 @@ async fn remove_member(
     let tournament = load_tournament_or_404(&mut *tx, tournament_id).await?;
     ensure_participant_management_allowed(tournament.get::<String, _>("status").as_str())?;
     let team = load_team_or_404(&mut *tx, tournament_id, team_id).await?;
-    let captain: String = team.get("captain_discord_id");
+    let captain: i64 = team.get("captain_discord_id");
+    let discord_id_i64 = db::parse_discord_id(&discord_id)?;
 
-    let member = sqlx::query("SELECT * FROM team_members WHERE team_id = ? AND discord_id = ?")
-        .bind(team_id)
-        .bind(&discord_id)
-        .fetch_optional(&mut *tx)
-        .await?
-        .ok_or_else(|| WebError::not_found("Mitglied nicht gefunden"))?;
+    let member = sqlx::query(
+        r#"SELECT * FROM turnier."team_members" WHERE team_id = $1 AND discord_id = $2"#,
+    )
+    .bind(team_id)
+    .bind(discord_id_i64)
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or_else(|| WebError::not_found("Mitglied nicht gefunden"))?;
 
     let snap = MemberSnapshot {
-        discord_id: member.get("discord_id"),
+        discord_id: db::discord_id_to_string(member.get("discord_id")),
         discord_name: member.get("discord_name"),
         steam_id: member.get("steam_id"),
         rank: member.get("rank"),
         rank_score: member.get::<Option<i64>, _>("rank_score").unwrap_or(0),
     };
     upsert_signup_from_member(&mut tx, tournament_id, &snap).await?;
-    sqlx::query("DELETE FROM team_members WHERE team_id = ? AND discord_id = ?")
+    sqlx::query(r#"DELETE FROM turnier."team_members" WHERE team_id = $1 AND discord_id = $2"#)
         .bind(team_id)
-        .bind(&discord_id)
+        .bind(discord_id_i64)
         .execute(&mut *tx)
         .await?;
-    if captain == discord_id {
+    if captain == discord_id_i64 {
         reassign_or_clear_captain(&mut tx, team_id).await?;
     }
 
@@ -591,13 +664,20 @@ async fn move_member(
 ) -> WebResult<Json<Team>> {
     let discord_id = body.discord_id.unwrap_or_default().trim().to_string();
     let Some(from_team_id) = body.from_team_id else {
-        return Err(WebError::bad_request("from_team_id und discord_id sind erforderlich"));
+        return Err(WebError::bad_request(
+            "from_team_id und discord_id sind erforderlich",
+        ));
     };
     if discord_id.is_empty() {
-        return Err(WebError::bad_request("from_team_id und discord_id sind erforderlich"));
+        return Err(WebError::bad_request(
+            "from_team_id und discord_id sind erforderlich",
+        ));
     }
+    let discord_id_i64 = db::parse_discord_id(&discord_id)?;
     if from_team_id == team_id {
-        return Err(WebError::bad_request("Quelle und Ziel dürfen nicht identisch sein"));
+        return Err(WebError::bad_request(
+            "Quelle und Ziel dürfen nicht identisch sein",
+        ));
     }
 
     let mut tx = state.pool.begin().await?;
@@ -608,48 +688,51 @@ async fn move_member(
     let target_team = load_team_or_404(&mut *tx, tournament_id, team_id).await?;
     ensure_team_has_capacity(&mut *tx, team_id, team_size).await?;
 
-    let in_source: Option<i64> =
-        sqlx::query_scalar("SELECT 1 FROM team_members WHERE team_id = ? AND discord_id = ?")
-            .bind(from_team_id)
-            .bind(&discord_id)
-            .fetch_optional(&mut *tx)
-            .await?;
+    let in_source: Option<i64> = sqlx::query_scalar(
+        r#"SELECT 1::BIGINT FROM turnier."team_members" WHERE team_id = $1 AND discord_id = $2"#,
+    )
+    .bind(from_team_id)
+    .bind(discord_id_i64)
+    .fetch_optional(&mut *tx)
+    .await?;
     if in_source.is_none() {
         return Err(WebError::not_found("Mitglied nicht im Quell-Team gefunden"));
     }
 
-    let in_target: Option<i64> =
-        sqlx::query_scalar("SELECT 1 FROM team_members WHERE team_id = ? AND discord_id = ?")
-            .bind(team_id)
-            .bind(&discord_id)
-            .fetch_optional(&mut *tx)
-            .await?;
+    let in_target: Option<i64> = sqlx::query_scalar(
+        r#"SELECT 1::BIGINT FROM turnier."team_members" WHERE team_id = $1 AND discord_id = $2"#,
+    )
+    .bind(team_id)
+    .bind(discord_id_i64)
+    .fetch_optional(&mut *tx)
+    .await?;
     if in_target.is_some() {
         return Err(WebError::conflict("Spieler ist bereits im Ziel-Team"));
     }
 
     let count = count_team_members(&mut *tx, team_id).await?;
-    let target_captain: String = target_team.get("captain_discord_id");
-    let new_role = member_role(count, &target_captain);
+    let target_captain: i64 = target_team.get("captain_discord_id");
+    let new_role = member_role(count, target_captain);
 
-    sqlx::query("UPDATE team_members SET team_id = ?, role = ? WHERE team_id = ? AND discord_id = ?")
+    sqlx::query(r#"UPDATE turnier."team_members" SET team_id = $1, role = $2 WHERE team_id = $3 AND discord_id = $4"#)
         .bind(team_id)
         .bind(new_role)
         .bind(from_team_id)
-        .bind(&discord_id)
+        .bind(discord_id_i64)
         .execute(&mut *tx)
-        .await?;
-    sqlx::query("UPDATE tournament_signups SET team_id = ? WHERE tournament_id = ? AND discord_id = ?")
+        .await
+        .map_err(|err| map_unique_conflict(err, "Spieler ist bereits im Ziel-Team"))?;
+    sqlx::query(r#"UPDATE turnier."tournament_signups" SET team_id = $1 WHERE tournament_id = $2 AND discord_id = $3"#)
         .bind(team_id)
         .bind(tournament_id)
-        .bind(&discord_id)
+        .bind(discord_id_i64)
         .execute(&mut *tx)
         .await?;
     if new_role == "captain" {
         set_captain(&mut tx, team_id, &discord_id).await?;
     }
-    let source_captain: String = source_team.get("captain_discord_id");
-    if source_captain == discord_id {
+    let source_captain: i64 = source_team.get("captain_discord_id");
+    if source_captain == discord_id_i64 {
         reassign_or_clear_captain(&mut tx, from_team_id).await?;
     }
 
@@ -693,42 +776,59 @@ async fn assign_signup(
     ensure_participant_management_allowed(tournament.get::<String, _>("status").as_str())?;
     let team_size: i64 = tournament.get("team_size");
     let target_team = load_team_or_404(&mut *tx, tournament_id, team_id).await?;
-    let captain: String = target_team.get("captain_discord_id");
+    let captain: i64 = target_team.get("captain_discord_id");
     ensure_team_has_capacity(&mut *tx, team_id, team_size).await?;
 
-    let signup = sqlx::query("SELECT * FROM tournament_signups WHERE id = ? AND tournament_id = ?")
-        .bind(signup_id)
-        .bind(tournament_id)
-        .fetch_optional(&mut *tx)
-        .await?
-        .ok_or_else(|| WebError::not_found("Signup nicht gefunden"))?;
+    let signup = sqlx::query(
+        r#"SELECT * FROM turnier."tournament_signups" WHERE id = $1 AND tournament_id = $2"#,
+    )
+    .bind(signup_id)
+    .bind(tournament_id)
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or_else(|| WebError::not_found("Signup nicht gefunden"))?;
     let s_team_id: Option<i64> = signup.get("team_id");
     if s_team_id.is_some() {
-        return Err(WebError::bad_request("Signup ist bereits einem Team zugewiesen"));
+        return Err(WebError::bad_request(
+            "Signup ist bereits einem Team zugewiesen",
+        ));
     }
-    let s_discord_id: String = signup.get("discord_id");
+    let s_discord_id_i64: i64 = signup.get("discord_id");
+    let s_discord_id = db::discord_id_to_string(s_discord_id_i64);
 
     let already: Option<i64> = sqlx::query_scalar(
-        "SELECT 1 FROM team_members tm JOIN teams t ON tm.team_id = t.id \
-         WHERE t.tournament_id = ? AND tm.discord_id = ?",
+        r#"SELECT 1::BIGINT FROM turnier."team_members" tm JOIN turnier."teams" t ON tm.team_id = t.id
+         WHERE t.tournament_id = $1 AND tm.discord_id = $2"#,
     )
     .bind(tournament_id)
-    .bind(&s_discord_id)
+    .bind(s_discord_id_i64)
     .fetch_optional(&mut *tx)
     .await?;
     if already.is_some() {
-        return Err(WebError::conflict("Spieler ist bereits Mitglied in einem Team dieses Turniers"));
+        return Err(WebError::conflict(
+            "Spieler ist bereits Mitglied in einem Team dieses Turniers",
+        ));
     }
 
     let count = count_team_members(&mut *tx, team_id).await?;
-    let role = member_role(count, &captain);
+    let role = member_role(count, captain);
     let s_name: Option<String> = signup.get("discord_name");
     let s_steam: Option<String> = signup.get("steam_id");
     let s_rank: Option<String> = signup.get("rank");
     let s_score: i64 = signup.get::<Option<i64>, _>("rank_score").unwrap_or(0);
 
-    insert_member(&mut tx, team_id, &s_discord_id, s_name.as_deref(), s_steam.as_deref(), s_rank.as_deref(), s_score, role).await?;
-    sqlx::query("UPDATE tournament_signups SET team_id = ? WHERE id = ?")
+    insert_member(
+        &mut tx,
+        team_id,
+        &s_discord_id,
+        s_name.as_deref(),
+        s_steam.as_deref(),
+        s_rank.as_deref(),
+        s_score,
+        role,
+    )
+    .await?;
+    sqlx::query(r#"UPDATE turnier."tournament_signups" SET team_id = $1 WHERE id = $2"#)
         .bind(team_id)
         .bind(signup_id)
         .execute(&mut *tx)
@@ -769,8 +869,11 @@ async fn add_member(
     let discord_id = body.discord_id.unwrap_or_default().trim().to_string();
     let discord_name = body.discord_name.unwrap_or_default().trim().to_string();
     if discord_id.is_empty() || discord_name.is_empty() {
-        return Err(WebError::bad_request("discord_id und discord_name sind erforderlich"));
+        return Err(WebError::bad_request(
+            "discord_id und discord_name sind erforderlich",
+        ));
     }
+    let discord_id_i64 = db::parse_discord_id(&discord_id)?;
 
     let mut tx = state.pool.begin().await?;
     let tournament = load_tournament_or_404(&mut *tx, tournament_id).await?;
@@ -782,27 +885,29 @@ async fn add_member(
     }
     let team_size: i64 = tournament.get("team_size");
     let target_team = load_team_or_404(&mut *tx, tournament_id, team_id).await?;
-    let captain: String = target_team.get("captain_discord_id");
+    let captain: i64 = target_team.get("captain_discord_id");
     ensure_team_has_capacity(&mut *tx, team_id, team_size).await?;
 
     let already: Option<i64> = sqlx::query_scalar(
-        "SELECT 1 FROM team_members tm JOIN teams t ON tm.team_id = t.id \
-         WHERE t.tournament_id = ? AND tm.discord_id = ?",
+        r#"SELECT 1::BIGINT FROM turnier."team_members" tm JOIN turnier."teams" t ON tm.team_id = t.id
+         WHERE t.tournament_id = $1 AND tm.discord_id = $2"#,
     )
     .bind(tournament_id)
-    .bind(&discord_id)
+    .bind(discord_id_i64)
     .fetch_optional(&mut *tx)
     .await?;
     if already.is_some() {
-        return Err(WebError::conflict("Spieler ist bereits Mitglied in einem Team dieses Turniers"));
+        return Err(WebError::conflict(
+            "Spieler ist bereits Mitglied in einem Team dieses Turniers",
+        ));
     }
 
     let existing_signup = sqlx::query(
-        "SELECT discord_name, steam_id, rank, rank_score, team_id \
-         FROM tournament_signups WHERE tournament_id = ? AND discord_id = ?",
+        r#"SELECT discord_name, steam_id, rank, rank_score, team_id
+         FROM turnier."tournament_signups" WHERE tournament_id = $1 AND discord_id = $2"#,
     )
     .bind(tournament_id)
-    .bind(&discord_id)
+    .bind(discord_id_i64)
     .fetch_optional(&mut *tx)
     .await?;
 
@@ -813,7 +918,9 @@ async fn add_member(
     if let Some(s) = &existing_signup {
         let s_team_id: Option<i64> = s.get("team_id");
         if s_team_id.is_some() && s_team_id != Some(team_id) {
-            return Err(WebError::conflict("Spieler ist bereits einem anderen Team zugeordnet"));
+            return Err(WebError::conflict(
+                "Spieler ist bereits einem anderen Team zugeordnet",
+            ));
         }
         steam_id = s.get("steam_id");
         rank = s.get("rank");
@@ -829,9 +936,19 @@ async fn add_member(
     };
 
     let count = count_team_members(&mut *tx, team_id).await?;
-    let role = member_role(count, &captain);
+    let role = member_role(count, captain);
 
-    insert_member(&mut tx, team_id, &discord_id, effective_name.as_deref(), steam_id.as_deref(), rank.as_deref(), rank_score, role).await?;
+    insert_member(
+        &mut tx,
+        team_id,
+        &discord_id,
+        effective_name.as_deref(),
+        steam_id.as_deref(),
+        rank.as_deref(),
+        rank_score,
+        role,
+    )
+    .await?;
     upsert_signup_for_team(
         &mut tx,
         tournament_id,
@@ -873,8 +990,8 @@ async fn delete_signup(
     ensure_participant_management_allowed(tournament.get::<String, _>("status").as_str())?;
 
     let signup = sqlx::query(
-        "SELECT id, tournament_id, discord_id, discord_name, steam_id, rank, rank_score, team_id, signed_up_at \
-         FROM tournament_signups WHERE id = ? AND tournament_id = ?",
+        r#"SELECT id, tournament_id, discord_id, discord_name, steam_id, rank, rank_score, team_id, signed_up_at
+         FROM turnier."tournament_signups" WHERE id = $1 AND tournament_id = $2"#,
     )
     .bind(signup_id)
     .bind(tournament_id)
@@ -884,9 +1001,11 @@ async fn delete_signup(
 
     let s_team_id: Option<i64> = signup.get("team_id");
     if s_team_id.is_some() {
-        return Err(WebError::bad_request("Nur nicht zugewiesene Solo-Signups können gelöscht werden"));
+        return Err(WebError::bad_request(
+            "Nur nicht zugewiesene Solo-Signups können gelöscht werden",
+        ));
     }
-    let s_discord_id: String = signup.get("discord_id");
+    let s_discord_id = db::discord_id_to_string(signup.get("discord_id"));
 
     let dto = TournamentSignup {
         id: signup.get("id"),
@@ -897,10 +1016,10 @@ async fn delete_signup(
         rank: signup.get("rank"),
         rank_score: signup.get::<Option<i64>, _>("rank_score").unwrap_or(0),
         team_id: s_team_id,
-        signed_up_at: signup.get("signed_up_at"),
+        signed_up_at: db::ts_to_string(signup.get::<DateTime<Utc>, _>("signed_up_at")),
     };
 
-    sqlx::query("DELETE FROM tournament_signups WHERE id = ?")
+    sqlx::query(r#"DELETE FROM turnier."tournament_signups" WHERE id = $1"#)
         .bind(signup_id)
         .execute(&mut *tx)
         .await?;
@@ -921,7 +1040,7 @@ async fn delete_signup(
 /// Fügt ein Mitglied mit gegebener Rolle ein.
 #[allow(clippy::too_many_arguments)]
 async fn insert_member(
-    tx: &mut Transaction<'_, Sqlite>,
+    tx: &mut Transaction<'_, Postgres>,
     team_id: i64,
     discord_id: &str,
     discord_name: Option<&str>,
@@ -930,9 +1049,10 @@ async fn insert_member(
     rank_score: i64,
     role: &str,
 ) -> WebResult<()> {
+    let discord_id = db::parse_discord_id(discord_id)?;
     sqlx::query(
-        "INSERT INTO team_members (team_id, discord_id, discord_name, steam_id, rank, rank_score, role) \
-         VALUES (?, ?, ?, ?, ?, ?, ?)",
+        r#"INSERT INTO turnier."team_members" (team_id, discord_id, discord_name, steam_id, rank, rank_score, role, joined_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, now())"#,
     )
     .bind(team_id)
     .bind(discord_id)
@@ -942,18 +1062,19 @@ async fn insert_member(
     .bind(rank_score)
     .bind(role)
     .execute(&mut **tx)
-    .await?;
+    .await
+    .map_err(|err| map_unique_conflict(err, "Spieler ist bereits Mitglied in diesem Team"))?;
     Ok(())
 }
 
 /// Setzt den Captain eines Teams.
 async fn set_captain(
-    tx: &mut Transaction<'_, Sqlite>,
+    tx: &mut Transaction<'_, Postgres>,
     team_id: i64,
     discord_id: &str,
 ) -> WebResult<()> {
-    sqlx::query("UPDATE teams SET captain_discord_id = ? WHERE id = ?")
-        .bind(discord_id)
+    sqlx::query(r#"UPDATE turnier."teams" SET captain_discord_id = $1 WHERE id = $2"#)
+        .bind(db::parse_captain_id(discord_id)?)
         .bind(team_id)
         .execute(&mut **tx)
         .await?;

@@ -22,6 +22,16 @@ pub enum SchedulerError {
     #[error("Turnierstatus wurde parallel geändert")]
     StatusConflict,
 
+    /// Die Single-Active-Tournament-Invariante verhindert, dass ein weiteres
+    /// Nicht-Test-Turnier in die aktive Phase wechselt.
+    #[error("{0}")]
+    ActiveTournamentConflict(String),
+
+    /// Actor-IDs werden in Postgres als `BIGINT` gespeichert und muessen deshalb
+    /// valide Discord-Snowflakes sein.
+    #[error("Ungültige Actor-Discord-ID: {0}")]
+    InvalidActorId(#[from] turnier_core::DiscordIdParseError),
+
     /// Fehler aus der Turnier-Engine (Generierung Gruppen/Matches/Bracket,
     /// Punkte-Neuberechnung).
     #[error(transparent)]

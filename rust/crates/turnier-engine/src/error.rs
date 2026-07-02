@@ -18,7 +18,9 @@ pub enum TournamentError {
 
     /// Der Confirm-Snapshot weicht vom Dry-Run ab (parallele Datenänderung).
     /// Entspricht `CheckinSnapshotMismatchError`.
-    #[error("Check-in-Daten haben sich seit der Vorschau geändert. Bitte Dry-Run erneut ausführen.")]
+    #[error(
+        "Check-in-Daten haben sich seit der Vorschau geändert. Bitte Dry-Run erneut ausführen."
+    )]
     SnapshotMismatch,
 
     /// Optimistic-Concurrency: der Turnierstatus wurde parallel geändert
@@ -27,10 +29,12 @@ pub enum TournamentError {
     StatusConflict,
 
     /// Rang-Resolver-Fehler (Steam-/Discord-Lookup) beim Solo-Team-Bilden.
+    #[cfg(feature = "persist")]
     #[error(transparent)]
     Steam(#[from] turnier_steam::SteamError),
 
     /// Persistenz-Fehler (Pool/Query/Migration).
+    #[cfg(feature = "persist")]
     #[error(transparent)]
     Db(#[from] turnier_db::DbError),
 }
@@ -38,6 +42,7 @@ pub enum TournamentError {
 /// Direkte Konvertierung aus `sqlx::Error`, damit `?` an Query-Aufrufen ohne
 /// manuelles Mapping funktioniert — über [`turnier_db::DbError`], damit es genau eine
 /// Persistenz-Fehler-Repräsentation gibt.
+#[cfg(feature = "persist")]
 impl From<sqlx::Error> for TournamentError {
     fn from(err: sqlx::Error) -> Self {
         TournamentError::Db(turnier_db::DbError::from(err))

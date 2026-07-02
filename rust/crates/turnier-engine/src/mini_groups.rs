@@ -176,7 +176,11 @@ pub fn extract_point_diff(
         let t1 = nested.get("team1").and_then(as_i64);
         let t2 = nested.get("team2").and_then(as_i64);
         if let (Some(s1), Some(s2)) = (t1, t2) {
-            return if team1_id == team_id { s1 - s2 } else { s2 - s1 };
+            return if team1_id == team_id {
+                s1 - s2
+            } else {
+                s2 - s1
+            };
         }
     }
 

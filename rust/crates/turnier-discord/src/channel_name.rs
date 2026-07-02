@@ -100,7 +100,10 @@ mod tests {
 
     #[test]
     fn channel_name_aufbau_und_kappung() {
-        assert_eq!(build_match_channel_name("Alpha", "Beta"), "match-alpha-vs-beta");
+        assert_eq!(
+            build_match_channel_name("Alpha", "Beta"),
+            "match-alpha-vs-beta"
+        );
         let long = "x".repeat(200);
         let name = build_match_channel_name(&long, &long);
         assert_eq!(name.chars().count(), CHANNEL_NAME_MAX);

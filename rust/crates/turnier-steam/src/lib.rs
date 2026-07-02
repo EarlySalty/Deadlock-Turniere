@@ -39,13 +39,13 @@ pub use role_rank::SOURCE_DISCORD_ROLE;
 
 /// Baut den produktiven Resolver aus dem App-DB-Pool und der Config.
 ///
-/// - Der Bridge-Reader wird geöffnet, falls `steam_bridge_db_path` gesetzt ist und
-///   die Datei existiert; sonst entfällt die Bridge-Stufe (mit Warnung).
+/// - Der Bridge-Reader wird geöffnet, falls `steam_bridge_db_path` gesetzt ist,
+///   die Datei existiert und read-only geöffnet werden kann; sonst entfällt die
+///   Bridge-Stufe (mit Warnung).
 /// - Der Discord-Client wird erstellt, falls Bot-Token und Guild-ID gesetzt sind;
 ///   sonst entfällt der Discord-Fallback (wie im Original).
 pub async fn build_resolver(pool: Pool, config: &Config) -> SteamResult<SteamRankResolver> {
-    let bridge =
-        BridgeReader::open(&config.steam_bridge_db_path, &config.discord_guild_id).await?;
+    let bridge = BridgeReader::open(&config.steam_bridge_db_path, &config.discord_guild_id).await?;
 
     let discord: Option<Arc<dyn DiscordMemberClient>> =
         ReqwestDiscordClient::new(&config.discord_bot_token, &config.discord_guild_id)

@@ -12,7 +12,7 @@
 
 use std::sync::Arc;
 
-use chrono::{Local, NaiveDateTime};
+use chrono::{DateTime, Utc};
 use tokio::sync::watch;
 
 use turnier_db::Pool;
@@ -49,7 +49,7 @@ impl Scheduler {
 
     /// Führt alle vier Checks EINMAL aus — jeder fehlertolerant. Ein Fehler in
     /// einem Check beendet weder die anderen noch den Loop.
-    pub async fn run_all_checks(&self, now: NaiveDateTime) {
+    pub async fn run_all_checks(&self, now: DateTime<Utc>) {
         if let Err(err) = self.check_and_advance_tournaments(now).await {
             tracing::error!(error = %err, "Phasen-Kaskade fehlgeschlagen");
         }
@@ -69,7 +69,7 @@ impl Scheduler {
     /// Phasen-Kaskade: loopt über alle Turniere in den aktiven Phasen und schiebt
     /// fällige weiter, bis in einem ganzen Durchlauf keines mehr advanciert.
     /// Portiert `_check_and_advance_tournaments` (Z.272-291).
-    async fn check_and_advance_tournaments(&self, now: NaiveDateTime) -> sqlx::Result<()> {
+    async fn check_and_advance_tournaments(&self, now: DateTime<Utc>) -> sqlx::Result<()> {
         loop {
             let tournaments = self.load_advanceable_tournaments().await?;
             let mut advanced_any = false;
@@ -91,7 +91,7 @@ impl Scheduler {
         sqlx::query_as::<_, AdvanceRow>(
             "SELECT id, status, tournament_mode, registration_start, registration_end, \
                     checkin_start, group_phase_start, bracket_start, is_test \
-             FROM tournaments \
+             FROM turnier.tournaments \
              WHERE status IN ('draft', 'registration', 'checkin', 'group_phase') \
              ORDER BY id",
         )
@@ -102,38 +102,19 @@ impl Scheduler {
     /// Schiebt ein einzelnes fälliges Turnier weiter und verschickt die
     /// Checkin-/Registration-Notifications. Portiert `_advance_due_tournament`
     /// (Z.198-269). Rückgabe `true`, wenn das Turnier advanciert wurde.
-    async fn advance_due_tournament(&self, row: &AdvanceRow, now: NaiveDateTime) -> bool {
+    async fn advance_due_tournament(&self, row: &AdvanceRow, now: DateTime<Utc>) -> bool {
         let due_row = DueStatusRow {
             status: row.status.clone(),
             tournament_mode: row.tournament_mode.clone(),
-            registration_start: row.registration_start.clone(),
-            registration_end: row.registration_end.clone(),
-            checkin_start: row.checkin_start.clone(),
-            group_phase_start: row.group_phase_start.clone(),
-            bracket_start: row.bracket_start.clone(),
+            registration_start: row.registration_start,
+            registration_end: row.registration_end,
+            checkin_start: row.checkin_start,
+            group_phase_start: row.group_phase_start,
+            bracket_start: row.bracket_start,
         };
         let Some(next_status) = get_due_next_status(&due_row, now) else {
             return false;
         };
-
-        // Single-Active-Invariante: vor der Aktivierung (→ registration) darf kein
-        // anderes Nicht-Test-Turnier aktiv sein.
-        if next_status == "registration" {
-            match self.has_other_active_tournament(row.id).await {
-                Ok(true) => {
-                    tracing::warn!(
-                        tournament_id = row.id,
-                        "Scheduler überspringt Turnier: anderes aktives Turnier blockiert Aktivierung"
-                    );
-                    return false;
-                }
-                Ok(false) => {}
-                Err(err) => {
-                    tracing::error!(tournament_id = row.id, error = %err, "Aktiv-Check fehlgeschlagen");
-                    return false;
-                }
-            }
-        }
 
         match advance_tournament_status(
             &self.pool,
@@ -153,6 +134,14 @@ impl Scheduler {
                     tournament_id = row.id,
                     next_status,
                     "Scheduler konnte Turnier nicht verschieben: {msg}"
+                );
+                return false;
+            }
+            Err(crate::SchedulerError::ActiveTournamentConflict(msg)) => {
+                tracing::warn!(
+                    tournament_id = row.id,
+                    next_status,
+                    "Scheduler überspringt Turnier: {msg}"
                 );
                 return false;
             }
@@ -177,7 +166,7 @@ impl Scheduler {
         );
 
         // Test-Turniere lösen keine Benachrichtigungen aus.
-        if row.is_test != 0 {
+        if row.is_test {
             return true;
         }
 
@@ -195,7 +184,11 @@ impl Scheduler {
 
     /// Sendet nach dem Statuswechsel die passende DM:
     /// `checkin` → an Teilnehmer; `registration` → an alle Profile.
-    async fn notify_after_advance(&self, tournament_id: i64, next_status: &str) -> sqlx::Result<()> {
+    async fn notify_after_advance(
+        &self,
+        tournament_id: i64,
+        next_status: &str,
+    ) -> sqlx::Result<()> {
         match next_status {
             "checkin" => {
                 let ids = load_tournament_participant_ids(&self.pool, tournament_id).await?;
@@ -215,29 +208,15 @@ impl Scheduler {
                     .notify_users(
                         &ids,
                         turnier_discord::NotificationEvent::TournamentNews,
-                        &format!("Die Registrierung für Turnier #{tournament_id} ist jetzt geöffnet."),
+                        &format!(
+                            "Die Registrierung für Turnier #{tournament_id} ist jetzt geöffnet."
+                        ),
                     )
                     .await;
             }
             _ => {}
         }
         Ok(())
-    }
-
-    /// `true`, wenn ein ANDERES Nicht-Test-Turnier aktiv ist
-    /// (registration/checkin/group_phase/bracket). Portiert
-    /// `_has_other_active_tournament` (Z.102-110).
-    async fn has_other_active_tournament(&self, tournament_id: i64) -> sqlx::Result<bool> {
-        let row: Option<(i64,)> = sqlx::query_as(
-            "SELECT 1 FROM tournaments \
-             WHERE id != ? \
-               AND status IN ('registration', 'checkin', 'group_phase', 'bracket') \
-               AND is_test = 0 LIMIT 1",
-        )
-        .bind(tournament_id)
-        .fetch_optional(&self.pool)
-        .await?;
-        Ok(row.is_some())
     }
 }
 
@@ -247,12 +226,12 @@ struct AdvanceRow {
     id: i64,
     status: String,
     tournament_mode: Option<String>,
-    registration_start: Option<String>,
-    registration_end: Option<String>,
-    checkin_start: Option<String>,
-    group_phase_start: Option<String>,
-    bracket_start: Option<String>,
-    is_test: i64,
+    registration_start: Option<DateTime<Utc>>,
+    registration_end: Option<DateTime<Utc>>,
+    checkin_start: Option<DateTime<Utc>>,
+    group_phase_start: Option<DateTime<Utc>>,
+    bracket_start: Option<DateTime<Utc>>,
+    is_test: bool,
 }
 
 /// Startet den Hintergrund-Loop: alle vier Checks EINMAL sofort, danach im
@@ -263,7 +242,7 @@ pub async fn start_scheduler(scheduler: Scheduler, mut shutdown: watch::Receiver
     tracing::info!("Tournament-Scheduler gestartet");
 
     // Erster Lauf SOFORT (wie im Original vor der Schleife).
-    scheduler.run_all_checks(Local::now().naive_local()).await;
+    scheduler.run_all_checks(Utc::now()).await;
 
     let mut ticker =
         tokio::time::interval(std::time::Duration::from_secs(SCHEDULER_INTERVAL_SECONDS));
@@ -273,7 +252,7 @@ pub async fn start_scheduler(scheduler: Scheduler, mut shutdown: watch::Receiver
     loop {
         tokio::select! {
             _ = ticker.tick() => {
-                scheduler.run_all_checks(Local::now().naive_local()).await;
+                scheduler.run_all_checks(Utc::now()).await;
             }
             res = shutdown.changed() => {
                 // Sender meldet Shutdown ODER wurde fallengelassen → beenden.

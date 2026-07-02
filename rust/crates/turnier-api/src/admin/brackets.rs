@@ -18,8 +18,14 @@ use super::helpers::audit;
 /// Router der Generierungs-Endpunkte.
 pub fn router() -> Router<AppState> {
     Router::new()
-        .route("/api/admin/tournaments/{tournament_id}/groups/generate", post(generate_groups_route))
-        .route("/api/admin/tournaments/{tournament_id}/bracket/generate", post(generate_bracket_route))
+        .route(
+            "/api/admin/tournaments/{tournament_id}/groups/generate",
+            post(generate_groups_route),
+        )
+        .route(
+            "/api/admin/tournaments/{tournament_id}/bracket/generate",
+            post(generate_bracket_route),
+        )
 }
 
 /// Body von `groups/generate` (`num_groups` optional).

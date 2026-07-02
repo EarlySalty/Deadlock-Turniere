@@ -27,5 +27,9 @@ base64.workspace = true
 [dev-dependencies]
 tokio = { workspace = true }
 
+[features]
+default = []
+testing = ["turnier-db/testing"]
+
 [lints]
 workspace = true

@@ -4,17 +4,19 @@
 
 use std::collections::{HashMap, HashSet};
 
+use chrono::{DateTime, Utc};
 use sha2_min::Sha256;
-use sqlx::{Sqlite, Transaction};
+use sqlx::{Postgres, Transaction};
+use turnier_core::{discord_id_to_string, now_utc};
 use turnier_steam::RankResolver;
 
 use crate::engine::naming::{name_key, TeamNamePool};
 use crate::error::{TournamentError, TournamentResult};
 
-use super::audit;
 use super::bracket::build_seeded_bracket;
 use super::double_elim::build_double_elimination_bracket;
 use super::groups::{generate_group_matches_in_tx, generate_groups_in_tx};
+use super::{audit, parse_db_discord_id};
 
 mod sha2_min {
     //! Minimaler, abhängigkeitsfreier SHA-256 — nur für den Snapshot-Token.
@@ -156,7 +158,7 @@ mod sha2_min {
 #[derive(sqlx::FromRow, Clone)]
 struct SoloSignup {
     id: i64,
-    discord_id: String,
+    discord_id: i64,
     discord_name: Option<String>,
     steam_id: Option<String>,
     rank: Option<String>,
@@ -206,7 +208,7 @@ impl SoloShuffler for NoShuffle {
 /// die Anzahl erstellter Teams. Der Shuffler ist injizierbar (Determinismus in
 /// Tests).
 pub async fn assign_random_teams(
-    pool: &sqlx::Pool<Sqlite>,
+    pool: &sqlx::Pool<Postgres>,
     resolver: &dyn RankResolver,
     tournament_id: i64,
     team_size: i64,
@@ -216,7 +218,9 @@ pub async fn assign_random_teams(
 
     let signups: Vec<SoloSignup> = sqlx::query_as::<_, SoloSignup>(
         "SELECT id, discord_id, discord_name, steam_id, rank, rank_score \
-         FROM tournament_signups WHERE tournament_id = ? AND team_id IS NULL",
+         FROM turnier.tournament_signups \
+         WHERE tournament_id = $1 AND team_id IS NULL \
+         ORDER BY signed_up_at, id",
     )
     .bind(tournament_id)
     .fetch_all(&mut *tx)
@@ -230,10 +234,13 @@ pub async fn assign_random_teams(
     let signups_assigned = signups.len();
     let permutation = shuffler.permutation(signups.len());
     debug_assert_eq!(permutation.len(), signups.len());
-    let signups: Vec<SoloSignup> = permutation.into_iter().map(|i| signups[i].clone()).collect();
+    let signups: Vec<SoloSignup> = permutation
+        .into_iter()
+        .map(|i| signups[i].clone())
+        .collect();
 
     let existing_keys: Vec<(String,)> =
-        sqlx::query_as("SELECT name_key FROM teams WHERE tournament_id = ?")
+        sqlx::query_as("SELECT name_key FROM turnier.teams WHERE tournament_id = $1")
             .bind(tournament_id)
             .fetch_all(&mut *tx)
             .await?;
@@ -242,27 +249,29 @@ pub async fn assign_random_teams(
     let mut teams_created = 0i64;
     let size = team_size.max(1) as usize;
     for chunk in signups.chunks(size) {
-        let captain_discord_id = &chunk[0].discord_id;
-        let captain_name =
-            captain_team_name(&mut tx, tournament_id, captain_discord_id).await?;
+        let captain_discord_id = chunk[0].discord_id;
+        let captain_name = captain_team_name(&mut tx, tournament_id, captain_discord_id).await?;
         let team_name = pool_names.from_captain(captain_name.as_deref());
         let team_name_key = name_key(&team_name);
 
         let team_row: (i64,) = sqlx::query_as(
-            "INSERT INTO teams (tournament_id, name, name_key, captain_discord_id) \
-             VALUES (?, ?, ?, ?) RETURNING id",
+            "INSERT INTO turnier.teams \
+                 (tournament_id, name, name_key, captain_discord_id, created_at, recruitment_status) \
+             VALUES ($1, $2, $3, $4, $5, 'open') RETURNING id",
         )
         .bind(tournament_id)
         .bind(&team_name)
         .bind(&team_name_key)
         .bind(captain_discord_id)
+        .bind(now_utc())
         .fetch_one(&mut *tx)
         .await?;
         let team_id = team_row.0;
 
         for (i, signup) in chunk.iter().enumerate() {
             let role = if i == 0 { "captain" } else { "member" };
-            let rank_data = resolver.rank_profile(&signup.discord_id).await?;
+            let signup_discord_id = discord_id_to_string(signup.discord_id);
+            let rank_data = resolver.rank_profile(&signup_discord_id).await?;
             let (steam_id, rank, score) = match rank_data {
                 Some(profile) => (
                     profile.steam_id.or_else(|| signup.steam_id.clone()),
@@ -278,21 +287,22 @@ pub async fn assign_random_teams(
             };
 
             sqlx::query(
-                "INSERT INTO team_members \
-                 (team_id, discord_id, discord_name, steam_id, rank, rank_score, role) \
-                 VALUES (?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO turnier.team_members \
+                 (team_id, discord_id, discord_name, steam_id, rank, rank_score, role, joined_at) \
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
             )
             .bind(team_id)
-            .bind(&signup.discord_id)
+            .bind(signup.discord_id)
             .bind(&signup.discord_name)
             .bind(&steam_id)
             .bind(&rank)
             .bind(score)
             .bind(role)
+            .bind(now_utc())
             .execute(&mut *tx)
             .await?;
 
-            sqlx::query("UPDATE tournament_signups SET team_id = ? WHERE id = ?")
+            sqlx::query("UPDATE turnier.tournament_signups SET team_id = $1 WHERE id = $2")
                 .bind(team_id)
                 .bind(signup.id)
                 .execute(&mut *tx)
@@ -317,13 +327,13 @@ pub async fn assign_random_teams(
 /// Liefert den (jüngsten, nicht-leeren) Captain-Discord-Namen für die
 /// Teamnamens-Ableitung. Portiert den DB-Teil von `_team_name_from_captain`.
 async fn captain_team_name(
-    tx: &mut Transaction<'_, Sqlite>,
+    tx: &mut Transaction<'_, Postgres>,
     tournament_id: i64,
-    captain_discord_id: &str,
+    captain_discord_id: i64,
 ) -> TournamentResult<Option<String>> {
     let from_members: Option<(Option<String>,)> = sqlx::query_as(
-        "SELECT discord_name FROM team_members \
-         WHERE discord_id = ? AND discord_name IS NOT NULL AND TRIM(discord_name) != '' \
+        "SELECT discord_name FROM turnier.team_members \
+         WHERE discord_id = $1 AND discord_name IS NOT NULL AND TRIM(discord_name) != '' \
          ORDER BY joined_at DESC, id DESC LIMIT 1",
     )
     .bind(captain_discord_id)
@@ -334,8 +344,8 @@ async fn captain_team_name(
         Some((Some(n),)) => Some(n),
         _ => {
             let from_signups: Option<(Option<String>,)> = sqlx::query_as(
-                "SELECT discord_name FROM tournament_signups \
-                 WHERE tournament_id = ? AND discord_id = ? \
+                "SELECT discord_name FROM turnier.tournament_signups \
+                 WHERE tournament_id = $1 AND discord_id = $2 \
                  AND discord_name IS NOT NULL AND TRIM(discord_name) != '' \
                  ORDER BY signed_up_at DESC, id DESC LIMIT 1",
             )
@@ -360,7 +370,7 @@ async fn captain_team_name(
 /// JSON). Spiegelt `_build_checkin_snapshot_token`. Öffentlich, damit Aufrufer
 /// (turnier-api) ihn vorab berechnen können.
 pub async fn build_checkin_snapshot_token(
-    pool: &sqlx::Pool<Sqlite>,
+    pool: &sqlx::Pool<Postgres>,
     tournament_id: i64,
     tournament_status: &str,
 ) -> TournamentResult<String> {
@@ -372,34 +382,34 @@ pub async fn build_checkin_snapshot_token(
 
 #[derive(sqlx::FromRow)]
 struct SnapshotCheckin {
-    discord_id: String,
-    checked_in_at: Option<String>,
+    discord_id: i64,
+    checked_in_at: Option<DateTime<Utc>>,
 }
 #[derive(sqlx::FromRow)]
 struct SnapshotMember {
     team_id: i64,
-    discord_id: String,
-    joined_at: Option<String>,
+    discord_id: i64,
+    joined_at: Option<DateTime<Utc>>,
     role: String,
     name: String,
-    created_at: Option<String>,
+    created_at: Option<DateTime<Utc>>,
 }
 #[derive(sqlx::FromRow)]
 struct SnapshotSignup {
     id: i64,
-    discord_id: String,
+    discord_id: i64,
     team_id: Option<i64>,
-    signed_up_at: Option<String>,
+    signed_up_at: Option<DateTime<Utc>>,
 }
 
 async fn snapshot_token_in_tx(
-    tx: &mut Transaction<'_, Sqlite>,
+    tx: &mut Transaction<'_, Postgres>,
     tournament_id: i64,
     tournament_status: &str,
 ) -> TournamentResult<String> {
     let checkins: Vec<SnapshotCheckin> = sqlx::query_as(
-        "SELECT discord_id, checked_in_at FROM tournament_checkins \
-         WHERE tournament_id = ? ORDER BY checked_in_at, id",
+        "SELECT discord_id, checked_in_at FROM turnier.tournament_checkins \
+         WHERE tournament_id = $1 ORDER BY checked_in_at, id",
     )
     .bind(tournament_id)
     .fetch_all(&mut **tx)
@@ -407,16 +417,16 @@ async fn snapshot_token_in_tx(
 
     let members: Vec<SnapshotMember> = sqlx::query_as(
         "SELECT tm.team_id, tm.discord_id, tm.joined_at, tm.role, t.name, t.created_at \
-         FROM team_members tm JOIN teams t ON t.id = tm.team_id \
-         WHERE t.tournament_id = ? ORDER BY t.created_at, t.id, tm.joined_at, tm.id",
+         FROM turnier.team_members tm JOIN turnier.teams t ON t.id = tm.team_id \
+         WHERE t.tournament_id = $1 ORDER BY t.created_at, t.id, tm.joined_at, tm.id",
     )
     .bind(tournament_id)
     .fetch_all(&mut **tx)
     .await?;
 
     let signups: Vec<SnapshotSignup> = sqlx::query_as(
-        "SELECT id, discord_id, team_id, signed_up_at FROM tournament_signups \
-         WHERE tournament_id = ? ORDER BY signed_up_at, id",
+        "SELECT id, discord_id, team_id, signed_up_at FROM turnier.tournament_signups \
+         WHERE tournament_id = $1 ORDER BY signed_up_at, id",
     )
     .bind(tournament_id)
     .fetch_all(&mut **tx)
@@ -511,45 +521,45 @@ struct TournamentRow {
 /// wie im Original.
 #[derive(Clone)]
 struct MemberData {
-    discord_id: String,
+    discord_id: i64,
     discord_name: Option<String>,
 }
 
 #[derive(Clone)]
 struct SignupData {
     id: i64,
-    discord_id: String,
+    discord_id: i64,
     discord_name: Option<String>,
     steam_id: Option<String>,
     rank: Option<String>,
     rank_score: i64,
     team_id: Option<i64>,
-    signed_up_at: Option<String>,
+    signed_up_at: Option<DateTime<Utc>>,
 }
 
 #[derive(sqlx::FromRow)]
 struct MemberRow {
     team_id: i64,
-    discord_id: String,
+    discord_id: i64,
     discord_name: Option<String>,
 }
 
 #[derive(sqlx::FromRow)]
 struct SignupRow {
     id: i64,
-    discord_id: String,
+    discord_id: i64,
     discord_name: Option<String>,
     steam_id: Option<String>,
     rank: Option<String>,
     rank_score: Option<i64>,
     team_id: Option<i64>,
-    signed_up_at: Option<String>,
+    signed_up_at: Option<DateTime<Utc>>,
 }
 
 struct CreatedTeamPlan {
     name: String,
     name_key: String,
-    captain_discord_id: String,
+    captain_discord_id: i64,
     members: Vec<SignupData>,
     team_id: Option<i64>,
 }
@@ -568,14 +578,15 @@ pub struct FinalizeCheckinParams<'a> {
 /// `finalize_checkin` 1:1 (inkl. Snapshot-Schutz, Pool-Auffüllung, Team-Bildung,
 /// optionalem Vorrücken). Eine Transaktion.
 pub async fn finalize_checkin(
-    pool: &sqlx::Pool<Sqlite>,
+    pool: &sqlx::Pool<Postgres>,
     tournament_id: i64,
     params: FinalizeCheckinParams<'_>,
 ) -> TournamentResult<FinalizeCheckinResult> {
     let mut tx = pool.begin().await?;
 
     let tournament: Option<TournamentRow> = sqlx::query_as::<_, TournamentRow>(
-        "SELECT status, team_size, tournament_mode, bracket_format FROM tournaments WHERE id = ?",
+        "SELECT status, team_size, tournament_mode, bracket_format \
+         FROM turnier.tournaments WHERE id = $1 FOR UPDATE",
     )
     .bind(tournament_id)
     .fetch_optional(&mut *tx)
@@ -607,72 +618,77 @@ pub async fn finalize_checkin(
     let team_size = tournament.team_size;
 
     // Check-ins (Reihenfolge merken).
-    let checkin_rows: Vec<(String,)> = sqlx::query_as(
-        "SELECT discord_id FROM tournament_checkins \
-         WHERE tournament_id = ? ORDER BY checked_in_at, id",
+    let checkin_rows: Vec<(i64,)> = sqlx::query_as(
+        "SELECT discord_id FROM turnier.tournament_checkins \
+         WHERE tournament_id = $1 ORDER BY checked_in_at, id",
     )
     .bind(tournament_id)
     .fetch_all(&mut *tx)
     .await?;
-    let checked_in_ids: HashSet<String> = checkin_rows.iter().map(|(d,)| d.clone()).collect();
-    let checkin_order: HashMap<String, usize> = checkin_rows
+    let checked_in_ids: HashSet<i64> = checkin_rows.iter().map(|(d,)| *d).collect();
+    let checkin_order: HashMap<i64, usize> = checkin_rows
         .iter()
         .enumerate()
-        .map(|(i, (d,))| (d.clone(), i))
+        .map(|(i, (d,))| (*d, i))
         .collect();
 
     // Teams (in stabiler Reihenfolge).
     let team_rows: Vec<(i64, String)> = sqlx::query_as(
-        "SELECT id, name FROM teams WHERE tournament_id = ? ORDER BY created_at, id",
+        "SELECT id, name FROM turnier.teams WHERE tournament_id = $1 ORDER BY created_at, id",
     )
     .bind(tournament_id)
     .fetch_all(&mut *tx)
     .await?;
     let team_order: Vec<i64> = team_rows.iter().map(|(id, _)| *id).collect();
-    let team_name_by_id: HashMap<i64, String> =
-        team_rows.iter().map(|(id, name)| (*id, name.clone())).collect();
+    let team_name_by_id: HashMap<i64, String> = team_rows
+        .iter()
+        .map(|(id, name)| (*id, name.clone()))
+        .collect();
 
     // Mitglieder je Team (stabile Reihenfolge). Es werden nur discord_id/
     // discord_name ausgewertet (siehe MemberData-Doku).
     let member_rows: Vec<MemberRow> = sqlx::query_as::<_, MemberRow>(
         "SELECT tm.team_id, tm.discord_id, tm.discord_name \
-         FROM team_members tm JOIN teams t ON t.id = tm.team_id \
-         WHERE t.tournament_id = ? ORDER BY t.created_at, t.id, tm.joined_at, tm.id",
+         FROM turnier.team_members tm JOIN turnier.teams t ON t.id = tm.team_id \
+         WHERE t.tournament_id = $1 ORDER BY t.created_at, t.id, tm.joined_at, tm.id",
     )
     .bind(tournament_id)
     .fetch_all(&mut *tx)
     .await?;
     let mut members_by_team: HashMap<i64, Vec<MemberData>> = HashMap::new();
     for row in &member_rows {
-        members_by_team.entry(row.team_id).or_default().push(MemberData {
-            discord_id: row.discord_id.clone(),
-            discord_name: row.discord_name.clone(),
-        });
+        members_by_team
+            .entry(row.team_id)
+            .or_default()
+            .push(MemberData {
+                discord_id: row.discord_id,
+                discord_name: row.discord_name.clone(),
+            });
     }
 
     // Signups (nach discord_id indexiert; Pool = Solo + eingecheckt).
     let signup_rows: Vec<SignupRow> = sqlx::query_as::<_, SignupRow>(
         "SELECT id, discord_id, discord_name, steam_id, rank, rank_score, team_id, signed_up_at \
-         FROM tournament_signups WHERE tournament_id = ? ORDER BY signed_up_at, id",
+         FROM turnier.tournament_signups WHERE tournament_id = $1 ORDER BY signed_up_at, id",
     )
     .bind(tournament_id)
     .fetch_all(&mut *tx)
     .await?;
-    let mut signups_by_discord: HashMap<String, SignupData> = HashMap::new();
-    let mut signup_iter_order: Vec<String> = Vec::new();
+    let mut signups_by_discord: HashMap<i64, SignupData> = HashMap::new();
+    let mut signup_iter_order: Vec<i64> = Vec::new();
     for row in &signup_rows {
-        signup_iter_order.push(row.discord_id.clone());
+        signup_iter_order.push(row.discord_id);
         signups_by_discord.insert(
-            row.discord_id.clone(),
+            row.discord_id,
             SignupData {
                 id: row.id,
-                discord_id: row.discord_id.clone(),
+                discord_id: row.discord_id,
                 discord_name: row.discord_name.clone(),
                 steam_id: row.steam_id.clone(),
                 rank: row.rank.clone(),
                 rank_score: row.rank_score.unwrap_or(0),
                 team_id: row.team_id,
-                signed_up_at: row.signed_up_at.clone(),
+                signed_up_at: row.signed_up_at,
             },
         );
     }
@@ -696,7 +712,7 @@ pub async fn finalize_checkin(
                 removed_members.push(RemovedPlayer {
                     team_id: *team_id,
                     team_name: team_name_by_id[team_id].clone(),
-                    discord_id: member.discord_id.clone(),
+                    discord_id: discord_id_to_string(member.discord_id),
                     discord_name: member.discord_name.clone(),
                 });
             }
@@ -724,7 +740,7 @@ pub async fn finalize_checkin(
                 .get(&a.discord_id)
                 .map(|i| *i as i64)
                 .unwrap_or(i64::MAX),
-            a.signed_up_at.clone(),
+            a.signed_up_at,
             a.id,
         );
         let kb = (
@@ -732,7 +748,7 @@ pub async fn finalize_checkin(
                 .get(&b.discord_id)
                 .map(|i| *i as i64)
                 .unwrap_or(i64::MAX),
-            b.signed_up_at.clone(),
+            b.signed_up_at,
             b.id,
         );
         ka.cmp(&kb)
@@ -751,14 +767,14 @@ pub async fn finalize_checkin(
                 break;
             };
             members.push(MemberData {
-                discord_id: signup.discord_id.clone(),
+                discord_id: signup.discord_id,
                 discord_name: signup.discord_name.clone(),
             });
             affected_team_ids.insert(*team_id);
             added_players.push(AddedPlayer {
                 team_id: Some(*team_id),
                 team_name: team_name_by_id[team_id].clone(),
-                discord_id: signup.discord_id.clone(),
+                discord_id: discord_id_to_string(signup.discord_id),
                 discord_name: signup.discord_name.clone(),
                 source: "solo_pool",
             });
@@ -768,22 +784,21 @@ pub async fn finalize_checkin(
 
     // Neue Teams aus dem Restpool.
     let existing_keys: Vec<(String,)> =
-        sqlx::query_as("SELECT name_key FROM teams WHERE tournament_id = ?")
+        sqlx::query_as("SELECT name_key FROM turnier.teams WHERE tournament_id = $1")
             .bind(tournament_id)
             .fetch_all(&mut *tx)
             .await?;
     let mut name_pool = TeamNamePool::new(existing_keys.into_iter().map(|(k,)| k));
     while pool.len() >= team_size as usize {
         let chunk: Vec<SignupData> = (0..team_size).map(|_| pool.pop_front().unwrap()).collect();
-        let captain_name =
-            captain_team_name(&mut tx, tournament_id, &chunk[0].discord_id).await?;
+        let captain_name = captain_team_name(&mut tx, tournament_id, chunk[0].discord_id).await?;
         let team_name = name_pool.from_captain(captain_name.as_deref());
         let team_name_key = name_key(&team_name);
         for signup in &chunk {
             added_players.push(AddedPlayer {
                 team_id: None,
                 team_name: team_name.clone(),
-                discord_id: signup.discord_id.clone(),
+                discord_id: discord_id_to_string(signup.discord_id),
                 discord_name: signup.discord_name.clone(),
                 source: "new_team",
             });
@@ -791,7 +806,7 @@ pub async fn finalize_checkin(
         created_teams.push(CreatedTeamPlan {
             name: team_name,
             name_key: team_name_key,
-            captain_discord_id: chunk[0].discord_id.clone(),
+            captain_discord_id: chunk[0].discord_id,
             members: chunk,
             team_id: None,
         });
@@ -838,17 +853,18 @@ pub async fn finalize_checkin(
     if params.confirm {
         // Entfernte Mitglieder löschen + Signup entkoppeln.
         for removed in &removed_members {
-            sqlx::query("DELETE FROM team_members WHERE team_id = ? AND discord_id = ?")
+            let removed_discord_id = parse_db_discord_id(&removed.discord_id)?;
+            sqlx::query("DELETE FROM turnier.team_members WHERE team_id = $1 AND discord_id = $2")
                 .bind(removed.team_id)
-                .bind(&removed.discord_id)
+                .bind(removed_discord_id)
                 .execute(&mut *tx)
                 .await?;
             sqlx::query(
-                "UPDATE tournament_signups SET team_id = NULL \
-                 WHERE tournament_id = ? AND discord_id = ?",
+                "UPDATE turnier.tournament_signups SET team_id = NULL \
+                 WHERE tournament_id = $1 AND discord_id = $2",
             )
             .bind(tournament_id)
-            .bind(&removed.discord_id)
+            .bind(removed_discord_id)
             .execute(&mut *tx)
             .await?;
             affected_team_ids.insert(removed.team_id);
@@ -857,18 +873,18 @@ pub async fn finalize_checkin(
         // Leere Teams löschen.
         for team_id in &deleted_team_ids {
             sqlx::query(
-                "UPDATE tournament_signups SET team_id = NULL \
-                 WHERE tournament_id = ? AND team_id = ?",
+                "UPDATE turnier.tournament_signups SET team_id = NULL \
+                 WHERE tournament_id = $1 AND team_id = $2",
             )
             .bind(tournament_id)
             .bind(team_id)
             .execute(&mut *tx)
             .await?;
-            sqlx::query("DELETE FROM team_members WHERE team_id = ?")
+            sqlx::query("DELETE FROM turnier.team_members WHERE team_id = $1")
                 .bind(team_id)
                 .execute(&mut *tx)
                 .await?;
-            sqlx::query("DELETE FROM teams WHERE id = ?")
+            sqlx::query("DELETE FROM turnier.teams WHERE id = $1")
                 .bind(team_id)
                 .execute(&mut *tx)
                 .await?;
@@ -883,23 +899,25 @@ pub async fn finalize_checkin(
             let Some(team_id) = added.team_id else {
                 continue;
             };
-            let Some(signup) = signups_by_discord.get(&added.discord_id) else {
+            let added_discord_id = parse_db_discord_id(&added.discord_id)?;
+            let Some(signup) = signups_by_discord.get(&added_discord_id) else {
                 continue;
             };
             sqlx::query(
-                "INSERT INTO team_members \
-                 (team_id, discord_id, discord_name, steam_id, rank, rank_score, role) \
-                 VALUES (?, ?, ?, ?, ?, ?, 'member')",
+                "INSERT INTO turnier.team_members \
+                 (team_id, discord_id, discord_name, steam_id, rank, rank_score, role, joined_at) \
+                 VALUES ($1, $2, $3, $4, $5, $6, 'member', $7)",
             )
             .bind(team_id)
-            .bind(&signup.discord_id)
+            .bind(signup.discord_id)
             .bind(&signup.discord_name)
             .bind(&signup.steam_id)
             .bind(&signup.rank)
             .bind(signup.rank_score)
+            .bind(now_utc())
             .execute(&mut *tx)
             .await?;
-            sqlx::query("UPDATE tournament_signups SET team_id = ? WHERE id = ?")
+            sqlx::query("UPDATE turnier.tournament_signups SET team_id = $1 WHERE id = $2")
                 .bind(team_id)
                 .bind(signup.id)
                 .execute(&mut *tx)
@@ -909,13 +927,15 @@ pub async fn finalize_checkin(
         // Neue Teams anlegen.
         for created_team in &mut created_teams {
             let team_row: (i64,) = sqlx::query_as(
-                "INSERT INTO teams (tournament_id, name, name_key, captain_discord_id) \
-                 VALUES (?, ?, ?, ?) RETURNING id",
+                "INSERT INTO turnier.teams \
+                     (tournament_id, name, name_key, captain_discord_id, created_at, recruitment_status) \
+                 VALUES ($1, $2, $3, $4, $5, 'open') RETURNING id",
             )
             .bind(tournament_id)
             .bind(&created_team.name)
             .bind(&created_team.name_key)
-            .bind(&created_team.captain_discord_id)
+            .bind(created_team.captain_discord_id)
+            .bind(now_utc())
             .fetch_one(&mut *tx)
             .await?;
             let new_team_id = team_row.0;
@@ -924,20 +944,21 @@ pub async fn finalize_checkin(
             for (index, signup) in created_team.members.iter().enumerate() {
                 let role = if index == 0 { "captain" } else { "member" };
                 sqlx::query(
-                    "INSERT INTO team_members \
-                     (team_id, discord_id, discord_name, steam_id, rank, rank_score, role) \
-                     VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    "INSERT INTO turnier.team_members \
+                     (team_id, discord_id, discord_name, steam_id, rank, rank_score, role, joined_at) \
+                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
                 )
                 .bind(new_team_id)
-                .bind(&signup.discord_id)
+                .bind(signup.discord_id)
                 .bind(&signup.discord_name)
                 .bind(&signup.steam_id)
                 .bind(&signup.rank)
                 .bind(signup.rank_score)
                 .bind(role)
+                .bind(now_utc())
                 .execute(&mut *tx)
                 .await?;
-                sqlx::query("UPDATE tournament_signups SET team_id = ? WHERE id = ?")
+                sqlx::query("UPDATE turnier.tournament_signups SET team_id = $1 WHERE id = $2")
                     .bind(new_team_id)
                     .bind(signup.id)
                     .execute(&mut *tx)
@@ -966,9 +987,10 @@ pub async fn finalize_checkin(
                 groups_created = group_ids.len() as i64;
                 matches_created = generate_group_matches_in_tx(&mut tx, tournament_id).await?;
                 let res = sqlx::query(
-                    "UPDATE tournaments SET status = 'group_phase', updated_at = datetime('now') \
-                     WHERE id = ? AND status = 'checkin'",
+                    "UPDATE turnier.tournaments SET status = 'group_phase', updated_at = $1 \
+                     WHERE id = $2 AND status = 'checkin'",
                 )
+                .bind(now_utc())
                 .bind(tournament_id)
                 .execute(&mut *tx)
                 .await?;
@@ -976,7 +998,7 @@ pub async fn finalize_checkin(
             } else {
                 super::clear_bracket_tree(&mut tx, tournament_id).await?;
                 let seeded: Vec<(i64,)> = sqlx::query_as(
-                    "SELECT id FROM teams WHERE tournament_id = ? ORDER BY created_at, id",
+                    "SELECT id FROM turnier.teams WHERE tournament_id = $1 ORDER BY created_at, id",
                 )
                 .bind(tournament_id)
                 .fetch_all(&mut *tx)
@@ -993,13 +1015,13 @@ pub async fn finalize_checkin(
                     )
                     .await?;
                 } else {
-                    matches_created =
-                        build_seeded_bracket(&mut tx, tournament_id, entries).await?;
+                    matches_created = build_seeded_bracket(&mut tx, tournament_id, entries).await?;
                 }
                 let res = sqlx::query(
-                    "UPDATE tournaments SET status = 'bracket', updated_at = datetime('now') \
-                     WHERE id = ? AND status = 'checkin'",
+                    "UPDATE turnier.tournaments SET status = 'bracket', updated_at = $1 \
+                     WHERE id = $2 AND status = 'checkin'",
                 )
+                .bind(now_utc())
                 .bind(tournament_id)
                 .execute(&mut *tx)
                 .await?;
@@ -1043,7 +1065,7 @@ pub async fn finalize_checkin(
         remaining_solo_players: pool
             .iter()
             .map(|s| SoloPlayer {
-                discord_id: s.discord_id.clone(),
+                discord_id: discord_id_to_string(s.discord_id),
                 discord_name: s.discord_name.clone(),
             })
             .collect(),
@@ -1078,34 +1100,35 @@ pub async fn finalize_checkin(
 /// Setzt den Captain eines Teams auf das (nach joined_at, id) erste Mitglied.
 /// Portiert `_sync_team_captain`.
 async fn sync_team_captain(
-    tx: &mut Transaction<'_, Sqlite>,
+    tx: &mut Transaction<'_, Postgres>,
     team_id: i64,
 ) -> TournamentResult<()> {
-    let members: Vec<(String,)> = sqlx::query_as(
-        "SELECT discord_id FROM team_members WHERE team_id = ? ORDER BY joined_at, id",
+    let members: Vec<(i64,)> = sqlx::query_as(
+        "SELECT discord_id FROM turnier.team_members WHERE team_id = $1 ORDER BY joined_at, id",
     )
     .bind(team_id)
     .fetch_all(&mut **tx)
     .await?;
-    let captain_id = members.first().map(|(d,)| d.clone()).unwrap_or_default();
+    let captain_id = members.first().map(|(d,)| *d);
 
-    sqlx::query("UPDATE team_members SET role = 'member' WHERE team_id = ?")
+    sqlx::query("UPDATE turnier.team_members SET role = 'member' WHERE team_id = $1")
         .bind(team_id)
         .execute(&mut **tx)
         .await?;
-    if !captain_id.is_empty() {
+    if let Some(captain_id) = captain_id {
         sqlx::query(
-            "UPDATE team_members SET role = 'captain' WHERE team_id = ? AND discord_id = ?",
+            "UPDATE turnier.team_members SET role = 'captain' WHERE team_id = $1 AND discord_id = $2",
         )
         .bind(team_id)
-        .bind(&captain_id)
+        .bind(captain_id)
         .execute(&mut **tx)
         .await?;
+
+        sqlx::query("UPDATE turnier.teams SET captain_discord_id = $1 WHERE id = $2")
+            .bind(captain_id)
+            .bind(team_id)
+            .execute(&mut **tx)
+            .await?;
     }
-    sqlx::query("UPDATE teams SET captain_discord_id = ? WHERE id = ?")
-        .bind(&captain_id)
-        .bind(team_id)
-        .execute(&mut **tx)
-        .await?;
     Ok(())
 }

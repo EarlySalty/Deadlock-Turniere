@@ -13,8 +13,10 @@
 use rand::seq::SliceRandom;
 use rand::Rng;
 use serde_json::{json, Value};
+use sqlx::{Postgres, QueryBuilder};
 
-use turnier_core::TournamentGameMode;
+use turnier_core::{discord_id_to_string, TournamentGameMode};
+use turnier_db::dynamic_sql::push_i64_bind_list;
 use turnier_db::Pool;
 
 use crate::error::MatchError;
@@ -68,9 +70,15 @@ fn objective_label(code: &str) -> Option<&'static str> {
 pub fn resolve_match_objective(match_objective: Option<&str>, team_size: i64) -> (String, String) {
     let mut code = match_objective.unwrap_or("auto").trim().to_lowercase();
     if code == "auto" {
-        code = if team_size <= 2 { "first_walker".to_string() } else { "base".to_string() };
+        code = if team_size <= 2 {
+            "first_walker".to_string()
+        } else {
+            "base".to_string()
+        };
     }
-    let label = objective_label(&code).map(|s| s.to_string()).unwrap_or_else(|| code.clone());
+    let label = objective_label(&code)
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| code.clone());
     (code, label)
 }
 
@@ -107,12 +115,23 @@ pub struct ModeParticipant {
     pub team_name: Option<String>,
 }
 
+#[derive(Debug, sqlx::FromRow)]
+struct ModeParticipantRow {
+    team_id: i64,
+    discord_id: i64,
+    discord_name: Option<String>,
+    team_name: Option<String>,
+}
+
 impl ModeParticipant {
     /// Anzeigename mit der Präzedenz des Originals
     /// (`discord_name` ∨ `team_name` ∨ `discord_id` ∨ `"Unbekannt"`).
     /// Portiert `_display_name`.
     fn display_name(&self) -> String {
-        for v in [&self.discord_name, &self.team_name, &self.discord_id].into_iter().flatten() {
+        for v in [&self.discord_name, &self.team_name, &self.discord_id]
+            .into_iter()
+            .flatten()
+        {
             if !v.is_empty() {
                 return v.clone();
             }
@@ -158,7 +177,9 @@ pub fn compute_assignments<R: Rng + ?Sized>(rng: &mut R, ctx: &ModeContext) -> M
         }
 
         TournamentGameMode::AllSame => {
-            let hero_name = *hero_names().choose(rng).expect("Heldenliste ist nicht leer");
+            let hero_name = *hero_names()
+                .choose(rng)
+                .expect("Heldenliste ist nicht leer");
             let mut players = serde_json::Map::new();
             for p in &ctx.participants {
                 if let Some(did) = p.non_empty_discord_id() {
@@ -190,7 +211,11 @@ pub fn compute_assignments<R: Rng + ?Sized>(rng: &mut R, ctx: &ModeContext) -> M
             let allow_duplicates = player_ids.len() > hero_names().len();
             let selected: Vec<&'static str> = if allow_duplicates {
                 (0..player_ids.len())
-                    .map(|_| *hero_names().choose(rng).expect("Heldenliste ist nicht leer"))
+                    .map(|_| {
+                        *hero_names()
+                            .choose(rng)
+                            .expect("Heldenliste ist nicht leer")
+                    })
                     .collect()
             } else {
                 pick_unique_heroes(rng, player_ids.len())
@@ -206,7 +231,10 @@ pub fn compute_assignments<R: Rng + ?Sized>(rng: &mut R, ctx: &ModeContext) -> M
                 .filter(|p| p.non_empty_discord_id().is_some())
                 .map(|p| {
                     let did = p.non_empty_discord_id().unwrap();
-                    let hero = player_assignments.get(did).and_then(|v| v.as_str()).unwrap_or("");
+                    let hero = player_assignments
+                        .get(did)
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("");
                     format!("{}: {}", p.display_name(), hero)
                 })
                 .collect();
@@ -240,7 +268,9 @@ pub fn compute_assignments<R: Rng + ?Sized>(rng: &mut R, ctx: &ModeContext) -> M
 /// als Dict-Key; `None` → `"None"`, was im Original durch das f-string ebenso
 /// entstünde, in der Praxis aber nur bei gesetzten Teams aufgerufen wird).
 fn id_key(team_id: Option<i64>) -> String {
-    team_id.map(|v| v.to_string()).unwrap_or_else(|| "None".to_string())
+    team_id
+        .map(|v| v.to_string())
+        .unwrap_or_else(|| "None".to_string())
 }
 
 /// Lädt den Modus-Kontext aus der DB und berechnet die Assignments.
@@ -270,21 +300,21 @@ async fn load_match_mode_context(
         MatchKind::Group => sqlx::query(
             "SELECT t.tournament_game_mode AS mode, gm.team1_id, gm.team2_id, \
                     team1.name AS team1_name, team2.name AS team2_name \
-             FROM tournaments t \
-             JOIN groups g ON g.tournament_id = t.id \
-             JOIN group_matches gm ON gm.group_id = g.id \
-             LEFT JOIN teams team1 ON team1.id = gm.team1_id \
-             LEFT JOIN teams team2 ON team2.id = gm.team2_id \
-             WHERE t.id = ? AND gm.id = ?",
+             FROM turnier.tournaments t \
+             JOIN turnier.groups g ON g.tournament_id = t.id \
+             JOIN turnier.group_matches gm ON gm.group_id = g.id \
+             LEFT JOIN turnier.teams team1 ON team1.id = gm.team1_id \
+             LEFT JOIN turnier.teams team2 ON team2.id = gm.team2_id \
+             WHERE t.id = $1 AND gm.id = $2",
         ),
         MatchKind::Bracket => sqlx::query(
             "SELECT t.tournament_game_mode AS mode, bm.team1_id, bm.team2_id, \
                     team1.name AS team1_name, team2.name AS team2_name \
-             FROM tournaments t \
-             JOIN bracket_matches bm ON bm.tournament_id = t.id \
-             LEFT JOIN teams team1 ON team1.id = bm.team1_id \
-             LEFT JOIN teams team2 ON team2.id = bm.team2_id \
-             WHERE t.id = ? AND bm.id = ?",
+             FROM turnier.tournaments t \
+             JOIN turnier.bracket_matches bm ON bm.tournament_id = t.id \
+             LEFT JOIN turnier.teams team1 ON team1.id = bm.team1_id \
+             LEFT JOIN turnier.teams team2 ON team2.id = bm.team2_id \
+             WHERE t.id = $1 AND bm.id = $2",
         ),
     }
     .bind(tournament_id)
@@ -306,25 +336,21 @@ async fn load_match_mode_context(
     let participants = if team_ids.is_empty() {
         Vec::new()
     } else {
-        let placeholders = std::iter::repeat_n("?", team_ids.len()).collect::<Vec<_>>().join(", ");
-        let sql = format!(
+        let mut query = QueryBuilder::<Postgres>::new(
             "SELECT tm.team_id, tm.discord_id, tm.discord_name, t.name AS team_name \
-             FROM team_members tm \
-             JOIN teams t ON t.id = tm.team_id \
-             WHERE tm.team_id IN ({placeholders}) \
-             ORDER BY tm.team_id, tm.joined_at, tm.id",
+             FROM turnier.team_members tm \
+             JOIN turnier.teams t ON t.id = tm.team_id \
+             WHERE tm.team_id IN ",
         );
-        let mut query = sqlx::query(&sql);
-        for id in &team_ids {
-            query = query.bind(id);
-        }
-        let rows = query.fetch_all(pool).await?;
+        push_i64_bind_list(&mut query, team_ids);
+        query.push(" ORDER BY tm.team_id, tm.joined_at, tm.id");
+        let rows: Vec<ModeParticipantRow> = query.build_query_as().fetch_all(pool).await?;
         rows.into_iter()
             .map(|r| ModeParticipant {
-                team_id: r.get("team_id"),
-                discord_id: r.get("discord_id"),
-                discord_name: r.get("discord_name"),
-                team_name: r.get("team_name"),
+                team_id: r.team_id,
+                discord_id: Some(discord_id_to_string(r.discord_id)),
+                discord_name: r.discord_name,
+                team_name: r.team_name,
             })
             .collect()
     };
@@ -335,10 +361,12 @@ async fn load_match_mode_context(
     // ohnehin nicht durchschlägt, vereinheitlichen wir auf den Fallback —
     // identische Wirkung, weil announcement_lines bei leeren Teams nie die
     // Namen verwenden).
-    let team1_label =
-        team1_name.filter(|s| !s.is_empty()).unwrap_or_else(|| format!("Team {}", id_key(team1_id)));
-    let team2_label =
-        team2_name.filter(|s| !s.is_empty()).unwrap_or_else(|| format!("Team {}", id_key(team2_id)));
+    let team1_label = team1_name
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| format!("Team {}", id_key(team1_id)));
+    let team2_label = team2_name
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| format!("Team {}", id_key(team2_id)));
 
     Ok(ModeContext {
         mode,
@@ -410,7 +438,10 @@ mod tests {
         };
         let mut rng = StdRng::seed_from_u64(1);
         let out = compute_assignments(&mut rng, &ctx);
-        assert_eq!(out.convars.get("citadel_allow_duplicate_heroes"), Some(&json!(1)));
+        assert_eq!(
+            out.convars.get("citadel_allow_duplicate_heroes"),
+            Some(&json!(1))
+        );
         assert_eq!(out.announcement_lines.len(), 2);
         let teams = &out.hero_assignments["teams"];
         assert!(teams.get("10").is_some());

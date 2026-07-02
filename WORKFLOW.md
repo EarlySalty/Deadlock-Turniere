@@ -2,6 +2,399 @@
 
 ---
 
+## Neue Aufgabe (2026-07-02): Rework T13-Kritiker — 4 Befunde
+
+### Ziel
+- Vier Abschluss-Kritiker-Befunde praezise fixen: atomare Status-/Gruppen-/Bracket-Transition, Single-Active-Advisory-Lock, Steam-Bridge-Fallback, Cutover-Runbook-Korrektur.
+- Workspace-weite Verifikation ausfuehren; kein Commit/Push.
+
+### Fortschritt
+- `WORKFLOW.md`, Git-Status und betroffene Scheduler-/Engine-/API-/Steam-/Doku-Dateien gelesen; bestehende uncommitted T13-Aenderungen bleiben erhalten.
+- Engine-Gruppenfunktionen als `_in_tx`-Varianten exportiert und Scheduler-Statuswechsel so umgebaut, dass Status-CAS, Gruppen-/Bracket-Erzeugung, Audit und Punkte-Recompute in einer DB-Transaktion laufen.
+- Gemeinsamer `pg_advisory_xact_lock` fuer Single-Active-Tournament eingefuehrt; Scheduler-Transition und Admin-Helfer nutzen denselben Lock-Key vor der Active-Pruefung.
+- Steam-Bridge-Open degradiert bei Connect-Fehlern mit Warning zu `None`; Cutover-Runbook behauptet keinen bereits erfolgreichen `--check`-Boot mehr.
+- Regressionstests ergaenzt: parallele Gruppenphase-Erzeugung erzeugt Gruppen/Matches nur einmal; parallele Registration-Aktivierung erlaubt nur ein aktives Nicht-Test-Turnier; Steam-Bridge-Open degradiert bei existierendem, aber unoefnnbarem Pfad.
+- Workspace-Verifikation gruen: `SQLX_OFFLINE=true cargo build --workspace`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo fmt --check`.
+- Workspace-Test gruen via zentralem Wegwerf-PG-Wrapper: `cargo test --workspace --features testing -- --include-ignored` (280 Tests, 0 fehlgeschlagen).
+
+### Status (2026-07-02)
+-> **Abgeschlossen fuer GPT-Worker** — Review durch Claude ausstehend
+
+---
+
+## Neue Aufgabe (2026-07-02): Abschluss-Kritiker SP4 Turniere T0-T13
+
+### Ziel
+- Unabhaengiger Review ohne Codeaenderungen des kompletten SP4-Turniere-Backends mit Fokus auf T9 Scheduler, T12 Composition Root, T13 Steam-Rank-Cache, Cross-Ticket-Integration, SQLite-Bridge-Abgrenzung, Kritiker-Checkliste und Cutover-Runbook.
+- Keine Commits, keine Service-Restarts, keine Secret-Ausgabe.
+
+### Fortschritt
+- `WORKFLOW.md`, Branch und Working-Tree-Status gelesen; bestehende uncommitted Aenderungen bleiben unangetastet.
+- T9 Scheduler (`transition.rs`, `reminders.rs`, `time.rs`, `loop_runner.rs`) vollstaendig gelesen; Punkte-Recompute laeuft in derselben Transaktion mit Advisory-Xact-Lock, aber Status-Seiteneffekte und Single-Active-Pruefung haben offene Concurrency-Risiken.
+- T12 Composition Root (`turnier-bot`, `AppState`, `turnier-config`, `turnier-db`) gelesen; `--check` startet keinen Scheduler und wird vom Test-DB-Confirm-Guard nicht blockiert.
+- T13 Rank-Cache/Resolver/Bridge und `resolver_db.rs` gelesen; `rank_cache` ist PG/`turnier.*`, externe Steam-Bridge bleibt separate SQLite-Worker-DB.
+- Cutover-Runbook und echte systemd-User-Unit read-only geprueft; kein Restart, keine Secret-Ausgabe, keine Cargo-Verifikation neu ausgefuehrt.
+- Review abgeschlossen; Findings werden an Claude zurueckgegeben.
+
+---
+
+## Neue Aufgabe (2026-07-02): SP4 T13 Workspace-Barriere + Cutover-Handoff
+
+### Ziel
+- Workspace-weit sicherstellen, dass die Turniere-Portierung PG-only kompiliert/testet.
+- Bekannten `connect_str`-Altbestand in `turnier-steam`-Tests und weitere SQLite-Aera-API-Reste suchen/fixen.
+- Cutover-Runbook pruefen/ergaenzen; keine Live-Restarts, keine Freigaben, kein Commit/Push.
+
+### Fortschritt
+- T13-Planabschnitt, Kritiker-Checkliste, `WORKFLOW.md` und Git-Status gelesen; bestehende untracked Audit-Datei bleibt unangetastet.
+- Bekannter `turnier-steam/tests/resolver_db.rs`-Bruch behoben: Test nutzt jetzt `turnier_db::test_pool()`/zentrale Wegwerf-PG-DB statt `connect_str` + SQLite-Migration.
+- Zusatzaudit-Fund behoben: `turnier-steam::RankCache` nutzte noch unqualifizierte SQLite-SQL gegen `turnier_db::Pool`; jetzt `turnier."rank_cache"`, `$n`-Binds, BIGINT-Discord-ID und TIMESTAMPTZ-TTL.
+- Zielcheck `turnier-steam`: `cargo build -p turnier-steam --features testing`, `cargo test -p turnier-steam --features testing -- --include-ignored` via zentralem Test-DB-Wrapper und `cargo fmt --check -p turnier-steam` gruen.
+- `rg`-SQLite-Audit wiederholt; verbleibende Treffer sind Legacy-Doku/-Migrationen, `DATABASE_PATH`-Fence-Kommentare, externe Steam-Bridge-SQLite-Flaechen oder ein alter Kommentarname.
+- Schemaqualifikations-Heuristik gegen alle `turnier`-Tabellen in Rust-Queries: keine nackten `FROM`/`JOIN`/`INSERT`/`UPDATE`-Zieltabellen gefunden.
+- `cargo sqlx prepare --workspace -- --all-targets --all-features` via Wegwerf-Zentral-DB gruen; `.sqlx`-Workspace-Cache neu erzeugt.
+- `SQLX_OFFLINE=true cargo build --workspace` gruen.
+- Vollverifikation gruen: `cargo test --workspace --features testing -- --include-ignored` via zentralem Wegwerf-PG-Wrapper, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo fmt --check`.
+- systemd-Metadaten read-only geprueft: echter User-Service `deadlock-turniere.service`, Drop-in `30-rust-cutover.conf` zeigt auf `scripts/run_turniere_backend_rust.sh`; kein Restart ausgefuehrt.
+- `rust/docs/cutover.md` um T13-Handoff-Barriere ergaenzt: vorheriges Release-Binary + SQLite-Datei als Rollback-Artefakte, `DEADLOCK_CENTRAL_DSN` nur via Infisical, Service-Restart nur nach expliziter Freigabe.
+- Read-only Daten-Gegenprobe ueber Infisical-geladene zentrale DSN: `turnier`-Schema vorhanden, 37/37 erwartete Tabellen vorhanden, 0 fehlend; Counts fuer `tournaments`, `teams`, `team_members`, `tournament_signups`, `bracket_matches`, `group_matches`, `rank_cache`, `player_points`, `sessions`, `user_profiles`, `user_consents` matchen die SP1-Erwartung.
+
+---
+
+## Neue Aufgabe (2026-07-02): SP4 T12 turnier-bot Composition Root
+
+### Ziel
+- `turnier-bot` als Composition Root auf zentrale Postgres-DB verdrahten.
+- `DATABASE_PATH` aus dem Rust-Produktivpfad entfernen/als Legacy abgrenzen; `DEADLOCK_CENTRAL_DSN` ist Pflicht.
+- Kein produktiver `run_migrations`-Aufruf gegen die zentrale DB, kein DSN-/DB-Pfad-Logging, kein Commit/Push.
+
+### Fortschritt
+- T12-Planabschnitt, `WORKFLOW.md`, `turnier-bot`, `turnier-config`, `turnier-db`, `AppState` und relevante Doku gelesen.
+- Befund: `turnier-db::connect_central()` existiert bereits und nutzt `dl_central_db::dsn_from_env()` + `connect_pool()`; `run_migrations()` ist im PG-Pfad ein No-op.
+- Befund: `--check` wuerde im Ist-Zustand den Scheduler starten; das muss fuer den Smoke-Pfad ohne mutierende Checks umgebaut werden.
+- `turnier-bot` nutzt jetzt `turnier_db::connect_central()`; DB-Pfad-/DSN-Logging und produktiver `run_migrations()`-Aufruf sind aus dem Startpfad entfernt.
+- `--check` baut Config, zentralen Pool, AppState, Scheduler-Objekt und Router, startet aber keinen Scheduler-Loop und serviert nicht.
+- `turnier-config` enthaelt keinen `database_path` mehr; `DATABASE_PATH` ist dokumentiert als Python-/SQLite-Legacy, `DEADLOCK_CENTRAL_DSN` als Pflicht fuer Rust.
+- Python-Fence dokumentiert in README, `rust/docs/db-contract.md`, `rust/docs/architecture.md` und `rust/docs/cutover.md`; Rust-Launcher bricht ohne `DEADLOCK_CENTRAL_DSN` ab.
+- Verifikation: `cargo build -p turnier-bot --bin turnier-bot` gruen.
+- Verifikation: `cargo clippy -p turnier-bot --all-targets -- -D warnings` gruen.
+- Verifikation: `cargo fmt --check -p turnier-bot` gruen.
+- Kein `cargo run -p turnier-bot -- --check` gegen Live-/Produktiv-DB ausgefuehrt; kein Commit/Push.
+
+### Status (2026-07-02)
+-> **Abgeschlossen fuer GPT-Worker** — Review durch Claude ausstehend
+
+---
+
+## Neue Aufgabe (2026-07-02): SP4 T10+T11 turnier-api zentrale Postgres
+
+### Ziel
+- `turnier-api` vollstaendig von alter SQLite-/`turnier-db`-Semantik auf zentrale `turnier.*`-Postgres-Tabellen portieren.
+- T10 Public/Account/Consent/Leaderboard und T11 Admin/Test/Ops/Loaders in einem Rutsch umsetzen, weil die Crate erst danach wieder kompilierbar ist.
+- Keine Secrets ausgeben, kein Commit/Push; bestehende untracked Audit-Datei bleibt unangetastet.
+
+### Kritiker-Review (2026-07-02)
+- Unabhaengige statische Review des uncommitted `turnier-api`-Diffs gestartet; Fokus Test-Mode-Wipe/Seed, Admin-Auth, Konflikt-Semantik, Consent-Patch, Discord-ID-Grenzen, `team_id=0` und Caster-Assign.
+- Review abgeschlossen: keine Code-Aenderungen an `turnier-api`; Findings betreffen Test-Mode-Guard, Unique-Konflikt-Mapping und orphan Cleanup bei Team-/Turnier-Deletes.
+
+### Rework (2026-07-02)
+- Befund 1: Test-Mode-Wipe/Seed braucht zusaetzlich `TURNIER_TEST_DB_CONFIRM=throwaway-only`; Wegwerf-DB-Harness setzt den Sentinel.
+- Befund 2: `23505`-Unique-Verletzungen werden zentral auf `409 Conflict` gemappt und in Public Signup/Team/Helper/Invitation-Pfaden getestet.
+- Befund 3: Team-/Turnier-Deletes entfernen `team_applications` und `team_invitations` vor dem Team-Loeschen; Regressionstests decken Admin-Turnier, Admin-Team und Public-Team-Aufloesung ab.
+- Rework-Verifikation gruen: Build, Clippy, Fmt und volle `turnier-api`-Testsuite via zentralem Wegwerf-Postgres-Harness.
+
+### Status (2026-07-02)
+-> **Abgeschlossen fuer GPT-Worker** — Review durch Claude ausstehend
+
+### Fortschritt
+- `WORKFLOW.md`, Git-Status und SP4-Planabschnitte T10/T11 gelesen.
+- `turnier-api` kompiliert nach erster Public/Test-Mode-Typmigration wieder, aber SQL-Audit zeigt noch alte SQLite-Runtime-Queries in Consent/Leaderboard/Operations/Public und Admin-Routen; Portierung laeuft weiter.
+- Public/Consent/Leaderboard/Operations/Admin/Test-Mode/Loaders auf `turnier.*`, `$n`-Binds, PG-Bools/JSONB/TIMESTAMPTZ und BIGINT-Discord-IDs umgestellt; `draft.rs`-Nebenrouter ebenfalls von altem Bracket-Match-SQL befreit.
+- Gemeinsamer `db`-Mapper fuer Discord-ID-Parsing/-Serialisierung, Zeit-/JSONB-Wire-Mapping und Admin-Captain-Kompatibilitaet (`0` intern, leerer String HTTP) ergaenzt.
+- Consent-Upsert nutzt `ON CONFLICT`; Profil-Patch laeuft ueber QueryBuilder mit statischer Spalten-Whitelist.
+- Test-Mode-Wipe/Seed loescht in FK-sicherer Reihenfolge und verweigert mutierende Pfade, wenn `CENTRAL_TEST_DSN` und aktive DSN nicht die gleiche Wegwerf-DB bezeichnen.
+- Neue PG-Integrationstests ergaenzt: Consent/Profile/Delete-Guard, Signup, Team-Join/Leave, Invitation-Autoaccept, Leaderboard-Profil, Admin-Tournament Create/Update, Test-Seed/Wipe/Simulate, Operations Confirm/Reject.
+- Offener Test-Gap: Caster-Assign-Route ist nicht deterministisch testbar, solange `AppState` keinen Notifier-Mock fuer Discord-Rollenmitglieder injiziert.
+- SQL-Audit gegen `turnier-api/src` und Tests: keine alten `INSERT OR`, `datetime('now')`, unqualifizierten Zieltabellen oder SQLite-Placeholder in Runtime-Queries gefunden.
+- Verifikation: `cargo build -p turnier-api` gruen.
+- Verifikation: `cargo clippy -p turnier-api --all-targets -- -D warnings` gruen.
+- Verifikation: `cargo fmt --check -p turnier-api` gruen.
+- Verifikation: `../Deadlock-Bots/rust/scripts/central_test_db.sh bash -lc 'cd /home/naniadm/Documents/Deadlock-Turniere/rust && cargo test -p turnier-api --features testing -- --include-ignored'` gruen (20 Integrationstests: 7 `automatik_routes`, 13 `central_routes`).
+- Kein Commit/Push, keine Dienste neu gestartet, keine Secret-Werte ausgegeben.
+
+---
+
+## Neue Aufgabe (2026-07-01): SP4 T9 turnier-scheduler zentrale Postgres
+
+### Ziel
+- `turnier-scheduler` auf zentrale `turnier.*`-Postgres-Tabellen portieren.
+- Reminder-Dedupe, Reminder-Offsets, Phasen-CAS, Punkte-Recompute und Test-Turnier-Skips mit PG-Typen absichern.
+- Keine Secrets ausgeben, kein Commit/Push.
+
+### Status (2026-07-01)
+-> **Abgeschlossen fuer GPT-Worker** — Review durch Claude ausstehend
+
+### Fortschritt
+- `WORKFLOW.md`, T9-Planabschnitt, Scheduler-Code, Scheduler-Tests und zentrales `0009_turnier.sql` gelesen.
+- Ausgangsstand: Branch `central-postgres-sp4`; nur vorbestehende untracked Audit-Datei ausserhalb T9 sichtbar.
+- Scheduler-Queries auf `turnier.*`, `$n`-Binds, PG-Bools, JSONB-Reminder-Offsets und `DateTime<Utc>` umgestellt; keine String-Zeitstempel/`datetime('now')` im Scheduler-Persistenzpfad.
+- Reminder-Dedupe nutzt `ON CONFLICT DO NOTHING`; dynamische Reminder-Tabellennamen laufen weiter nur ueber `turnier_db::dynamic_sql::ReminderDedupeTable`.
+- Statuswechsel behaelt den CAS `WHERE id = $n AND status = $n`; Audit schreibt `user_id BIGINT`, JSONB-Details und `created_at`.
+- `completed`-Recompute bleibt in der Scheduler-Transaktion und nutzt die in T8 serialisierte Engine-Funktion ohne zusaetzliche Scheduler-Locks.
+- Scheduler-Tests auf zentrale Wegwerf-PG-DB migriert und erweitert: Registration-/Start-/Match-Reminder-Dedupe, Test-Turnier-Skip, completed->points-Recompute und Recompute-Rollback.
+- Verifikation: `cargo build -p turnier-scheduler` gruen.
+- Verifikation: `cargo clippy -p turnier-scheduler --all-targets -- -D warnings` gruen.
+- Verifikation: `cargo fmt --check -p turnier-scheduler` gruen.
+- Verifikation: `../Deadlock-Bots/rust/scripts/central_test_db.sh bash -lc 'cd /home/naniadm/Documents/Deadlock-Turniere/rust && cargo test -p turnier-scheduler --features testing -- --include-ignored'` gruen.
+- Kein Commit/Push, keine Dienste neu gestartet, keine Secret-Werte ausgegeben.
+
+---
+
+## Neue Aufgabe (2026-07-01): Rework SP4 T8 Tiebreaker + Concurrency-Guards
+
+### Ziel
+- Kritiker-Befunde in `turnier-engine::persist` beheben: deterministische Gruppen-Top-2, Check-in-Zeilenlock und globaler Points-Recompute-Lock.
+- Bestehende uncommitted T8-Aenderungen erhalten; kein Commit/Push.
+
+### Status (2026-07-01)
+-> **Abgeschlossen fuer GPT-Worker** — Review durch Claude ausstehend
+
+### Fortschritt
+- `WORKFLOW.md`, Git-Status und relevante Persistenz-/Testdateien gelesen.
+- Ranking-Queries in `bracket.rs`/`groups.rs`/`double_elim.rs` per `rg` geprueft; einzige unvollstaendige Top-2-DB-Sortierung liegt in `bracket.rs`.
+- `bracket.rs`: Gruppen-IDs und Gruppen-Top-2 deterministisch geordnet (`seeding_order, id` sowie `points DESC, wins DESC, id ASC, team_id ASC`); flache Qualifier-Sortierung nutzt explizit die urspruengliche Reihenfolge als weiteren Fallback.
+- `checkin.rs`: initialer Tournament-Snapshot in `finalize_checkin` nimmt jetzt `FOR UPDATE` innerhalb der Transaktion.
+- `points.rs`: globaler `player_points`-Recompute nimmt am Anfang der Transaktion einen benannten `pg_advisory_xact_lock`.
+- Regressionstest ergaenzt: Punkte-/Wins-Gleichstand in einer Gruppe waehlt deterministisch die ersten `group_teams`-Zeilen.
+- Verifikation: `cargo build -p turnier-engine` gruen.
+- Verifikation: `cargo clippy -p turnier-engine --all-targets -- -D warnings` gruen.
+- Verifikation: `cargo fmt --check -p turnier-engine` gruen.
+- Verifikation: `../Deadlock-Bots/rust/scripts/central_test_db.sh bash -lc 'cd /home/naniadm/Documents/Deadlock-Turniere/rust && cargo test -p turnier-engine --features testing -- --include-ignored'` gruen (40 Tests).
+- Zusatzcheck: `git diff --check -- rust/crates/turnier-engine/src/persist/bracket.rs rust/crates/turnier-engine/src/persist/checkin.rs rust/crates/turnier-engine/src/persist/points.rs rust/crates/turnier-engine/tests/engine_cross_seeding.rs WORKFLOW.md` gruen.
+- Kein Commit/Push, keine Dienste neu gestartet, keine Secret-Werte ausgegeben.
+
+---
+
+## Neue Aufgabe (2026-07-01): Kritiker-Review SP4 T8 turnier-engine
+
+### Ziel
+- Uncommitted T8-Diff von `turnier-engine::persist` gegen `HEAD` vollstaendig lesen und auf echte Portierungsbugs pruefen.
+- Fokus: Generator-ID-Reihenfolge, Points-Recompute, Check-in-Transaktionen/Concurrency, PG-Bools/JSONB, Double-Elim-/Advance-Propagation und Testabdeckung.
+- Keine Codeaenderungen an Produktiv-/Testcode, kein Commit/Push.
+
+### Status (2026-07-01)
+→ **Abgeschlossen** — Review-Befunde an Claude zurueckzugeben
+
+### Fortschritt
+- `WORKFLOW.md`, Git-Status, Branch und Basis-Commit gelesen; bestehende uncommitted Aenderungen bleiben unangetastet.
+- Vollstaendigen T8-Diff der `turnier-engine::persist`-Dateien und migrierte Engine-Tests gegen `HEAD` gelesen; zentrale PG-Schema-Definition `0009_turnier.sql` fuer Typ-/Constraint-Abgleich geprueft.
+- Befund 1: `finalize_checkin` validiert den Snapshot nur einmal und schuetzt die danach gelesenen Check-ins/Signups/Teams unter Postgres nicht gegen parallele Mutationen; der spaete Status-CAS deckt nur Statuswechsel ab.
+- Befund 2: `recalculate_player_points_in_tx` macht globales `DELETE` + per-Spieler-`INSERT` ohne PG-weite Serialisierung; parallele Recomputes koennen auf dem `player_points`-PK kollidieren und einen Completed-Statuswechsel zurueckrollen.
+- Befund 3: Bracket-Qualifikation aus `group_teams` bricht Punkte/Wins-Gleichstaende ohne stabilen Tie-Breaker (`id`/Seed); Postgres darf dadurch andere Top-2/Seeding-Reihenfolgen liefern als die faktische SQLite-Rowid-Reihenfolge.
+- Geprueft: sequenzielle `RETURNING id`-Nutzung in Bracket-/Group-/Double-Elim-Generatoren, PG-Bools/JSONB, Mini-Group-JSONB, Double-Elim-Propagation, Advance-Propagation und Testabdeckung.
+- Verifikation: `git diff --check HEAD -- rust/crates/turnier-engine/src/persist rust/crates/turnier-engine/tests` gruen; keine Cargo-Tests neu ausgefuehrt, da Review statisch war und externe T8-Verifikation bereits vorlag.
+
+---
+
+## Neue Aufgabe (2026-07-01): SP4 T8 turnier-engine zentrale Postgres
+
+### Ziel
+- `turnier-engine::persist` von SQLite auf zentrale Postgres-Tabellen unter `turnier.*` portieren.
+- Check-in-Finalisierung, Gruppen-/Bracket-/Mini-Group-/Double-Elim-Generatoren und Points-Recompute mit PG-Typen testen.
+- Keine Secrets ausgeben, kein Commit/Push.
+
+### Status (2026-07-01)
+→ **Abgeschlossen fuer GPT-Worker** — Review durch Claude ausstehend
+
+### Fortschritt
+- `WORKFLOW.md`, T8-Planabschnitt, zentrale `0009_turnier.sql`, bestehende Engine-Persistenz, T7-`turnier-match`-PG-Muster und Aufrufer per `rg` gelesen.
+- `turnier-engine::persist` auf `Pool<Postgres>`/`Transaction<'_, Postgres>`, `turnier.*`, `$n`-Binds, PG-Bools, JSONB und `DateTime<Utc>` umgestellt; Discord-IDs werden an der DB-Grenze `String <-> i64` konvertiert.
+- Generatoren nutzen `RETURNING id` und explizite Reihenfolgen statt SQLite-Rowid-Annahmen; `on_stream` ist echtes `BOOLEAN`.
+- Engine-Tests auf zentrale Wegwerf-PG-DB (`turnier-db/testing`) migriert; Rollback-Abdeckung fuer Bracket-Rebuild, Points-Recompute und Check-in-Team-Bildung vorhanden.
+- `turnier-engine` behaelt `sqlx/sqlite` im `persist`-Feature nur als Uebergang fuer `turnier-steam::bridge`; Engine-Persistenz selbst enthaelt keine SQLite-Pools/Queries mehr.
+- Verifikation: `cargo build -p turnier-engine` gruen.
+- Verifikation: `cargo clippy -p turnier-engine --all-targets -- -D warnings` gruen.
+- Verifikation: `cargo fmt --check -p turnier-engine` gruen.
+- Verifikation: `../Deadlock-Bots/rust/scripts/central_test_db.sh bash -lc 'cd /home/naniadm/Documents/Deadlock-Turniere/rust && cargo test -p turnier-engine --features testing -- --include-ignored'` gruen.
+- Aufrufer-Check: `cargo build -p turnier-scheduler` gruen; `cargo build -p turnier-api -p turnier-scheduler` scheitert weiter an offenen T10/T11-`turnier-api`-SQLite-Executor-/Error-Mapping-Stellen.
+- Kein Commit/Push, keine Dienste neu gestartet, keine Secret-Werte ausgegeben.
+
+---
+
+## Neue Aufgabe (2026-07-01): Rework SP4 T7 Mini-Group-Tiebreak
+
+### Ziel
+- `complete_mini_group_round_robin_pg` in `turnier-match` wieder auf die volle Mini-Group-Tiebreaker-Kette bringen.
+- Reine Logik aus `turnier_engine::mini_groups` wiederverwenden, ohne die SQLite-Persistenzschicht in `turnier-match` mitzuziehen.
+- Regressionstest fuer Head-to-Head/Point-Diff gegen Seed-Fallback ergaenzen.
+- `advance_bracket_winner_pg`/`advance_in_tx_pg` kurz gegen alte Engine-Propagation pruefen.
+
+### Status (2026-07-01)
+→ **Abgeschlossen fuer GPT-Worker** — Rework umgesetzt, Review durch Claude ausstehend
+
+### Fortschritt
+- `WORKFLOW.md`, Git-Status, `turnier_match::result`, `turnier_engine::mini_groups` und alte Engine-Persistenz fuer Mini-Groups/Advance gelesen.
+- `turnier-engine` per `persist`-Default-Feature aufgeteilt; `turnier-match` bindet `turnier-engine` mit `default-features = false` und nutzt nur `mini_groups`.
+- `complete_mini_group_round_robin_pg` laedt jetzt `team1_id`, `team2_id`, `winner_id`, `status`, `match_stats` und wertet ueber `aggregate` + `select_mini_group_winner` aus.
+- Regressionstest ergaenzt: 4er-Mini-Group mit 2er-Wins-Tie, besserem Seed/Point-Diff fuer Team 1, aber Head-to-Head-Sieg fuer Team 2.
+- `advance_bracket_winner_pg`/`advance_in_tx_pg` gegen `turnier_engine::persist::advance` gegengelesen: Source-Propagation, Loser-Ziel, Grand-Final-Reset und Legacy-Fallback sind paritaer vorhanden.
+- Verifikation: `cargo build -p turnier-match` gruen.
+- Verifikation: `cargo clippy -p turnier-match --all-targets --all-features -- -D warnings` gruen.
+- Verifikation: `cargo fmt --check -p turnier-match` gruen.
+- Verifikation: `../Deadlock-Bots/rust/scripts/central_test_db.sh bash -lc 'cd /home/naniadm/Documents/Deadlock-Turniere/rust && cargo test -p turnier-match --features testing -- --include-ignored'` gruen.
+- Kein Commit/Push, keine Dienste neu gestartet, keine Secret-Werte ausgegeben.
+
+---
+
+## Neue Aufgabe (2026-07-01): Kritiker-Review SP4 T7 turnier-match
+
+### Ziel
+- Uncommitted T7-Diff von `turnier-match` gegen `HEAD` vollstaendig lesen und aktiv auf echte Portierungsbugs pruefen.
+- Fokus: `RETURNING id`, Zeitstempel/TIMESTAMPTZ, JSONB-Binds, PG-Bools, Bracket/Series-Zustandslogik, Dynamic-SQL-Whitelist und Testabdeckung.
+- Keine Codeaenderungen an Produktiv-/Testcode, kein Commit/Push.
+
+### Status (2026-07-01)
+→ **Abgeschlossen** — Review-Befund an Claude zurückzugeben
+
+### Fortschritt
+- `WORKFLOW.md`, `git status`, Basis-Commit und T7-Diffstat gelesen; bestehende uncommitted Aenderungen bleiben unangetastet.
+- Vollstaendigen T7-Diff gegen `HEAD` und relevante Vorversionen/Schema gelesen: `series`, `result`, `repo`, `modes`, `auto_lobby`, `lobby`, `steam_bridge`, Tests und Plan.
+- Befund: `complete_mini_group_round_robin_pg` bildet die bisherige Engine-Tiebreaker-Kette nicht ab und entscheidet Gleichstaende nur nach Wins/Seed/Team-ID.
+- Geprueft ohne Produktiv-/Testcodeaenderung: `RETURNING id`, TIMESTAMPTZ-Binds, JSONB-Binds/Casts, PG-Bools, Dynamic-SQL-Whitelist und Testabdeckung.
+- Verifikation: `git diff --check HEAD -- rust/crates/turnier-match` gruen; keine Cargo-Tests neu ausgefuehrt, da externe T7-Verifikation bereits vorlag und Review statisch war.
+
+---
+
+## Neue Aufgabe (2026-07-01): SP4 Turniere T7 turnier-match
+
+### Ziel
+- T7 (`turnier-match`) aus `backend/docs/plans/2026-07-01-sp4-turniere-central-db.md` auf zentrale Postgres-Tabellen unter `turnier.*` portieren.
+- MatchManager, Ergebnisverarbeitung, Series, Modes, Auto-Lobby und Repos ohne SQLite-Fachqueries betreiben.
+- Tests/Build/Clippy/Fmt fuer `turnier-match` ausfuehren; keine Secrets ausgeben, kein Commit/Push.
+
+### Status (2026-07-01)
+→ **Abgeschlossen fuer GPT-Worker** — T7 umgesetzt, Review durch Claude ausstehend
+
+### Fortschritt
+- `WORKFLOW.md`, T7-Planabschnitt, Git-Status und `turnier-match`-SQLite-Stellen gelesen.
+- Ausgangsstand: Branch `central-postgres-sp4`, nur untracked Audit-Datei ausserhalb T7 sichtbar; kein Commit/Push.
+- `turnier-match` von der noch SQLite-typisierten `turnier-engine`-Persistenz entkoppelt: Bracket-Gewinner-Propagation und Mini-Group-Abschluss lokal in PG umgesetzt, damit T7 unabhaengig von T8 baubar ist.
+- Fachqueries in `series`, `result`, `repo`, `modes` und `auto_lobby` auf `turnier.*`, `$n`-Binds, PG-Bools, `TIMESTAMPTZ` und JSONB umgestellt; variable Team-`IN`-Listen nutzen die Dynamic-SQL-Whitelist-Helfer.
+- Tests von In-Memory-SQLite auf zentrale Wegwerf-PG-DB (`turnier-db/testing`) umgestellt; Caster-Fallback und JSONB-Stats abgedeckt.
+- Verifikation: `cargo build -p turnier-match` gruen.
+- Verifikation: `cargo test -p turnier-match --features testing -- --include-ignored` via `Deadlock-Bots/rust/scripts/central_test_db.sh` gruen; direkter Lauf ohne Test-DSN scheiterte erwartungsgemaess an fehlender DSN-Umgebung.
+- Verifikation: `cargo clippy -p turnier-match --all-targets --all-features -- -D warnings` gruen.
+- Verifikation: `cargo fmt --check -p turnier-match` gruen; dafuer scoped `cargo fmt -p turnier-match` ausgefuehrt.
+- Kein Commit/Push, keine Dienste neu gestartet, keine Secret-Werte ausgegeben.
+
+---
+
+## Neue Aufgabe (2026-07-01): SP4 Turniere Welle1 T3-T5 Umsetzung
+
+### Ziel
+- T3 (`turnier-auth` + `turnier-discord`), T4 (`turnier-automatik`) und T5 (`turnier-draft`) aus `backend/docs/plans/2026-07-01-sp4-turniere-central-db.md` auf `central-postgres-sp4` umsetzen.
+- SQLite-Queries in diesen Crates auf zentrale Postgres-Tabellen unter `turnier.*` portieren.
+- Tests/Build/Clippy/Fmt fuer die vier Crates ausfuehren; keine Secrets ausgeben, kein Commit/Push.
+
+### Status (2026-07-01)
+→ **Abgeschlossen fuer GPT-Worker** — T3-T5 umgesetzt, Review durch Claude ausstehend
+
+### Fortschritt
+- `WORKFLOW.md`, Git-Status und SP4-Plan gelesen.
+- Scope bestaetigt: T3 Sessions/Discord-Tasks/Notifier-Optout, T4 Automatik-Presets/Proposals/Votes/Feedback/Optout/Signals, T5 Draft-Repo/CAS.
+- Aktueller Arbeitsbaum war bereits schmutzig: vorhandene `WORKFLOW.md`-Aenderung und untracked Audit-Datei bleiben erhalten.
+- T3 umgesetzt: `turnier.sessions` mit `BIGINT`-Discord-ID und `TIMESTAMPTZ`, `turnier.discord_tasks` mit JSONB-Payloads/`RETURNING id`, Notifier-Lookups via PG-Bools und BIGINT-ID-Konvertierung.
+- T4 umgesetzt: Automatik-Tabellen auf `turnier.*`, JSONB fuer Offset-/Config-/Feedback-Felder, explizite PG-Zeitstempel, `ON CONFLICT DO NOTHING`, TEXT-Enum-Mapping fuer zentrale PG-Textspalten.
+- T5 umgesetzt: Draft-Repo auf PG-Transaktionen, `RETURNING id` fuer Action-Materialisierung, `is_admin_forced BOOLEAN`, `taken_at TIMESTAMPTZ`, CAS-Konfliktgrenze ohne `BEGIN IMMEDIATE`.
+- Tests auf echte zentrale Wegwerf-PG-DBs umgestellt: Sessions, Discord-Tasks, DM-Optout, Approval-Gate, Vote-Upsert, JSONB-Roundtrip, Optout, Signals, doppelte Hero-Auswahl, CAS, Admin-forced und parallele Aktion.
+- Verifikation via Infisical-geladener `DEADLOCK_CENTRAL_DSN` als `DATABASE_URL` ohne Secret-Ausgabe: `cargo build -p turnier-auth -p turnier-discord -p turnier-automatik -p turnier-draft` gruen.
+- Verifikation: `cargo test -p turnier-auth -p turnier-discord -p turnier-automatik -p turnier-draft --features testing -- --include-ignored` gruen.
+- Verifikation: `cargo clippy -p turnier-auth -p turnier-discord -p turnier-automatik -p turnier-draft --all-targets --all-features -- -D warnings` gruen.
+- Verifikation: `cargo fmt --check -p turnier-auth -p turnier-discord -p turnier-automatik -p turnier-draft` gruen; dafuer scoped `cargo fmt` ueber die vier Ziel-Crates ausgefuehrt.
+- Kein Commit/Push, keine Dienste neu gestartet, keine Secret-Werte ausgegeben.
+
+---
+
+## Neue Aufgabe (2026-07-01): Review SP4 Turniere T0-T2 Kritiker
+
+### Ziel
+- Uncommitted Diff auf `central-postgres-sp4` gegen `backend/docs/plans/2026-07-01-sp4-turniere-central-db.md`, Tickets T0-T2, kritisch prüfen.
+- Keine Codeänderungen, kein Commit/Push, keine Live-Daten anfassen.
+
+### Status (2026-07-01)
+→ **Abgeschlossen** — Review-Befunde an Claude zurückzugeben
+
+### Fortschritt
+- `WORKFLOW.md`, `git status --short --branch` und `git diff --stat` gelesen.
+- Review-Fokus bestätigt: SQLite-Entfernung, Startpfad-Migrationen, ID-Helfer, JSONB-Mapping, Dynamic-SQL-Whitelist, DSN-Ausgabe, Tests und Doku/ADR.
+- Gezielter `cargo check -p turnier-bot` ohne DB-Zugriff ausgeführt: Build bricht bereits wegen fehlendem `sqlx::sqlite` in `turnier-steam`/`turnier-draft`.
+- Blocker notiert: Workspace-SQLx-Features entfernen SQLite global, produktiver `turnier-bot`-Startpfad nutzt weiter `connect_str(&config.database_path, ...)`, Dynamic-SQL-Whitelist ist nicht in die bestehenden Builder/Reminder-Pfade integriert.
+- Kein Commit/Push, keine Dienste neu gestartet, keine Live-Daten gelesen oder geschrieben.
+
+---
+
+## Neue Aufgabe (2026-07-01): SP4 Turniere T2 Typ-/Query-Konventionen
+
+### Ziel
+- T2 aus `backend/docs/plans/2026-07-01-sp4-turniere-central-db.md` umsetzen.
+- Zentrale Helfer fuer Discord-ID-Casts, UTC-Zeit, nullable JSONB und erlaubte dynamische SQL-Muster bereitstellen.
+- ADR/DB-Vertrag/Architektur auf zentrale PG-Konventionen aktualisieren.
+- Kein Commit/Push; Änderungen bleiben uncommitted fuer Claude-Review.
+
+### Status (2026-07-01)
+→ **Abgeschlossen fuer GPT-Worker** — T2 umgesetzt, Review durch Claude ausstehend
+
+### Fortschritt
+- `WORKFLOW.md`, SP4-Plan, T1-Stand, zentrale `0009_turnier.sql` und Rust-Doku gelesen.
+- Helfer umgesetzt: `parse_discord_id`, `discord_id_to_string`, `now_utc`, nullable JSONB-Mapper und `turnier-db::dynamic_sql`-Whitelist fuer variable IN-Listen, Reminder-Dedupe-Tabellen und Patch-Update-Builder.
+- ADR 0002, `rust/docs/db-contract.md` und `rust/docs/architecture.md` auf zentrale PG-Konventionen aktualisiert: static SQL compile-checked bevorzugt, dynamisches SQL nur begruendet/whitelisted.
+- Verifikation: direkter Testlauf ohne Test-DSN scheiterte erwartungsgemaess an fehlender Test-DSN-Umgebung; danach `cargo test -p turnier-core -p turnier-db --features testing` via `Deadlock-Bots/rust/scripts/central_test_db.sh` gruen.
+- Verifikation: `cargo fmt --check -p turnier-core -p turnier-db` gruen.
+
+---
+
+## Neue Aufgabe (2026-07-01): SP4 Turniere T0+T1 zentrale Postgres-Foundation
+
+### Ziel
+- Nur T0 und T1 aus `backend/docs/plans/2026-07-01-sp4-turniere-central-db.md` umsetzen.
+- T0: Boundary-Entscheidungen dokumentieren; keine Live-Daten schreiben, keine Secrets ausgeben.
+- T1: `turnier-db` von SQLite-Fassade auf zentrale `sqlx::PgPool`-Foundation mit `dl-central-db` umstellen.
+- Kein Commit/Push; Änderungen bleiben uncommitted fuer Claude-Review.
+
+### Status (2026-07-01)
+→ **Abgeschlossen fuer GPT-Worker** — T0/T1 umgesetzt, Review durch Claude ausstehend
+
+### Fortschritt
+- `WORKFLOW.md` und SP4-Plan gelesen; vorhandene uncommitted `WORKFLOW.md`-Aenderung und untracked Audit-Datei nicht zurueckgesetzt.
+- T0 Live-Codepfad geprueft: `deadlock-turniere.service` startet `scripts/run_turniere_backend_rust.sh` und damit `rust/target/release/turnier-bot`.
+- T0 Boundary-Entscheidungen: `dl-central-db` als relative Path-Dependency `../../Deadlock-Bots/rust/crates/dl-central-db`; SQLx-Cache-Ort `rust/.sqlx`; Steam-Bridge-SQLite in T6 auf zentrale `core/voice`-Tabellen umstellen.
+- T0 Schema-Oracle read-only geprueft: `turnier` vorhanden, 37/37 erwartete `turnier`-Tabellen vorhanden, `core` und `voice` vorhanden; keine DSN ausgegeben.
+- T1 umgesetzt: `turnier-db::Pool = sqlx::PgPool`, `connect_central()`, `test_pool()` hinter Feature `testing`, `CentralDbError`-Mapping und `run_migrations()` als bewusster PG-No-op.
+- T1 Tests ersetzt: lokale SQLite-Migrationstests raus, PG-Schema-Smokes gegen `dl_central_db::testing::test_pool()` rein.
+- Verifikation: `cargo build -p turnier-db --features testing`, `SQLX_OFFLINE=true cargo build -p turnier-db --features testing`, `cargo test -p turnier-db --features testing -- --include-ignored`, `cargo clippy -p turnier-db --all-targets --all-features -- -D warnings`, `cargo fmt --check -p turnier-db` gruen.
+- Hinweis: ungescoptes `cargo fmt --check` scheitert an vorhandenen Format-Diffs ausserhalb T0/T1; nicht auto-formatiert, um Scope nicht zu erweitern.
+
+---
+
+## Neue Aufgabe (2026-07-01): SP4 Turniere zentrale Postgres-Planung
+
+### Ziel
+- Nur Plan schreiben fuer die Umstellung von lokaler SQLite-`tournament.db` auf zentrale Postgres/TimescaleDB (`turnier.*`).
+- Referenzen aus `Deadlock-Bots` lesen: zentrale Migrationen, Ledger/Data-Landscape, SP1-Methodik.
+- Keine Live-Daten anfassen, keine Dienste neu starten, kein Push/Commit durch GPT-Worker.
+
+### Status (2026-07-01)
+→ **Abgeschlossen fuer GPT-Worker** — Plan geschrieben, Review/Commit durch Claude ausstehend
+
+### Fortschritt
+- `WORKFLOW.md` gelesen; vorhandener Arbeitsbaum hatte bereits eine untracked Audit-Datei, nicht angefasst.
+- Zentrales Schema `turnier.*` aus `Deadlock-Bots/rust/crates/dl-central-db/migrations/0009_turnier.sql` gelesen; `0001`-`0011` per Suche auf Schema-/Cross-FK-Kontext geprueft.
+- Mapping/Ledger gelesen: `rust/docs/_work/sp1/data-landscape.md` und `crates/dl-central-etl/ledger/tournament/turnier.toml`; `_sqlx_migrations` ist Meta, fachliche Turnier-Tabellen liegen in `turnier`.
+- Bestehende lokale Rust-/Python-Persistenzstellen inventarisiert: Rust nutzt `turnier-db::SqlitePool`, Python/Legacy nutzt weiter `aiosqlite`; Steam-Bridge-SQLite als eigenes Risiko notiert.
+- Neuer Plan angelegt: `backend/docs/plans/2026-07-01-sp4-turniere-central-db.md`.
+
+---
+
 ## Neue Aufgabe (2026-06-30): Fix Enforcement-Gaps Turniere
 
 ### Ziel

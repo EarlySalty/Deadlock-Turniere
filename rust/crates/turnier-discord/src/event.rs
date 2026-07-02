@@ -79,7 +79,10 @@ mod tests {
             ("checkin", NotificationEvent::Checkin),
             ("team_invite", NotificationEvent::TeamInvite),
             ("tournament_news", NotificationEvent::TournamentNews),
-            ("registration_reminder", NotificationEvent::RegistrationReminder),
+            (
+                "registration_reminder",
+                NotificationEvent::RegistrationReminder,
+            ),
         ] {
             assert_eq!(NotificationEvent::parse(s), Some(ev));
             assert_eq!(ev.as_str(), s);
@@ -99,6 +102,9 @@ mod tests {
     #[test]
     fn spalten_mapping_stabil() {
         assert_eq!(NotificationEvent::MatchStart.column(), "notify_match_start");
-        assert_eq!(NotificationEvent::TournamentNews.column(), "notify_tournament_news");
+        assert_eq!(
+            NotificationEvent::TournamentNews.column(),
+            "notify_tournament_news"
+        );
     }
 }

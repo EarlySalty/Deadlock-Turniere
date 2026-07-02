@@ -23,8 +23,7 @@ pub struct DraftAction {
     pub hero_name: Option<String>,
     pub taken_by: Option<String>,
     pub taken_at: Option<String>,
-    /// `0` | `1` (im Schema INTEGER).
-    pub is_admin_forced: i64,
+    pub is_admin_forced: bool,
 }
 
 /// Die Session-Stammzeile (`draft_sessions`).

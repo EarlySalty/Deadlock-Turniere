@@ -5,11 +5,16 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 
-# Persistenz-Fundament: SqlitePool-Aufbau, PRAGMA-Setup, eingebettete Migration,
-# Fehler-Typ. KEINE Geschäftslogik — domänenspezifische Queries leben in den
-# Domain-Crates und nutzen den hier bereitgestellten Pool.
+[features]
+default = []
+testing = ["dl-central-db/testing"]
+
+# Persistenz-Fundament: zentraler PgPool-Aufbau und Fehler-Typ. KEINE
+# Geschäftslogik — domänenspezifische Queries leben in den Domain-Crates und
+# nutzen den hier bereitgestellten Pool.
 [dependencies]
 turnier-core = { path = "../turnier-core" }
+dl-central-db.workspace = true
 sqlx.workspace = true
 tokio.workspace = true
 thiserror.workspace = true

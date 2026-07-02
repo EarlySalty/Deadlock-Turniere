@@ -37,7 +37,11 @@ pub fn router() -> Router<AppState> {
 /// `GET /auth/discord/login` — Redirect auf die Discord-Authorize-URL (307).
 async fn login(State(state): State<AppState>) -> WebResult<Response> {
     let authorize_url = state.oauth.initiate_login().await?;
-    Ok(redirect(StatusCode::TEMPORARY_REDIRECT, &authorize_url, None))
+    Ok(redirect(
+        StatusCode::TEMPORARY_REDIRECT,
+        &authorize_url,
+        None,
+    ))
 }
 
 /// Query-Parameter von `/auth/discord/complete`.
@@ -67,7 +71,11 @@ async fn complete(
     let cookie = format!(
         "{SESSION_COOKIE}={token}; HttpOnly; Secure; SameSite=Lax; Max-Age={SESSION_MAX_AGE_SECONDS}; Path=/"
     );
-    Ok(redirect(StatusCode::FOUND, &state.config.frontend_url, Some(cookie)))
+    Ok(redirect(
+        StatusCode::FOUND,
+        &state.config.frontend_url,
+        Some(cookie),
+    ))
 }
 
 /// `GET /auth/discord/logout` — Session + Cookie löschen, aufs Frontend (302).
@@ -79,12 +87,18 @@ async fn logout(State(state): State<AppState>, jar: CookieJar) -> WebResult<Resp
         }
     }
     let clear = format!("{SESSION_COOKIE}=; Max-Age=0; Path=/");
-    Ok(redirect(StatusCode::FOUND, &state.config.frontend_url, Some(clear)))
+    Ok(redirect(
+        StatusCode::FOUND,
+        &state.config.frontend_url,
+        Some(clear),
+    ))
 }
 
 /// Baut eine Redirect-Response mit optionalem `Set-Cookie`-Header.
 fn redirect(status: StatusCode, location: &str, set_cookie: Option<String>) -> Response {
-    let mut builder = Response::builder().status(status).header(LOCATION, location);
+    let mut builder = Response::builder()
+        .status(status)
+        .header(LOCATION, location);
     if let Some(cookie) = set_cookie {
         builder = builder.header(SET_COOKIE, cookie);
     }

@@ -22,9 +22,15 @@ use crate::state::AppState;
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/api/draft/heroes", get(list_heroes))
-        .route("/api/draft/matches/{match_id}/start", post(start_match_draft))
+        .route(
+            "/api/draft/matches/{match_id}/start",
+            post(start_match_draft),
+        )
         .route("/api/draft/sessions/{session_id}", get(get_session))
-        .route("/api/draft/sessions/{session_id}/action", post(submit_action))
+        .route(
+            "/api/draft/sessions/{session_id}/action",
+            post(submit_action),
+        )
 }
 
 /// `GET /api/draft/heroes` — die geordnete Heldenliste.
@@ -39,10 +45,11 @@ async fn start_match_draft(
     Path(match_id): Path<i64>,
 ) -> WebResult<Json<Value>> {
     // Existenz des Bracket-Matches vorab prüfen (wie im Original; FK ist Backstop).
-    let exists: Option<(i64,)> = sqlx::query_as("SELECT id FROM bracket_matches WHERE id = ?")
-        .bind(match_id)
-        .fetch_optional(&state.pool)
-        .await?;
+    let exists: Option<(i64,)> =
+        sqlx::query_as(r#"SELECT id FROM turnier."bracket_matches" WHERE id = $1"#)
+            .bind(match_id)
+            .fetch_optional(&state.pool)
+            .await?;
     if exists.is_none() {
         return Err(WebError::not_found(format!(
             "Bracket-Match {match_id} nicht gefunden"
@@ -51,7 +58,9 @@ async fn start_match_draft(
 
     let session_id = turnier_draft::start_draft(&state.pool, match_id, &user.discord_id).await?;
     let draft_state = turnier_draft::get_draft_state(&state.pool, session_id).await?;
-    Ok(Json(serde_json::to_value(draft_state).unwrap_or_else(|_| json!({}))))
+    Ok(Json(
+        serde_json::to_value(draft_state).unwrap_or_else(|_| json!({})),
+    ))
 }
 
 /// `GET /api/draft/sessions/{session_id}` — den Draft-Zustand lesen.
@@ -61,7 +70,9 @@ async fn get_session(
     Path(session_id): Path<i64>,
 ) -> WebResult<Json<Value>> {
     let draft_state = turnier_draft::get_draft_state(&state.pool, session_id).await?;
-    Ok(Json(serde_json::to_value(draft_state).unwrap_or_else(|_| json!({}))))
+    Ok(Json(
+        serde_json::to_value(draft_state).unwrap_or_else(|_| json!({})),
+    ))
 }
 
 /// Request-Body von `submit_action`.
@@ -83,9 +94,14 @@ async fn submit_action(
     Path(session_id): Path<i64>,
     Json(body): Json<DraftActionRequest>,
 ) -> WebResult<Json<Value>> {
-    let outcome =
-        turnier_draft::take_action(&state.pool, session_id, &body.hero_name, &body.taken_by, body.force)
-            .await?;
+    let outcome = turnier_draft::take_action(
+        &state.pool,
+        session_id,
+        &body.hero_name,
+        &body.taken_by,
+        body.force,
+    )
+    .await?;
     let draft_state = turnier_draft::get_draft_state(&state.pool, session_id).await?;
 
     let mut merged = serde_json::to_value(draft_state).unwrap_or_else(|_| json!({}));

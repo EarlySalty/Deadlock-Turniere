@@ -8,8 +8,8 @@ use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use serde_json::{Value, json};
-use sqlx::Row;
+use serde_json::{json, Value};
+use sqlx::{Postgres, QueryBuilder, Row};
 
 use turnier_core::{
     LobbySettingsPreset, Patch, Tournament, TournamentCreate, TournamentDetail, TournamentMode,
@@ -19,6 +19,7 @@ use turnier_engine::{
     determine_tournament_mode, generate_bracket_in_tx, is_valid_transition, valid_next_statuses,
 };
 
+use crate::db;
 use crate::error::{WebError, WebResult};
 use crate::extract::{AdminUser, ModUser};
 use crate::state::AppState;
@@ -179,6 +180,9 @@ async fn create_tournament(
 
     let lobby_settings =
         serialize_lobby_settings(body.lobby_settings_preset, body.lobby_settings.as_ref())?;
+    let lobby_settings = optional_jsonb(lobby_settings.as_deref())?;
+    let reminder_offsets = jsonb(serialize_reminder_offsets(&body.reminder_offsets))?;
+    let start_reminder_offsets = jsonb(serialize_reminder_offsets(&body.start_reminder_offsets))?;
 
     // Auto-Mode (Befund admin_routes.py:835: team_size statt Teamanzahl — 1:1
     // erhalten, siehe bugs_preserved).
@@ -186,19 +190,22 @@ async fn create_tournament(
         determine_tournament_mode(body.team_size as usize, body.force_tournament_mode);
 
     let mut tx = state.pool.begin().await?;
-    ensure_single_active_tournament(&mut *tx, None).await?;
+    ensure_single_active_tournament(&mut tx, None).await?;
 
     // Insert inkl. lobby_settings (safe-Fix: das nachgelagerte UPDATE entfällt).
-    let tournament_id: i64 = sqlx::query(
-        "INSERT INTO tournaments \
-         (name, description, team_size, bracket_format, registration_start, registration_end, \
-          checkin_start, group_phase_start, bracket_start, created_by, invite_mode, \
-          invite_window_start, invite_window_end, tournament_mode, tournament_game_mode, \
-          auto_lobby_enabled, exclude_from_leaderboard, is_test, reminder_offsets, rules, \
-          series_format, final_series_format, match_objective, no_show_grace_minutes, \
-          start_reminder_offsets, lobby_settings) \
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) \
-         RETURNING id",
+    let tournament_id: i64 = sqlx::query_scalar(
+        r#"INSERT INTO turnier."tournaments"
+         (name, status, description, team_size, bracket_format, registration_start, registration_end,
+          checkin_start, group_phase_start, bracket_start, created_by, created_at, updated_at,
+          invite_mode, invite_window_start, invite_window_end, tournament_mode, tournament_game_mode,
+          auto_lobby_enabled, exclude_from_leaderboard, is_test, reminder_offsets, rules,
+          series_format, final_series_format, match_objective, no_show_grace_minutes,
+          start_reminder_offsets, lobby_settings, source)
+         VALUES ($1, 'draft', $2, $3, $4, $5::timestamptz, $6::timestamptz, $7::timestamptz,
+                 $8::timestamptz, $9::timestamptz, $10, now(), now(), $11,
+                 $12::timestamptz, $13::timestamptz, $14, $15, $16, $17, $18,
+                 $19, $20, $21, $22, $23, $24, $25, $26, 'manual')
+         RETURNING id"#,
     )
     .bind(&body.name)
     .bind(&body.description)
@@ -209,26 +216,25 @@ async fn create_tournament(
     .bind(&body.checkin_start)
     .bind(&body.group_phase_start)
     .bind(&body.bracket_start)
-    .bind(&user.discord_id)
+    .bind(db::parse_actor_id(&user.discord_id)?)
     .bind(serde_value_str(&body.invite_mode))
     .bind(&body.invite_window_start)
     .bind(&body.invite_window_end)
     .bind(mode_str(tournament_mode))
     .bind(serde_value_str(&body.tournament_game_mode))
-    .bind(i64::from(body.auto_lobby_enabled))
-    .bind(i64::from(body.exclude_from_leaderboard))
-    .bind(i64::from(body.is_test))
-    .bind(serialize_reminder_offsets(&body.reminder_offsets))
+    .bind(body.auto_lobby_enabled)
+    .bind(body.exclude_from_leaderboard)
+    .bind(body.is_test)
+    .bind(reminder_offsets)
     .bind(&body.rules)
     .bind(body.series_format)
     .bind(body.final_series_format)
     .bind(&body.match_objective)
     .bind(body.no_show_grace_minutes)
-    .bind(serialize_reminder_offsets(&body.start_reminder_offsets))
-    .bind(&lobby_settings)
+    .bind(start_reminder_offsets)
+    .bind(lobby_settings)
     .fetch_one(&mut *tx)
-    .await?
-    .get("id");
+    .await?;
 
     audit(
         &mut *tx,
@@ -243,12 +249,16 @@ async fn create_tournament(
 
     // Benachrichtigung aller Profile bei Nicht-Test (best-effort).
     if !body.is_test {
-        let profile_ids: Vec<String> =
-            sqlx::query_scalar("SELECT DISTINCT discord_id FROM user_profiles")
+        let profile_ids: Vec<i64> =
+            sqlx::query_scalar(r#"SELECT DISTINCT discord_id FROM turnier."user_profiles""#)
                 .fetch_all(&state.pool)
                 .await
                 .unwrap_or_default();
-        let profile_ids: Vec<String> = profile_ids.into_iter().filter(|s| !s.is_empty()).collect();
+        let profile_ids: Vec<String> = profile_ids
+            .into_iter()
+            .map(db::discord_id_to_string)
+            .filter(|s| !s.is_empty())
+            .collect();
         if let Err(err) = state
             .notifier
             .notify_users(
@@ -283,11 +293,12 @@ async fn update_tournament(
     let body = body.validated().map_err(WebError::bad_request)?;
 
     let mut tx = state.pool.begin().await?;
-    let existing = sqlx::query("SELECT status, tournament_mode FROM tournaments WHERE id = ?")
-        .bind(tournament_id)
-        .fetch_optional(&mut *tx)
-        .await?
-        .ok_or_else(|| WebError::not_found("Turnier nicht gefunden"))?;
+    let existing =
+        sqlx::query(r#"SELECT status, tournament_mode FROM turnier."tournaments" WHERE id = $1"#)
+            .bind(tournament_id)
+            .fetch_optional(&mut *tx)
+            .await?
+            .ok_or_else(|| WebError::not_found("Turnier nicht gefunden"))?;
     let current_status: String = existing.get("status");
     let existing_mode: String = existing.get("tournament_mode");
 
@@ -327,85 +338,105 @@ async fn update_tournament(
                 ));
             }
             if helpers::ACTIVE_TOURNAMENT_STATUSES.contains(&new_status_s) {
-                ensure_single_active_tournament(&mut *tx, Some(tournament_id)).await?;
+                ensure_single_active_tournament(&mut tx, Some(tournament_id)).await?;
             }
         }
     }
 
-    // Update-Felder einsammeln (nur gesetzte). Reihenfolge wie im Original.
-    let mut sets: Vec<String> = Vec::new();
-    let mut binds: Vec<Value> = Vec::new();
+    // Update-Felder einsammeln (nur gesetzte). Spaltennamen kommen
+    // ausschliesslich aus dieser Whitelist; Werte werden gebunden.
+    let mut updates: Vec<(&'static str, PatchBind)> = Vec::new();
     let mut changes = serde_json::Map::new();
 
-    macro_rules! push {
-        ($col:literal, $val:expr) => {{
-            sets.push(format!("{} = ?", $col));
-            let v: Value = $val;
-            changes.insert($col.to_string(), v.clone());
-            binds.push(v);
+    macro_rules! push_typed {
+        ($col:literal, $change:expr, $bind:expr) => {{
+            let change: Value = $change;
+            changes.insert($col.to_string(), change);
+            updates.push(($col, $bind));
         }};
     }
 
     if let Some(v) = &body.name {
-        push!("name", json!(v));
+        push_typed!("name", json!(v), PatchBind::Text(Some(v.clone())));
     }
     match &body.description {
         Patch::Missing => {}
-        Patch::Null => push!("description", Value::Null),
-        Patch::Value(v) => push!("description", json!(v)),
+        Patch::Null => push_typed!("description", Value::Null, PatchBind::Text(None)),
+        Patch::Value(v) => push_typed!("description", json!(v), PatchBind::Text(Some(v.clone()))),
     }
     if let Some(v) = body.status {
-        push!("status", json!(status_str(v)));
+        push_typed!(
+            "status",
+            json!(status_str(v)),
+            PatchBind::Text(Some(status_str(v).to_string()))
+        );
     }
     if let Some(v) = body.team_size {
-        push!("team_size", json!(v));
+        push_typed!("team_size", json!(v), PatchBind::I64(Some(v)));
     }
     if let Some(v) = body.bracket_format {
-        push!("bracket_format", json!(serde_value_str(&v)));
+        let value = serde_value_str(&v);
+        push_typed!("bracket_format", json!(value), PatchBind::Text(Some(value)));
     }
     if let Some(v) = body.series_format {
-        push!("series_format", json!(v));
+        push_typed!("series_format", json!(v), PatchBind::I64(Some(v)));
     }
     match &body.final_series_format {
         Patch::Missing => {}
-        Patch::Null => push!("final_series_format", Value::Null),
-        Patch::Value(v) => push!("final_series_format", json!(v)),
+        Patch::Null => push_typed!("final_series_format", Value::Null, PatchBind::I64(None)),
+        Patch::Value(v) => push_typed!("final_series_format", json!(v), PatchBind::I64(Some(*v))),
     }
     match &body.registration_start {
         Patch::Missing => {}
-        Patch::Null => push!("registration_start", Value::Null),
-        Patch::Value(v) => push!("registration_start", json!(v)),
+        Patch::Null => push_typed!("registration_start", Value::Null, PatchBind::Time(None)),
+        Patch::Value(v) => push_typed!(
+            "registration_start",
+            json!(v),
+            PatchBind::Time(Some(v.clone()))
+        ),
     }
     match &body.registration_end {
         Patch::Missing => {}
-        Patch::Null => push!("registration_end", Value::Null),
-        Patch::Value(v) => push!("registration_end", json!(v)),
+        Patch::Null => push_typed!("registration_end", Value::Null, PatchBind::Time(None)),
+        Patch::Value(v) => push_typed!(
+            "registration_end",
+            json!(v),
+            PatchBind::Time(Some(v.clone()))
+        ),
     }
     match &body.checkin_start {
         Patch::Missing => {}
-        Patch::Null => push!("checkin_start", Value::Null),
-        Patch::Value(v) => push!("checkin_start", json!(v)),
+        Patch::Null => push_typed!("checkin_start", Value::Null, PatchBind::Time(None)),
+        Patch::Value(v) => push_typed!("checkin_start", json!(v), PatchBind::Time(Some(v.clone()))),
     }
     match &body.group_phase_start {
         Patch::Missing => {}
-        Patch::Null => push!("group_phase_start", Value::Null),
-        Patch::Value(v) => push!("group_phase_start", json!(v)),
+        Patch::Null => push_typed!("group_phase_start", Value::Null, PatchBind::Time(None)),
+        Patch::Value(v) => push_typed!(
+            "group_phase_start",
+            json!(v),
+            PatchBind::Time(Some(v.clone()))
+        ),
     }
     match &body.bracket_start {
         Patch::Missing => {}
-        Patch::Null => push!("bracket_start", Value::Null),
-        Patch::Value(v) => push!("bracket_start", json!(v)),
+        Patch::Null => push_typed!("bracket_start", Value::Null, PatchBind::Time(None)),
+        Patch::Value(v) => push_typed!("bracket_start", json!(v), PatchBind::Time(Some(v.clone()))),
     }
     if let Some(v) = &body.match_objective {
-        push!("match_objective", json!(v));
+        push_typed!(
+            "match_objective",
+            json!(v),
+            PatchBind::Text(Some(v.clone()))
+        );
     }
     if let Some(v) = body.no_show_grace_minutes {
-        push!("no_show_grace_minutes", json!(v));
+        push_typed!("no_show_grace_minutes", json!(v), PatchBind::I64(Some(v)));
     }
     match &body.rules {
         Patch::Missing => {}
-        Patch::Null => push!("rules", Value::Null),
-        Patch::Value(v) => push!("rules", json!(v)),
+        Patch::Null => push_typed!("rules", Value::Null, PatchBind::Text(None)),
+        Patch::Value(v) => push_typed!("rules", json!(v), PatchBind::Text(Some(v.clone()))),
     }
 
     // Mode-Wechsel (nur in draft/checkin/group_phase, group_phase nur ungespielt).
@@ -424,48 +455,77 @@ async fn update_tournament(
             ));
         }
         let mode_s = mode_str(force_mode);
-        push!("tournament_mode", json!(mode_s));
+        push_typed!(
+            "tournament_mode",
+            json!(mode_s),
+            PatchBind::Text(Some(mode_s.to_string()))
+        );
         mode_changed_to_bracket_only = mode_s == "bracket_only" && existing_mode != "bracket_only";
     }
 
     // Bool-/Enum-Spezialfelder.
     if let Some(v) = body.invite_mode {
-        push!("invite_mode", json!(serde_value_str(&v)));
+        let value = serde_value_str(&v);
+        push_typed!("invite_mode", json!(value), PatchBind::Text(Some(value)));
     }
     if let Some(v) = body.exclude_from_leaderboard {
-        push!("exclude_from_leaderboard", json!(i64::from(v)));
+        push_typed!("exclude_from_leaderboard", json!(v), PatchBind::Bool(v));
     }
     if let Some(v) = body.auto_lobby_enabled {
-        push!("auto_lobby_enabled", json!(i64::from(v)));
+        push_typed!("auto_lobby_enabled", json!(v), PatchBind::Bool(v));
     }
     if let Some(v) = body.is_test {
-        push!("is_test", json!(i64::from(v)));
+        push_typed!("is_test", json!(v), PatchBind::Bool(v));
     }
     if let Some(v) = body.tournament_game_mode {
-        push!("tournament_game_mode", json!(serde_value_str(&v)));
+        let value = serde_value_str(&v);
+        push_typed!(
+            "tournament_game_mode",
+            json!(value),
+            PatchBind::Text(Some(value))
+        );
     }
     match &body.reminder_offsets {
         Patch::Missing => {}
-        Patch::Null => push!("reminder_offsets", Value::Null),
-        Patch::Value(v) => push!("reminder_offsets", json!(serialize_reminder_offsets(v))),
+        Patch::Null => push_typed!("reminder_offsets", Value::Null, PatchBind::Json(None)),
+        Patch::Value(v) => {
+            let value = jsonb(serialize_reminder_offsets(v))?;
+            push_typed!(
+                "reminder_offsets",
+                value.clone(),
+                PatchBind::Json(Some(value))
+            );
+        }
     }
     match &body.start_reminder_offsets {
         Patch::Missing => {}
-        Patch::Null => push!("start_reminder_offsets", Value::Null),
-        Patch::Value(v) => push!(
-            "start_reminder_offsets",
-            json!(serialize_reminder_offsets(v))
-        ),
+        Patch::Null => push_typed!("start_reminder_offsets", Value::Null, PatchBind::Json(None)),
+        Patch::Value(v) => {
+            let value = jsonb(serialize_reminder_offsets(v))?;
+            push_typed!(
+                "start_reminder_offsets",
+                value.clone(),
+                PatchBind::Json(Some(value))
+            );
+        }
     }
     match &body.invite_window_start {
         Patch::Missing => {}
-        Patch::Null => push!("invite_window_start", Value::Null),
-        Patch::Value(v) => push!("invite_window_start", json!(v)),
+        Patch::Null => push_typed!("invite_window_start", Value::Null, PatchBind::Time(None)),
+        Patch::Value(v) => push_typed!(
+            "invite_window_start",
+            json!(v),
+            PatchBind::Time(Some(v.clone()))
+        ),
     }
     match &body.invite_window_end {
         Patch::Missing => {}
-        Patch::Null => push!("invite_window_end", Value::Null),
-        Patch::Value(v) => push!("invite_window_end", json!(v)),
+        Patch::Null => push_typed!("invite_window_end", Value::Null, PatchBind::Time(None)),
+        Patch::Value(v) => push_typed!(
+            "invite_window_end",
+            json!(v),
+            PatchBind::Time(Some(v.clone()))
+        ),
     }
 
     // Lobby-Settings: Preset oder Custom (Custom impliziert preset=custom).
@@ -481,9 +541,14 @@ async fn update_tournament(
                 Patch::Missing | Patch::Null => None,
             };
             let serialized = serialize_lobby_settings(p, custom_settings)?;
-            push!("lobby_settings", json!(serialized));
+            let value = optional_jsonb(serialized.as_deref())?;
+            push_typed!(
+                "lobby_settings",
+                value.clone().unwrap_or(Value::Null),
+                PatchBind::Json(value)
+            );
         } else if matches!(body.lobby_settings, Patch::Null) {
-            push!("lobby_settings", Value::Null);
+            push_typed!("lobby_settings", Value::Null, PatchBind::Json(None));
         } else if matches!(body.lobby_settings, Patch::Value(_)) {
             return Err(WebError::bad_request(
                 "lobby_settings_preset ist erforderlich, wenn lobby_settings gesetzt wird",
@@ -491,17 +556,21 @@ async fn update_tournament(
         }
     }
 
-    if sets.is_empty() {
+    if updates.is_empty() {
         return Err(WebError::bad_request("Keine Änderungen angegeben"));
     }
 
-    let mut sql = format!("UPDATE tournaments SET {}", sets.join(", "));
-    sql.push_str(", updated_at = datetime('now') WHERE id = ?");
-    let mut q = sqlx::query(&sql);
-    for v in &binds {
-        q = bind_json(q, v);
+    let mut builder = QueryBuilder::<Postgres>::new(r#"UPDATE turnier."tournaments" SET "#);
+    let mut first = true;
+    for (column, bind) in updates {
+        push_update_bind(&mut builder, &mut first, column, bind);
     }
-    q.bind(tournament_id).execute(&mut *tx).await?;
+    if !first {
+        builder.push(", ");
+    }
+    builder.push("updated_at = now() WHERE id = ");
+    builder.push_bind(tournament_id);
+    builder.build().execute(&mut *tx).await?;
 
     // Mode-Wechsel group_phase → bracket_only: Delete + Rebuild + Status
     // zusammen mit dem Update committen.
@@ -510,7 +579,7 @@ async fn update_tournament(
         delete_group_phase_tree(&mut tx, tournament_id).await?;
         generate_bracket_in_tx(&mut tx, tournament_id).await?;
         sqlx::query(
-            "UPDATE tournaments SET status = 'bracket', updated_at = datetime('now') WHERE id = ?",
+            r#"UPDATE turnier."tournaments" SET status = 'bracket', updated_at = now() WHERE id = $1"#,
         )
         .bind(tournament_id)
         .execute(&mut *tx)
@@ -529,18 +598,57 @@ async fn update_tournament(
     Ok(Json(load_tournament_dto(&state.pool, tournament_id).await?))
 }
 
-/// Bindet einen JSON-Wert typgerecht an eine SQL-Query (Null/Int/Bool/String).
-fn bind_json<'q>(
-    q: sqlx::query::Query<'q, sqlx::Sqlite, sqlx::sqlite::SqliteArguments<'q>>,
-    v: &'q Value,
-) -> sqlx::query::Query<'q, sqlx::Sqlite, sqlx::sqlite::SqliteArguments<'q>> {
-    match v {
-        Value::Null => q.bind(None::<String>),
-        Value::Bool(b) => q.bind(i64::from(*b)),
-        Value::Number(n) if n.is_i64() => q.bind(n.as_i64().unwrap()),
-        Value::Number(n) => q.bind(n.as_f64().unwrap()),
-        Value::String(s) => q.bind(s.as_str()),
-        other => q.bind(other.to_string()),
+fn jsonb(value: String) -> WebResult<Value> {
+    serde_json::from_str(&value)
+        .map_err(|_| WebError::internal("JSONB-Serialisierung fehlgeschlagen"))
+}
+
+fn optional_jsonb(value: Option<&str>) -> WebResult<Option<Value>> {
+    value
+        .map(|value| {
+            serde_json::from_str(value)
+                .map_err(|_| WebError::internal("JSONB-Serialisierung fehlgeschlagen"))
+        })
+        .transpose()
+}
+
+enum PatchBind {
+    Text(Option<String>),
+    I64(Option<i64>),
+    Bool(bool),
+    Time(Option<String>),
+    Json(Option<Value>),
+}
+
+fn push_update_bind(
+    builder: &mut QueryBuilder<'_, Postgres>,
+    first: &mut bool,
+    column: &'static str,
+    bind: PatchBind,
+) {
+    if !*first {
+        builder.push(", ");
+    }
+    *first = false;
+    builder.push(column);
+    builder.push(" = ");
+    match bind {
+        PatchBind::Text(value) => {
+            builder.push_bind(value);
+        }
+        PatchBind::I64(value) => {
+            builder.push_bind(value);
+        }
+        PatchBind::Bool(value) => {
+            builder.push_bind(value);
+        }
+        PatchBind::Time(value) => {
+            builder.push_bind(value);
+            builder.push("::timestamptz");
+        }
+        PatchBind::Json(value) => {
+            builder.push_bind(value);
+        }
     }
 }
 
@@ -583,10 +691,11 @@ async fn open_checkin(
                 "Check-in kann nur aus der Registration geöffnet werden",
             ));
         }
-        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM teams WHERE tournament_id = ?")
-            .bind(tournament_id)
-            .fetch_one(&state.pool)
-            .await?;
+        let count: i64 =
+            sqlx::query_scalar(r#"SELECT COUNT(*) FROM turnier."teams" WHERE tournament_id = $1"#)
+                .bind(tournament_id)
+                .fetch_one(&state.pool)
+                .await?;
         if count == 0 {
             return Err(WebError::bad_request(
                 "Check-in kann erst geöffnet werden, wenn mindestens ein Team existiert",
@@ -620,13 +729,13 @@ async fn revert_checkin(
         ));
     }
 
-    sqlx::query("DELETE FROM tournament_checkins WHERE tournament_id = ?")
+    sqlx::query(r#"DELETE FROM turnier."tournament_checkins" WHERE tournament_id = $1"#)
         .bind(tournament_id)
         .execute(&mut *tx)
         .await?;
     sqlx::query(
-        "UPDATE tournaments SET status = ?, registration_end = NULL, checkin_start = NULL, \
-         updated_at = datetime('now') WHERE id = ?",
+        r#"UPDATE turnier."tournaments" SET status = $1, registration_end = NULL, checkin_start = NULL,
+         updated_at = now() WHERE id = $2"#,
     )
     .bind("registration")
     .bind(tournament_id)
@@ -657,7 +766,7 @@ async fn advance_tournament(
 ) -> WebResult<Json<Tournament>> {
     let (current_status, next_status) = {
         let mut tx = state.pool.begin().await?;
-        let existing = sqlx::query("SELECT status FROM tournaments WHERE id = ?")
+        let existing = sqlx::query(r#"SELECT status FROM turnier."tournaments" WHERE id = $1"#)
             .bind(tournament_id)
             .fetch_optional(&mut *tx)
             .await?
@@ -688,7 +797,7 @@ async fn advance_tournament(
             )));
         };
         if helpers::ACTIVE_TOURNAMENT_STATUSES.contains(&next_status) {
-            ensure_single_active_tournament(&mut *tx, Some(tournament_id)).await?;
+            ensure_single_active_tournament(&mut tx, Some(tournament_id)).await?;
         }
         tx.commit().await?;
         (current_status, next_status)
@@ -736,6 +845,7 @@ async fn advance_status_shared(
         turnier_scheduler::SchedulerError::StatusConflict => {
             WebError::conflict("Turnierstatus wurde parallel geändert")
         }
+        turnier_scheduler::SchedulerError::ActiveTournamentConflict(msg) => WebError::conflict(msg),
         other => other.into(),
     })
 }

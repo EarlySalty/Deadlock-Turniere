@@ -8,7 +8,7 @@
 use std::future::Future;
 use std::pin::Pin;
 
-use sqlx::{Pool, Sqlite, Transaction};
+use sqlx::{Pool, Postgres, Transaction};
 
 use crate::engine::seeding::{
     distribute_entries_across_slots, is_power_of_two, seed_slot_order, slot_sizes_for_round,
@@ -25,6 +25,7 @@ struct Qualifier {
     points: i64,
     wins: i64,
     seed: i64,
+    origin_order: i64,
 }
 
 /// Generiert das Bracket aus den Gruppen-Standings (Top 2/Gruppe) oder — ohne
@@ -33,7 +34,7 @@ struct Qualifier {
 /// Portiert `generate_bracket(tournament_id, bracket_format)`: Das übergebene
 /// `bracket_format`-Argument wird (wie im Original) ignoriert und stattdessen aus
 /// der `tournaments`-Zeile gelesen.
-pub async fn generate_bracket(pool: &Pool<Sqlite>, tournament_id: i64) -> TournamentResult<i64> {
+pub async fn generate_bracket(pool: &Pool<Postgres>, tournament_id: i64) -> TournamentResult<i64> {
     let mut tx = pool.begin().await?;
     let match_count = generate_bracket_in_tx(&mut tx, tournament_id).await?;
     tx.commit().await?;
@@ -45,13 +46,13 @@ pub async fn generate_bracket(pool: &Pool<Sqlite>, tournament_id: i64) -> Tourna
 /// Der Aufrufer besitzt Commit/Rollback. Genutzt für Admin-Updates, bei denen
 /// Löschen, Rebuild, Statuswechsel und Audit atomar zusammengehören.
 pub async fn generate_bracket_in_tx(
-    tx: &mut Transaction<'_, Sqlite>,
+    tx: &mut Transaction<'_, Postgres>,
     tournament_id: i64,
 ) -> TournamentResult<i64> {
     clear_bracket_tree(tx, tournament_id).await?;
 
     let format_row: Option<(String,)> =
-        sqlx::query_as("SELECT bracket_format FROM tournaments WHERE id = ?")
+        sqlx::query_as("SELECT bracket_format FROM turnier.tournaments WHERE id = $1")
             .bind(tournament_id)
             .fetch_optional(&mut **tx)
             .await?;
@@ -60,18 +61,19 @@ pub async fn generate_bracket_in_tx(
         .unwrap_or_else(|| "single_elimination".to_string());
 
     // Gruppen (nach seeding_order) und je Gruppe die Top-2-Standings.
-    let group_ids: Vec<(i64,)> =
-        sqlx::query_as("SELECT id FROM groups WHERE tournament_id = ? ORDER BY seeding_order")
-            .bind(tournament_id)
-            .fetch_all(&mut **tx)
-            .await?;
+    let group_ids: Vec<(i64,)> = sqlx::query_as(
+        "SELECT id FROM turnier.groups WHERE tournament_id = $1 ORDER BY seeding_order, id",
+    )
+    .bind(tournament_id)
+    .fetch_all(&mut **tx)
+    .await?;
 
     let mut qualified: Vec<Qualifier> = Vec::new();
     let mut grouped_qualifiers: Vec<Vec<Qualifier>> = Vec::new();
     for (group_id,) in &group_ids {
         let standings: Vec<(i64, i64, i64, i64)> = sqlx::query_as(
-            "SELECT team_id, wins, losses, points FROM group_teams \
-             WHERE group_id = ? ORDER BY points DESC, wins DESC",
+            "SELECT team_id, wins, losses, points FROM turnier.group_teams \
+             WHERE group_id = $1 ORDER BY points DESC, wins DESC, id ASC, team_id ASC",
         )
         .bind(group_id)
         .fetch_all(&mut **tx)
@@ -83,12 +85,14 @@ pub async fn generate_bracket_in_tx(
                 points: *points,
                 wins: *wins,
                 seed: rank_pos as i64,
+                origin_order: qualified.len() as i64,
             });
             group_qs.push(Qualifier {
                 team_id: *team_id,
                 points: *points,
                 wins: *wins,
                 seed: rank_pos as i64,
+                origin_order: group_qs.len() as i64,
             });
         }
         grouped_qualifiers.push(group_qs);
@@ -96,11 +100,12 @@ pub async fn generate_bracket_in_tx(
 
     // Fallback ohne Gruppenphase: alle Teams in DB-Reihenfolge.
     if qualified.is_empty() {
-        let all_teams: Vec<(i64,)> =
-            sqlx::query_as("SELECT id FROM teams WHERE tournament_id = ?")
-                .bind(tournament_id)
-                .fetch_all(&mut **tx)
-                .await?;
+        let all_teams: Vec<(i64,)> = sqlx::query_as(
+            "SELECT id FROM turnier.teams WHERE tournament_id = $1 ORDER BY created_at, id",
+        )
+        .bind(tournament_id)
+        .fetch_all(&mut **tx)
+        .await?;
         qualified = all_teams
             .into_iter()
             .enumerate()
@@ -109,6 +114,7 @@ pub async fn generate_bracket_in_tx(
                 points: 0,
                 wins: 0,
                 seed: i as i64,
+                origin_order: i as i64,
             })
             .collect();
     }
@@ -140,10 +146,11 @@ pub async fn generate_bracket_in_tx(
     Ok(match_count)
 }
 
-/// Sortiert die Qualifikanten (`-points, -wins, seed`) und mappt sie auf
-/// Team-Slots. Portiert die zweifach duplizierte Sortier-/Map-Logik einmalig.
+/// Sortiert die Qualifikanten (`-points, -wins, seed`, urspruengliche Reihenfolge)
+/// und mappt sie auf Team-Slots. Portiert die zweifach duplizierte
+/// Sortier-/Map-Logik einmalig.
 fn sort_and_map_entries(mut qualified: Vec<Qualifier>) -> Vec<BracketSlot> {
-    qualified.sort_by_key(|q| (-q.points, -q.wins, q.seed));
+    qualified.sort_by_key(|q| (-q.points, -q.wins, q.seed, q.origin_order, q.team_id));
     qualified
         .into_iter()
         .map(|q| BracketSlot::Team(q.team_id))
@@ -188,7 +195,7 @@ fn build_group_cross_seed_pairs(
 /// Baut ein Single-Elimination-Bracket aus einer Seed-Liste. Portiert
 /// `_build_seeded_bracket`.
 pub(crate) async fn build_seeded_bracket(
-    tx: &mut Transaction<'_, Sqlite>,
+    tx: &mut Transaction<'_, Postgres>,
     tournament_id: i64,
     entries: Vec<BracketSlot>,
 ) -> TournamentResult<i64> {
@@ -203,7 +210,7 @@ pub(crate) async fn build_seeded_bracket(
 /// Baut ein Paar-basiertes Bracket (Cross-Seed-Runde 1), dann rekursiv weiter.
 /// Portiert `_build_paired_bracket`.
 async fn build_paired_bracket(
-    tx: &mut Transaction<'_, Sqlite>,
+    tx: &mut Transaction<'_, Postgres>,
     tournament_id: i64,
     pairs: Vec<(BracketSlot, BracketSlot)>,
     current_round: i64,
@@ -237,13 +244,14 @@ async fn build_paired_bracket(
     if next_entries.len() == 1 {
         return Ok(match_count);
     }
-    Ok(match_count + build_bracket_round(tx, tournament_id, next_entries, current_round + 1).await?)
+    Ok(match_count
+        + build_bracket_round(tx, tournament_id, next_entries, current_round + 1).await?)
 }
 
 /// Eine Bracket-Runde: bei Zweierpotenz Standard-Seed-Paarung, sonst Mini-Group-
 /// Slots. Rekursiv bis zum Finale. Portiert `_build_bracket_round`.
 fn build_bracket_round<'a>(
-    tx: &'a mut Transaction<'_, Sqlite>,
+    tx: &'a mut Transaction<'_, Postgres>,
     tournament_id: i64,
     entries: Vec<BracketSlot>,
     current_round: i64,
@@ -346,7 +354,7 @@ fn build_bracket_round<'a>(
 /// Referenzen) und die Round-Robin-Matches. Liefert (mini_group_id, match_count).
 /// Portiert `_insert_mini_group`.
 async fn insert_mini_group(
-    tx: &mut Transaction<'_, Sqlite>,
+    tx: &mut Transaction<'_, Postgres>,
     tournament_id: i64,
     round_num: i64,
     position: i64,
@@ -354,22 +362,23 @@ async fn insert_mini_group(
     entries: &[BracketSlot],
 ) -> TournamentResult<(i64, i64)> {
     let mg_row: (i64,) = sqlx::query_as(
-        "INSERT INTO bracket_mini_groups \
-         (tournament_id, round, position, advances_to_match_id, advances_to_slot) \
-         VALUES (?, ?, ?, NULL, NULL) RETURNING id",
+        "INSERT INTO turnier.bracket_mini_groups \
+         (tournament_id, round, position, advances_to_match_id, advances_to_slot, created_at) \
+         VALUES ($1, $2, $3, NULL, NULL, $4) RETURNING id",
     )
     .bind(tournament_id)
     .bind(round_num)
     .bind(position)
+    .bind(turnier_core::now_utc())
     .fetch_one(&mut **tx)
     .await?;
     let mini_group_id = mg_row.0;
 
     for (seed_order, entry) in entries.iter().enumerate() {
         sqlx::query(
-            "INSERT INTO bracket_mini_group_teams \
+            "INSERT INTO turnier.bracket_mini_group_teams \
              (mini_group_id, team_id, seed_order, source_match_id, source_mini_group_id) \
-             VALUES (?, ?, ?, ?, ?)",
+             VALUES ($1, $2, $3, $4, $5)",
         )
         .bind(mini_group_id)
         .bind(entry.team_id())

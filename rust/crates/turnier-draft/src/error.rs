@@ -38,6 +38,10 @@ pub enum DraftError {
     #[error("Draft-Aktion kollidierte mit einer parallelen Aktion")]
     ActionConflict,
 
+    /// Ungueltige Discord-ID fuer eine BIGINT-Spalte.
+    #[error("ungueltige Discord-ID: {0}")]
+    InvalidDiscordId(String),
+
     /// Persistenz-Fehler (Pool/Query).
     #[error(transparent)]
     Db(#[from] turnier_db::DbError),

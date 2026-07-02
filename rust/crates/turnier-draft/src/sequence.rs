@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 /// (`'ban'` | `'pick'`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, sqlx::Type)]
 #[serde(rename_all = "snake_case")]
-#[sqlx(rename_all = "snake_case")]
+#[sqlx(type_name = "text", rename_all = "snake_case")]
 pub enum ActionType {
     Ban,
     Pick,
@@ -193,6 +193,9 @@ mod tests {
         assert_eq!(ActionType::Pick.as_str(), "pick");
         assert_eq!(TeamSlot::One.as_i64(), 1);
         assert_eq!(TeamSlot::Two.as_i64(), 2);
-        assert_eq!(serde_json::to_string(&ActionType::Pick).unwrap(), "\"pick\"");
+        assert_eq!(
+            serde_json::to_string(&ActionType::Pick).unwrap(),
+            "\"pick\""
+        );
     }
 }

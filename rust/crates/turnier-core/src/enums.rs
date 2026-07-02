@@ -16,7 +16,7 @@ macro_rules! str_enum {
         $(#[$meta])*
         #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, sqlx::Type)]
         #[serde(rename_all = "snake_case")]
-        #[sqlx(rename_all = "snake_case")]
+        #[sqlx(type_name = "text", rename_all = "snake_case")]
         pub enum $name {
             $( $variant ),+
         }

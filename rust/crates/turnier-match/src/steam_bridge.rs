@@ -101,7 +101,10 @@ impl SteamBridge {
             .unwrap_or_else(|_| SqliteConnectOptions::new().filename(db_path))
             .create_if_missing(false)
             .busy_timeout(Duration::from_secs(5));
-        let pool = SqlitePoolOptions::new().max_connections(4).connect_with(options).await?;
+        let pool = SqlitePoolOptions::new()
+            .max_connections(4)
+            .connect_with(options)
+            .await?;
         Ok(Some(Self { pool }))
     }
 
@@ -160,7 +163,10 @@ impl SteamBridge {
             if Instant::now() >= deadline {
                 return Ok(TaskOutcome::TimedOut { task_id, timeout_s });
             }
-            let task = self.get_task(task_id).await?.ok_or(BridgeError::TaskNotFound(task_id))?;
+            let task = self
+                .get_task(task_id)
+                .await?
+                .ok_or(BridgeError::TaskNotFound(task_id))?;
             let status = task.status.to_uppercase();
             if status == "DONE" {
                 let payload = task.result.unwrap_or_default();
@@ -174,9 +180,10 @@ impl SteamBridge {
             if status == "FAILED" {
                 return Ok(TaskOutcome::Failed {
                     task_id,
-                    error: task.error.filter(|e| !e.is_empty()).unwrap_or_else(|| {
-                        "Steam-Task fehlgeschlagen".to_string()
-                    }),
+                    error: task
+                        .error
+                        .filter(|e| !e.is_empty())
+                        .unwrap_or_else(|| "Steam-Task fehlgeschlagen".to_string()),
                 });
             }
             tokio::time::sleep(poll_interval).await;
@@ -186,7 +193,10 @@ impl SteamBridge {
     /// Prüft, ob ein passender PENDING/RUNNING-Task existiert. Optionale Filter
     /// werden per `json_extract` auf das Payload angewendet (1:1 zum Original).
     /// Läuft VORHER den Stale-Cleanup.
-    pub async fn has_active_task(&self, filter: &ActiveTaskFilter<'_>) -> Result<bool, BridgeError> {
+    pub async fn has_active_task(
+        &self,
+        filter: &ActiveTaskFilter<'_>,
+    ) -> Result<bool, BridgeError> {
         self.fail_stale_running_tasks().await?;
 
         let mut clauses = vec![
@@ -205,8 +215,10 @@ impl SteamBridge {
         if filter.steam_id.is_some() {
             clauses.push("json_extract(payload, '$.steam_id') = ?".to_string());
         }
-        let sql =
-            format!("SELECT 1 FROM steam_tasks WHERE {} LIMIT 1", clauses.join(" AND "));
+        let sql = format!(
+            "SELECT 1 FROM steam_tasks WHERE {} LIMIT 1",
+            clauses.join(" AND ")
+        );
 
         let mut query = sqlx::query(&sql).bind(filter.task_type);
         if let Some(match_id) = filter.match_id {
@@ -235,7 +247,9 @@ impl SteamBridge {
     ) -> Result<InviteResult, BridgeError> {
         let normalized_party_id = party_id.trim().to_string();
         if normalized_party_id.is_empty() {
-            return Err(BridgeError::InvalidArg("party_id ist erforderlich".to_string()));
+            return Err(BridgeError::InvalidArg(
+                "party_id ist erforderlich".to_string(),
+            ));
         }
 
         let mut unique_steam_ids: Vec<String> = Vec::new();
@@ -359,7 +373,13 @@ pub struct ActiveTaskFilter<'a> {
 impl<'a> ActiveTaskFilter<'a> {
     /// Filter nur nach Typ (alle optionalen Felder leer).
     pub fn new(task_type: &'a str) -> Self {
-        Self { task_type, match_id: None, match_type: None, party_id: None, steam_id: None }
+        Self {
+            task_type,
+            match_id: None,
+            match_type: None,
+            party_id: None,
+            steam_id: None,
+        }
     }
 }
 
@@ -461,9 +481,15 @@ mod tests {
         static COUNTER: AtomicU64 = AtomicU64::new(0);
         let unique = COUNTER.fetch_add(1, Ordering::Relaxed);
         let url = format!("sqlite:file:tb_match_bridge_{unique}?mode=memory&cache=shared");
-        let options = SqliteConnectOptions::from_str(&url).unwrap().create_if_missing(true);
+        let options = SqliteConnectOptions::from_str(&url)
+            .unwrap()
+            .create_if_missing(true);
         // max_connections=1: hält die shared-cache-In-Memory-DB am Leben.
-        let pool = SqlitePoolOptions::new().max_connections(1).connect_with(options).await.unwrap();
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(options)
+            .await
+            .unwrap();
         sqlx::query(
             "CREATE TABLE steam_tasks (\
                 id INTEGER PRIMARY KEY AUTOINCREMENT, \
@@ -487,13 +513,19 @@ mod tests {
     #[tokio::test]
     async fn open_fehlender_pfad_ist_none() {
         assert!(SteamBridge::open("").await.unwrap().is_none());
-        assert!(SteamBridge::open("/nonexistent/path/x.sqlite3").await.unwrap().is_none());
+        assert!(SteamBridge::open("/nonexistent/path/x.sqlite3")
+            .await
+            .unwrap()
+            .is_none());
     }
 
     #[tokio::test]
     async fn create_und_poll_done() {
         let bridge = temp_bridge().await;
-        let id = bridge.create_task("GC_TEST", &serde_json::json!({ "match_id": 5 })).await.unwrap();
+        let id = bridge
+            .create_task("GC_TEST", &serde_json::json!({ "match_id": 5 }))
+            .await
+            .unwrap();
         sqlx::query("UPDATE steam_tasks SET status='DONE', result=? WHERE id=?")
             .bind(r#"{"party_id":"P1","success":true}"#)
             .bind(id)
@@ -509,7 +541,10 @@ mod tests {
     #[tokio::test]
     async fn poll_failed_ist_kein_fehler() {
         let bridge = temp_bridge().await;
-        let id = bridge.create_task("GC_TEST", &serde_json::json!({})).await.unwrap();
+        let id = bridge
+            .create_task("GC_TEST", &serde_json::json!({}))
+            .await
+            .unwrap();
         sqlx::query("UPDATE steam_tasks SET status='FAILED', error='kaputt' WHERE id=?")
             .bind(id)
             .execute(&bridge.pool)
@@ -524,7 +559,10 @@ mod tests {
     #[tokio::test]
     async fn poll_timeout() {
         let bridge = temp_bridge().await;
-        let id = bridge.create_task("GC_TEST", &serde_json::json!({})).await.unwrap();
+        let id = bridge
+            .create_task("GC_TEST", &serde_json::json!({}))
+            .await
+            .unwrap();
         // Bleibt PENDING → Timeout.
         match bridge.poll_task_result(id, 0.05).await.unwrap() {
             TaskOutcome::TimedOut { task_id, .. } => assert_eq!(task_id, id),
@@ -536,7 +574,10 @@ mod tests {
     async fn has_active_task_matcht_payload() {
         let bridge = temp_bridge().await;
         bridge
-            .create_task("GC_CREATE_CUSTOM_LOBBY", &serde_json::json!({ "match_id": 7, "match_type": "bracket" }))
+            .create_task(
+                "GC_CREATE_CUSTOM_LOBBY",
+                &serde_json::json!({ "match_id": 7, "match_type": "bracket" }),
+            )
             .await
             .unwrap();
         let found = bridge
@@ -574,12 +615,11 @@ mod tests {
         .unwrap();
         // get_task triggert den Cleanup.
         let _ = bridge.get_task(999).await.unwrap();
-        let status: String =
-            sqlx::query("SELECT status FROM steam_tasks WHERE type='GC_X'")
-                .fetch_one(&bridge.pool)
-                .await
-                .unwrap()
-                .get("status");
+        let status: String = sqlx::query("SELECT status FROM steam_tasks WHERE type='GC_X'")
+            .fetch_one(&bridge.pool)
+            .await
+            .unwrap()
+            .get("status");
         assert_eq!(status, "FAILED");
     }
 
@@ -589,10 +629,16 @@ mod tests {
         // Erster Steam-ID-Task wird sofort als DONE markiert via separater Logik:
         // wir simulieren, indem wir VORAB einen aktiven Invite anlegen → skipped.
         bridge
-            .create_task(GC_LOBBY_INVITE_PLAYER, &serde_json::json!({ "party_id": "P", "steam_id": "111" }))
+            .create_task(
+                GC_LOBBY_INVITE_PLAYER,
+                &serde_json::json!({ "party_id": "P", "steam_id": "111" }),
+            )
             .await
             .unwrap();
-        let out = bridge.invite_players_to_lobby("P", &["111".into()]).await.unwrap();
+        let out = bridge
+            .invite_players_to_lobby("P", &["111".into()])
+            .await
+            .unwrap();
         assert_eq!(out.skipped.len(), 1);
         assert!(out.success());
     }

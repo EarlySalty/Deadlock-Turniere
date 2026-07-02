@@ -1,5 +1,5 @@
 //! Zweistufiger Rang-Cache: prozesslokales L1 (HashMap) + persistentes L2
-//! (Tabelle `rank_cache`).
+//! (Tabelle `turnier.rank_cache`).
 //!
 //! Portiert `_get_memory_cache`/`_set_memory_cache`/`_get_cached_rank_profile`/
 //! `_store_cached_rank_profile` aus `rank_reader.py`. TTL ist 24 h.
@@ -17,7 +17,7 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use sqlx::FromRow;
-use turnier_core::RankProfile;
+use turnier_core::{parse_discord_id, RankProfile};
 use turnier_db::Pool;
 
 use crate::error::SteamResult;
@@ -28,7 +28,7 @@ pub const RANK_CACHE_TTL_SECONDS: i64 = 60 * 60 * 24;
 /// L1-TTL als `Duration` für die In-Memory-Ebene.
 const L1_TTL: Duration = Duration::from_secs(RANK_CACHE_TTL_SECONDS as u64);
 
-/// Eine Zeile aus `rank_cache` (Spalten 1:1 zum Schema).
+/// Eine Zeile aus `turnier.rank_cache` (Spalten 1:1 zum Schema).
 #[derive(Debug, FromRow)]
 struct RankCacheRow {
     source: String,
@@ -67,7 +67,7 @@ pub struct RankCache {
 }
 
 impl RankCache {
-    /// Erstellt den Cache über dem App-DB-Pool (`rank_cache`-Tabelle).
+    /// Erstellt den Cache über dem App-DB-Pool (`turnier.rank_cache`-Tabelle).
     pub fn new(pool: Pool) -> Self {
         Self {
             pool,
@@ -81,14 +81,14 @@ impl RankCache {
         if let Some(profile) = self.get_memory(discord_id) {
             return Ok(Some(profile));
         }
+        let discord_id_db = parse_discord_id(discord_id)?;
 
         let row: Option<RankCacheRow> = sqlx::query_as(
             "SELECT source, steam_id, rank, rank_tier, subrank, rank_score \
-             FROM rank_cache \
-             WHERE discord_id = ? AND cached_at + ? > unixepoch()",
+             FROM turnier.\"rank_cache\" \
+             WHERE discord_id = $1 AND cached_at > now() - interval '24 hours'",
         )
-        .bind(discord_id)
-        .bind(RANK_CACHE_TTL_SECONDS)
+        .bind(discord_id_db)
         .fetch_optional(&self.pool)
         .await?;
 
@@ -101,11 +101,12 @@ impl RankCache {
         Ok(Some(profile))
     }
 
-    /// Persistiert ein Profil per UPSERT in `rank_cache` und füllt L1.
+    /// Persistiert ein Profil per UPSERT in `turnier.rank_cache` und füllt L1.
     ///
-    /// `cached_at` wird wie im Original auf `strftime('%s','now')` (= aktuelle
-    /// Unix-Zeit) gesetzt. `source` fällt auf `"unknown"` zurück, falls leer.
+    /// `cached_at` wird auf die DB-Uhr gesetzt. `source` fällt auf `"unknown"`
+    /// zurück, falls leer.
     pub async fn store(&self, discord_id: &str, profile: &RankProfile) -> SteamResult<()> {
+        let discord_id_db = parse_discord_id(discord_id)?;
         let source = if profile.source.is_empty() {
             "unknown"
         } else {
@@ -113,19 +114,19 @@ impl RankCache {
         };
 
         sqlx::query(
-            "INSERT INTO rank_cache \
+            "INSERT INTO turnier.\"rank_cache\" \
              (discord_id, source, steam_id, rank, rank_tier, subrank, rank_score, cached_at) \
-             VALUES (?, ?, ?, ?, ?, ?, ?, strftime('%s','now')) \
-             ON CONFLICT(discord_id) DO UPDATE SET \
-             source = excluded.source, \
-             steam_id = excluded.steam_id, \
-             rank = excluded.rank, \
-             rank_tier = excluded.rank_tier, \
-             subrank = excluded.subrank, \
-             rank_score = excluded.rank_score, \
-             cached_at = excluded.cached_at",
+             VALUES ($1, $2, $3, $4, $5, $6, $7, now()) \
+             ON CONFLICT (discord_id) DO UPDATE SET \
+             source = EXCLUDED.source, \
+             steam_id = EXCLUDED.steam_id, \
+             rank = EXCLUDED.rank, \
+             rank_tier = EXCLUDED.rank_tier, \
+             subrank = EXCLUDED.subrank, \
+             rank_score = EXCLUDED.rank_score, \
+             cached_at = EXCLUDED.cached_at",
         )
-        .bind(discord_id)
+        .bind(discord_id_db)
         .bind(source)
         .bind(&profile.steam_id)
         .bind(&profile.rank)

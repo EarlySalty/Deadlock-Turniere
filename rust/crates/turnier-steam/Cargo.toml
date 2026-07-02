@@ -8,12 +8,16 @@ license.workspace = true
 # Rang-Resolver des Turnier-Backends: eine Rang-Domäne (Tier↔Name + rank_score),
 # der read-only Bridge-DB-Reader (steam_links/deadlock_subrank_roles), der
 # persistente rank_cache und der Discord-Rollen-Fallback. Keine Web-Schicht.
+[features]
+default = []
+testing = ["turnier-db/testing"]
+
 [dependencies]
 turnier-core = { path = "../turnier-core" }
 turnier-db = { path = "../turnier-db" }
 turnier-config = { path = "../turnier-config" }
 
-sqlx.workspace = true
+sqlx = { workspace = true, features = ["sqlite"] }
 tokio.workspace = true
 async-trait.workspace = true
 reqwest.workspace = true

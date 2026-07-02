@@ -1,7 +1,8 @@
 //! Mini-Group-Round-Robin abschließen: Sieger ermitteln und propagieren.
 //! Portiert `complete_mini_group_round_robin`.
 
-use sqlx::{Pool, Sqlite};
+use serde_json::Value;
+use sqlx::{Pool, Postgres};
 
 use crate::error::TournamentResult;
 use crate::mini_groups::{aggregate, select_mini_group_winner, MiniGroupMatch};
@@ -14,21 +15,21 @@ struct MgMatchRow {
     team2_id: Option<i64>,
     winner_id: Option<i64>,
     status: String,
-    match_stats: Option<String>,
+    match_stats: Option<Value>,
 }
 
 /// Wertet eine vollständig gespielte Mini-Group aus, schreibt den Sieger in den
 /// Ziel-Slot des Folge-Matches und propagiert ihn. Liefert die Sieger-Team-ID,
 /// oder `None`, wenn die Mini-Group (noch) nicht auswertbar ist.
 pub async fn complete_mini_group_round_robin(
-    pool: &Pool<Sqlite>,
+    pool: &Pool<Postgres>,
     mini_group_id: i64,
 ) -> TournamentResult<Option<i64>> {
     let mut tx = pool.begin().await?;
 
     let mini_group: Option<(i64, i64, Option<i64>, Option<i64>)> = sqlx::query_as(
         "SELECT id, tournament_id, advances_to_match_id, advances_to_slot \
-         FROM bracket_mini_groups WHERE id = ?",
+         FROM turnier.bracket_mini_groups WHERE id = $1",
     )
     .bind(mini_group_id)
     .fetch_optional(&mut *tx)
@@ -40,8 +41,8 @@ pub async fn complete_mini_group_round_robin(
 
     // Teilnehmer (mit Team) in Seed-Reihenfolge.
     let team_rows: Vec<(i64, i64)> = sqlx::query_as(
-        "SELECT team_id, seed_order FROM bracket_mini_group_teams \
-         WHERE mini_group_id = ? AND team_id IS NOT NULL ORDER BY seed_order, id",
+        "SELECT team_id, seed_order FROM turnier.bracket_mini_group_teams \
+         WHERE mini_group_id = $1 AND team_id IS NOT NULL ORDER BY seed_order, id",
     )
     .bind(mini_group_id)
     .fetch_all(&mut *tx)
@@ -57,7 +58,7 @@ pub async fn complete_mini_group_round_robin(
     // Alle Round-Robin-Matches dieser Mini-Group.
     let match_rows: Vec<MgMatchRow> = sqlx::query_as::<_, MgMatchRow>(
         "SELECT team1_id, team2_id, winner_id, status, match_stats \
-         FROM bracket_matches WHERE mini_group_id = ? ORDER BY round, position, id",
+         FROM turnier.bracket_matches WHERE mini_group_id = $1 ORDER BY round, position, id",
     )
     .bind(mini_group_id)
     .fetch_all(&mut *tx)
@@ -79,27 +80,23 @@ pub async fn complete_mini_group_round_robin(
             team1_id: r.team1_id.expect("completed match has team1"),
             team2_id: r.team2_id.expect("completed match has team2"),
             winner_id: r.winner_id.expect("completed match has winner"),
-            match_stats: r
-                .match_stats
-                .as_deref()
-                .and_then(|s| serde_json::from_str(s).ok()),
+            match_stats: r.match_stats.clone(),
         })
         .collect();
 
     let (wins, point_diff, h2h) = aggregate(&team_ids, &mini_matches);
-    let winner_team_id =
-        select_mini_group_winner(&team_ids, &wins, &point_diff, &seed_order, &h2h);
+    let winner_team_id = select_mini_group_winner(&team_ids, &wins, &point_diff, &seed_order, &h2h);
 
     // Sieger in den Ziel-Slot des Folge-Matches schreiben.
     if let (Some(target_match_id), Some(slot)) = (advances_to_match_id, advances_to_slot) {
         if slot == 1 {
-            sqlx::query("UPDATE bracket_matches SET team1_id = ? WHERE id = ?")
+            sqlx::query("UPDATE turnier.bracket_matches SET team1_id = $1 WHERE id = $2")
                 .bind(winner_team_id)
                 .bind(target_match_id)
                 .execute(&mut *tx)
                 .await?;
         } else if slot == 2 {
-            sqlx::query("UPDATE bracket_matches SET team2_id = ? WHERE id = ?")
+            sqlx::query("UPDATE turnier.bracket_matches SET team2_id = $1 WHERE id = $2")
                 .bind(winner_team_id)
                 .bind(target_match_id)
                 .execute(&mut *tx)

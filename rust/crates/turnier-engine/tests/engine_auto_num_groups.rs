@@ -7,6 +7,10 @@ use turnier_engine::auto_num_groups;
 fn auto_num_groups_returns_expected_best_practice_values() {
     let cases = [(8, 2), (16, 4), (20, 5), (24, 6), (32, 8)];
     for (team_count, expected) in cases {
-        assert_eq!(auto_num_groups(team_count), expected, "team_count={team_count}");
+        assert_eq!(
+            auto_num_groups(team_count),
+            expected,
+            "team_count={team_count}"
+        );
     }
 }

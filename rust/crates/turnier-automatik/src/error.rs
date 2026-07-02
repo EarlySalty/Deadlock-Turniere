@@ -23,6 +23,18 @@ pub enum AutomatikError {
         proposal_id: i64,
     },
 
+    /// Ungueltige Discord-/Message-ID fuer eine BIGINT-Spalte.
+    #[error("ungueltige numerische ID: {0}")]
+    InvalidNumericId(String),
+
+    /// Ungueltiges JSON fuer eine JSONB-Spalte.
+    #[error(transparent)]
+    Json(#[from] serde_json::Error),
+
+    /// Ungueltiger Zeitstempel fuer eine TIMESTAMPTZ-Spalte.
+    #[error(transparent)]
+    Time(#[from] chrono::ParseError),
+
     /// Persistenz-Fehler (Pool/Query).
     #[error(transparent)]
     Db(#[from] turnier_db::DbError),

@@ -11,9 +11,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use sqlx::Row;
 
-use turnier_engine::{
-    assign_random_teams, finalize_checkin, FinalizeCheckinParams, SoloShuffler,
-};
+use turnier_engine::{assign_random_teams, finalize_checkin, FinalizeCheckinParams, SoloShuffler};
 
 use crate::error::{WebError, WebResult};
 use crate::extract::ModUser;
@@ -24,8 +22,14 @@ use super::helpers::load_tournament_or_404;
 /// Router der Phasen-Endpunkte.
 pub fn router() -> Router<AppState> {
     Router::new()
-        .route("/api/admin/tournaments/{tournament_id}/finalize-checkin", post(finalize_checkin_route))
-        .route("/api/admin/tournaments/{tournament_id}/assign-random", post(assign_random))
+        .route(
+            "/api/admin/tournaments/{tournament_id}/finalize-checkin",
+            post(finalize_checkin_route),
+        )
+        .route(
+            "/api/admin/tournaments/{tournament_id}/assign-random",
+            post(assign_random),
+        )
 }
 
 /// Query-Parameter `?confirm=bool` für die Check-in-Finalisierung.
@@ -186,9 +190,9 @@ async fn assign_random(
     _mod: ModUser,
     Path(tournament_id): Path<i64>,
 ) -> WebResult<Json<Value>> {
-    // Die SqliteRow ist nicht `Send` und darf nicht über das `assign_random_teams`-
-    // await gehalten werden (sonst ist das Handler-Future nicht `Send`) — daher die
-    // benötigten Werte in einem Block extrahieren und die Row vorher fallenlassen.
+    // Die DB-Row darf nicht über das `assign_random_teams`-await gehalten werden
+    // (sonst ist das Handler-Future nicht `Send`) — daher die benötigten Werte in
+    // einem Block extrahieren und die Row vorher fallenlassen.
     let (status, team_size): (String, i64) = {
         let tournament = load_tournament_or_404(&state.pool, tournament_id).await?;
         (tournament.get("status"), tournament.get("team_size"))
@@ -209,5 +213,7 @@ async fn assign_random(
     )
     .await?;
 
-    Ok(Json(json!({ "status": "ok", "teams_created": teams_created })))
+    Ok(Json(
+        json!({ "status": "ok", "teams_created": teams_created }),
+    ))
 }

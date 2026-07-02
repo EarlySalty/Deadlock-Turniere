@@ -8,9 +8,9 @@
 //! UPDATE. Die beobachtbaren End-Zeilen (`DONE`/`FAILED` mit
 //! `result_payload`/`error`) bleiben identisch.
 
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use serde::Serialize;
-use sqlx::Row;
+use serde_json::Value;
 use turnier_db::Pool;
 
 use crate::error::BrokerError;
@@ -36,28 +36,30 @@ impl TaskType {
     }
 }
 
-/// Aktueller UTC-Zeitstempel als ISO-8601-String (wie
-/// `datetime.now(timezone.utc).isoformat()` im Original).
-fn now_iso() -> String {
-    Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Micros, false)
+fn now_utc() -> DateTime<Utc> {
+    Utc::now()
 }
 
 /// Legt eine `discord_tasks`-Zeile direkt mit `status='RUNNING'` an und gibt
-/// deren `id` zurück. `payload` wird als JSON-Text serialisiert.
-pub async fn create_running(pool: &Pool, task_type: TaskType, payload: &impl Serialize) -> sqlx::Result<i64> {
-    let now = now_iso();
-    let payload_json = serde_json::to_string(payload).unwrap_or_else(|_| "null".to_string());
-    let row = sqlx::query(
-        "INSERT INTO discord_tasks (type, payload, status, created_at, updated_at) \
-         VALUES (?, ?, 'RUNNING', ?, ?) RETURNING id",
+/// deren `id` zurück. `payload` wird als JSONB gebunden.
+pub async fn create_running(
+    pool: &Pool,
+    task_type: TaskType,
+    payload: &impl Serialize,
+) -> sqlx::Result<i64> {
+    let now = now_utc();
+    let payload_json = serde_json::to_value(payload).unwrap_or(Value::Null);
+    let id = sqlx::query_scalar(
+        "INSERT INTO turnier.discord_tasks (type, payload, status, created_at, updated_at) \
+         VALUES ($1, $2, 'RUNNING', $3, $4) RETURNING id",
     )
     .bind(task_type.as_str())
     .bind(payload_json)
-    .bind(&now)
-    .bind(&now)
+    .bind(now)
+    .bind(now)
     .fetch_one(pool)
     .await?;
-    Ok(row.get::<i64, _>("id"))
+    Ok(id)
 }
 
 /// Schreibt den Abschluss eines Tasks (`DONE`/`FAILED`) als einzelnes UPDATE.
@@ -65,19 +67,19 @@ async fn finish(
     pool: &Pool,
     task_id: i64,
     status_value: &str,
-    result_payload: Option<String>,
+    result_payload: Option<Value>,
     error: Option<&str>,
 ) -> sqlx::Result<()> {
-    let now = now_iso();
+    let now = now_utc();
     sqlx::query(
-        "UPDATE discord_tasks \
-         SET status = ?, result_payload = ?, error = ?, updated_at = ? \
-         WHERE id = ?",
+        "UPDATE turnier.discord_tasks \
+         SET status = $1, result_payload = $2, error = $3, updated_at = $4 \
+         WHERE id = $5",
     )
     .bind(status_value)
     .bind(result_payload)
     .bind(error)
-    .bind(&now)
+    .bind(now)
     .bind(task_id)
     .execute(pool)
     .await?;
@@ -85,8 +87,12 @@ async fn finish(
 }
 
 /// Markiert einen Task als `DONE` mit (optionalem) Result-Payload.
-pub async fn mark_done(pool: &Pool, task_id: i64, result_payload: Option<&serde_json::Value>) -> sqlx::Result<()> {
-    let payload = result_payload.map(|v| serde_json::to_string(v).unwrap_or_else(|_| "null".to_string()));
+pub async fn mark_done(
+    pool: &Pool,
+    task_id: i64,
+    result_payload: Option<&serde_json::Value>,
+) -> sqlx::Result<()> {
+    let payload = result_payload.cloned();
     finish(pool, task_id, "DONE", payload, None).await
 }
 

@@ -52,8 +52,14 @@ mod tests {
 
     #[test]
     fn mode_from_count_and_override() {
-        assert_eq!(determine_tournament_mode(15, None), TournamentMode::BracketOnly);
-        assert_eq!(determine_tournament_mode(16, None), TournamentMode::GroupStage);
+        assert_eq!(
+            determine_tournament_mode(15, None),
+            TournamentMode::BracketOnly
+        );
+        assert_eq!(
+            determine_tournament_mode(16, None),
+            TournamentMode::GroupStage
+        );
         assert_eq!(
             determine_tournament_mode(4, Some(TournamentMode::GroupStage)),
             TournamentMode::GroupStage

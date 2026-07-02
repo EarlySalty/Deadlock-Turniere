@@ -71,7 +71,9 @@ mod tests {
 
     fn sets() -> RoleSets {
         RoleSets::new(
-            ["admin1".to_string(), "admin2".to_string()].into_iter().collect(),
+            ["admin1".to_string(), "admin2".to_string()]
+                .into_iter()
+                .collect(),
             ["mod1".to_string()].into_iter().collect(),
         )
     }

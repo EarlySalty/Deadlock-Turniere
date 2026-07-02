@@ -1,103 +1,134 @@
-//! Integrationstest: die eingebettete Migration läuft über sqlx sauber durch —
-//! sowohl auf einer frischen DB als auch (idempotent) auf einer Kopie der echten
-//! Live-DB.
+#![cfg(feature = "testing")]
 
-use std::path::PathBuf;
+//! PG-Smoke fuer die zentrale Test-Harness: `dl-central-db` erzeugt eine
+//! Wegwerf-Datenbank und wendet die zentralen Migrationen an.
 
 use sqlx::Row;
-use turnier_db::{connect, run_migrations};
+use turnier_db::{run_migrations, test_pool};
 
-fn temp_db(tag: &str) -> PathBuf {
-    let mut p = std::env::temp_dir();
-    p.push(format!("tb_db_{}_{}.db", tag, std::process::id()));
-    let _ = std::fs::remove_file(&p);
-    p
-}
-
-async fn table_names(pool: &turnier_db::Pool) -> Vec<String> {
-    sqlx::query("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name <> '_sqlx_migrations' ORDER BY name")
-        .fetch_all(pool)
-        .await
-        .unwrap()
-        .into_iter()
-        .map(|r| r.get::<String, _>("name"))
-        .collect()
+async fn turnier_table_names(pool: &turnier_db::Pool) -> Vec<String> {
+    sqlx::query(
+        "SELECT table_name \
+         FROM information_schema.tables \
+         WHERE table_schema = 'turnier' AND table_type = 'BASE TABLE' \
+         ORDER BY table_name",
+    )
+    .fetch_all(pool)
+    .await
+    .unwrap()
+    .into_iter()
+    .map(|row| row.get::<String, _>("table_name"))
+    .collect()
 }
 
 #[tokio::test]
-async fn migration_baut_frische_db_vollstaendig_auf() {
-    let path = temp_db("fresh");
-    let pool = connect(&path, 2).await.expect("connect");
-    run_migrations(&pool).await.expect("migrate");
+async fn zentrale_test_harness_enthaelt_turnier_schema() {
+    let db = test_pool().await.expect("central test pool");
+    let pool = db.pool();
 
-    let tables = table_names(&pool).await;
-    assert_eq!(tables.len(), 37, "erwarte 37 Tabellen, bekam {}", tables.len());
-    for must in ["tournaments", "teams", "bracket_matches", "draft_sessions", "match_result_reports"] {
+    let tables = turnier_table_names(pool).await;
+    assert_eq!(
+        tables.len(),
+        37,
+        "erwarte 37 turnier-Tabellen, bekam {}",
+        tables.len()
+    );
+    for must in [
+        "tournaments",
+        "teams",
+        "bracket_matches",
+        "tournament_dm_optout",
+        "draft_sessions",
+        "match_result_reports",
+    ] {
         assert!(tables.contains(&must.to_string()), "Tabelle {must} fehlt");
     }
-
-    pool.close().await;
-    let _ = std::fs::remove_file(&path);
 }
 
 #[tokio::test]
-async fn migration_ist_idempotent_auf_live_db_kopie() {
-    // Die echte Live-DB liegt relativ zum Crate-Manifest. Fehlt sie (z. B. in CI),
-    // wird der Test übersprungen statt zu scheitern.
-    let live = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../../backend/data/tournament.db");
-    if !live.exists() {
-        eprintln!("Live-DB nicht vorhanden ({}), Test übersprungen", live.display());
-        return;
+async fn zentrale_test_harness_enthaelt_core_und_voice_schemas() {
+    let db = test_pool().await.expect("central test pool");
+    let pool = db.pool();
+
+    for schema in ["core", "voice", "turnier"] {
+        let exists: bool = sqlx::query_scalar(
+            "SELECT EXISTS ( \
+             SELECT 1 FROM information_schema.schemata WHERE schema_name = $1 \
+             )",
+        )
+        .bind(schema)
+        .fetch_one(pool)
+        .await
+        .expect("schema exists query");
+        assert!(exists, "Schema {schema} fehlt");
+    }
+}
+
+#[tokio::test]
+async fn zentrale_turnier_tabellen_nutzen_pg_typen() {
+    let db = test_pool().await.expect("central test pool");
+    let pool = db.pool();
+
+    let rows = sqlx::query(
+        "SELECT table_name, column_name, data_type, udt_name \
+         FROM information_schema.columns \
+         WHERE table_schema = 'turnier' \
+           AND (table_name, column_name) IN ( \
+             ('tournaments', 'id'), \
+             ('tournaments', 'created_at'), \
+             ('tournaments', 'lobby_settings'), \
+             ('tournaments', 'is_test'), \
+             ('tournament_dm_optout', 'discord_id') \
+           )",
+    )
+    .fetch_all(pool)
+    .await
+    .expect("column metadata");
+
+    let mut columns = Vec::new();
+    for row in rows {
+        columns.push((
+            row.get::<String, _>("table_name"),
+            row.get::<String, _>("column_name"),
+            row.get::<String, _>("data_type"),
+            row.get::<String, _>("udt_name"),
+        ));
     }
 
-    let path = temp_db("livecopy");
-    std::fs::copy(&live, &path).expect("copy live db");
-
-    let pool = connect(&path, 2).await.expect("connect");
-    // Darf auf der bestehenden DB nicht scheitern (alle CREATEs sind IF NOT EXISTS).
-    run_migrations(&pool).await.expect("migrate on live copy");
-    // Zweiter Lauf = garantiert No-op.
-    run_migrations(&pool).await.expect("migrate idempotent");
-
-    let tables = table_names(&pool).await;
-    assert_eq!(tables.len(), 37);
-
-    pool.close().await;
-    let _ = std::fs::remove_file(&path);
+    assert!(columns.contains(&(
+        "tournaments".to_string(),
+        "id".to_string(),
+        "bigint".to_string(),
+        "int8".to_string(),
+    )));
+    assert!(columns.contains(&(
+        "tournaments".to_string(),
+        "created_at".to_string(),
+        "timestamp with time zone".to_string(),
+        "timestamptz".to_string(),
+    )));
+    assert!(columns.contains(&(
+        "tournaments".to_string(),
+        "lobby_settings".to_string(),
+        "jsonb".to_string(),
+        "jsonb".to_string(),
+    )));
+    assert!(columns.contains(&(
+        "tournaments".to_string(),
+        "is_test".to_string(),
+        "boolean".to_string(),
+        "bool".to_string(),
+    )));
+    assert!(columns.contains(&(
+        "tournament_dm_optout".to_string(),
+        "discord_id".to_string(),
+        "bigint".to_string(),
+        "int8".to_string(),
+    )));
 }
 
 #[tokio::test]
-async fn migration_erzwingt_automatik_enum_checks_und_tournament_source_not_null() {
-    let path = temp_db("constraints");
-    let pool = connect(&path, 2).await.expect("connect");
-    run_migrations(&pool).await.expect("migrate");
-
-    let bad_category = sqlx::query(
-        "INSERT INTO tournament_presets (name, category, created_by) \
-         VALUES ('Bad Preset', 'xxx', 'tester')",
-    )
-    .execute(&pool)
-    .await;
-    assert!(bad_category.is_err(), "ungueltige Preset-Kategorie wurde akzeptiert");
-
-    let missing_source = sqlx::query(
-        "INSERT INTO tournaments (name, status, created_by, source) \
-         VALUES ('Bad Cup', 'draft', 'tester', NULL)",
-    )
-    .execute(&pool)
-    .await;
-    assert!(missing_source.is_err(), "NULL fuer tournaments.source wurde akzeptiert");
-
-    let row: (String,) = sqlx::query_as(
-        "INSERT INTO tournaments (name, status, created_by) \
-         VALUES ('Default Cup', 'draft', 'tester') RETURNING source",
-    )
-    .fetch_one(&pool)
-    .await
-    .expect("Tournament mit Default-Source anlegen");
-    assert_eq!(row.0, "manual");
-
-    pool.close().await;
-    let _ = std::fs::remove_file(&path);
+async fn lokale_run_migrations_ist_pg_noop() {
+    let db = test_pool().await.expect("central test pool");
+    run_migrations(db.pool()).await.expect("migration no-op");
 }

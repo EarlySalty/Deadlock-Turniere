@@ -11,6 +11,7 @@ license.workspace = true
 # führen Aktionen sequenziell aus. Die HTTP-Routen (/api/draft/*) leben in
 # turnier-api; hier sitzt die Logik darunter. Funktional 1:1 zu backend/draft/*.py.
 [dependencies]
+turnier-core = { path = "../turnier-core" }
 turnier-db = { path = "../turnier-db" }
 
 sqlx.workspace = true
@@ -22,6 +23,10 @@ once_cell.workspace = true
 [dev-dependencies]
 tokio = { workspace = true }
 serde_json.workspace = true
+
+[features]
+default = []
+testing = ["turnier-db/testing"]
 
 [lints]
 workspace = true

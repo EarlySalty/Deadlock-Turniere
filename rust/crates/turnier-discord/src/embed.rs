@@ -50,7 +50,11 @@ pub struct Embed {
 impl Embed {
     /// Leeres Embed (nur `fields`).
     pub fn new() -> Self {
-        Self { title: None, description: None, fields: Vec::new() }
+        Self {
+            title: None,
+            description: None,
+            fields: Vec::new(),
+        }
     }
 
     /// Setzt den Titel (gekappt auf [`TITLE_MAX`]).
@@ -66,7 +70,12 @@ impl Embed {
     }
 
     /// Hängt ein Feld an.
-    pub fn field(mut self, name: impl Into<String>, value: impl Into<String>, inline: bool) -> Self {
+    pub fn field(
+        mut self,
+        name: impl Into<String>,
+        value: impl Into<String>,
+        inline: bool,
+    ) -> Self {
         self.fields.push(Field::new(name, value, inline));
         self
     }

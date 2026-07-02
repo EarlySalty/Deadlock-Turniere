@@ -38,10 +38,6 @@ pub enum MatchError {
     /// Persistenz-Fehler (Pool/Query) auf der Haupt-DB.
     #[error(transparent)]
     Db(#[from] turnier_db::DbError),
-
-    /// Fehler aus der Turnier-Engine (Propagation, Mini-Group-Abschluss).
-    #[error(transparent)]
-    Tournament(#[from] turnier_engine::TournamentError),
 }
 
 impl MatchError {
@@ -148,9 +144,6 @@ impl From<MatchError> for SteamTaskError {
             MatchError::NotFound(m) => SteamTaskError::NotFound(m),
             MatchError::State(m) | MatchError::Invalid(m) => SteamTaskError::InvalidResult(m),
             MatchError::Db(e) => SteamTaskError::Db(e),
-            MatchError::Tournament(e) => {
-                SteamTaskError::Failed(format!("Turnier-Engine-Fehler: {e}"))
-            }
         }
     }
 }
