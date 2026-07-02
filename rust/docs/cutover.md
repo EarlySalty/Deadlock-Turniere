@@ -104,6 +104,18 @@ identisch — kein Delta seit dem SP1-ETL-Snapshot, kein Reconciliation-Bedarf.
 Siehe [`known-issues.md`](known-issues.md) — alle beim Port gefundenen Alt-Bugs
 sind dort als Opt-in-Folgefixe gelistet (Verhalten 1:1 erhalten).
 
+## Live-Cutover-Beweis (2026-07-02 02:56:53 CEST)
+
+`--check` gegen die echte Zielumgebung lief grün (`central DB pool opened`,
+AppState/Scheduler/Router gebaut, kein Serve). Anschließend Wartungsfenster
+ohne Downtime-Risiko (Row-Counts vorab identisch): `deadlock-turniere.service`
+gestoppt, `tournament.db` von keinem Prozess mehr offen gehalten, Dienst mit
+neuem Binary neu gestartet. Journal-Beweis: Log zeigt `central DB pool opened`
+statt des alten `db=data/tournament.db`; `lsof` zeigt aktive Verbindungen zu
+`localhost:5434`, keine offene `tournament.db` mehr; `GET /api/tournaments`
+antwortet `200` (liest live aus Postgres). Rollback-Artefakte gesichert unter
+`backend/data/rollback-snapshots/` (Binary + DB-Snapshot vor Cutover).
+
 ## Rollback
 
 Python-Stand im Repo-Root ist unangetastet, darf aber nicht versehentlich
