@@ -24,7 +24,19 @@ anyhow = "1"
 chrono = { version = "0.4", features = ["serde", "clock"] }
 
 # --- Async / Laufzeit ---
-tokio = { version = "1", features = ["full"] }
+# Statt "full": nur die tatsächlich genutzten Bausteine (tokio::main/test,
+# ::net (TcpListener), ::fs, ::signal::ctrl_c, ::sync (watch/Barrier), ::time
+# (sleep/interval)). rt-multi-thread bewahrt den Standard-Multithread-Scheduler
+# von #[tokio::main] (kein Verhaltenswechsel).
+tokio = { version = "1", features = [
+    "rt-multi-thread",
+    "macros",
+    "net",
+    "fs",
+    "signal",
+    "sync",
+    "time",
+] }
 futures = "0.3"
 async-trait = "0.1"
 
@@ -42,10 +54,13 @@ sqlx = { version = "0.8", default-features = false, features = [
 ] }
 
 # --- Web ---
-axum = { version = "0.8", features = ["ws", "macros", "multipart"] }
-axum-extra = { version = "0.10", features = ["cookie", "typed-header"] }
+# ws/macros (axum) und typed-header (axum-extra) und fs/trace (tower-http)
+# sind im Code unbenutzt (kein WebSocket, kein #[debug_handler], keine
+# TypedHeader-Extraktion, kein ServeDir/ServeFile, kein TraceLayer) -> entfernt.
+axum = { version = "0.8", features = ["multipart"] }
+axum-extra = { version = "0.10", features = ["cookie"] }
 tower = "0.5"
-tower-http = { version = "0.6", features = ["fs", "trace", "cors"] }
+tower-http = { version = "0.6", features = ["cors"] }
 
 # --- Netz / externe Dienste ---
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
