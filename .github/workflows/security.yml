@@ -24,7 +24,7 @@ jobs:
 
       - name: Block tracked secret material files
         run: |
-          forbidden=$(git ls-files | grep -E '(^|/)(\.env(\..*)?|id_rsa|id_dsa|.*\.pem|.*\.key)$' || true)
+          forbidden=$(git ls-files | grep -E '(^|/)(\.env(\..*)?|id_rsa|id_dsa|.*\.pem|.*\.key)$' | grep -vE '\.(example|sample|template|dist)$' || true)
           if [ -n "$forbidden" ]; then
             echo "::error::Tracked secret material files detected:"
             echo "$forbidden"
