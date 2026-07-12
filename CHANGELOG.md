@@ -1,6 +1,6 @@
 ## #14 — Turniere brauchen zwei Mod-Freigaben
 
-**Ausgangslage:** Die Turnier-Automatik konnte nach einem Zeitplan selbst ein Turnier anlegen und ankündigen. **Änderung:** Sie erstellt nur noch einen internen Vorschlag; N und Änderungswünsche werden als Lernhistorie für spätere Vorschläge gespeichert. **Aktuelles Verhalten:** Erst zwei unterschiedliche J von Mods legen das Turnier an, eine Ankündigung wird nur als interne Vorlage vorbereitet.
+**Ausgangslage:** Die Turnier-Automatik konnte nach einem Zeitplan selbst ein Turnier anlegen und ankündigen. **Änderung:** Sie erstellt nur noch einen internen Vorschlag; N und Änderungswünsche werden als Lernhistorie für spätere Vorschläge gespeichert. **Aktuelles Verhalten:** Erst zwei unterschiedliche J von Mods legen das Turnier an, eine Ankündigung wird nur als interne Vorlage vorbereitet; ein fehlgeschlagener Vorlagen-Post bleibt offen und kann erneut versucht werden.
 
 ## #13 — Turnier-Automatik bis zur Mod-Freigabe gestoppt
 

@@ -244,11 +244,54 @@ async fn internal_votes_require_token_roles_and_two_distinct_approvals() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(second["approvals"], 2);
     assert_eq!(second["went_live"], true);
+    assert_eq!(second["announcement_posted"], false);
     let tournament_id = second["tournament_id"].as_i64().unwrap();
+
+    let announcement_uri = format!(
+        "/internal/turnier/v1/proposals/{}/announcement-rendered",
+        proposal.id
+    );
+    let (status, announced) = send_internal(
+        &app,
+        Some("internal-token"),
+        &announcement_uri,
+        json!({
+            "actor_id":"1401891955931222602",
+            "role_ids":["1401891955931222110"],
+            "message_id":"1474543558793887999"
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(announced["announcement_posted"], true);
+    assert_eq!(announced["feedback"].as_array().unwrap().len(), 1);
+    let (status, repeated_announcement) = send_internal(
+        &app,
+        Some("internal-token"),
+        &announcement_uri,
+        json!({
+            "actor_id":"1401891955931222602",
+            "role_ids":["1401891955931222110"],
+            "message_id":"1474543558793887999"
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(repeated_announcement["announcement_posted"], true);
+    let marker_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM turnier.tournament_proposal_feedback \
+         WHERE proposal_id = $1 AND applied_change_json->>'kind' = 'announcement_draft'",
+    )
+    .bind(proposal.id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(marker_count, 1);
 
     let (status, repeated) = send_internal(&app, Some("internal-token"), &uri, second_body).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(repeated["tournament_id"], tournament_id);
+    assert_eq!(repeated["announcement_posted"], true);
     let rows: Vec<(i64, String)> =
         sqlx::query_as("SELECT id, status FROM turnier.tournaments WHERE source='routine'")
             .fetch_all(&pool)

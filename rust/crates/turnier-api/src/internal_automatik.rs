@@ -36,6 +36,10 @@ pub fn router() -> Router<AppState> {
             "/internal/turnier/v1/proposals/{proposal_id}/revision",
             post(revise),
         )
+        .route(
+            "/internal/turnier/v1/proposals/{proposal_id}/announcement-rendered",
+            post(announcement_rendered),
+        )
 }
 
 #[derive(Debug, Deserialize)]
@@ -59,6 +63,13 @@ struct RevisionBody {
     role_ids: Vec<String>,
     feedback: String,
     config_json: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct AnnouncementRenderedBody {
+    actor_id: String,
+    role_ids: Vec<String>,
+    message_id: String,
 }
 
 fn require_internal(headers: &HeaderMap, state: &AppState) -> WebResult<()> {
@@ -93,6 +104,7 @@ async fn proposal_payload(state: &AppState, proposal_id: i64) -> WebResult<Value
     let feedback = proposals::list_feedback(&state.pool, proposal_id).await?;
     let learning_feedback = proposals::list_recent_feedback(&state.pool, 20).await?;
     let approvals = proposals::approvals_count(&state.pool, proposal_id).await?;
+    let announcement_posted = proposals::announcement_posted(&state.pool, proposal_id).await?;
     Ok(json!({
         "proposal": proposal,
         "votes": votes,
@@ -100,6 +112,7 @@ async fn proposal_payload(state: &AppState, proposal_id: i64) -> WebResult<Value
         "learning_feedback": learning_feedback,
         "approvals": approvals,
         "required_approvals": proposals::REQUIRED_APPROVALS,
+        "announcement_posted": announcement_posted,
     }))
 }
 
@@ -204,6 +217,32 @@ async fn revise(
     )
     .await?;
     Ok(Json(proposal_payload(&state, revised_id).await?))
+}
+
+async fn announcement_rendered(
+    State(state): State<AppState>,
+    Path(proposal_id): Path<i64>,
+    headers: HeaderMap,
+    Json(body): Json<AnnouncementRenderedBody>,
+) -> WebResult<Json<Value>> {
+    require_internal(&headers, &state)?;
+    require_approver(&body.role_ids)?;
+    let proposal = proposals::get_proposal(&state.pool, proposal_id)
+        .await?
+        .ok_or_else(|| WebError::not_found("Vorschlag nicht gefunden"))?;
+    if proposal.tournament_id.is_none() {
+        return Err(WebError::conflict(
+            "Ankündigungsvorlage erst nach der Freigabe möglich",
+        ));
+    }
+    proposals::record_announcement_posted(
+        &state.pool,
+        proposal_id,
+        &body.actor_id,
+        &body.message_id,
+    )
+    .await?;
+    Ok(Json(proposal_payload(&state, proposal_id).await?))
 }
 
 async fn materialize(state: &AppState, proposal_id: i64, actor_id: &str) -> WebResult<(i64, bool)> {

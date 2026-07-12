@@ -485,7 +485,9 @@ pub async fn list_feedback(
 ) -> AutomatikResult<Vec<ProposalFeedback>> {
     let rows = sqlx::query_as::<_, ProposalFeedbackRow>(
         "SELECT * FROM turnier.tournament_proposal_feedback \
-         WHERE proposal_id = $1 ORDER BY id",
+         WHERE proposal_id = $1 \
+           AND COALESCE(applied_change_json->>'kind', '') <> 'announcement_draft' \
+         ORDER BY id",
     )
     .bind(proposal_id)
     .fetch_all(pool)
@@ -502,12 +504,54 @@ pub async fn list_recent_feedback(
 ) -> AutomatikResult<Vec<ProposalFeedback>> {
     let rows = sqlx::query_as::<_, ProposalFeedbackRow>(
         "SELECT * FROM turnier.tournament_proposal_feedback \
+         WHERE COALESCE(applied_change_json->>'kind', '') <> 'announcement_draft' \
          ORDER BY id DESC LIMIT $1",
     )
     .bind(limit.clamp(1, 100))
     .fetch_all(pool)
     .await?;
     Ok(rows.into_iter().map(Into::into).collect())
+}
+
+/// Ob die interne Ankündigungsvorlage bereits erfolgreich in Discord liegt.
+pub async fn announcement_posted(pool: &Pool, proposal_id: i64) -> AutomatikResult<bool> {
+    let posted = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM turnier.tournament_proposal_feedback \
+         WHERE proposal_id = $1 AND applied_change_json->>'kind' = 'announcement_draft')",
+    )
+    .bind(proposal_id)
+    .fetch_one(pool)
+    .await?;
+    Ok(posted)
+}
+
+/// Markiert den erfolgreichen Vorlagen-Post idempotent. Der Marker nutzt die
+/// bestehende Audit-Tabelle, wird aber nicht als Lernfeedback ausgeliefert.
+pub async fn record_announcement_posted(
+    pool: &Pool,
+    proposal_id: i64,
+    actor_id: &str,
+    message_id: &str,
+) -> AutomatikResult<()> {
+    let actor_id = parse_numeric_id(actor_id)?;
+    let message_id = parse_numeric_id(message_id)?;
+    let now = now_utc();
+    sqlx::query(
+        "INSERT INTO turnier.tournament_proposal_feedback \
+             (proposal_id, caster_discord_id, raw_text, applied_change_json, created_at) \
+         SELECT $1, $2, 'announcement_draft_posted', \
+                jsonb_build_object('kind', 'announcement_draft', 'message_id', $3), $4 \
+         WHERE NOT EXISTS (SELECT 1 FROM turnier.tournament_proposal_feedback \
+                           WHERE proposal_id = $1 \
+                             AND applied_change_json->>'kind' = 'announcement_draft')",
+    )
+    .bind(proposal_id)
+    .bind(actor_id)
+    .bind(message_id)
+    .bind(now)
+    .execute(pool)
+    .await?;
+    Ok(())
 }
 
 fn parse_numeric_id(value: &str) -> AutomatikResult<i64> {
