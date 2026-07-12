@@ -53,7 +53,7 @@ pub enum VoteDecision {
 }
 
 /// DB-Zeile aus `tournament_proposals`.
-#[derive(Debug, Clone, PartialEq, Eq, sqlx::FromRow)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, sqlx::FromRow)]
 pub struct Proposal {
     pub id: i64,
     pub preset_id: Option<i64>,
@@ -102,7 +102,7 @@ impl From<ProposalRow> for Proposal {
 }
 
 /// DB-Zeile aus `tournament_proposal_votes`.
-#[derive(Debug, Clone, PartialEq, Eq, sqlx::FromRow)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, sqlx::FromRow)]
 pub struct ProposalVote {
     pub id: i64,
     pub proposal_id: i64,
@@ -133,7 +133,7 @@ impl From<ProposalVoteRow> for ProposalVote {
 }
 
 /// DB-Zeile aus `tournament_proposal_feedback`.
-#[derive(Debug, Clone, PartialEq, Eq, sqlx::FromRow)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, sqlx::FromRow)]
 pub struct ProposalFeedback {
     pub id: i64,
     pub proposal_id: i64,
@@ -269,6 +269,51 @@ pub async fn create_revision(
     .await?;
     tx.commit().await?;
     Ok(revised_id)
+}
+
+/// Speichert den von der KI validierten Plan und die zugehoerige Discord-Nachricht.
+pub async fn attach_rendered_message(
+    pool: &Pool,
+    proposal_id: i64,
+    config_json: &str,
+    channel_id: &str,
+    message_id: &str,
+) -> AutomatikResult<()> {
+    let config_json = serde_json::from_str::<Value>(config_json)?;
+    let channel_id = parse_numeric_id(channel_id)?;
+    let message_id = parse_numeric_id(message_id)?;
+    let result = sqlx::query(
+        "UPDATE turnier.tournament_proposals \
+         SET config_json = $1, channel_id = $2, proposal_message_id = $3 \
+         WHERE id = $4 AND state = 'pending_approval'",
+    )
+    .bind(config_json)
+    .bind(channel_id)
+    .bind(message_id)
+    .bind(proposal_id)
+    .execute(pool)
+    .await?;
+    if result.rows_affected() == 0 {
+        return Err(sqlx::Error::RowNotFound.into());
+    }
+    Ok(())
+}
+
+/// Verknuepft einen freigegebenen Vorschlag idempotent mit seinem Turnier.
+pub async fn attach_tournament(
+    pool: &Pool,
+    proposal_id: i64,
+    tournament_id: i64,
+) -> AutomatikResult<()> {
+    sqlx::query(
+        "UPDATE turnier.tournament_proposals SET tournament_id = $1 \
+         WHERE id = $2 AND (tournament_id IS NULL OR tournament_id = $1)",
+    )
+    .bind(tournament_id)
+    .bind(proposal_id)
+    .execute(pool)
+    .await?;
+    Ok(())
 }
 
 /// Laedt einen Vorschlag per ID.

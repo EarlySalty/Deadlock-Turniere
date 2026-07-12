@@ -20,6 +20,7 @@ pub mod admin;
 pub mod auth;
 pub mod consent;
 pub mod draft;
+pub mod internal_automatik;
 pub mod leaderboard;
 pub mod operations;
 pub mod public;

@@ -10,6 +10,8 @@ use serde_json::{json, Value};
 use tower::ServiceExt;
 
 use turnier_api::{build_router, AppState};
+use turnier_automatik::presets;
+use turnier_automatik::routine::{ensure_routine_proposal, RoutineTournamentPlan};
 use turnier_config::Config;
 use turnier_db::{test_pool, Pool, TestDb};
 
@@ -29,6 +31,7 @@ async fn setup() -> (Router, TestDb, Pool, String) {
     config.discord_bot_token = String::new();
     config.steam_bridge_db_path = String::new();
     config.backend_allowed_hosts = "localhost".to_string();
+    config.discord_oauth_internal_api_token = "internal-token".to_string();
 
     let state = AppState::build(pool.clone(), Arc::new(config))
         .await
@@ -111,6 +114,36 @@ async fn send_json(
     (status, body)
 }
 
+async fn send_internal(
+    app: &Router,
+    token: Option<&str>,
+    uri: &str,
+    body: Value,
+) -> (StatusCode, Value) {
+    let mut request = Request::builder()
+        .method(Method::POST)
+        .uri(uri)
+        .header(HOST, "localhost")
+        .header(CONTENT_TYPE, "application/json");
+    if let Some(token) = token {
+        request = request.header("X-Internal-Token", token);
+    }
+    let response = app
+        .clone()
+        .oneshot(request.body(Body::from(body.to_string())).expect("request"))
+        .await
+        .expect("response");
+    let status = response.status();
+    let bytes = to_bytes(response.into_body(), 1024 * 1024)
+        .await
+        .expect("body");
+    if bytes.is_empty() {
+        return (status, Value::Null);
+    }
+    let body = serde_json::from_slice(&bytes).expect("json body");
+    (status, body)
+}
+
 async fn create_preset(app: &Router, token: &str, name: &str) -> Value {
     let (status, body) = send_json(
         app,
@@ -122,6 +155,106 @@ async fn create_preset(app: &Router, token: &str, name: &str) -> Value {
     .await;
     assert_eq!(status, StatusCode::OK);
     body
+}
+
+#[tokio::test]
+async fn internal_votes_require_token_roles_and_two_distinct_approvals() {
+    let (app, _db, pool, session) = setup().await;
+    let preset_json = create_preset(&app, &session, "Human Gate").await;
+    let preset = presets::get(&pool, preset_json["id"].as_i64().unwrap())
+        .await
+        .unwrap()
+        .unwrap();
+    let proposal = ensure_routine_proposal(
+        &pool,
+        &preset,
+        &RoutineTournamentPlan {
+            registration_start: chrono::DateTime::parse_from_rfc3339("2026-07-12T18:00:00Z")
+                .unwrap()
+                .to_utc(),
+            registration_end: chrono::DateTime::parse_from_rfc3339("2026-07-19T17:30:00Z")
+                .unwrap()
+                .to_utc(),
+            checkin_start: chrono::DateTime::parse_from_rfc3339("2026-07-19T17:30:00Z")
+                .unwrap()
+                .to_utc(),
+            event_start: chrono::DateTime::parse_from_rfc3339("2026-07-19T18:00:00Z")
+                .unwrap()
+                .to_utc(),
+            bracket_start: chrono::DateTime::parse_from_rfc3339("2026-07-19T21:00:00Z")
+                .unwrap()
+                .to_utc(),
+        },
+    )
+    .await
+    .unwrap();
+    let uri = format!("/internal/turnier/v1/proposals/{}/vote", proposal.id);
+
+    let (status, _) = send_internal(
+        &app,
+        None,
+        &uri,
+        json!({"actor_id":"1337518124647579601","role_ids":["1337518124647579661"],"decision":"approve"}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+
+    let (status, _) = send_internal(
+        &app,
+        Some("internal-token"),
+        &uri,
+        json!({"actor_id":"1337518124647579601","role_ids":["1"],"decision":"approve"}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+
+    let (status, first) = send_internal(
+        &app,
+        Some("internal-token"),
+        &uri,
+        json!({"actor_id":"1337518124647579601","role_ids":["1337518124647579661"],"decision":"approve"}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(first["approvals"], 1);
+    assert_eq!(first["went_live"], false);
+
+    let (status, _) = send_internal(
+        &app,
+        Some("internal-token"),
+        &uri,
+        json!({"actor_id":"1401891955931222602","role_ids":["1401891955931222110"],"decision":"reject"}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    let (status, rejected) = send_internal(
+        &app,
+        Some("internal-token"),
+        &uri,
+        json!({"actor_id":"1401891955931222602","role_ids":["1401891955931222110"],"decision":"reject","reason":"Keine Zeit"}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(rejected["approvals"], 1);
+    assert_eq!(rejected["feedback"].as_array().unwrap().len(), 1);
+
+    let second_body = json!({"actor_id":"1401891955931222602","role_ids":["1401891955931222110"],"decision":"approve"});
+    let (status, second) =
+        send_internal(&app, Some("internal-token"), &uri, second_body.clone()).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(second["approvals"], 2);
+    assert_eq!(second["went_live"], true);
+    let tournament_id = second["tournament_id"].as_i64().unwrap();
+
+    let (status, repeated) = send_internal(&app, Some("internal-token"), &uri, second_body).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(repeated["tournament_id"], tournament_id);
+    let rows: Vec<(i64, String)> =
+        sqlx::query_as("SELECT id, status FROM turnier.tournaments WHERE source='routine'")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+    assert_eq!(rows, vec![(tournament_id, "registration".to_string())]);
 }
 
 #[tokio::test]
