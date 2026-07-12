@@ -291,6 +291,13 @@ pub async fn prepare_revision(
             event: ProposalEvent::Feedback,
         });
     }
+    sqlx::query(
+        "DELETE FROM turnier.tournament_proposals \
+         WHERE state = 'draft' AND config_json->>'_parent_proposal_id' = $1",
+    )
+    .bind(proposal_id.to_string())
+    .execute(pool)
+    .await?;
     let id = sqlx::query_scalar(
         "INSERT INTO turnier.tournament_proposals \
              (preset_id, source, proposed_start, config_json, state, created_at) \
