@@ -271,6 +271,119 @@ pub async fn create_revision(
     Ok(revised_id)
 }
 
+/// Legt eine neue Version zunächst nur als Entwurf an. Der bisherige Vorschlag
+/// bleibt abstimmbar, bis Discord erfolgreich auf die neue Karte editiert ist.
+pub async fn prepare_revision(
+    pool: &Pool,
+    proposal_id: i64,
+    config_json: &str,
+) -> AutomatikResult<i64> {
+    let config_json = serde_json::from_str::<Value>(config_json)?;
+    let parent = sqlx::query_as::<_, ProposalRow>(
+        "SELECT * FROM turnier.tournament_proposals WHERE id = $1",
+    )
+    .bind(proposal_id)
+    .fetch_one(pool)
+    .await?;
+    if parent.state != ProposalState::PendingApproval {
+        return Err(AutomatikError::InvalidTransition {
+            state: parent.state,
+            event: ProposalEvent::Feedback,
+        });
+    }
+    let id = sqlx::query_scalar(
+        "INSERT INTO turnier.tournament_proposals \
+             (preset_id, source, proposed_start, config_json, state, created_at) \
+         VALUES ($1, $2, $3, $4, 'draft', $5) RETURNING id",
+    )
+    .bind(parent.preset_id)
+    .bind(parent.source)
+    .bind(parent.proposed_start)
+    .bind(config_json)
+    .bind(now_utc())
+    .fetch_one(pool)
+    .await?;
+    Ok(id)
+}
+
+/// Aktiviert eine vorbereitete Version atomar, nachdem Discord erfolgreich
+/// editiert wurde. Erst hier verfallen die alte Version und ihre Stimmen.
+pub async fn activate_prepared_revision(
+    pool: &Pool,
+    proposal_id: i64,
+    revised_id: i64,
+    caster_id: &str,
+    feedback: &str,
+    channel_id: &str,
+    message_id: &str,
+) -> AutomatikResult<()> {
+    let caster_id = parse_numeric_id(caster_id)?;
+    let channel_id = parse_numeric_id(channel_id)?;
+    let message_id = parse_numeric_id(message_id)?;
+    let feedback = feedback.trim();
+    if feedback.is_empty() {
+        return Err(AutomatikError::MissingFeedback);
+    }
+    let now = now_utc();
+    let mut tx = pool.begin().await?;
+    let parent_state: ProposalState = sqlx::query_scalar(
+        "SELECT state FROM turnier.tournament_proposals WHERE id = $1 FOR UPDATE",
+    )
+    .bind(proposal_id)
+    .fetch_one(&mut *tx)
+    .await?;
+    let revised_state: ProposalState = sqlx::query_scalar(
+        "SELECT state FROM turnier.tournament_proposals WHERE id = $1 FOR UPDATE",
+    )
+    .bind(revised_id)
+    .fetch_one(&mut *tx)
+    .await?;
+    if parent_state != ProposalState::PendingApproval {
+        return Err(AutomatikError::InvalidTransition {
+            state: parent_state,
+            event: ProposalEvent::Feedback,
+        });
+    }
+    if revised_state != ProposalState::Draft {
+        return Err(AutomatikError::InvalidTransition {
+            state: revised_state,
+            event: ProposalEvent::SubmitForApproval,
+        });
+    }
+    sqlx::query(
+        "INSERT INTO turnier.tournament_proposal_feedback \
+             (proposal_id, caster_discord_id, raw_text, applied_change_json, created_at) \
+         VALUES ($1, $2, $3, jsonb_build_object('kind', 'change', 'revision_id', $4), $5)",
+    )
+    .bind(proposal_id)
+    .bind(caster_id)
+    .bind(feedback)
+    .bind(revised_id)
+    .bind(now)
+    .execute(&mut *tx)
+    .await?;
+    sqlx::query(
+        "UPDATE turnier.tournament_proposals SET state = 'expired', decided_at = $1 \
+         WHERE id = $2",
+    )
+    .bind(now)
+    .bind(proposal_id)
+    .execute(&mut *tx)
+    .await?;
+    sqlx::query(
+        "UPDATE turnier.tournament_proposals \
+         SET state = 'pending_approval', channel_id = $1, proposal_message_id = $2 \
+         WHERE id = $3",
+    )
+    .bind(channel_id)
+    .bind(message_id)
+    .bind(revised_id)
+    .execute(&mut *tx)
+    .await?;
+    tx.commit().await?;
+    Ok(())
+}
+
 /// Speichert den validierten KI-Plan, bevor eine Discord-Nachricht entsteht.
 pub async fn store_planned_config(
     pool: &Pool,

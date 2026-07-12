@@ -477,6 +477,86 @@ async fn revision_expires_old_proposal_and_starts_without_votes() {
     );
 }
 
+#[tokio::test]
+async fn prepared_revision_keeps_old_live_until_discord_activation() {
+    let db = temp_db().await;
+    let pool = db.pool();
+    let proposal_id = proposals::create_proposal(
+        pool,
+        None,
+        ProposalSource::Bot,
+        Some("2026-07-10T18:00:00Z"),
+        r#"{"name":"Alt","revision":1}"#,
+    )
+    .await
+    .unwrap();
+    proposals::apply_event(pool, proposal_id, ProposalEvent::SubmitForApproval)
+        .await
+        .unwrap();
+    proposals::record_vote(
+        pool,
+        proposal_id,
+        "123456789012345601",
+        VoteDecision::Approve,
+    )
+    .await
+    .unwrap();
+
+    let revised_id =
+        proposals::prepare_revision(pool, proposal_id, r#"{"name":"Neu","revision":2}"#)
+            .await
+            .unwrap();
+    assert_eq!(
+        proposals::get_proposal(pool, proposal_id)
+            .await
+            .unwrap()
+            .unwrap()
+            .state,
+        ProposalState::PendingApproval
+    );
+    assert_eq!(
+        proposals::get_proposal(pool, revised_id)
+            .await
+            .unwrap()
+            .unwrap()
+            .state,
+        ProposalState::Draft
+    );
+
+    proposals::activate_prepared_revision(
+        pool,
+        proposal_id,
+        revised_id,
+        "123456789012345602",
+        "Eine Stunde später",
+        "1474543558793887937",
+        "1474543558793887999",
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        proposals::get_proposal(pool, proposal_id)
+            .await
+            .unwrap()
+            .unwrap()
+            .state,
+        ProposalState::Expired
+    );
+    let revised = proposals::get_proposal(pool, revised_id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(revised.state, ProposalState::PendingApproval);
+    assert_eq!(
+        revised.proposal_message_id.as_deref(),
+        Some("1474543558793887999")
+    );
+    assert_eq!(
+        proposals::approvals_count(pool, revised_id).await.unwrap(),
+        0
+    );
+}
+
 #[test]
 fn compute_recipients_filters_category_all_and_none() {
     let role_members = vec![

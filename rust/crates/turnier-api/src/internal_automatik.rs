@@ -41,6 +41,10 @@ pub fn router() -> Router<AppState> {
             post(revise),
         )
         .route(
+            "/internal/turnier/v1/proposals/{proposal_id}/revision/{revised_id}/activate",
+            post(activate_revision),
+        )
+        .route(
             "/internal/turnier/v1/proposals/{proposal_id}/announcement-rendered",
             post(announcement_rendered),
         )
@@ -68,10 +72,17 @@ struct VoteBody {
 
 #[derive(Debug, Deserialize)]
 struct RevisionBody {
+    role_ids: Vec<String>,
+    config_json: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct ActivateRevisionBody {
     actor_id: String,
     role_ids: Vec<String>,
     feedback: String,
-    config_json: String,
+    channel_id: String,
+    message_id: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -228,12 +239,27 @@ async fn revise(
 ) -> WebResult<Json<Value>> {
     require_internal(&headers, &state)?;
     require_approver(&body.role_ids)?;
-    let revised_id = proposals::create_revision(
+    let revised_id =
+        proposals::prepare_revision(&state.pool, proposal_id, &body.config_json).await?;
+    Ok(Json(proposal_payload(&state, revised_id).await?))
+}
+
+async fn activate_revision(
+    State(state): State<AppState>,
+    Path((proposal_id, revised_id)): Path<(i64, i64)>,
+    headers: HeaderMap,
+    Json(body): Json<ActivateRevisionBody>,
+) -> WebResult<Json<Value>> {
+    require_internal(&headers, &state)?;
+    require_approver(&body.role_ids)?;
+    proposals::activate_prepared_revision(
         &state.pool,
         proposal_id,
+        revised_id,
         &body.actor_id,
         &body.feedback,
-        &body.config_json,
+        &body.channel_id,
+        &body.message_id,
     )
     .await?;
     Ok(Json(proposal_payload(&state, revised_id).await?))
