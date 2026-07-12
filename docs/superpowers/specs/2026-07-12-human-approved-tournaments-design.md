@@ -13,7 +13,7 @@ Die KI darf Routine-Turniere nur vorschlagen und aus Mod-Feedback überarbeiten.
 
 ## Ablauf
 
-1. Der Routine-Check erzeugt nur einen Vorschlag für den nächsten Termin. Er legt kein Turnier an und öffnet keine Anmeldung.
+1. Der Routine-Check läuft beim Dienststart und danach höchstens stündlich. Er erzeugt nur einen Vorschlag für den nächsten Termin, legt kein Turnier an und öffnet keine Anmeldung; Matchphasen und Erinnerungen bleiben im separaten Minuten-Loop.
 2. Der Master-Bot lässt aus Preset, Termin und gelernter Präferenz-Zusammenfassung einen strukturierten Plan erzeugen und postet ihn als goldene Components-V2-Karte.
 3. Die Karte bietet:
    - `Y – Zeit & Freigabe`
