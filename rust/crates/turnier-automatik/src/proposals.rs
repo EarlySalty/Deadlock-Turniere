@@ -493,6 +493,23 @@ pub async fn list_feedback(
     Ok(rows.into_iter().map(Into::into).collect())
 }
 
+/// Liefert die jüngsten Mod-Rückmeldungen über Vorschlagsgrenzen hinweg.
+/// Der Master-Bot nutzt sie als kleine, persistente Lernhistorie im Prompt;
+/// es findet ausdrücklich kein autonomes Modelltraining statt.
+pub async fn list_recent_feedback(
+    pool: &Pool,
+    limit: i64,
+) -> AutomatikResult<Vec<ProposalFeedback>> {
+    let rows = sqlx::query_as::<_, ProposalFeedbackRow>(
+        "SELECT * FROM turnier.tournament_proposal_feedback \
+         ORDER BY id DESC LIMIT $1",
+    )
+    .bind(limit.clamp(1, 100))
+    .fetch_all(pool)
+    .await?;
+    Ok(rows.into_iter().map(Into::into).collect())
+}
+
 fn parse_numeric_id(value: &str) -> AutomatikResult<i64> {
     parse_discord_id(value).map_err(|_| AutomatikError::InvalidNumericId(value.to_string()))
 }

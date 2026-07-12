@@ -1,3 +1,7 @@
+## #14 — Turniere brauchen zwei Mod-Freigaben
+
+**Ausgangslage:** Die Turnier-Automatik konnte nach einem Zeitplan selbst ein Turnier anlegen und ankündigen. **Änderung:** Sie erstellt nur noch einen internen Vorschlag; N und Änderungswünsche werden als Lernhistorie für spätere Vorschläge gespeichert. **Aktuelles Verhalten:** Erst zwei unterschiedliche J von Mods legen das Turnier an, eine Ankündigung wird nur als interne Vorlage vorbereitet.
+
 ## #13 — Turnier-Automatik bis zur Mod-Freigabe gestoppt
 
 **Ausgangslage:** Ein gelöschtes Routine-Turnier wurde vom laufenden Wochenplaner erneut angelegt und angekündigt. **Änderung:** Der automatische Planungspfad ist vollständig abgeschaltet, bis die neue Abstimmung mit zwei Mods bereitsteht. **Aktuelles Verhalten:** Der Bot erstellt, öffnet und veröffentlicht keine Routine-Turniere mehr selbstständig.

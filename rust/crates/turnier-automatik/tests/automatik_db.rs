@@ -254,6 +254,9 @@ async fn proposals_votes_feedback_and_state_roundtrip() {
     let feedback = proposals::list_feedback(pool, proposal_id).await.unwrap();
     assert_eq!(feedback.len(), 1);
     assert_eq!(feedback[0].raw_text, "Bitte eine Stunde spaeter");
+    let learned = proposals::list_recent_feedback(pool, 20).await.unwrap();
+    assert_eq!(learned.len(), 1);
+    assert_eq!(learned[0].raw_text, "Bitte eine Stunde spaeter");
 
     assert_eq!(
         proposals::apply_event(pool, proposal_id, ProposalEvent::SubmitForApproval)

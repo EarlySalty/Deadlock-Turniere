@@ -91,11 +91,13 @@ async fn proposal_payload(state: &AppState, proposal_id: i64) -> WebResult<Value
         .ok_or_else(|| WebError::not_found("Vorschlag nicht gefunden"))?;
     let votes = proposals::list_votes(&state.pool, proposal_id).await?;
     let feedback = proposals::list_feedback(&state.pool, proposal_id).await?;
+    let learning_feedback = proposals::list_recent_feedback(&state.pool, 20).await?;
     let approvals = proposals::approvals_count(&state.pool, proposal_id).await?;
     Ok(json!({
         "proposal": proposal,
         "votes": votes,
         "feedback": feedback,
+        "learning_feedback": learning_feedback,
         "approvals": approvals,
         "required_approvals": proposals::REQUIRED_APPROVALS,
     }))
