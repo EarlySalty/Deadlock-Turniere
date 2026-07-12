@@ -30,7 +30,7 @@ use crate::{RoutineDecision, RoutineSettings, SchedulerResult};
 
 /// Loop-Intervall in Sekunden (wie im Original `SCHEDULER_INTERVAL_SECONDS`).
 pub const SCHEDULER_INTERVAL_SECONDS: u64 = 60;
-pub const ROUTINE_ANNOUNCEMENT: &str = "Das wöchentliche Community-Turnier ist angesetzt und die Anmeldung ist ab sofort offen. Schnapp dir deinen Platz über den Turnier-Post, alle Zeiten und Details stehen dort. Kein festes Team nötig, meld dich einfach an und spiel mit.";
+pub const ROUTINE_PROPOSAL_INTERVAL_SECONDS: u64 = 60 * 60;
 
 /// Gebündelte Handles des Schedulers. Werden vom App-Bootstrap (turnier-bot/turnier-api)
 /// gebaut und an [`start_scheduler`] übergeben.
@@ -61,7 +61,6 @@ impl Scheduler {
     /// Führt alle Checks EINMAL aus — jeder fehlertolerant. Ein Fehler in
     /// einem Check beendet weder die anderen noch den Loop.
     pub async fn run_all_checks(&self, now: DateTime<Utc>) {
-        self.check_routine_tournament(now).await;
         if let Err(err) = self.check_and_advance_tournaments(now).await {
             tracing::error!(error = %err, "Phasen-Kaskade fehlgeschlagen");
         }
@@ -76,6 +75,10 @@ impl Scheduler {
         if let Err(err) = check_and_send_match_reminders(&self.pool, &self.notifier).await {
             tracing::error!(error = %err, "Match-Reminder-Check fehlgeschlagen");
         }
+    }
+
+    pub async fn run_routine_check(&self, now: DateTime<Utc>) {
+        self.check_routine_tournament(now).await;
     }
 
     async fn check_routine_tournament(&self, now: DateTime<Utc>) {
@@ -133,87 +136,33 @@ impl Scheduler {
                 plan.bracket_start
             },
         };
-        let ensured = match routine_store::ensure_routine_tournament(&self.pool, &preset, &db_plan)
+        let ensured = match routine_store::ensure_routine_proposal(&self.pool, &preset, &db_plan)
             .await
         {
             Ok(value) => value,
             Err(err) => {
-                tracing::error!(decision = "error", reason = "create_failed", preset_id = preset.id, event_start = %plan.event_start, error = %err, "Routine-Scheduler-Entscheidung");
+                tracing::error!(decision = "error", reason = "proposal_create_failed", preset_id = preset.id, event_start = %plan.event_start, error = %err, "Routine-Scheduler-Entscheidung");
                 return;
             }
         };
         if ensured.created {
-            tracing::info!(decision = "created", tournament_id = ensured.id, preset_id = preset.id, event_start = %plan.event_start, "Routine-Scheduler-Entscheidung");
+            tracing::info!(decision = "created", proposal_id = ensured.id, preset_id = preset.id, event_start = %plan.event_start, "Routine-Scheduler-Entscheidung");
         } else {
-            tracing::info!(decision = "skipped", reason = "slot_exists", tournament_id = ensured.id, status = ensured.status, event_start = %plan.event_start, "Routine-Scheduler-Entscheidung");
-        }
-
-        let status = if ensured.status == "draft" {
-            match advance_tournament_status(
-                &self.pool,
-                &self.matchmgr,
-                &self.notifier,
-                ensured.id,
-                "draft",
-                "registration",
-                "scheduler",
-                None,
-            )
-            .await
-            {
-                Ok(_) => "registration",
-                Err(crate::SchedulerError::ActiveTournamentConflict(err)) => {
-                    tracing::info!(decision = "skipped", reason = "active_tournament", tournament_id = ensured.id, error = %err, "Routine-Scheduler-Entscheidung");
-                    return;
-                }
-                Err(err) => {
-                    tracing::error!(decision = "error", reason = "registration_open_failed", tournament_id = ensured.id, error = %err, "Routine-Scheduler-Entscheidung");
-                    return;
-                }
-            }
-        } else {
-            ensured.status.as_str()
-        };
-        if status != "registration" {
-            tracing::info!(
-                decision = "skipped",
-                reason = "slot_already_progressed",
-                tournament_id = ensured.id,
-                status,
-                "Routine-Scheduler-Entscheidung"
-            );
-            return;
+            tracing::info!(decision = "skipped", reason = "proposal_exists", proposal_id = ensured.id, state = ensured.state, event_start = %plan.event_start, "Routine-Scheduler-Entscheidung");
         }
 
         match self
             .notifier
-            .announce_routine_tournament(
-                ensured.id,
-                self.routine.announcement_channel_id,
-                ROUTINE_ANNOUNCEMENT,
-            )
+            .request_proposal_publish(ensured.id, self.routine.proposal_channel_id)
             .await
         {
-            Ok(result)
-                if result
-                    .get("deduplicated")
-                    .and_then(serde_json::Value::as_bool)
-                    == Some(true) =>
-            {
-                tracing::info!(
-                    decision = "skipped",
-                    reason = "announcement_already_sent",
-                    tournament_id = ensured.id,
-                    "Routine-Scheduler-Ankuendigung"
-                );
-            }
             Ok(_) => tracing::info!(
-                decision = "created",
-                tournament_id = ensured.id,
-                "Routine-Scheduler-Ankuendigung"
+                decision = "publish_requested",
+                proposal_id = ensured.id,
+                "Routine-Scheduler-Entscheidung"
             ),
             Err(err) => {
-                tracing::error!(decision = "error", reason = "announcement_failed", tournament_id = ensured.id, error = %err, "Routine-Scheduler-Ankuendigung")
+                tracing::error!(decision = "error", reason = "proposal_publish_failed", proposal_id = ensured.id, error = %err, "Routine-Scheduler-Entscheidung")
             }
         }
     }
@@ -386,25 +335,34 @@ struct AdvanceRow {
     is_test: bool,
 }
 
-/// Startet den Hintergrund-Loop: alle vier Checks EINMAL sofort, danach im
-/// 60-s-Takt — jeder Tick fehlertolerant. Der Loop endet erst, wenn über
+/// Startet den Hintergrund-Loop: Match-/Reminder-Checks minuetlich,
+/// Routine-Vorschlaege beim Start und danach stuendlich. Der Loop endet erst, wenn über
 /// `shutdown` ein `true` gesendet (oder der Sender fallengelassen) wird; das
 /// entspricht dem `CancelledError`-Pfad des Originals.
 pub async fn start_scheduler(scheduler: Scheduler, mut shutdown: watch::Receiver<bool>) {
     tracing::info!("Tournament-Scheduler gestartet");
 
     // Erster Lauf SOFORT (wie im Original vor der Schleife).
-    scheduler.run_all_checks(Utc::now()).await;
+    let now = Utc::now();
+    scheduler.run_routine_check(now).await;
+    scheduler.run_all_checks(now).await;
 
     let mut ticker =
         tokio::time::interval(std::time::Duration::from_secs(SCHEDULER_INTERVAL_SECONDS));
     // Den sofort feuernden ersten Tick verwerfen — der erste Lauf ist schon erfolgt.
     ticker.tick().await;
+    let mut routine_ticker = tokio::time::interval(std::time::Duration::from_secs(
+        ROUTINE_PROPOSAL_INTERVAL_SECONDS,
+    ));
+    routine_ticker.tick().await;
 
     loop {
         tokio::select! {
             _ = ticker.tick() => {
                 scheduler.run_all_checks(Utc::now()).await;
+            }
+            _ = routine_ticker.tick() => {
+                scheduler.run_routine_check(Utc::now()).await;
             }
             res = shutdown.changed() => {
                 // Sender meldet Shutdown ODER wurde fallengelassen → beenden.

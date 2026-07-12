@@ -2,6 +2,7 @@
 //! Einladungs-Kohorte. Versand gehoert bewusst nicht in dieses Modul.
 
 use chrono::{DateTime, Duration, Utc};
+use serde_json::json;
 use turnier_core::{discord_id_to_string, json::wire_string_to_jsonb, parse_discord_id};
 use turnier_db::Pool;
 
@@ -25,6 +26,87 @@ pub struct EnsuredRoutineTournament {
     pub id: i64,
     pub status: String,
     pub created: bool,
+}
+
+/// Ergebnis der idempotenten Vorschlags-Erzeugung.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EnsuredRoutineProposal {
+    pub id: i64,
+    pub state: String,
+    pub created: bool,
+}
+
+/// Legt fuer Preset und Startslot hoechstens einen offenen Vorschlag an.
+/// Diese Funktion erzeugt ausdruecklich kein Turnier.
+pub async fn ensure_routine_proposal(
+    pool: &Pool,
+    preset: &Preset,
+    plan: &RoutineTournamentPlan,
+) -> AutomatikResult<EnsuredRoutineProposal> {
+    let mut tx = pool.begin().await?;
+    sqlx::query("SELECT pg_advisory_xact_lock($1)")
+        .bind(ROUTINE_CREATE_LOCK)
+        .execute(&mut *tx)
+        .await?;
+
+    if let Some((id, state)) = sqlx::query_as::<_, (i64, String)>(
+        "SELECT id, state::text FROM turnier.tournament_proposals \
+         WHERE preset_id = $1 AND proposed_start = $2 \
+           AND state IN ('draft', 'pending_approval', 'approved') \
+         ORDER BY id DESC LIMIT 1",
+    )
+    .bind(preset.id)
+    .bind(plan.event_start)
+    .fetch_optional(&mut *tx)
+    .await?
+    {
+        tx.commit().await?;
+        return Ok(EnsuredRoutineProposal {
+            id,
+            state,
+            created: false,
+        });
+    }
+
+    let config = json!({
+        "revision": 1,
+        "name": &preset.name,
+        "category": preset.category,
+        "team_size": preset.team_size,
+        "bracket_format": preset.bracket_format,
+        "series_format": preset.series_format,
+        "final_series_format": preset.final_series_format,
+        "tournament_mode": preset.tournament_mode,
+        "tournament_game_mode": preset.tournament_game_mode,
+        "match_objective": &preset.match_objective,
+        "invite_mode": preset.invite_mode,
+        "reminder_offsets": &preset.reminder_offsets,
+        "start_reminder_offsets": &preset.start_reminder_offsets,
+        "rules": &preset.rules,
+        "description": &preset.description_template,
+        "registration_start": plan.registration_start,
+        "registration_end": plan.registration_end,
+        "checkin_start": plan.checkin_start,
+        "event_start": plan.event_start,
+        "bracket_start": plan.bracket_start,
+    });
+    let id = sqlx::query_scalar(
+        "INSERT INTO turnier.tournament_proposals \
+             (preset_id, source, proposed_start, config_json, state, created_at) \
+         VALUES ($1, 'bot', $2, $3, 'pending_approval', now()) RETURNING id",
+    )
+    .bind(preset.id)
+    .bind(plan.event_start)
+    .bind(config)
+    .fetch_one(&mut *tx)
+    .await?;
+    tx.commit().await?;
+
+    Ok(EnsuredRoutineProposal {
+        id,
+        state: "pending_approval".to_string(),
+        created: true,
+    })
 }
 
 /// Legt fuer Preset und Startslot hoechstens einen Entwurf an. Der Aufrufer

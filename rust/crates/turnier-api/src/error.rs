@@ -182,6 +182,7 @@ impl From<turnier_automatik::AutomatikError> for WebError {
             MissingApproval { .. } => {
                 Self::conflict("Für diesen Vorschlag liegt noch keine Caster-Freigabe vor.")
             }
+            MissingFeedback => Self::bad_request("Feedback darf nicht leer sein"),
             InvalidNumericId(_) => Self::bad_request("Ungueltige numerische ID"),
             Json(_) => Self::bad_request("Ungueltiges JSON"),
             Time(_) => Self::bad_request("Ungueltiger Zeitstempel"),

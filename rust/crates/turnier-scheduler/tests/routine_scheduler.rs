@@ -13,7 +13,7 @@ fn utc(value: &str) -> DateTime<Utc> {
 }
 
 #[tokio::test]
-async fn faelliger_tick_erstellt_oeffnet_und_dedupliziert_routine_turnier() {
+async fn faelliger_check_erstellt_nur_einen_routine_vorschlag() {
     let db = temp_db().await;
     let pool = db.pool().clone();
     let preset = presets::create(
@@ -58,17 +58,24 @@ async fn faelliger_tick_erstellt_oeffnet_und_dedupliziert_routine_turnier() {
     .expect("scheduler config");
     let now = utc("2026-07-11T18:01:00Z");
 
-    scheduler.run_all_checks(now).await;
-    scheduler.run_all_checks(now).await;
+    scheduler.run_routine_check(now).await;
+    scheduler.run_routine_check(now).await;
 
-    let rows: Vec<(i64, String)> = sqlx::query_as(
-        "SELECT id, status FROM turnier.tournaments WHERE source = 'routine' ORDER BY id",
+    let proposals: Vec<(i64, String)> = sqlx::query_as(
+        "SELECT id, state::text FROM turnier.tournament_proposals \
+         WHERE source = 'bot' ORDER BY id",
     )
     .fetch_all(&pool)
     .await
-    .expect("load routines");
-    assert_eq!(rows.len(), 1);
-    assert_eq!(rows[0].1, "registration");
+    .expect("load proposals");
+    assert_eq!(proposals.len(), 1);
+    assert_eq!(proposals[0].1, "pending_approval");
+    let tournament_count: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM turnier.tournaments WHERE source = 'routine'")
+            .fetch_one(&pool)
+            .await
+            .expect("tournament count");
+    assert_eq!(tournament_count, 0);
     let audit_count: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM turnier.audit_log \
          WHERE action = 'tournament_auto_advance' AND details->>'to' = 'registration'",
@@ -76,26 +83,11 @@ async fn faelliger_tick_erstellt_oeffnet_und_dedupliziert_routine_turnier() {
     .fetch_one(&pool)
     .await
     .expect("audit count");
-    assert_eq!(audit_count, 1);
-    let announcement_attempts: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM turnier.discord_tasks \
-         WHERE type = 'ANNOUNCE_TOURNAMENT' \
-           AND payload->>'tournament_id' = $1 \
-           AND payload->>'content' = $2",
-    )
-    .bind(rows[0].0.to_string())
-    .bind(turnier_scheduler::ROUTINE_ANNOUNCEMENT)
-    .fetch_one(&pool)
-    .await
-    .expect("announcement attempts");
-    assert_eq!(
-        announcement_attempts, 2,
-        "failed broker attempts are retried"
-    );
+    assert_eq!(audit_count, 0);
     let dm_attempts: i64 =
         sqlx::query_scalar("SELECT COUNT(*) FROM turnier.discord_tasks WHERE type = 'SEND_DM'")
             .fetch_one(&pool)
             .await
             .expect("DM attempts");
-    assert_eq!(dm_attempts, 0, "routine creation must not invite by DM");
+    assert_eq!(dm_attempts, 0, "proposal creation must not invite by DM");
 }

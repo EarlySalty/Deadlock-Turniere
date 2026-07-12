@@ -40,7 +40,7 @@ pub enum RoutineDecision {
 pub struct RoutineSettings {
     pub enabled: bool,
     pub preset_id: i64,
-    pub announcement_channel_id: i64,
+    pub proposal_channel_id: i64,
     pub schedule: RoutineSchedule,
 }
 
@@ -50,7 +50,7 @@ impl RoutineSettings {
             return Ok(Self {
                 enabled: false,
                 preset_id: 0,
-                announcement_channel_id: config.discord_tournament_lobby_channel_id,
+                proposal_channel_id: config.routine_proposal_channel_id,
                 schedule: RoutineSchedule {
                     weekday: Weekday::Sat,
                     start_time: NaiveTime::MIN,
@@ -99,7 +99,7 @@ impl RoutineSettings {
         Ok(Self {
             enabled: true,
             preset_id: config.routine_tournament_preset_id,
-            announcement_channel_id: config.discord_tournament_lobby_channel_id,
+            proposal_channel_id: config.routine_proposal_channel_id,
             schedule: RoutineSchedule {
                 weekday,
                 start_time,

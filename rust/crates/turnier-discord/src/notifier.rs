@@ -30,6 +30,7 @@ mod path {
     pub const MOVE_VOICE: &str = "/internal/master/v1/discord/member/move-voice";
     pub const VOICE_MEMBERS: &str = "/internal/master/v1/discord/voice-channel/members";
     pub const ROLE_MEMBERS: &str = "/internal/master/v1/discord/role/members";
+    pub const PUBLISH_TOURNAMENT_PROPOSAL: &str = "/internal/master/v1/turnier/proposals/publish";
 }
 
 /// Ergebnis von [`notify_users`]: dieselbe Wire-Shape wie das Original
@@ -103,6 +104,22 @@ impl DiscordNotifier {
     /// oder Aufrufer, die roh posten müssen).
     pub fn broker(&self) -> &BrokerClient {
         &self.broker
+    }
+
+    /// Uebergibt einen persistierten Turniervorschlag an den Master-Bot. Der
+    /// Master besitzt KI, Discord-UI und Interactions; hier wird nichts
+    /// veroeffentlicht oder freigegeben.
+    pub async fn request_proposal_publish(
+        &self,
+        proposal_id: i64,
+        channel_id: i64,
+    ) -> BrokerResult<Value> {
+        self.broker
+            .post_internal(
+                path::PUBLISH_TOURNAMENT_PROPOSAL,
+                &json!({ "proposal_id": proposal_id, "channel_id": channel_id }),
+            )
+            .await
     }
 
     /// Kuendigt ein automatisch geoeffnetes Turnier im konfigurierten Kanal an.
