@@ -10,6 +10,10 @@ use thiserror::Error;
 /// Fehler der Scheduler-Orchestrierung.
 #[derive(Debug, Error)]
 pub enum SchedulerError {
+    /// Ungueltige Routine-Konfiguration am Systemrand.
+    #[error("ungueltige Routine-Turnier-Konfiguration: {0}")]
+    InvalidRoutineConfig(String),
+
     /// Ungültiger Status-Übergang. Entspricht dem `ValueError` im Original
     /// (`advance_tournament_status`, Z.140-144): die erlaubten Folge-Status
     /// werden im Text mitgeliefert.

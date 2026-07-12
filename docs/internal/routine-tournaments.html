@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <title>Routine-Turniere – Betrieb</title>
+</head>
+<body>
+  <h1>Routine-Turniere</h1>
+  <p>Der 60-Sekunden-Scheduler legt aus einem aktiven Preset einen Entwurf an und öffnet ihn über dieselbe <code>draft → registration</code>-Transition wie die bestehende Turnier-Automatik. Dadurch greifen die vorhandenen Phasenwechsel und Signup-/Start-Reminder unverändert.</p>
+
+  <h2>Konfiguration</h2>
+  <table>
+    <thead><tr><th>Variable</th><th>Default</th><th>Zweck</th></tr></thead>
+    <tbody>
+      <tr><td><code>ROUTINE_TOURNAMENTS_ENABLED</code></td><td><code>false</code></td><td>Feature-Flag; ohne explizite Aktivierung wird nichts angelegt.</td></tr>
+      <tr><td><code>ROUTINE_TOURNAMENT_PRESET_ID</code></td><td><code>0</code></td><td>ID eines aktiven Presets; muss bei Aktivierung positiv sein.</td></tr>
+      <tr><td><code>ROUTINE_TOURNAMENT_WEEKDAY</code></td><td><code>saturday</code></td><td>Englischer Wochentag von <code>monday</code> bis <code>sunday</code>.</td></tr>
+      <tr><td><code>ROUTINE_TOURNAMENT_TIME_UTC</code></td><td><code>18:00</code></td><td>Turnierstart im Format <code>HH:MM</code> (UTC).</td></tr>
+      <tr><td><code>ROUTINE_TOURNAMENT_LEAD_DAYS</code></td><td><code>7</code></td><td>Vorlauf der Anmeldeöffnung.</td></tr>
+      <tr><td><code>ROUTINE_TOURNAMENT_CHECKIN_LEAD_MINUTES</code></td><td><code>30</code></td><td>Anmeldeschluss und Check-in vor dem Start.</td></tr>
+      <tr><td><code>ROUTINE_TOURNAMENT_BRACKET_DELAY_MINUTES</code></td><td><code>180</code></td><td>Bracket-Start nach Beginn der Gruppenphase.</td></tr>
+    </tbody>
+  </table>
+  <p>Die öffentliche Ankündigung geht an <code>DISCORD_TOURNAMENT_LOBBY_CHANNEL_ID</code>. Erfolgreiche Zustellung wird in <code>turnier.discord_tasks</code> dedupliziert; Fehler werden mit gleichem Broker-Idempotency-Key erneut versucht.</p>
+
+  <h2>Kandidaten-Schnittstelle</h2>
+  <p><code>load_invitation_candidate_ids(pool, tournament_id, guild_id, now)</code> liefert frühere Teilnehmer abgeschlossener/archivierter Turniere sowie in den letzten 14 Tagen Voice-aktive Mitglieder. Bereits im Zielturnier angemeldete Personen werden ausgeschlossen. Die Funktion versendet nichts; eine spätere zentrale Outbox kann sie direkt verwenden.</p>
+
+  <h2>Logs</h2>
+  <p>Jeder Tick protokolliert <code>created</code>, <code>skipped</code> mit Grund oder <code>error</code>. Typische Gründe sind <code>feature_disabled</code>, <code>not_due</code>, <code>preset_missing</code>, <code>preset_inactive</code>, <code>slot_exists</code> und <code>active_tournament</code>.</p>
+</body>
+</html>

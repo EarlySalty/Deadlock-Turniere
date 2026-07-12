@@ -15,14 +15,15 @@ use turnier_db::Pool;
 
 use crate::error::BrokerError;
 
-/// Task-Typen, die das Original protokolliert (`CREATE_CHANNEL`,
-/// `SEND_MATCH_INFO`, `DELETE_CHANNEL`, `SEND_DM`).
+/// Persistierte Discord-Effekte. `ANNOUNCE_TOURNAMENT` ergaenzt die bestehenden
+/// Match-/DM-Typen fuer den retry-faehigen Routine-Scheduler.
 #[derive(Debug, Clone, Copy)]
 pub enum TaskType {
     CreateChannel,
     SendMatchInfo,
     DeleteChannel,
     SendDm,
+    AnnounceTournament,
 }
 
 impl TaskType {
@@ -32,6 +33,7 @@ impl TaskType {
             Self::SendMatchInfo => "SEND_MATCH_INFO",
             Self::DeleteChannel => "DELETE_CHANNEL",
             Self::SendDm => "SEND_DM",
+            Self::AnnounceTournament => "ANNOUNCE_TOURNAMENT",
         }
     }
 }

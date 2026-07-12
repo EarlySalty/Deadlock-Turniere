@@ -14,7 +14,7 @@ license.workspace = true
 # wird auch von turnier-api (Admin-Routen) aufgerufen.
 [features]
 default = []
-testing = ["turnier-db/testing"]
+testing = ["turnier-db/testing", "turnier-automatik/testing"]
 
 [dependencies]
 turnier-core = { path = "../turnier-core" }
@@ -23,6 +23,7 @@ turnier-config = { path = "../turnier-config" }
 turnier-discord = { path = "../turnier-discord" }
 turnier-engine = { path = "../turnier-engine" }
 turnier-match = { path = "../turnier-match" }
+turnier-automatik = { path = "../turnier-automatik" }
 
 sqlx.workspace = true
 tokio.workspace = true

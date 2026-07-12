@@ -163,6 +163,7 @@ impl From<turnier_scheduler::SchedulerError> for WebError {
     fn from(err: turnier_scheduler::SchedulerError) -> Self {
         use turnier_scheduler::SchedulerError::*;
         match err {
+            InvalidRoutineConfig(msg) => Self::bad_request(msg),
             InvalidTransition(msg) => Self::bad_request(msg),
             StatusConflict => Self::conflict("Turnierstatus wurde parallel geändert"),
             ActiveTournamentConflict(msg) => Self::conflict(msg),

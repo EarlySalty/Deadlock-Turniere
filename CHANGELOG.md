@@ -1,3 +1,7 @@
+## #12 — PLATZHALTER
+
+PLATZHALTER
+
 ## #11 — Caster-Freigabe wirklich verbindlich, DM-Wunsch lückenlos respektiert
 
 **Ausgangslage:** Mit der Turnier-Automatik (#10) sollte eine Turnier-Freigabe ausschließlich von einem Caster kommen — über einen direkten Status-Weg ließ sich das aber umgehen. Und der „keine Turnier-DMs"-Wunsch sollte auf jedem Benachrichtigungsweg greifen.

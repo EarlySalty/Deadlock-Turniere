@@ -57,6 +57,15 @@ pub struct Config {
 
     // --- Benachrichtigungen ---
     pub discord_webhook_url: String,
+
+    // --- Routine-Turniere (sicherer Default: aus) ---
+    pub routine_tournaments_enabled: bool,
+    pub routine_tournament_preset_id: i64,
+    pub routine_tournament_weekday: String,
+    pub routine_tournament_time_utc: String,
+    pub routine_tournament_lead_days: i64,
+    pub routine_tournament_checkin_lead_minutes: i64,
+    pub routine_tournament_bracket_delay_minutes: i64,
 }
 
 impl Config {
@@ -156,6 +165,19 @@ impl Config {
                 "https://deutsche-deadlock-community.de/turnier",
             ),
             discord_webhook_url: get_string("DISCORD_WEBHOOK_URL", ""),
+            routine_tournaments_enabled: get_bool("ROUTINE_TOURNAMENTS_ENABLED", false),
+            routine_tournament_preset_id: get_int("ROUTINE_TOURNAMENT_PRESET_ID", 0),
+            routine_tournament_weekday: get_string("ROUTINE_TOURNAMENT_WEEKDAY", "saturday"),
+            routine_tournament_time_utc: get_string("ROUTINE_TOURNAMENT_TIME_UTC", "18:00"),
+            routine_tournament_lead_days: get_int("ROUTINE_TOURNAMENT_LEAD_DAYS", 7),
+            routine_tournament_checkin_lead_minutes: get_int(
+                "ROUTINE_TOURNAMENT_CHECKIN_LEAD_MINUTES",
+                30,
+            ),
+            routine_tournament_bracket_delay_minutes: get_int(
+                "ROUTINE_TOURNAMENT_BRACKET_DELAY_MINUTES",
+                180,
+            ),
         };
 
         if cfg.discord_oauth_internal_api_token.is_empty() {
