@@ -61,9 +61,6 @@ while true; do
   sleep "$INFISICAL_RETRY_DELAY"
 done
 
-# ponytail: Incident-Sperre bis der Human-Approval-Scheduler live ist.
-export ROUTINE_TOURNAMENTS_ENABLED=false
-
 export DISCORD_BOT_TOKEN="${DISCORD_BOT_TOKEN:-${DISCORD_TOKEN:-}}"
 
 if [[ -z "${DEADLOCK_CENTRAL_DSN:-}" ]]; then
