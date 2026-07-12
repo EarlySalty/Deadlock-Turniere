@@ -1,3 +1,7 @@
+## #13 — Turnier-Automatik bis zur Mod-Freigabe gestoppt
+
+**Ausgangslage:** Ein gelöschtes Routine-Turnier wurde vom laufenden Wochenplaner erneut angelegt und angekündigt. **Änderung:** Der automatische Planungspfad ist vollständig abgeschaltet, bis die neue Abstimmung mit zwei Mods bereitsteht. **Aktuelles Verhalten:** Der Bot erstellt, öffnet und veröffentlicht keine Routine-Turniere mehr selbstständig.
+
 ## #12 — Turniere laufen jetzt von allein an
 
 **Ausgangslage:** Turniere sind nur entstanden, wenn sich jemand freiwillig um Erstellung, Freigabe und Erinnerungen gekümmert hat. Das hat kaum noch jemand gemacht, also gab es kaum noch Turniere.
