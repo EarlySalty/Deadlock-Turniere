@@ -142,6 +142,7 @@ async fn get_proposal(
     headers: HeaderMap,
 ) -> WebResult<Json<Value>> {
     require_internal(&headers, &state)?;
+    let proposal_id = resolve_active_id(&state, proposal_id).await?;
     Ok(Json(proposal_payload(&state, proposal_id).await?))
 }
 
@@ -182,6 +183,7 @@ async fn vote(
 ) -> WebResult<Json<Value>> {
     require_internal(&headers, &state)?;
     require_approver(&body.role_ids)?;
+    let proposal_id = resolve_active_id(&state, proposal_id).await?;
     let proposal = proposals::get_proposal(&state.pool, proposal_id)
         .await?
         .ok_or_else(|| WebError::not_found("Vorschlag nicht gefunden"))?;
@@ -239,6 +241,7 @@ async fn revise(
 ) -> WebResult<Json<Value>> {
     require_internal(&headers, &state)?;
     require_approver(&body.role_ids)?;
+    let proposal_id = resolve_active_id(&state, proposal_id).await?;
     let revised_id =
         proposals::prepare_revision(&state.pool, proposal_id, &body.config_json).await?;
     Ok(Json(proposal_payload(&state, revised_id).await?))
@@ -252,6 +255,7 @@ async fn activate_revision(
 ) -> WebResult<Json<Value>> {
     require_internal(&headers, &state)?;
     require_approver(&body.role_ids)?;
+    let proposal_id = resolve_active_id(&state, proposal_id).await?;
     proposals::activate_prepared_revision(
         &state.pool,
         proposal_id,
@@ -273,6 +277,7 @@ async fn announcement_rendered(
 ) -> WebResult<Json<Value>> {
     require_internal(&headers, &state)?;
     require_approver(&body.role_ids)?;
+    let proposal_id = resolve_active_id(&state, proposal_id).await?;
     let proposal = proposals::get_proposal(&state.pool, proposal_id)
         .await?
         .ok_or_else(|| WebError::not_found("Vorschlag nicht gefunden"))?;
@@ -289,6 +294,12 @@ async fn announcement_rendered(
     )
     .await?;
     Ok(Json(proposal_payload(&state, proposal_id).await?))
+}
+
+async fn resolve_active_id(state: &AppState, proposal_id: i64) -> WebResult<i64> {
+    proposals::resolve_active_proposal_id(&state.pool, proposal_id)
+        .await?
+        .ok_or_else(|| WebError::not_found("Vorschlag nicht gefunden"))
 }
 
 async fn materialize(state: &AppState, proposal_id: i64, actor_id: &str) -> WebResult<(i64, bool)> {

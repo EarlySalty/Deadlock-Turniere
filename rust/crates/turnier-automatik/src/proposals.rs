@@ -278,7 +278,14 @@ pub async fn prepare_revision(
     proposal_id: i64,
     config_json: &str,
 ) -> AutomatikResult<i64> {
-    let config_json = serde_json::from_str::<Value>(config_json)?;
+    let mut config_json = serde_json::from_str::<Value>(config_json)?;
+    config_json
+        .as_object_mut()
+        .ok_or(AutomatikError::InvalidProposalConfig)?
+        .insert(
+            "_parent_proposal_id".to_string(),
+            serde_json::json!(proposal_id),
+        );
     let parent = sqlx::query_as::<_, ProposalRow>(
         "SELECT * FROM turnier.tournament_proposals WHERE id = $1",
     )
@@ -466,6 +473,30 @@ pub async fn get_proposal(pool: &Pool, proposal_id: i64) -> AutomatikResult<Opti
     .fetch_optional(pool)
     .await?;
     Ok(row.map(Into::into))
+}
+
+/// Folgt einer Revisionskette zur aktuell abstimmbaren Version. Dadurch bleiben
+/// alte Discord-Buttons auch nach einem Prozessabbruch zwischen DB und Edit heilbar.
+pub async fn resolve_active_proposal_id(
+    pool: &Pool,
+    proposal_id: i64,
+) -> AutomatikResult<Option<i64>> {
+    let id = sqlx::query_scalar(
+        "WITH RECURSIVE chain AS ( \
+             SELECT id, state, 0 AS depth FROM turnier.tournament_proposals WHERE id = $1 \
+             UNION ALL \
+             SELECT child.id, child.state, chain.depth + 1 \
+             FROM turnier.tournament_proposals child \
+             JOIN chain ON child.config_json->>'_parent_proposal_id' = chain.id::text \
+             WHERE chain.depth < 20 \
+         ) \
+         SELECT id FROM chain WHERE state IN ('pending_approval', 'approved') \
+         ORDER BY depth DESC, id DESC LIMIT 1",
+    )
+    .bind(proposal_id)
+    .fetch_optional(pool)
+    .await?;
+    Ok(id)
 }
 
 /// Listet Vorschlaege, optional nach Zustand gefiltert.

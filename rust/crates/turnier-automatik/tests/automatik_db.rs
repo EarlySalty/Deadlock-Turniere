@@ -555,6 +555,12 @@ async fn prepared_revision_keeps_old_live_until_discord_activation() {
         proposals::approvals_count(pool, revised_id).await.unwrap(),
         0
     );
+    assert_eq!(
+        proposals::resolve_active_proposal_id(pool, proposal_id)
+            .await
+            .unwrap(),
+        Some(revised_id)
+    );
 }
 
 #[test]

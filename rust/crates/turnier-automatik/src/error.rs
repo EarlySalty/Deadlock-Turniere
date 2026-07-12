@@ -27,6 +27,10 @@ pub enum AutomatikError {
     #[error("feedback darf nicht leer sein")]
     MissingFeedback,
 
+    /// Strukturierter Vorschlagsplan ist kein JSON-Objekt.
+    #[error("vorschlagsplan muss ein JSON-Objekt sein")]
+    InvalidProposalConfig,
+
     /// Ungueltige Discord-/Message-ID fuer eine BIGINT-Spalte.
     #[error("ungueltige numerische ID: {0}")]
     InvalidNumericId(String),
