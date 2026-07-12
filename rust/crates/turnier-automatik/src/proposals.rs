@@ -8,6 +8,8 @@ use turnier_db::Pool;
 
 use crate::error::{AutomatikError, AutomatikResult};
 
+pub const REQUIRED_APPROVALS: i64 = 2;
+
 /// Herkunft eines Vorschlags.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, sqlx::Type)]
 #[serde(rename_all = "snake_case")]
@@ -203,6 +205,72 @@ pub async fn create_proposal(
     Ok(id)
 }
 
+/// Ersetzt einen offenen Vorschlag atomar durch eine neue, unbestimmte Version.
+/// Votes bleiben am alten Proposal und zählen deshalb nicht weiter.
+pub async fn create_revision(
+    pool: &Pool,
+    proposal_id: i64,
+    caster_id: &str,
+    feedback: &str,
+    config_json: &str,
+) -> AutomatikResult<i64> {
+    let caster_id = parse_numeric_id(caster_id)?;
+    let feedback = feedback.trim();
+    if feedback.is_empty() {
+        return Err(AutomatikError::MissingFeedback);
+    }
+    let config_json = serde_json::from_str::<Value>(config_json)?;
+    let now = now_utc();
+    let mut tx = pool.begin().await?;
+    let parent = sqlx::query_as::<_, ProposalRow>(
+        "SELECT * FROM turnier.tournament_proposals WHERE id = $1 FOR UPDATE",
+    )
+    .bind(proposal_id)
+    .fetch_one(&mut *tx)
+    .await?;
+    if parent.state != ProposalState::PendingApproval {
+        return Err(AutomatikError::InvalidTransition {
+            state: parent.state,
+            event: ProposalEvent::Feedback,
+        });
+    }
+
+    sqlx::query(
+        "INSERT INTO turnier.tournament_proposal_feedback \
+             (proposal_id, caster_discord_id, raw_text, applied_change_json, created_at) \
+         VALUES ($1, $2, $3, $4, $5)",
+    )
+    .bind(proposal_id)
+    .bind(caster_id)
+    .bind(feedback)
+    .bind(&config_json)
+    .bind(now)
+    .execute(&mut *tx)
+    .await?;
+    sqlx::query(
+        "UPDATE turnier.tournament_proposals SET state = 'expired', decided_at = $1 \
+         WHERE id = $2 AND state = 'pending_approval'",
+    )
+    .bind(now)
+    .bind(proposal_id)
+    .execute(&mut *tx)
+    .await?;
+    let revised_id = sqlx::query_scalar(
+        "INSERT INTO turnier.tournament_proposals \
+             (preset_id, source, proposed_start, config_json, state, created_at) \
+         VALUES ($1, $2, $3, $4, 'pending_approval', $5) RETURNING id",
+    )
+    .bind(parent.preset_id)
+    .bind(parent.source)
+    .bind(parent.proposed_start)
+    .bind(config_json)
+    .bind(now)
+    .fetch_one(&mut *tx)
+    .await?;
+    tx.commit().await?;
+    Ok(revised_id)
+}
+
 /// Laedt einen Vorschlag per ID.
 pub async fn get_proposal(pool: &Pool, proposal_id: i64) -> AutomatikResult<Option<Proposal>> {
     let row = sqlx::query_as::<_, ProposalRow>(
@@ -315,7 +383,9 @@ pub async fn apply_event(
             .fetch_one(pool)
             .await?;
     let next = transition(current.0, event)?;
-    if matches!(next, ProposalState::Approved) && approvals_count(pool, proposal_id).await? < 1 {
+    if matches!(next, ProposalState::Approved)
+        && approvals_count(pool, proposal_id).await? < REQUIRED_APPROVALS
+    {
         return Err(AutomatikError::MissingApproval { proposal_id });
     }
     set_state(pool, proposal_id, current.0, next).await?;

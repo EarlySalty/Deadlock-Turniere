@@ -232,6 +232,14 @@ async fn proposals_votes_feedback_and_state_roundtrip() {
         proposals::approvals_count(pool, proposal_id).await.unwrap(),
         1
     );
+    proposals::record_vote(
+        pool,
+        proposal_id,
+        "123456789012345603",
+        VoteDecision::Approve,
+    )
+    .await
+    .unwrap();
 
     let feedback_id = proposals::record_feedback(
         pool,
@@ -370,6 +378,100 @@ async fn apply_event_requires_approval_vote_before_approved() {
         .unwrap();
     assert_eq!(proposal.state, ProposalState::PendingApproval);
     assert!(proposal.decided_at.is_none());
+
+    proposals::record_vote(
+        pool,
+        proposal_id,
+        "123456789012345601",
+        VoteDecision::Approve,
+    )
+    .await
+    .unwrap();
+    assert!(
+        proposals::apply_event(pool, proposal_id, ProposalEvent::Approve)
+            .await
+            .is_err()
+    );
+
+    proposals::record_vote(
+        pool,
+        proposal_id,
+        "123456789012345602",
+        VoteDecision::Approve,
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        proposals::apply_event(pool, proposal_id, ProposalEvent::Approve)
+            .await
+            .unwrap(),
+        ProposalState::Approved
+    );
+}
+
+#[tokio::test]
+async fn revision_expires_old_proposal_and_starts_without_votes() {
+    let db = temp_db().await;
+    let pool = db.pool();
+    let proposal_id = proposals::create_proposal(
+        pool,
+        None,
+        ProposalSource::Bot,
+        Some("2026-07-10T18:00:00Z"),
+        r#"{"name":"Alt","revision":1}"#,
+    )
+    .await
+    .unwrap();
+    proposals::apply_event(pool, proposal_id, ProposalEvent::SubmitForApproval)
+        .await
+        .unwrap();
+    proposals::record_vote(
+        pool,
+        proposal_id,
+        "123456789012345601",
+        VoteDecision::Approve,
+    )
+    .await
+    .unwrap();
+
+    let revised_id = proposals::create_revision(
+        pool,
+        proposal_id,
+        "123456789012345601",
+        "Eine Stunde spaeter",
+        r#"{"name":"Neu","revision":2}"#,
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(
+        proposals::get_proposal(pool, proposal_id)
+            .await
+            .unwrap()
+            .unwrap()
+            .state,
+        ProposalState::Expired
+    );
+    let revised = proposals::get_proposal(pool, revised_id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(revised.state, ProposalState::PendingApproval);
+    assert_eq!(
+        revised.proposed_start.as_deref(),
+        Some("2026-07-10T18:00:00+00:00")
+    );
+    assert_eq!(
+        proposals::approvals_count(pool, revised_id).await.unwrap(),
+        0
+    );
+    assert_eq!(
+        proposals::list_feedback(pool, proposal_id)
+            .await
+            .unwrap()
+            .len(),
+        1
+    );
 }
 
 #[test]

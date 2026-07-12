@@ -23,6 +23,10 @@ pub enum AutomatikError {
         proposal_id: i64,
     },
 
+    /// Revision oder Ablehnung ohne verwertbaren menschlichen Grund.
+    #[error("feedback darf nicht leer sein")]
+    MissingFeedback,
+
     /// Ungueltige Discord-/Message-ID fuer eine BIGINT-Spalte.
     #[error("ungueltige numerische ID: {0}")]
     InvalidNumericId(String),
