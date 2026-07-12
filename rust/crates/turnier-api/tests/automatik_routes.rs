@@ -188,6 +188,29 @@ async fn internal_votes_require_token_roles_and_two_distinct_approvals() {
     )
     .await
     .unwrap();
+    let mut planned_config: Value = serde_json::from_str(
+        &turnier_automatik::proposals::get_proposal(&pool, proposal.id)
+            .await
+            .unwrap()
+            .unwrap()
+            .config_json,
+    )
+    .unwrap();
+    planned_config["name"] = json!("KI Human Gate");
+    planned_config["_ai_planned"] = json!(true);
+    let planned_uri = format!("/internal/turnier/v1/proposals/{}/planned", proposal.id);
+    let (status, planned) = send_internal(
+        &app,
+        Some("internal-token"),
+        &planned_uri,
+        json!({"config_json": planned_config.to_string()}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(planned["proposal"]["config_json"]
+        .as_str()
+        .unwrap()
+        .contains("KI Human Gate"));
     let uri = format!("/internal/turnier/v1/proposals/{}/vote", proposal.id);
 
     let (status, _) = send_internal(

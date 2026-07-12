@@ -29,6 +29,10 @@ pub fn router() -> Router<AppState> {
             post(attach_rendered),
         )
         .route(
+            "/internal/turnier/v1/proposals/{proposal_id}/planned",
+            post(store_planned),
+        )
+        .route(
             "/internal/turnier/v1/proposals/{proposal_id}/vote",
             post(vote),
         )
@@ -47,6 +51,11 @@ struct RenderedBody {
     config_json: String,
     channel_id: String,
     message_id: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct PlannedBody {
+    config_json: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -140,6 +149,17 @@ async fn attach_rendered(
         &body.message_id,
     )
     .await?;
+    Ok(Json(proposal_payload(&state, proposal_id).await?))
+}
+
+async fn store_planned(
+    State(state): State<AppState>,
+    Path(proposal_id): Path<i64>,
+    headers: HeaderMap,
+    Json(body): Json<PlannedBody>,
+) -> WebResult<Json<Value>> {
+    require_internal(&headers, &state)?;
+    proposals::store_planned_config(&state.pool, proposal_id, &body.config_json).await?;
     Ok(Json(proposal_payload(&state, proposal_id).await?))
 }
 

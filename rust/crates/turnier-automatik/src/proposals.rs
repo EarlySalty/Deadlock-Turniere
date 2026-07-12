@@ -271,7 +271,28 @@ pub async fn create_revision(
     Ok(revised_id)
 }
 
-/// Speichert den von der KI validierten Plan und die zugehoerige Discord-Nachricht.
+/// Speichert den validierten KI-Plan, bevor eine Discord-Nachricht entsteht.
+pub async fn store_planned_config(
+    pool: &Pool,
+    proposal_id: i64,
+    config_json: &str,
+) -> AutomatikResult<()> {
+    let config_json = serde_json::from_str::<Value>(config_json)?;
+    let result = sqlx::query(
+        "UPDATE turnier.tournament_proposals SET config_json = $1 \
+         WHERE id = $2 AND state = 'pending_approval'",
+    )
+    .bind(config_json)
+    .bind(proposal_id)
+    .execute(pool)
+    .await?;
+    if result.rows_affected() == 0 {
+        return Err(sqlx::Error::RowNotFound.into());
+    }
+    Ok(())
+}
+
+/// Verknuepft den bereits gespeicherten KI-Plan mit seiner Discord-Nachricht.
 pub async fn attach_rendered_message(
     pool: &Pool,
     proposal_id: i64,
