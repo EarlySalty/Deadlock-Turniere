@@ -81,9 +81,10 @@ async fn faelliger_tick_erstellt_oeffnet_und_dedupliziert_routine_turnier() {
         "SELECT COUNT(*) FROM turnier.discord_tasks \
          WHERE type = 'ANNOUNCE_TOURNAMENT' \
            AND payload->>'tournament_id' = $1 \
-           AND payload->>'content' = 'Platzhalter'",
+           AND payload->>'content' = $2",
     )
     .bind(rows[0].0.to_string())
+    .bind(turnier_scheduler::ROUTINE_ANNOUNCEMENT)
     .fetch_one(&pool)
     .await
     .expect("announcement attempts");

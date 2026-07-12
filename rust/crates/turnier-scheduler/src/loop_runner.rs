@@ -30,7 +30,7 @@ use crate::{RoutineDecision, RoutineSettings, SchedulerResult};
 
 /// Loop-Intervall in Sekunden (wie im Original `SCHEDULER_INTERVAL_SECONDS`).
 pub const SCHEDULER_INTERVAL_SECONDS: u64 = 60;
-const ROUTINE_ANNOUNCEMENT: &str = "Platzhalter";
+pub const ROUTINE_ANNOUNCEMENT: &str = "Das wöchentliche Community-Turnier ist angesetzt und die Anmeldung ist ab sofort offen. Schnapp dir deinen Platz über den Turnier-Post, alle Zeiten und Details stehen dort. Kein festes Team nötig, meld dich einfach an und spiel mit.";
 
 /// Gebündelte Handles des Schedulers. Werden vom App-Bootstrap (turnier-bot/turnier-api)
 /// gebaut und an [`start_scheduler`] übergeben.

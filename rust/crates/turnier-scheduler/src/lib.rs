@@ -30,7 +30,7 @@ pub mod time;
 pub mod transition;
 
 pub use error::{SchedulerError, SchedulerResult};
-pub use loop_runner::{start_scheduler, Scheduler, SCHEDULER_INTERVAL_SECONDS};
+pub use loop_runner::{start_scheduler, Scheduler, ROUTINE_ANNOUNCEMENT, SCHEDULER_INTERVAL_SECONDS};
 pub use reminders::{
     check_and_send_match_reminders, check_and_send_registration_reminders,
     check_and_send_start_reminders, load_all_profile_ids, load_tournament_participant_ids,
