@@ -105,6 +105,54 @@ impl DiscordNotifier {
         &self.broker
     }
 
+    /// Kuendigt ein automatisch geoeffnetes Turnier im konfigurierten Kanal an.
+    /// Erfolgreiche Tasks deduplizieren weitere Scheduler-Ticks; fehlgeschlagene
+    /// werden mit derselben Broker-Idempotency erneut versucht.
+    pub async fn announce_routine_tournament(
+        &self,
+        tournament_id: i64,
+        channel_id: i64,
+        content: &str,
+    ) -> BrokerResult<Value> {
+        let done: bool = sqlx::query_scalar(
+            "SELECT EXISTS (SELECT 1 FROM turnier.discord_tasks \
+             WHERE type = 'ANNOUNCE_TOURNAMENT' AND status = 'DONE' \
+               AND payload->>'tournament_id' = $1)",
+        )
+        .bind(tournament_id.to_string())
+        .fetch_one(&self.pool)
+        .await
+        .map_err(map_db_err)?;
+        if done {
+            return Ok(json!({ "deduplicated": true }));
+        }
+
+        let task_payload = json!({
+            "tournament_id": tournament_id,
+            "channel_id": channel_id,
+            "content": content,
+        });
+        let task_id =
+            tasks::create_running(&self.pool, TaskType::AnnounceTournament, &task_payload)
+                .await
+                .map_err(map_db_err)?;
+        let payload = routine_announcement_payload(tournament_id, channel_id, content);
+        match self
+            .broker
+            .post_internal(path::SEND_RICH_MESSAGE, &payload)
+            .await
+        {
+            Ok(result) => {
+                let _ = tasks::mark_done(&self.pool, task_id, Some(&result)).await;
+                Ok(result)
+            }
+            Err(err) => {
+                let _ = tasks::mark_failed(&self.pool, task_id, &tasks::error_text(&err)).await;
+                Err(err)
+            }
+        }
+    }
+
     // --- Match-Channel-Verwaltung ---------------------------------------
 
     /// Legt einen Discord-Match-Channel via Broker an, protokolliert als
@@ -736,6 +784,17 @@ fn mentions(ids: &[String]) -> String {
         .join(" ")
 }
 
+fn routine_announcement_payload(tournament_id: i64, channel_id: i64, content: &str) -> Value {
+    json!({
+        "channel_id": channel_id,
+        "content": content,
+        "embed": {},
+        "allowed_user_ids": [],
+        "allowed_role_ids": [],
+        "idempotency_key": format!("routine-announcement-{tournament_id}"),
+    })
+}
+
 /// Wie [`mentions`], aber leere Liste → `"—"` (für die Team-Felder).
 fn mentions_or_dash(ids: &[String]) -> String {
     let raw: Vec<String> = ids.iter().map(|id| format!("<@{id}>")).collect();
@@ -866,5 +925,13 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(p4.display_name(), "D");
+    }
+
+    #[test]
+    fn routine_ankuendigung_payload_ist_idempotent() {
+        let payload = routine_announcement_payload(42, 123, "PLATZHALTER");
+        assert_eq!(payload["channel_id"], 123);
+        assert_eq!(payload["content"], "PLATZHALTER");
+        assert_eq!(payload["idempotency_key"], "routine-announcement-42");
     }
 }

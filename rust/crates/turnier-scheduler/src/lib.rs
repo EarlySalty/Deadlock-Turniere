@@ -25,15 +25,17 @@
 pub mod error;
 pub mod loop_runner;
 pub mod reminders;
+pub mod routine;
 pub mod time;
 pub mod transition;
 
 pub use error::{SchedulerError, SchedulerResult};
-pub use loop_runner::{start_scheduler, Scheduler, SCHEDULER_INTERVAL_SECONDS};
+pub use loop_runner::{start_scheduler, Scheduler, ROUTINE_ANNOUNCEMENT, SCHEDULER_INTERVAL_SECONDS};
 pub use reminders::{
     check_and_send_match_reminders, check_and_send_registration_reminders,
     check_and_send_start_reminders, load_all_profile_ids, load_tournament_participant_ids,
 };
+pub use routine::{RoutineDecision, RoutinePlan, RoutineSchedule, RoutineSettings};
 pub use time::{
     is_due, is_within_window, offset_label, parse_reminder_offsets, DEFAULT_REMINDER_OFFSETS,
     REMINDER_WINDOW_MINUTES,

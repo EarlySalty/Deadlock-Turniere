@@ -30,7 +30,8 @@ async fn main() -> anyhow::Result<()> {
         pool.clone(),
         state.match_manager.clone(),
         scheduler_notifier(&config, &pool),
-    );
+        &config,
+    )?;
     let app = build_router(state);
 
     if check_only {

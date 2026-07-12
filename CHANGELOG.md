@@ -1,3 +1,11 @@
+## #12 — Turniere laufen jetzt von allein an
+
+**Ausgangslage:** Turniere sind nur entstanden, wenn sich jemand freiwillig um Erstellung, Freigabe und Erinnerungen gekümmert hat. Das hat kaum noch jemand gemacht, also gab es kaum noch Turniere.
+
+**Änderung:** Der Bot legt Turniere jetzt selbst an. Im festen Wochenrhythmus entsteht aus einer freigegebenen Vorlage automatisch ein Turnier, die Anmeldung öffnet sich von selbst und die Ankündigung landet im Turnier-Channel. Die bekannten Erinnerungen greifen wie gewohnt.
+
+**Aktuelles Verhalten:** Die Automatik ist eingebaut, aber noch nicht angeschaltet. Sobald wir sie aktivieren, gibt es jede Woche ein festes Turnier, ganz ohne Orga-Aufwand.
+
 ## #11 — Caster-Freigabe wirklich verbindlich, DM-Wunsch lückenlos respektiert
 
 **Ausgangslage:** Mit der Turnier-Automatik (#10) sollte eine Turnier-Freigabe ausschließlich von einem Caster kommen — über einen direkten Status-Weg ließ sich das aber umgehen. Und der „keine Turnier-DMs"-Wunsch sollte auf jedem Benachrichtigungsweg greifen.

@@ -2363,6 +2363,7 @@ dependencies = [
  "thiserror",
  "tokio",
  "tracing",
+ "turnier-automatik",
  "turnier-config",
  "turnier-core",
  "turnier-db",

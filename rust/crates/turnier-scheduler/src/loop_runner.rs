@@ -1,4 +1,4 @@
-//! Hintergrund-Loop: vier fehlertolerante Checks im 60-s-Takt.
+//! Hintergrund-Loop: Routine-Erzeugung, Phasen und Reminder im 60-s-Takt.
 //!
 //! Portiert `start_scheduler`/`_run_all_checks` (Z.503-521) und die
 //! Phasen-Kaskade `_check_and_advance_tournaments`/`_advance_due_tournament`
@@ -15,6 +15,8 @@ use std::sync::Arc;
 use chrono::{DateTime, Utc};
 use tokio::sync::watch;
 
+use turnier_automatik::{presets, routine as routine_store};
+use turnier_core::TournamentMode;
 use turnier_db::Pool;
 use turnier_discord::DiscordNotifier;
 use turnier_match::MatchManager;
@@ -24,9 +26,11 @@ use crate::reminders::{
     check_and_send_start_reminders, load_all_profile_ids, load_tournament_participant_ids,
 };
 use crate::transition::{advance_tournament_status, get_due_next_status, DueStatusRow};
+use crate::{RoutineDecision, RoutineSettings, SchedulerResult};
 
 /// Loop-Intervall in Sekunden (wie im Original `SCHEDULER_INTERVAL_SECONDS`).
 pub const SCHEDULER_INTERVAL_SECONDS: u64 = 60;
+pub const ROUTINE_ANNOUNCEMENT: &str = "Das wöchentliche Community-Turnier ist angesetzt und die Anmeldung ist ab sofort offen. Schnapp dir deinen Platz über den Turnier-Post, alle Zeiten und Details stehen dort. Kein festes Team nötig, meld dich einfach an und spiel mit.";
 
 /// Gebündelte Handles des Schedulers. Werden vom App-Bootstrap (turnier-bot/turnier-api)
 /// gebaut und an [`start_scheduler`] übergeben.
@@ -35,21 +39,29 @@ pub struct Scheduler {
     pool: Pool,
     matchmgr: Arc<MatchManager>,
     notifier: DiscordNotifier,
+    routine: RoutineSettings,
 }
 
 impl Scheduler {
     /// Baut den Scheduler aus seinen Abhängigkeiten.
-    pub fn new(pool: Pool, matchmgr: Arc<MatchManager>, notifier: DiscordNotifier) -> Self {
-        Self {
+    pub fn new(
+        pool: Pool,
+        matchmgr: Arc<MatchManager>,
+        notifier: DiscordNotifier,
+        config: &turnier_config::Config,
+    ) -> SchedulerResult<Self> {
+        Ok(Self {
             pool,
             matchmgr,
             notifier,
-        }
+            routine: RoutineSettings::from_config(config)?,
+        })
     }
 
-    /// Führt alle vier Checks EINMAL aus — jeder fehlertolerant. Ein Fehler in
+    /// Führt alle Checks EINMAL aus — jeder fehlertolerant. Ein Fehler in
     /// einem Check beendet weder die anderen noch den Loop.
     pub async fn run_all_checks(&self, now: DateTime<Utc>) {
+        self.check_routine_tournament(now).await;
         if let Err(err) = self.check_and_advance_tournaments(now).await {
             tracing::error!(error = %err, "Phasen-Kaskade fehlgeschlagen");
         }
@@ -63,6 +75,146 @@ impl Scheduler {
         }
         if let Err(err) = check_and_send_match_reminders(&self.pool, &self.notifier).await {
             tracing::error!(error = %err, "Match-Reminder-Check fehlgeschlagen");
+        }
+    }
+
+    async fn check_routine_tournament(&self, now: DateTime<Utc>) {
+        if !self.routine.enabled {
+            tracing::info!(
+                decision = "skipped",
+                reason = "feature_disabled",
+                "Routine-Scheduler-Entscheidung"
+            );
+            return;
+        }
+        let plan = match self.routine.schedule.decide(now) {
+            RoutineDecision::NotDue {
+                due_at,
+                event_start,
+            } => {
+                tracing::info!(decision = "skipped", reason = "not_due", %due_at, %event_start, "Routine-Scheduler-Entscheidung");
+                return;
+            }
+            RoutineDecision::Due(plan) => plan,
+        };
+        let preset = match presets::get(&self.pool, self.routine.preset_id).await {
+            Ok(Some(preset)) if preset.active => preset,
+            Ok(Some(_)) => {
+                tracing::warn!(
+                    decision = "skipped",
+                    reason = "preset_inactive",
+                    preset_id = self.routine.preset_id,
+                    "Routine-Scheduler-Entscheidung"
+                );
+                return;
+            }
+            Ok(None) => {
+                tracing::warn!(
+                    decision = "skipped",
+                    reason = "preset_missing",
+                    preset_id = self.routine.preset_id,
+                    "Routine-Scheduler-Entscheidung"
+                );
+                return;
+            }
+            Err(err) => {
+                tracing::error!(decision = "error", reason = "preset_load_failed", preset_id = self.routine.preset_id, error = %err, "Routine-Scheduler-Entscheidung");
+                return;
+            }
+        };
+        let db_plan = routine_store::RoutineTournamentPlan {
+            registration_start: plan.registration_start,
+            registration_end: plan.registration_end,
+            checkin_start: plan.checkin_start,
+            event_start: plan.event_start,
+            bracket_start: if preset.tournament_mode == TournamentMode::BracketOnly {
+                plan.event_start
+            } else {
+                plan.bracket_start
+            },
+        };
+        let ensured = match routine_store::ensure_routine_tournament(&self.pool, &preset, &db_plan)
+            .await
+        {
+            Ok(value) => value,
+            Err(err) => {
+                tracing::error!(decision = "error", reason = "create_failed", preset_id = preset.id, event_start = %plan.event_start, error = %err, "Routine-Scheduler-Entscheidung");
+                return;
+            }
+        };
+        if ensured.created {
+            tracing::info!(decision = "created", tournament_id = ensured.id, preset_id = preset.id, event_start = %plan.event_start, "Routine-Scheduler-Entscheidung");
+        } else {
+            tracing::info!(decision = "skipped", reason = "slot_exists", tournament_id = ensured.id, status = ensured.status, event_start = %plan.event_start, "Routine-Scheduler-Entscheidung");
+        }
+
+        let status = if ensured.status == "draft" {
+            match advance_tournament_status(
+                &self.pool,
+                &self.matchmgr,
+                &self.notifier,
+                ensured.id,
+                "draft",
+                "registration",
+                "scheduler",
+                None,
+            )
+            .await
+            {
+                Ok(_) => "registration",
+                Err(crate::SchedulerError::ActiveTournamentConflict(err)) => {
+                    tracing::info!(decision = "skipped", reason = "active_tournament", tournament_id = ensured.id, error = %err, "Routine-Scheduler-Entscheidung");
+                    return;
+                }
+                Err(err) => {
+                    tracing::error!(decision = "error", reason = "registration_open_failed", tournament_id = ensured.id, error = %err, "Routine-Scheduler-Entscheidung");
+                    return;
+                }
+            }
+        } else {
+            ensured.status.as_str()
+        };
+        if status != "registration" {
+            tracing::info!(
+                decision = "skipped",
+                reason = "slot_already_progressed",
+                tournament_id = ensured.id,
+                status,
+                "Routine-Scheduler-Entscheidung"
+            );
+            return;
+        }
+
+        match self
+            .notifier
+            .announce_routine_tournament(
+                ensured.id,
+                self.routine.announcement_channel_id,
+                ROUTINE_ANNOUNCEMENT,
+            )
+            .await
+        {
+            Ok(result)
+                if result
+                    .get("deduplicated")
+                    .and_then(serde_json::Value::as_bool)
+                    == Some(true) =>
+            {
+                tracing::info!(
+                    decision = "skipped",
+                    reason = "announcement_already_sent",
+                    tournament_id = ensured.id,
+                    "Routine-Scheduler-Ankuendigung"
+                );
+            }
+            Ok(_) => tracing::info!(
+                decision = "created",
+                tournament_id = ensured.id,
+                "Routine-Scheduler-Ankuendigung"
+            ),
+            Err(err) => {
+                tracing::error!(decision = "error", reason = "announcement_failed", tournament_id = ensured.id, error = %err, "Routine-Scheduler-Ankuendigung")
+            }
         }
     }
 
