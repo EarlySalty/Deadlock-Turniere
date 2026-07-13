@@ -1,7 +1,8 @@
 use chrono::{DateTime, Duration, Utc};
 use turnier_automatik::presets::{self, Category, NewPreset, PresetConfig};
 use turnier_automatik::routine::{
-    ensure_routine_tournament, load_invitation_candidate_ids, RoutineTournamentPlan,
+    ensure_routine_proposal, ensure_routine_tournament, load_invitation_candidate_ids,
+    RoutineTournamentPlan,
 };
 use turnier_core::{BracketFormat, InviteMode, TournamentGameMode, TournamentMode};
 use turnier_db::{test_pool, Pool};
@@ -78,6 +79,48 @@ async fn aktives_preset_erzeugt_genau_einen_entwurf_mit_remindern() {
     assert_eq!(row.2, preset.id);
     assert_eq!(row.3, serde_json::json!([1440, 120, 15]));
     assert_eq!(row.4, serde_json::json!([1440, 60]));
+}
+
+#[tokio::test]
+async fn routine_slot_erzeugt_nur_einen_offenen_vorschlag() {
+    let db = test_pool().await.expect("central test pool");
+    let pool = db.pool();
+    let preset = presets::create(
+        pool,
+        &NewPreset {
+            name: "Routine Cup".to_string(),
+            category: Category::Fun,
+            config: preset_config(),
+            active: true,
+            created_by: CREATOR.to_string(),
+        },
+    )
+    .await
+    .expect("create preset");
+    let plan = RoutineTournamentPlan {
+        registration_start: utc("2026-07-11T18:01:00Z"),
+        registration_end: utc("2026-07-18T17:30:00Z"),
+        checkin_start: utc("2026-07-18T17:30:00Z"),
+        event_start: utc("2026-07-18T18:00:00Z"),
+        bracket_start: utc("2026-07-18T21:00:00Z"),
+    };
+
+    let first = ensure_routine_proposal(pool, &preset, &plan)
+        .await
+        .expect("first ensure");
+    let second = ensure_routine_proposal(pool, &preset, &plan)
+        .await
+        .expect("second ensure");
+
+    assert!(first.created);
+    assert!(!second.created);
+    assert_eq!(first.id, second.id);
+    assert_eq!(first.state, "pending_approval");
+    let tournament_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM turnier.tournaments")
+        .fetch_one(pool)
+        .await
+        .expect("count tournaments");
+    assert_eq!(tournament_count, 0);
 }
 
 async fn insert_tournament(pool: &Pool, name: &str, status: &str) -> i64 {

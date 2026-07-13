@@ -23,6 +23,14 @@ pub enum AutomatikError {
         proposal_id: i64,
     },
 
+    /// Revision oder Ablehnung ohne verwertbaren menschlichen Grund.
+    #[error("feedback darf nicht leer sein")]
+    MissingFeedback,
+
+    /// Strukturierter Vorschlagsplan ist kein JSON-Objekt.
+    #[error("vorschlagsplan muss ein JSON-Objekt sein")]
+    InvalidProposalConfig,
+
     /// Ungueltige Discord-/Message-ID fuer eine BIGINT-Spalte.
     #[error("ungueltige numerische ID: {0}")]
     InvalidNumericId(String),

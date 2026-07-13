@@ -60,6 +60,7 @@ pub struct Config {
 
     // --- Routine-Turniere (sicherer Default: aus) ---
     pub routine_tournaments_enabled: bool,
+    pub routine_proposal_channel_id: i64,
     pub routine_tournament_preset_id: i64,
     pub routine_tournament_weekday: String,
     pub routine_tournament_time_utc: String,
@@ -166,6 +167,10 @@ impl Config {
             ),
             discord_webhook_url: get_string("DISCORD_WEBHOOK_URL", ""),
             routine_tournaments_enabled: get_bool("ROUTINE_TOURNAMENTS_ENABLED", false),
+            routine_proposal_channel_id: get_int(
+                "ROUTINE_PROPOSAL_CHANNEL_ID",
+                1474543558793887937,
+            ),
             routine_tournament_preset_id: get_int("ROUTINE_TOURNAMENT_PRESET_ID", 0),
             routine_tournament_weekday: get_string("ROUTINE_TOURNAMENT_WEEKDAY", "saturday"),
             routine_tournament_time_utc: get_string("ROUTINE_TOURNAMENT_TIME_UTC", "18:00"),

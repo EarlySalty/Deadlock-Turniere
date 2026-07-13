@@ -8,6 +8,8 @@ use turnier_db::Pool;
 
 use crate::error::{AutomatikError, AutomatikResult};
 
+pub const REQUIRED_APPROVALS: i64 = 2;
+
 /// Herkunft eines Vorschlags.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, sqlx::Type)]
 #[serde(rename_all = "snake_case")]
@@ -51,7 +53,7 @@ pub enum VoteDecision {
 }
 
 /// DB-Zeile aus `tournament_proposals`.
-#[derive(Debug, Clone, PartialEq, Eq, sqlx::FromRow)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, sqlx::FromRow)]
 pub struct Proposal {
     pub id: i64,
     pub preset_id: Option<i64>,
@@ -100,7 +102,7 @@ impl From<ProposalRow> for Proposal {
 }
 
 /// DB-Zeile aus `tournament_proposal_votes`.
-#[derive(Debug, Clone, PartialEq, Eq, sqlx::FromRow)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, sqlx::FromRow)]
 pub struct ProposalVote {
     pub id: i64,
     pub proposal_id: i64,
@@ -131,7 +133,7 @@ impl From<ProposalVoteRow> for ProposalVote {
 }
 
 /// DB-Zeile aus `tournament_proposal_feedback`.
-#[derive(Debug, Clone, PartialEq, Eq, sqlx::FromRow)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, sqlx::FromRow)]
 pub struct ProposalFeedback {
     pub id: i64,
     pub proposal_id: i64,
@@ -203,6 +205,265 @@ pub async fn create_proposal(
     Ok(id)
 }
 
+/// Ersetzt einen offenen Vorschlag atomar durch eine neue, unbestimmte Version.
+/// Votes bleiben am alten Proposal und zählen deshalb nicht weiter.
+pub async fn create_revision(
+    pool: &Pool,
+    proposal_id: i64,
+    caster_id: &str,
+    feedback: &str,
+    config_json: &str,
+) -> AutomatikResult<i64> {
+    let caster_id = parse_numeric_id(caster_id)?;
+    let feedback = feedback.trim();
+    if feedback.is_empty() {
+        return Err(AutomatikError::MissingFeedback);
+    }
+    let config_json = serde_json::from_str::<Value>(config_json)?;
+    let now = now_utc();
+    let mut tx = pool.begin().await?;
+    let parent = sqlx::query_as::<_, ProposalRow>(
+        "SELECT * FROM turnier.tournament_proposals WHERE id = $1 FOR UPDATE",
+    )
+    .bind(proposal_id)
+    .fetch_one(&mut *tx)
+    .await?;
+    if parent.state != ProposalState::PendingApproval {
+        return Err(AutomatikError::InvalidTransition {
+            state: parent.state,
+            event: ProposalEvent::Feedback,
+        });
+    }
+
+    sqlx::query(
+        "INSERT INTO turnier.tournament_proposal_feedback \
+             (proposal_id, caster_discord_id, raw_text, applied_change_json, created_at) \
+         VALUES ($1, $2, $3, $4, $5)",
+    )
+    .bind(proposal_id)
+    .bind(caster_id)
+    .bind(feedback)
+    .bind(&config_json)
+    .bind(now)
+    .execute(&mut *tx)
+    .await?;
+    sqlx::query(
+        "UPDATE turnier.tournament_proposals SET state = 'expired', decided_at = $1 \
+         WHERE id = $2 AND state = 'pending_approval'",
+    )
+    .bind(now)
+    .bind(proposal_id)
+    .execute(&mut *tx)
+    .await?;
+    let revised_id = sqlx::query_scalar(
+        "INSERT INTO turnier.tournament_proposals \
+             (preset_id, source, proposed_start, config_json, state, created_at) \
+         VALUES ($1, $2, $3, $4, 'pending_approval', $5) RETURNING id",
+    )
+    .bind(parent.preset_id)
+    .bind(parent.source)
+    .bind(parent.proposed_start)
+    .bind(config_json)
+    .bind(now)
+    .fetch_one(&mut *tx)
+    .await?;
+    tx.commit().await?;
+    Ok(revised_id)
+}
+
+/// Legt eine neue Version zunächst nur als Entwurf an. Der bisherige Vorschlag
+/// bleibt abstimmbar, bis Discord erfolgreich auf die neue Karte editiert ist.
+pub async fn prepare_revision(
+    pool: &Pool,
+    proposal_id: i64,
+    config_json: &str,
+) -> AutomatikResult<i64> {
+    let mut config_json = serde_json::from_str::<Value>(config_json)?;
+    config_json
+        .as_object_mut()
+        .ok_or(AutomatikError::InvalidProposalConfig)?
+        .insert(
+            "_parent_proposal_id".to_string(),
+            serde_json::json!(proposal_id),
+        );
+    let parent = sqlx::query_as::<_, ProposalRow>(
+        "SELECT * FROM turnier.tournament_proposals WHERE id = $1",
+    )
+    .bind(proposal_id)
+    .fetch_one(pool)
+    .await?;
+    if parent.state != ProposalState::PendingApproval {
+        return Err(AutomatikError::InvalidTransition {
+            state: parent.state,
+            event: ProposalEvent::Feedback,
+        });
+    }
+    sqlx::query(
+        "DELETE FROM turnier.tournament_proposals \
+         WHERE state = 'draft' AND config_json->>'_parent_proposal_id' = $1",
+    )
+    .bind(proposal_id.to_string())
+    .execute(pool)
+    .await?;
+    let id = sqlx::query_scalar(
+        "INSERT INTO turnier.tournament_proposals \
+             (preset_id, source, proposed_start, config_json, state, created_at) \
+         VALUES ($1, $2, $3, $4, 'draft', $5) RETURNING id",
+    )
+    .bind(parent.preset_id)
+    .bind(parent.source)
+    .bind(parent.proposed_start)
+    .bind(config_json)
+    .bind(now_utc())
+    .fetch_one(pool)
+    .await?;
+    Ok(id)
+}
+
+/// Aktiviert eine vorbereitete Version atomar, nachdem Discord erfolgreich
+/// editiert wurde. Erst hier verfallen die alte Version und ihre Stimmen.
+pub async fn activate_prepared_revision(
+    pool: &Pool,
+    proposal_id: i64,
+    revised_id: i64,
+    caster_id: &str,
+    feedback: &str,
+    channel_id: &str,
+    message_id: &str,
+) -> AutomatikResult<()> {
+    let caster_id = parse_numeric_id(caster_id)?;
+    let channel_id = parse_numeric_id(channel_id)?;
+    let message_id = parse_numeric_id(message_id)?;
+    let feedback = feedback.trim();
+    if feedback.is_empty() {
+        return Err(AutomatikError::MissingFeedback);
+    }
+    let now = now_utc();
+    let mut tx = pool.begin().await?;
+    let parent_state: ProposalState = sqlx::query_scalar(
+        "SELECT state FROM turnier.tournament_proposals WHERE id = $1 FOR UPDATE",
+    )
+    .bind(proposal_id)
+    .fetch_one(&mut *tx)
+    .await?;
+    let revised_state: ProposalState = sqlx::query_scalar(
+        "SELECT state FROM turnier.tournament_proposals WHERE id = $1 FOR UPDATE",
+    )
+    .bind(revised_id)
+    .fetch_one(&mut *tx)
+    .await?;
+    if parent_state != ProposalState::PendingApproval {
+        return Err(AutomatikError::InvalidTransition {
+            state: parent_state,
+            event: ProposalEvent::Feedback,
+        });
+    }
+    if revised_state != ProposalState::Draft {
+        return Err(AutomatikError::InvalidTransition {
+            state: revised_state,
+            event: ProposalEvent::SubmitForApproval,
+        });
+    }
+    sqlx::query(
+        "INSERT INTO turnier.tournament_proposal_feedback \
+             (proposal_id, caster_discord_id, raw_text, applied_change_json, created_at) \
+         VALUES ($1, $2, $3, jsonb_build_object('kind', 'change', 'revision_id', $4), $5)",
+    )
+    .bind(proposal_id)
+    .bind(caster_id)
+    .bind(feedback)
+    .bind(revised_id)
+    .bind(now)
+    .execute(&mut *tx)
+    .await?;
+    sqlx::query(
+        "UPDATE turnier.tournament_proposals SET state = 'expired', decided_at = $1 \
+         WHERE id = $2",
+    )
+    .bind(now)
+    .bind(proposal_id)
+    .execute(&mut *tx)
+    .await?;
+    sqlx::query(
+        "UPDATE turnier.tournament_proposals \
+         SET state = 'pending_approval', channel_id = $1, proposal_message_id = $2 \
+         WHERE id = $3",
+    )
+    .bind(channel_id)
+    .bind(message_id)
+    .bind(revised_id)
+    .execute(&mut *tx)
+    .await?;
+    tx.commit().await?;
+    Ok(())
+}
+
+/// Speichert den validierten KI-Plan, bevor eine Discord-Nachricht entsteht.
+pub async fn store_planned_config(
+    pool: &Pool,
+    proposal_id: i64,
+    config_json: &str,
+) -> AutomatikResult<()> {
+    let config_json = serde_json::from_str::<Value>(config_json)?;
+    let result = sqlx::query(
+        "UPDATE turnier.tournament_proposals SET config_json = $1 \
+         WHERE id = $2 AND state = 'pending_approval'",
+    )
+    .bind(config_json)
+    .bind(proposal_id)
+    .execute(pool)
+    .await?;
+    if result.rows_affected() == 0 {
+        return Err(sqlx::Error::RowNotFound.into());
+    }
+    Ok(())
+}
+
+/// Verknuepft den bereits gespeicherten KI-Plan mit seiner Discord-Nachricht.
+pub async fn attach_rendered_message(
+    pool: &Pool,
+    proposal_id: i64,
+    config_json: &str,
+    channel_id: &str,
+    message_id: &str,
+) -> AutomatikResult<()> {
+    let config_json = serde_json::from_str::<Value>(config_json)?;
+    let channel_id = parse_numeric_id(channel_id)?;
+    let message_id = parse_numeric_id(message_id)?;
+    let result = sqlx::query(
+        "UPDATE turnier.tournament_proposals \
+         SET config_json = $1, channel_id = $2, proposal_message_id = $3 \
+         WHERE id = $4 AND state = 'pending_approval'",
+    )
+    .bind(config_json)
+    .bind(channel_id)
+    .bind(message_id)
+    .bind(proposal_id)
+    .execute(pool)
+    .await?;
+    if result.rows_affected() == 0 {
+        return Err(sqlx::Error::RowNotFound.into());
+    }
+    Ok(())
+}
+
+/// Verknuepft einen freigegebenen Vorschlag idempotent mit seinem Turnier.
+pub async fn attach_tournament(
+    pool: &Pool,
+    proposal_id: i64,
+    tournament_id: i64,
+) -> AutomatikResult<()> {
+    sqlx::query(
+        "UPDATE turnier.tournament_proposals SET tournament_id = $1 \
+         WHERE id = $2 AND (tournament_id IS NULL OR tournament_id = $1)",
+    )
+    .bind(tournament_id)
+    .bind(proposal_id)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
 /// Laedt einen Vorschlag per ID.
 pub async fn get_proposal(pool: &Pool, proposal_id: i64) -> AutomatikResult<Option<Proposal>> {
     let row = sqlx::query_as::<_, ProposalRow>(
@@ -212,6 +473,30 @@ pub async fn get_proposal(pool: &Pool, proposal_id: i64) -> AutomatikResult<Opti
     .fetch_optional(pool)
     .await?;
     Ok(row.map(Into::into))
+}
+
+/// Folgt einer Revisionskette zur aktuell abstimmbaren Version. Dadurch bleiben
+/// alte Discord-Buttons auch nach einem Prozessabbruch zwischen DB und Edit heilbar.
+pub async fn resolve_active_proposal_id(
+    pool: &Pool,
+    proposal_id: i64,
+) -> AutomatikResult<Option<i64>> {
+    let id = sqlx::query_scalar(
+        "WITH RECURSIVE chain AS ( \
+             SELECT id, state, 0 AS depth FROM turnier.tournament_proposals WHERE id = $1 \
+             UNION ALL \
+             SELECT child.id, child.state, chain.depth + 1 \
+             FROM turnier.tournament_proposals child \
+             JOIN chain ON child.config_json->>'_parent_proposal_id' = chain.id::text \
+             WHERE chain.depth < 20 \
+         ) \
+         SELECT id FROM chain WHERE state IN ('pending_approval', 'approved') \
+         ORDER BY depth DESC, id DESC LIMIT 1",
+    )
+    .bind(proposal_id)
+    .fetch_optional(pool)
+    .await?;
+    Ok(id)
 }
 
 /// Listet Vorschlaege, optional nach Zustand gefiltert.
@@ -315,7 +600,9 @@ pub async fn apply_event(
             .fetch_one(pool)
             .await?;
     let next = transition(current.0, event)?;
-    if matches!(next, ProposalState::Approved) && approvals_count(pool, proposal_id).await? < 1 {
+    if matches!(next, ProposalState::Approved)
+        && approvals_count(pool, proposal_id).await? < REQUIRED_APPROVALS
+    {
         return Err(AutomatikError::MissingApproval { proposal_id });
     }
     set_state(pool, proposal_id, current.0, next).await?;
@@ -370,12 +657,98 @@ pub async fn list_feedback(
 ) -> AutomatikResult<Vec<ProposalFeedback>> {
     let rows = sqlx::query_as::<_, ProposalFeedbackRow>(
         "SELECT * FROM turnier.tournament_proposal_feedback \
-         WHERE proposal_id = $1 ORDER BY id",
+         WHERE proposal_id = $1 \
+           AND COALESCE(applied_change_json->>'kind', '') <> 'announcement_draft' \
+         ORDER BY id",
     )
     .bind(proposal_id)
     .fetch_all(pool)
     .await?;
     Ok(rows.into_iter().map(Into::into).collect())
+}
+
+/// Liefert die jüngsten Mod-Rückmeldungen über Vorschlagsgrenzen hinweg.
+/// Der Master-Bot nutzt sie als kleine, persistente Lernhistorie im Prompt;
+/// es findet ausdrücklich kein autonomes Modelltraining statt.
+pub async fn list_recent_feedback(
+    pool: &Pool,
+    limit: i64,
+) -> AutomatikResult<Vec<ProposalFeedback>> {
+    let rows = sqlx::query_as::<_, ProposalFeedbackRow>(
+        "SELECT * FROM turnier.tournament_proposal_feedback \
+         WHERE COALESCE(applied_change_json->>'kind', '') <> 'announcement_draft' \
+         ORDER BY id DESC LIMIT $1",
+    )
+    .bind(limit.clamp(1, 100))
+    .fetch_all(pool)
+    .await?;
+    Ok(rows.into_iter().map(Into::into).collect())
+}
+
+/// Ob die interne Ankündigungsvorlage bereits erfolgreich in Discord liegt.
+pub async fn announcement_posted(pool: &Pool, proposal_id: i64) -> AutomatikResult<bool> {
+    let posted = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM turnier.tournament_proposal_feedback \
+         WHERE proposal_id = $1 AND applied_change_json->>'kind' = 'announcement_draft')",
+    )
+    .bind(proposal_id)
+    .fetch_one(pool)
+    .await?;
+    Ok(posted)
+}
+
+/// Markiert den erfolgreichen Vorlagen-Post idempotent. Der Marker nutzt die
+/// bestehende Audit-Tabelle, wird aber nicht als Lernfeedback ausgeliefert.
+pub async fn record_announcement_posted(
+    pool: &Pool,
+    proposal_id: i64,
+    actor_id: &str,
+    message_id: &str,
+) -> AutomatikResult<()> {
+    let actor_id = parse_numeric_id(actor_id)?;
+    let message_id = parse_numeric_id(message_id)?;
+    let now = now_utc();
+    sqlx::query(
+        "INSERT INTO turnier.tournament_proposal_feedback \
+             (proposal_id, caster_discord_id, raw_text, applied_change_json, created_at) \
+         SELECT $1, $2, 'announcement_draft_posted', \
+                jsonb_build_object('kind', 'announcement_draft', 'message_id', $3), $4 \
+         WHERE NOT EXISTS (SELECT 1 FROM turnier.tournament_proposal_feedback \
+                           WHERE proposal_id = $1 \
+                             AND applied_change_json->>'kind' = 'announcement_draft')",
+    )
+    .bind(proposal_id)
+    .bind(actor_id)
+    .bind(message_id)
+    .bind(now)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+/// Speichert die KI-Vorlage vor dem Discord-Edit in derselben Proposal-Zeile.
+pub async fn store_announcement_draft(
+    pool: &Pool,
+    proposal_id: i64,
+    draft: &str,
+) -> AutomatikResult<()> {
+    let draft = draft.trim();
+    if draft.is_empty() {
+        return Err(AutomatikError::MissingFeedback);
+    }
+    let result = sqlx::query(
+        "UPDATE turnier.tournament_proposals \
+         SET config_json = jsonb_set(config_json, '{_announcement_draft}', to_jsonb($1::text), true) \
+         WHERE id = $2 AND tournament_id IS NOT NULL",
+    )
+    .bind(draft)
+    .bind(proposal_id)
+    .execute(pool)
+    .await?;
+    if result.rows_affected() == 0 {
+        return Err(sqlx::Error::RowNotFound.into());
+    }
+    Ok(())
 }
 
 fn parse_numeric_id(value: &str) -> AutomatikResult<i64> {

@@ -1,3 +1,11 @@
+## #14 — Turniere brauchen zwei Mod-Freigaben
+
+**Ausgangslage:** Die Turnier-Automatik konnte nach einem Zeitplan selbst ein Turnier anlegen und ankündigen. **Änderung:** Sie erstellt nur noch einen internen Vorschlag; N und Änderungswünsche werden als Lernhistorie für spätere Vorschläge gespeichert. **Aktuelles Verhalten:** Der sichtbare KI-Plan wird vor dem Discord-Post verbindlich gespeichert, Änderungen wechseln nacheinander und alte Karten-Buttons führen automatisch zur aktiven Version; erst zwei unterschiedliche J von Mods legen das Turnier an. Die Ankündigung steht nur als interne Vorlage in derselben Karte, ein fehlgeschlagenes Edit bleibt offen und kann erneut versucht werden.
+
+## #13 — Turnier-Automatik bis zur Mod-Freigabe gestoppt
+
+**Ausgangslage:** Ein gelöschtes Routine-Turnier wurde vom laufenden Wochenplaner erneut angelegt und angekündigt. **Änderung:** Der automatische Planungspfad ist vollständig abgeschaltet, bis die neue Abstimmung mit zwei Mods bereitsteht. **Aktuelles Verhalten:** Der Bot erstellt, öffnet und veröffentlicht keine Routine-Turniere mehr selbstständig.
+
 ## #12 — Turniere laufen jetzt von allein an
 
 **Ausgangslage:** Turniere sind nur entstanden, wenn sich jemand freiwillig um Erstellung, Freigabe und Erinnerungen gekümmert hat. Das hat kaum noch jemand gemacht, also gab es kaum noch Turniere.

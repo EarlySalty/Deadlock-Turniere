@@ -1,6 +1,8 @@
 use chrono::{DateTime, Duration, NaiveTime, Utc, Weekday};
 use turnier_config::Config;
-use turnier_scheduler::{RoutineDecision, RoutineSchedule, RoutineSettings};
+use turnier_scheduler::{
+    RoutineDecision, RoutineSchedule, RoutineSettings, ROUTINE_PROPOSAL_INTERVAL_SECONDS,
+};
 
 fn utc(value: &str) -> DateTime<Utc> {
     DateTime::parse_from_rfc3339(value)
@@ -53,6 +55,7 @@ fn slot_ist_vor_dem_vorlauf_noch_nicht_faellig() {
 fn config_parst_wochentag_und_utc_uhrzeit() {
     let mut config = Config::from_env();
     config.routine_tournaments_enabled = true;
+    config.routine_proposal_channel_id = 1474543558793887937;
     config.routine_tournament_preset_id = 42;
     config.routine_tournament_weekday = "friday".to_string();
     config.routine_tournament_time_utc = "20:30".to_string();
@@ -63,6 +66,7 @@ fn config_parst_wochentag_und_utc_uhrzeit() {
     let settings = RoutineSettings::from_config(&config).expect("valid routine config");
     assert!(settings.enabled);
     assert_eq!(settings.preset_id, 42);
+    assert_eq!(settings.proposal_channel_id, 1474543558793887937);
     assert_eq!(settings.schedule.weekday, Weekday::Fri);
     assert_eq!(
         settings.schedule.start_time,
@@ -79,4 +83,9 @@ fn deaktivierter_scheduler_ignoriert_unvollstaendige_routine_config() {
 
     let settings = RoutineSettings::from_config(&config).expect("disabled is always safe");
     assert!(!settings.enabled);
+}
+
+#[test]
+fn routine_vorschlaege_laufen_hoechstens_stuendlich() {
+    assert_eq!(ROUTINE_PROPOSAL_INTERVAL_SECONDS, 60 * 60);
 }
