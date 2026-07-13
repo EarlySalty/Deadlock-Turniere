@@ -5,6 +5,7 @@ use axum::http::HeaderMap;
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use chrono::{DateTime, Utc};
+use serde::de::DeserializeOwned;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
@@ -373,6 +374,7 @@ async fn materialize(state: &AppState, proposal_id: i64, actor_id: &str) -> WebR
         .ok_or_else(|| WebError::not_found("Preset nicht gefunden"))?;
     let config: Value = serde_json::from_str(&proposal.config_json)
         .map_err(|_| WebError::bad_request("Vorschlagsplan ist ungueltig"))?;
+    let approved_preset = approved_preset(preset, &config)?;
     let plan = RoutineTournamentPlan {
         registration_start: config_time(&config, "registration_start")?,
         registration_end: config_time(&config, "registration_end")?,
@@ -380,7 +382,8 @@ async fn materialize(state: &AppState, proposal_id: i64, actor_id: &str) -> WebR
         event_start: config_time(&config, "event_start")?,
         bracket_start: config_time(&config, "bracket_start")?,
     };
-    let ensured = routine::ensure_routine_tournament(&state.pool, &preset, &plan).await?;
+    let ensured =
+        routine::ensure_routine_tournament(&state.pool, &approved_preset, &plan).await?;
     if ensured.status == "draft" {
         turnier_scheduler::advance_tournament_status(
             &state.pool,
@@ -400,6 +403,32 @@ async fn materialize(state: &AppState, proposal_id: i64, actor_id: &str) -> WebR
     }
     proposals::approve_and_attach_tournament(&state.pool, proposal_id, ensured.id).await?;
     Ok((ensured.id, true))
+}
+
+fn approved_preset(mut preset: presets::Preset, config: &Value) -> WebResult<presets::Preset> {
+    preset.name = config_field(config, "name")?;
+    preset.team_size = config_field(config, "team_size")?;
+    preset.bracket_format = config_field(config, "bracket_format")?;
+    preset.series_format = config_field(config, "series_format")?;
+    preset.final_series_format = config_field(config, "final_series_format")?;
+    preset.tournament_mode = config_field(config, "tournament_mode")?;
+    preset.tournament_game_mode = config_field(config, "tournament_game_mode")?;
+    preset.match_objective = config_field(config, "match_objective")?;
+    preset.invite_mode = config_field(config, "invite_mode")?;
+    preset.reminder_offsets = config_field(config, "reminder_offsets")?;
+    preset.start_reminder_offsets = config_field(config, "start_reminder_offsets")?;
+    preset.rules = config_field(config, "rules")?;
+    preset.description_template = config_field(config, "description")?;
+    Ok(preset)
+}
+
+fn config_field<T: DeserializeOwned>(config: &Value, key: &str) -> WebResult<T> {
+    let value = config
+        .get(key)
+        .cloned()
+        .ok_or_else(|| WebError::bad_request(format!("Vorschlagsplan ohne {key}")))?;
+    serde_json::from_value(value)
+        .map_err(|_| WebError::bad_request(format!("Ungueltiger Vorschlagswert: {key}")))
 }
 
 fn config_time(config: &Value, key: &str) -> WebResult<DateTime<Utc>> {

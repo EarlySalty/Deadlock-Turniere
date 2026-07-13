@@ -598,6 +598,45 @@ async fn prepared_revision_rejects_parallel_draft_without_deleting_first() {
 }
 
 #[tokio::test]
+async fn prepared_revision_replaces_abandoned_draft_after_lease() {
+    let db = temp_db().await;
+    let pool = db.pool();
+    let proposal_id = proposals::create_proposal(
+        pool,
+        None,
+        ProposalSource::Bot,
+        None,
+        r#"{"name":"Alt"}"#,
+    )
+    .await
+    .unwrap();
+    proposals::apply_event(pool, proposal_id, ProposalEvent::SubmitForApproval)
+        .await
+        .unwrap();
+    let abandoned = proposals::prepare_revision(pool, proposal_id, r#"{"name":"Verwaist"}"#)
+        .await
+        .unwrap();
+    sqlx::query(
+        "UPDATE turnier.tournament_proposals SET created_at = now() - interval '10 minutes' \
+         WHERE id = $1",
+    )
+    .bind(abandoned)
+    .execute(pool)
+    .await
+    .unwrap();
+
+    let replacement =
+        proposals::prepare_revision(pool, proposal_id, r#"{"name":"Neuer Versuch"}"#)
+            .await
+            .unwrap();
+    assert_ne!(replacement, abandoned);
+    assert!(proposals::get_proposal(pool, abandoned)
+        .await
+        .unwrap()
+        .is_none());
+}
+
+#[tokio::test]
 async fn planned_config_cannot_change_after_first_vote() {
     let db = temp_db().await;
     let pool = db.pool();

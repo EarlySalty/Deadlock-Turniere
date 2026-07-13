@@ -197,6 +197,9 @@ async fn internal_votes_require_token_roles_and_two_distinct_approvals() {
     )
     .unwrap();
     planned_config["name"] = json!("KI Human Gate");
+    planned_config["description"] = json!("Von Mods freigegeben");
+    planned_config["rules"] = json!("Keine Ausnahmen");
+    planned_config["team_size"] = json!(5);
     planned_config["_ai_planned"] = json!(true);
     let planned_uri = format!("/internal/turnier/v1/proposals/{}/planned", proposal.id);
     let (status, planned) = send_internal(
@@ -269,6 +272,17 @@ async fn internal_votes_require_token_roles_and_two_distinct_approvals() {
     assert_eq!(second["went_live"], true);
     assert_eq!(second["announcement_posted"], false);
     let tournament_id = second["tournament_id"].as_i64().unwrap();
+    let materialized: (String, Option<String>, Option<String>, i64) = sqlx::query_as(
+        "SELECT name, description, rules, team_size FROM turnier.tournaments WHERE id = $1",
+    )
+    .bind(tournament_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(materialized.0, "KI Human Gate");
+    assert_eq!(materialized.1.as_deref(), Some("Von Mods freigegeben"));
+    assert_eq!(materialized.2.as_deref(), Some("Keine Ausnahmen"));
+    assert_eq!(materialized.3, 5);
 
     let announcement_uri = format!(
         "/internal/turnier/v1/proposals/{}/announcement-rendered",

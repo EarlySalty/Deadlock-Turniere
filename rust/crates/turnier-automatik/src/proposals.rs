@@ -299,6 +299,14 @@ pub async fn prepare_revision(
             event: ProposalEvent::Feedback,
         });
     }
+    sqlx::query(
+        "DELETE FROM turnier.tournament_proposals \
+         WHERE state = 'draft' AND config_json->>'_parent_proposal_id' = $1 \
+         AND created_at < now() - interval '5 minutes'",
+    )
+    .bind(proposal_id.to_string())
+    .execute(&mut *tx)
+    .await?;
     let revision_in_progress: bool = sqlx::query_scalar(
         "SELECT EXISTS(SELECT 1 FROM turnier.tournament_proposals \
          WHERE state = 'draft' AND config_json->>'_parent_proposal_id' = $1)",
