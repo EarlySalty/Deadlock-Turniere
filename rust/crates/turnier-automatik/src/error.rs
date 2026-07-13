@@ -31,6 +31,10 @@ pub enum AutomatikError {
     #[error("fuer diesen Vorschlag wird bereits eine Revision vorbereitet")]
     RevisionInProgress,
 
+    /// Der vorbereitete Entwurf gehoert zu einem anderen Elternvorschlag.
+    #[error("revisionsentwurf gehoert nicht zum angegebenen vorschlag")]
+    RevisionParentMismatch,
+
     /// Ein sichtbarer oder bereits bewerteter Plan darf nicht still ersetzt werden.
     #[error("der Vorschlagsplan ist bereits gesperrt")]
     PlanLocked,

@@ -564,6 +564,57 @@ async fn prepared_revision_keeps_old_live_until_discord_activation() {
 }
 
 #[tokio::test]
+async fn prepared_revision_cannot_be_activated_for_different_parent() {
+    let db = temp_db().await;
+    let pool = db.pool();
+    let first =
+        proposals::create_proposal(pool, None, ProposalSource::Bot, None, r#"{"name":"A"}"#)
+            .await
+            .unwrap();
+    let second =
+        proposals::create_proposal(pool, None, ProposalSource::Bot, None, r#"{"name":"B"}"#)
+            .await
+            .unwrap();
+    for id in [first, second] {
+        proposals::apply_event(pool, id, ProposalEvent::SubmitForApproval)
+            .await
+            .unwrap();
+    }
+    let second_revision = proposals::prepare_revision(pool, second, r#"{"name":"B2"}"#)
+        .await
+        .unwrap();
+
+    let error = proposals::activate_prepared_revision(
+        pool,
+        first,
+        second_revision,
+        "123456789012345602",
+        "Falscher Parent",
+        "1474543558793887937",
+        "1474543558793887999",
+    )
+    .await
+    .unwrap_err();
+    assert!(matches!(error, AutomatikError::RevisionParentMismatch));
+    assert_eq!(
+        proposals::get_proposal(pool, first)
+            .await
+            .unwrap()
+            .unwrap()
+            .state,
+        ProposalState::PendingApproval
+    );
+    assert_eq!(
+        proposals::get_proposal(pool, second_revision)
+            .await
+            .unwrap()
+            .unwrap()
+            .state,
+        ProposalState::Draft
+    );
+}
+
+#[tokio::test]
 async fn prepared_revision_rejects_parallel_draft_without_deleting_first() {
     let db = temp_db().await;
     let pool = db.pool();

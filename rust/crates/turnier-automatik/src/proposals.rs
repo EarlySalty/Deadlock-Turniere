@@ -359,8 +359,9 @@ pub async fn activate_prepared_revision(
     .bind(proposal_id)
     .fetch_one(&mut *tx)
     .await?;
-    let revised_state: ProposalState = sqlx::query_scalar(
-        "SELECT state FROM turnier.tournament_proposals WHERE id = $1 FOR UPDATE",
+    let (revised_state, revised_parent): (ProposalState, Option<String>) = sqlx::query_as(
+        "SELECT state, config_json->>'_parent_proposal_id' \
+         FROM turnier.tournament_proposals WHERE id = $1 FOR UPDATE",
     )
     .bind(revised_id)
     .fetch_one(&mut *tx)
@@ -376,6 +377,10 @@ pub async fn activate_prepared_revision(
             state: revised_state,
             event: ProposalEvent::SubmitForApproval,
         });
+    }
+    let proposal_id_text = proposal_id.to_string();
+    if revised_parent.as_deref() != Some(proposal_id_text.as_str()) {
+        return Err(AutomatikError::RevisionParentMismatch);
     }
     sqlx::query(
         "INSERT INTO turnier.tournament_proposal_feedback \

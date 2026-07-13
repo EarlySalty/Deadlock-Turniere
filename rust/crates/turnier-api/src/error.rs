@@ -186,6 +186,9 @@ impl From<turnier_automatik::AutomatikError> for WebError {
             RevisionInProgress => {
                 Self::conflict("Für diesen Vorschlag wird bereits eine Änderung verarbeitet.")
             }
+            RevisionParentMismatch => {
+                Self::conflict("Der Änderungsentwurf gehört zu einem anderen Vorschlag.")
+            }
             PlanLocked => Self::conflict(
                 "Der Vorschlagsplan ist bereits sichtbar oder bewertet und kann nicht ersetzt werden.",
             ),
