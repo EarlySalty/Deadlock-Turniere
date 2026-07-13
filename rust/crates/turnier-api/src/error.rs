@@ -186,6 +186,9 @@ impl From<turnier_automatik::AutomatikError> for WebError {
             RevisionInProgress => {
                 Self::conflict("Für diesen Vorschlag wird bereits eine Änderung verarbeitet.")
             }
+            PlanLocked => Self::conflict(
+                "Der Vorschlagsplan ist bereits sichtbar oder bewertet und kann nicht ersetzt werden.",
+            ),
             InvalidProposalConfig => Self::bad_request("Vorschlagsplan muss ein JSON-Objekt sein"),
             InvalidNumericId(_) => Self::bad_request("Ungueltige numerische ID"),
             Json(_) => Self::bad_request("Ungueltiges JSON"),

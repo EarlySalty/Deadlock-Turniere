@@ -31,6 +31,10 @@ pub enum AutomatikError {
     #[error("fuer diesen Vorschlag wird bereits eine Revision vorbereitet")]
     RevisionInProgress,
 
+    /// Ein sichtbarer oder bereits bewerteter Plan darf nicht still ersetzt werden.
+    #[error("der Vorschlagsplan ist bereits gesperrt")]
+    PlanLocked,
+
     /// Strukturierter Vorschlagsplan ist kein JSON-Objekt.
     #[error("vorschlagsplan muss ein JSON-Objekt sein")]
     InvalidProposalConfig,

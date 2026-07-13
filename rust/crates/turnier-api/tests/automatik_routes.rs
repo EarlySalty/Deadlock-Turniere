@@ -343,6 +343,60 @@ async fn internal_votes_require_token_roles_and_two_distinct_approvals() {
 }
 
 #[tokio::test]
+async fn failed_materialization_keeps_proposal_pending() {
+    let (app, _db, pool, _session) = setup().await;
+    let proposal_id = turnier_automatik::proposals::create_proposal(
+        &pool,
+        None,
+        turnier_automatik::proposals::ProposalSource::Bot,
+        Some("2026-07-19T18:00:00Z"),
+        r#"{
+            "registration_start":"2026-07-12T18:00:00Z",
+            "registration_end":"2026-07-19T17:30:00Z",
+            "checkin_start":"2026-07-19T17:30:00Z",
+            "event_start":"2026-07-19T18:00:00Z",
+            "bracket_start":"2026-07-19T21:00:00Z"
+        }"#,
+    )
+    .await
+    .unwrap();
+    turnier_automatik::proposals::apply_event(
+        &pool,
+        proposal_id,
+        turnier_automatik::proposals::ProposalEvent::SubmitForApproval,
+    )
+    .await
+    .unwrap();
+    let uri = format!("/internal/turnier/v1/proposals/{proposal_id}/vote");
+    let (status, _) = send_internal(
+        &app,
+        Some("internal-token"),
+        &uri,
+        json!({"actor_id":"1337518124647579601","role_ids":["1337518124647579661"],"decision":"approve"}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, _) = send_internal(
+        &app,
+        Some("internal-token"),
+        &uri,
+        json!({"actor_id":"1401891955931222602","role_ids":["1401891955931222110"],"decision":"approve"}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+
+    let proposal = turnier_automatik::proposals::get_proposal(&pool, proposal_id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        proposal.state,
+        turnier_automatik::proposals::ProposalState::PendingApproval
+    );
+    assert!(proposal.tournament_id.is_none());
+}
+
+#[tokio::test]
 async fn preset_admin_roundtrip() {
     let (app, _db, _pool, token) = setup().await;
 

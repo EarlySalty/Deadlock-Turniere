@@ -412,14 +412,15 @@ pub async fn store_planned_config(
     let config_json = serde_json::from_str::<Value>(config_json)?;
     let result = sqlx::query(
         "UPDATE turnier.tournament_proposals SET config_json = $1 \
-         WHERE id = $2 AND state = 'pending_approval'",
+         WHERE id = $2 AND state = 'pending_approval' \
+         AND NOT EXISTS (SELECT 1 FROM turnier.tournament_proposal_votes WHERE proposal_id = $2)",
     )
     .bind(config_json)
     .bind(proposal_id)
     .execute(pool)
     .await?;
     if result.rows_affected() == 0 {
-        return Err(sqlx::Error::RowNotFound.into());
+        return Err(AutomatikError::PlanLocked);
     }
     Ok(())
 }
@@ -437,35 +438,65 @@ pub async fn attach_rendered_message(
     let message_id = parse_numeric_id(message_id)?;
     let result = sqlx::query(
         "UPDATE turnier.tournament_proposals \
-         SET config_json = $1, channel_id = $2, proposal_message_id = $3 \
-         WHERE id = $4 AND state = 'pending_approval'",
+         SET channel_id = $1, proposal_message_id = $2 \
+         WHERE id = $3 AND state = 'pending_approval' AND config_json = $4",
     )
-    .bind(config_json)
     .bind(channel_id)
     .bind(message_id)
     .bind(proposal_id)
+    .bind(config_json)
     .execute(pool)
     .await?;
     if result.rows_affected() == 0 {
-        return Err(sqlx::Error::RowNotFound.into());
+        return Err(AutomatikError::PlanLocked);
     }
     Ok(())
 }
 
-/// Verknuepft einen freigegebenen Vorschlag idempotent mit seinem Turnier.
-pub async fn attach_tournament(
+/// Schaltet Vorschlag und Turnier-Verknuepfung nach erfolgreicher Erstellung
+/// gemeinsam frei.
+pub async fn approve_and_attach_tournament(
     pool: &Pool,
     proposal_id: i64,
     tournament_id: i64,
 ) -> AutomatikResult<()> {
+    let mut tx = pool.begin().await?;
+    let proposal = sqlx::query_as::<_, ProposalRow>(
+        "SELECT * FROM turnier.tournament_proposals WHERE id = $1 FOR UPDATE",
+    )
+    .bind(proposal_id)
+    .fetch_one(&mut *tx)
+    .await?;
+    if proposal.state == ProposalState::Approved && proposal.tournament_id == Some(tournament_id) {
+        tx.commit().await?;
+        return Ok(());
+    }
+    if proposal.state != ProposalState::PendingApproval {
+        return Err(AutomatikError::InvalidTransition {
+            state: proposal.state,
+            event: ProposalEvent::Approve,
+        });
+    }
+    let approvals: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM turnier.tournament_proposal_votes \
+         WHERE proposal_id = $1 AND decision = 'approve'",
+    )
+    .bind(proposal_id)
+    .fetch_one(&mut *tx)
+    .await?;
+    if approvals < REQUIRED_APPROVALS {
+        return Err(AutomatikError::MissingApproval { proposal_id });
+    }
     sqlx::query(
-        "UPDATE turnier.tournament_proposals SET tournament_id = $1 \
-         WHERE id = $2 AND (tournament_id IS NULL OR tournament_id = $1)",
+        "UPDATE turnier.tournament_proposals \
+         SET state = 'approved', tournament_id = $1, decided_at = $2 WHERE id = $3",
     )
     .bind(tournament_id)
+    .bind(now_utc())
     .bind(proposal_id)
-    .execute(pool)
+    .execute(&mut *tx)
     .await?;
+    tx.commit().await?;
     Ok(())
 }
 

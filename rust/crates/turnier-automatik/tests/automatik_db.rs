@@ -597,6 +597,58 @@ async fn prepared_revision_rejects_parallel_draft_without_deleting_first() {
     assert_eq!(first.state, ProposalState::Draft);
 }
 
+#[tokio::test]
+async fn planned_config_cannot_change_after_first_vote() {
+    let db = temp_db().await;
+    let pool = db.pool();
+    let proposal_id = proposals::create_proposal(
+        pool,
+        None,
+        ProposalSource::Bot,
+        None,
+        r#"{"name":"Veröffentlichter Plan"}"#,
+    )
+    .await
+    .unwrap();
+    proposals::apply_event(pool, proposal_id, ProposalEvent::SubmitForApproval)
+        .await
+        .unwrap();
+    proposals::record_vote(
+        pool,
+        proposal_id,
+        "123456789012345601",
+        VoteDecision::Approve,
+    )
+    .await
+    .unwrap();
+
+    let error = proposals::store_planned_config(
+        pool,
+        proposal_id,
+        r#"{"name":"Nachträglich geändert"}"#,
+    )
+    .await
+    .unwrap_err();
+    assert!(matches!(error, AutomatikError::PlanLocked));
+
+    let error = proposals::attach_rendered_message(
+        pool,
+        proposal_id,
+        r#"{"name":"Nachträglich geändert"}"#,
+        "1474543558793887937",
+        "1474543558793887999",
+    )
+    .await
+    .unwrap_err();
+    assert!(matches!(error, AutomatikError::PlanLocked));
+    let proposal = proposals::get_proposal(pool, proposal_id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(proposal.config_json.contains("Veröffentlicht"));
+    assert!(proposal.proposal_message_id.is_none());
+}
+
 #[test]
 fn compute_recipients_filters_category_all_and_none() {
     let role_members = vec![

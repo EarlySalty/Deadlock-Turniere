@@ -9,7 +9,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use turnier_automatik::presets;
-use turnier_automatik::proposals::{self, ProposalEvent, ProposalState, VoteDecision};
+use turnier_automatik::proposals::{self, ProposalState, VoteDecision};
 use turnier_automatik::routine::{self, RoutineTournamentPlan};
 
 use crate::error::{WebError, WebResult};
@@ -229,9 +229,6 @@ async fn vote(
     let mut went_live = false;
     let mut tournament_id = None;
     if body.decision == VoteDecision::Approve && approvals >= proposals::REQUIRED_APPROVALS {
-        if proposal.state == ProposalState::PendingApproval {
-            proposals::apply_event(&state.pool, proposal_id, ProposalEvent::Approve).await?;
-        }
         let (id, created) = materialize(&state, proposal_id, &body.actor_id).await?;
         tournament_id = Some(id);
         went_live = created;
@@ -365,7 +362,7 @@ async fn materialize(state: &AppState, proposal_id: i64, actor_id: &str) -> WebR
             "Turnier wurde bereits ueber die Anmeldung hinaus fortgesetzt",
         ));
     }
-    proposals::attach_tournament(&state.pool, proposal_id, ensured.id).await?;
+    proposals::approve_and_attach_tournament(&state.pool, proposal_id, ensured.id).await?;
     Ok((ensured.id, true))
 }
 
