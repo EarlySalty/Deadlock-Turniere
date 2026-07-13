@@ -726,6 +726,31 @@ pub async fn record_announcement_posted(
     Ok(())
 }
 
+/// Speichert die KI-Vorlage vor dem Discord-Edit in derselben Proposal-Zeile.
+pub async fn store_announcement_draft(
+    pool: &Pool,
+    proposal_id: i64,
+    draft: &str,
+) -> AutomatikResult<()> {
+    let draft = draft.trim();
+    if draft.is_empty() {
+        return Err(AutomatikError::MissingFeedback);
+    }
+    let result = sqlx::query(
+        "UPDATE turnier.tournament_proposals \
+         SET config_json = jsonb_set(config_json, '{_announcement_draft}', to_jsonb($1::text), true) \
+         WHERE id = $2 AND tournament_id IS NOT NULL",
+    )
+    .bind(draft)
+    .bind(proposal_id)
+    .execute(pool)
+    .await?;
+    if result.rows_affected() == 0 {
+        return Err(sqlx::Error::RowNotFound.into());
+    }
+    Ok(())
+}
+
 fn parse_numeric_id(value: &str) -> AutomatikResult<i64> {
     parse_discord_id(value).map_err(|_| AutomatikError::InvalidNumericId(value.to_string()))
 }

@@ -48,6 +48,10 @@ pub fn router() -> Router<AppState> {
             "/internal/turnier/v1/proposals/{proposal_id}/announcement-rendered",
             post(announcement_rendered),
         )
+        .route(
+            "/internal/turnier/v1/proposals/{proposal_id}/announcement-planned",
+            post(announcement_planned),
+        )
 }
 
 #[derive(Debug, Deserialize)]
@@ -90,6 +94,12 @@ struct AnnouncementRenderedBody {
     actor_id: String,
     role_ids: Vec<String>,
     message_id: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct AnnouncementPlannedBody {
+    role_ids: Vec<String>,
+    draft: String,
 }
 
 fn require_internal(headers: &HeaderMap, state: &AppState) -> WebResult<()> {
@@ -293,6 +303,19 @@ async fn announcement_rendered(
         &body.message_id,
     )
     .await?;
+    Ok(Json(proposal_payload(&state, proposal_id).await?))
+}
+
+async fn announcement_planned(
+    State(state): State<AppState>,
+    Path(proposal_id): Path<i64>,
+    headers: HeaderMap,
+    Json(body): Json<AnnouncementPlannedBody>,
+) -> WebResult<Json<Value>> {
+    require_internal(&headers, &state)?;
+    require_approver(&body.role_ids)?;
+    let proposal_id = resolve_active_id(&state, proposal_id).await?;
+    proposals::store_announcement_draft(&state.pool, proposal_id, &body.draft).await?;
     Ok(Json(proposal_payload(&state, proposal_id).await?))
 }
 

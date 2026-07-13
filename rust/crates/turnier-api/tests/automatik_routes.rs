@@ -274,6 +274,25 @@ async fn internal_votes_require_token_roles_and_two_distinct_approvals() {
         "/internal/turnier/v1/proposals/{}/announcement-rendered",
         proposal.id
     );
+    let announcement_planned_uri = format!(
+        "/internal/turnier/v1/proposals/{}/announcement-planned",
+        proposal.id
+    );
+    let (status, announcement_planned) = send_internal(
+        &app,
+        Some("internal-token"),
+        &announcement_planned_uri,
+        json!({
+            "role_ids":["1401891955931222110"],
+            "draft":"Interne Vorlage"
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(announcement_planned["proposal"]["config_json"]
+        .as_str()
+        .unwrap()
+        .contains("Interne Vorlage"));
     let (status, announced) = send_internal(
         &app,
         Some("internal-token"),

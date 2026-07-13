@@ -1,6 +1,6 @@
 ## #14 — Turniere brauchen zwei Mod-Freigaben
 
-**Ausgangslage:** Die Turnier-Automatik konnte nach einem Zeitplan selbst ein Turnier anlegen und ankündigen. **Änderung:** Sie erstellt nur noch einen internen Vorschlag; N und Änderungswünsche werden als Lernhistorie für spätere Vorschläge gespeichert. **Aktuelles Verhalten:** Der sichtbare KI-Plan wird vor dem Discord-Post verbindlich gespeichert, Änderungen wechseln nacheinander und alte Karten-Buttons führen automatisch zur aktiven Version; erst zwei unterschiedliche J von Mods legen das Turnier an. Eine Ankündigung wird nur als interne Vorlage vorbereitet, ein fehlgeschlagener Vorlagen-Post bleibt offen und kann erneut versucht werden.
+**Ausgangslage:** Die Turnier-Automatik konnte nach einem Zeitplan selbst ein Turnier anlegen und ankündigen. **Änderung:** Sie erstellt nur noch einen internen Vorschlag; N und Änderungswünsche werden als Lernhistorie für spätere Vorschläge gespeichert. **Aktuelles Verhalten:** Der sichtbare KI-Plan wird vor dem Discord-Post verbindlich gespeichert, Änderungen wechseln nacheinander und alte Karten-Buttons führen automatisch zur aktiven Version; erst zwei unterschiedliche J von Mods legen das Turnier an. Die Ankündigung steht nur als interne Vorlage in derselben Karte, ein fehlgeschlagenes Edit bleibt offen und kann erneut versucht werden.
 
 ## #13 — Turnier-Automatik bis zur Mod-Freigabe gestoppt
 
