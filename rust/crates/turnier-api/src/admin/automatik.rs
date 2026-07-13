@@ -29,6 +29,7 @@ const PH_INVALID_PROPOSAL_EVENT: &str = "Ungültige Vorschlags-Aktion";
 const PH_INVALID_VOTE_DECISION: &str = "Ungültige Vote-Entscheidung";
 const PH_CONFIG_JSON_ERROR: &str = "Konfiguration konnte nicht erzeugt werden";
 const PH_CASTER_ROLE_REQUIRED: &str = "Nur ein Caster kann diese Freigabe erteilen.";
+const PH_APPROVE_VIA_VOTES: &str = "Freigaben laufen ausschließlich über zwei Mod-Stimmen.";
 
 /// Router fuer `/api/admin/presets` und `/api/admin/proposals`.
 pub fn router() -> Router<AppState> {
@@ -307,7 +308,7 @@ where
 fn parse_event(value: &str) -> WebResult<ProposalEvent> {
     match value {
         "submit" => Ok(ProposalEvent::SubmitForApproval),
-        "approve" => Ok(ProposalEvent::Approve),
+        "approve" => Err(WebError::bad_request(PH_APPROVE_VIA_VOTES)),
         "reject" => Ok(ProposalEvent::Reject),
         "expire" => Ok(ProposalEvent::Expire),
         _ => Err(WebError::bad_request(PH_INVALID_PROPOSAL_EVENT)),
@@ -530,9 +531,6 @@ async fn apply_proposal_event(
     let _lock = proposal_lock::acquire(&state.pool, id).await?;
     load_proposal(&state.pool, id).await?;
     let event = parse_event(&body.event)?;
-    if matches!(event, ProposalEvent::Approve) && !actor_has_caster_role(&state, &user) {
-        return Err(WebError::forbidden(PH_CASTER_ROLE_REQUIRED));
-    }
     let next = proposals::apply_event(&state.pool, id, event).await?;
     audit(
         &state.pool,

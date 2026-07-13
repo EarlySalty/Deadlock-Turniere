@@ -666,7 +666,7 @@ async fn proposal_vote_uses_authenticated_actor_id() {
 }
 
 #[tokio::test]
-async fn proposal_event_approve_requires_actor_caster_role_even_after_caster_vote() {
+async fn proposal_event_approve_is_disabled_for_human_gate() {
     let (app, _db, pool, token) = setup().await;
     let caster_token = create_caster_session(&pool, CASTER_APPROVER_ID).await;
     let preset = create_preset(&app, &token, "Event Caster Gate Preset").await;
@@ -711,7 +711,17 @@ async fn proposal_event_approve_requires_actor_caster_role_even_after_caster_vot
         Some(json!({ "event": "approve" })),
     )
     .await;
-    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+
+    let (status, _body) = send_json(
+        &app,
+        &caster_token,
+        Method::POST,
+        &format!("/api/admin/proposals/{proposal_id}/event"),
+        Some(json!({ "event": "approve" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
 
     let stored: String =
         sqlx::query_scalar(r#"SELECT state FROM turnier."tournament_proposals" WHERE id = $1"#)
