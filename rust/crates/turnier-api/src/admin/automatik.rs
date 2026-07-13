@@ -26,10 +26,10 @@ const PH_PRESET_NOT_FOUND: &str = "Preset nicht gefunden";
 const PH_PROPOSAL_NOT_FOUND: &str = "Vorschlag nicht gefunden";
 const PH_INVALID_PROPOSAL_STATE: &str = "Ungültiger Vorschlags-Status";
 const PH_INVALID_PROPOSAL_EVENT: &str = "Ungültige Vorschlags-Aktion";
-const PH_INVALID_VOTE_DECISION: &str = "Ungültige Vote-Entscheidung";
 const PH_CONFIG_JSON_ERROR: &str = "Konfiguration konnte nicht erzeugt werden";
 const PH_CASTER_ROLE_REQUIRED: &str = "Nur ein Caster kann diese Freigabe erteilen.";
 const PH_APPROVE_VIA_VOTES: &str = "Freigaben laufen ausschließlich über zwei Mod-Stimmen.";
+const PH_VOTE_VIA_DISCORD: &str = "Stimmen werden ausschließlich im Mod-Discord abgegeben.";
 
 /// Router fuer `/api/admin/presets` und `/api/admin/proposals`.
 pub fn router() -> Router<AppState> {
@@ -275,12 +275,6 @@ struct ProposalEventBody {
 #[derive(Debug, Serialize)]
 struct ProposalStateDto {
     state: ProposalState,
-}
-
-#[derive(Debug, Deserialize)]
-struct VoteBody {
-    caster_id: String,
-    decision: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -545,32 +539,13 @@ async fn apply_proposal_event(
 async fn record_proposal_vote(
     State(state): State<AppState>,
     ModUser(user): ModUser,
-    Path(id): Path<i64>,
-    Json(body): Json<VoteBody>,
+    Path(_id): Path<i64>,
+    Json(_body): Json<Value>,
 ) -> WebResult<StatusCode> {
     if !actor_has_caster_role(&state, &user) {
         return Err(WebError::forbidden(PH_CASTER_ROLE_REQUIRED));
     }
-    let _lock = proposal_lock::acquire(&state.pool, id).await?;
-    load_proposal(&state.pool, id).await?;
-    let actor_id = user.discord_id.clone();
-    let requested_caster_id = body.caster_id;
-    let decision_text = body.decision;
-    let decision = parse_wire_enum(&decision_text, PH_INVALID_VOTE_DECISION)?;
-    proposals::record_vote(&state.pool, id, &actor_id, decision).await?;
-    audit(
-        &state.pool,
-        "proposal_vote",
-        &actor_id,
-        json!({
-            "proposal_id": id,
-            "caster_id": &actor_id,
-            "requested_caster_id": requested_caster_id,
-            "decision": decision_text
-        }),
-    )
-    .await?;
-    Ok(StatusCode::NO_CONTENT)
+    Err(WebError::bad_request(PH_VOTE_VIA_DISCORD))
 }
 
 async fn record_proposal_feedback(

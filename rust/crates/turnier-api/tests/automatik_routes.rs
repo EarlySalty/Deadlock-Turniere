@@ -443,9 +443,8 @@ async fn failed_revision_activation_does_not_block_retry() {
     .await;
     assert_eq!(status, StatusCode::OK);
     let revised_id = revision["proposal"]["id"].as_i64().unwrap();
-    let activate_uri = format!(
-        "/internal/turnier/v1/proposals/{proposal_id}/revision/{revised_id}/activate"
-    );
+    let activate_uri =
+        format!("/internal/turnier/v1/proposals/{proposal_id}/revision/{revised_id}/activate");
     let (status, _) = send_internal(
         &app,
         Some("internal-token"),
@@ -460,18 +459,15 @@ async fn failed_revision_activation_does_not_block_retry() {
     )
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
-    assert!(turnier_automatik::proposals::get_proposal(&pool, revised_id)
-        .await
-        .unwrap()
-        .is_none());
+    assert!(
+        turnier_automatik::proposals::get_proposal(&pool, revised_id)
+            .await
+            .unwrap()
+            .is_none()
+    );
 
-    let (status, _) = send_internal(
-        &app,
-        Some("internal-token"),
-        &revision_uri,
-        revision_body,
-    )
-    .await;
+    let (status, _) =
+        send_internal(&app, Some("internal-token"), &revision_uri, revision_body).await;
     assert_eq!(status, StatusCode::OK);
 }
 
@@ -628,7 +624,7 @@ async fn proposal_vote_requires_actor_caster_role() {
 }
 
 #[tokio::test]
-async fn proposal_vote_uses_authenticated_actor_id() {
+async fn legacy_caster_vote_is_disabled_for_mod_gate() {
     let (app, _db, pool, token) = setup().await;
     let caster_token = create_caster_session(&pool, CASTER_USER_ID).await;
 
@@ -653,16 +649,16 @@ async fn proposal_vote_uses_authenticated_actor_id() {
         Some(json!({ "caster_id": "spoofed-caster", "decision": "approve" })),
     )
     .await;
-    assert_eq!(status, StatusCode::NO_CONTENT);
+    assert_eq!(status, StatusCode::BAD_REQUEST);
 
     let stored: i64 = sqlx::query_scalar(
-        r#"SELECT caster_discord_id FROM turnier."tournament_proposal_votes" WHERE proposal_id = $1"#,
+        r#"SELECT COUNT(*) FROM turnier."tournament_proposal_votes" WHERE proposal_id = $1"#,
     )
     .bind(proposal_id)
     .fetch_one(&pool)
     .await
     .unwrap();
-    assert_eq!(stored, CASTER_USER_ID.parse::<i64>().unwrap());
+    assert_eq!(stored, 0);
 }
 
 #[tokio::test]
@@ -701,7 +697,7 @@ async fn proposal_event_approve_is_disabled_for_human_gate() {
         Some(json!({ "caster_id": CASTER_APPROVER_ID, "decision": "approve" })),
     )
     .await;
-    assert_eq!(status, StatusCode::NO_CONTENT);
+    assert_eq!(status, StatusCode::BAD_REQUEST);
 
     let (status, _body) = send_json(
         &app,

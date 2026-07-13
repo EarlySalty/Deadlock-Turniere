@@ -382,8 +382,7 @@ async fn materialize(state: &AppState, proposal_id: i64, actor_id: &str) -> WebR
         event_start: config_time(&config, "event_start")?,
         bracket_start: config_time(&config, "bracket_start")?,
     };
-    let ensured =
-        routine::ensure_routine_tournament(&state.pool, &approved_preset, &plan).await?;
+    let ensured = routine::ensure_routine_tournament(&state.pool, &approved_preset, &plan).await?;
     if ensured.status == "draft" {
         turnier_scheduler::advance_tournament_status(
             &state.pool,

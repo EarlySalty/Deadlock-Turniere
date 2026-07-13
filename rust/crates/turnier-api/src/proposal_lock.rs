@@ -34,12 +34,11 @@ mod tests {
         let db = turnier_db::test_pool().await.expect("central test pool");
         let first = acquire(db.pool(), 42).await.unwrap();
 
-        assert!(tokio::time::timeout(
-            Duration::from_millis(100),
-            acquire(db.pool(), 42)
-        )
-        .await
-        .is_err());
+        assert!(
+            tokio::time::timeout(Duration::from_millis(100), acquire(db.pool(), 42))
+                .await
+                .is_err()
+        );
         acquire(db.pool(), 43).await.unwrap();
 
         drop(first);

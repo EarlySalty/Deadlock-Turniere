@@ -584,10 +584,9 @@ async fn prepared_revision_rejects_parallel_draft_without_deleting_first() {
         proposals::prepare_revision(pool, proposal_id, r#"{"name":"Erster Entwurf"}"#)
             .await
             .unwrap();
-    let error =
-        proposals::prepare_revision(pool, proposal_id, r#"{"name":"Zweiter Entwurf"}"#)
-            .await
-            .unwrap_err();
+    let error = proposals::prepare_revision(pool, proposal_id, r#"{"name":"Zweiter Entwurf"}"#)
+        .await
+        .unwrap_err();
 
     assert!(matches!(error, AutomatikError::RevisionInProgress));
     let first = proposals::get_proposal(pool, first_revision)
@@ -601,15 +600,10 @@ async fn prepared_revision_rejects_parallel_draft_without_deleting_first() {
 async fn prepared_revision_replaces_abandoned_draft_after_lease() {
     let db = temp_db().await;
     let pool = db.pool();
-    let proposal_id = proposals::create_proposal(
-        pool,
-        None,
-        ProposalSource::Bot,
-        None,
-        r#"{"name":"Alt"}"#,
-    )
-    .await
-    .unwrap();
+    let proposal_id =
+        proposals::create_proposal(pool, None, ProposalSource::Bot, None, r#"{"name":"Alt"}"#)
+            .await
+            .unwrap();
     proposals::apply_event(pool, proposal_id, ProposalEvent::SubmitForApproval)
         .await
         .unwrap();
@@ -625,10 +619,9 @@ async fn prepared_revision_replaces_abandoned_draft_after_lease() {
     .await
     .unwrap();
 
-    let replacement =
-        proposals::prepare_revision(pool, proposal_id, r#"{"name":"Neuer Versuch"}"#)
-            .await
-            .unwrap();
+    let replacement = proposals::prepare_revision(pool, proposal_id, r#"{"name":"Neuer Versuch"}"#)
+        .await
+        .unwrap();
     assert_ne!(replacement, abandoned);
     assert!(proposals::get_proposal(pool, abandoned)
         .await
@@ -661,13 +654,10 @@ async fn planned_config_cannot_change_after_first_vote() {
     .await
     .unwrap();
 
-    let error = proposals::store_planned_config(
-        pool,
-        proposal_id,
-        r#"{"name":"Nachträglich geändert"}"#,
-    )
-    .await
-    .unwrap_err();
+    let error =
+        proposals::store_planned_config(pool, proposal_id, r#"{"name":"Nachträglich geändert"}"#)
+            .await
+            .unwrap_err();
     assert!(matches!(error, AutomatikError::PlanLocked));
 
     let error = proposals::attach_rendered_message(
@@ -693,15 +683,9 @@ async fn planned_config_cannot_change_after_card_is_visible() {
     let db = temp_db().await;
     let pool = db.pool();
     let original = r#"{"name":"Sichtbarer Plan"}"#;
-    let proposal_id = proposals::create_proposal(
-        pool,
-        None,
-        ProposalSource::Bot,
-        None,
-        original,
-    )
-    .await
-    .unwrap();
+    let proposal_id = proposals::create_proposal(pool, None, ProposalSource::Bot, None, original)
+        .await
+        .unwrap();
     proposals::apply_event(pool, proposal_id, ProposalEvent::SubmitForApproval)
         .await
         .unwrap();
@@ -715,13 +699,10 @@ async fn planned_config_cannot_change_after_card_is_visible() {
     .await
     .unwrap();
 
-    let error = proposals::store_planned_config(
-        pool,
-        proposal_id,
-        r#"{"name":"Unsichtbar ersetzt"}"#,
-    )
-    .await
-    .unwrap_err();
+    let error =
+        proposals::store_planned_config(pool, proposal_id, r#"{"name":"Unsichtbar ersetzt"}"#)
+            .await
+            .unwrap_err();
     assert!(matches!(error, AutomatikError::PlanLocked));
     let proposal = proposals::get_proposal(pool, proposal_id)
         .await

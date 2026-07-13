@@ -11,8 +11,8 @@
 pub mod app;
 pub(crate) mod db;
 pub mod error;
-mod proposal_lock;
 pub mod extract;
+mod proposal_lock;
 pub mod state;
 
 // Router-Module (je eine Datei/Ordner — getrennt befüllbar).
