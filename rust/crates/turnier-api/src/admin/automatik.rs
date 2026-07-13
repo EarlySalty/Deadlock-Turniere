@@ -17,6 +17,7 @@ use turnier_core::{BracketFormat, InviteMode, TournamentGameMode, TournamentMode
 
 use crate::error::{WebError, WebResult};
 use crate::extract::ModUser;
+use crate::proposal_lock;
 use crate::state::AppState;
 
 use super::helpers::audit;
@@ -526,6 +527,7 @@ async fn apply_proposal_event(
     Path(id): Path<i64>,
     Json(body): Json<ProposalEventBody>,
 ) -> WebResult<Json<ProposalStateDto>> {
+    let _lock = proposal_lock::acquire(&state.pool, id).await?;
     load_proposal(&state.pool, id).await?;
     let event = parse_event(&body.event)?;
     if matches!(event, ProposalEvent::Approve) && !actor_has_caster_role(&state, &user) {
@@ -551,6 +553,7 @@ async fn record_proposal_vote(
     if !actor_has_caster_role(&state, &user) {
         return Err(WebError::forbidden(PH_CASTER_ROLE_REQUIRED));
     }
+    let _lock = proposal_lock::acquire(&state.pool, id).await?;
     load_proposal(&state.pool, id).await?;
     let actor_id = user.discord_id.clone();
     let requested_caster_id = body.caster_id;

@@ -13,6 +13,7 @@ use turnier_automatik::proposals::{self, ProposalState, VoteDecision};
 use turnier_automatik::routine::{self, RoutineTournamentPlan};
 
 use crate::error::{WebError, WebResult};
+use crate::proposal_lock::{self, ProposalLock};
 use crate::state::AppState;
 
 const INTERNAL_TOKEN_HEADER: &str = "X-Internal-Token";
@@ -163,6 +164,7 @@ async fn attach_rendered(
     Json(body): Json<RenderedBody>,
 ) -> WebResult<Json<Value>> {
     require_internal(&headers, &state)?;
+    let (proposal_id, _lock) = lock_active_proposal(&state, proposal_id).await?;
     proposals::attach_rendered_message(
         &state.pool,
         proposal_id,
@@ -181,6 +183,7 @@ async fn store_planned(
     Json(body): Json<PlannedBody>,
 ) -> WebResult<Json<Value>> {
     require_internal(&headers, &state)?;
+    let (proposal_id, _lock) = lock_active_proposal(&state, proposal_id).await?;
     proposals::store_planned_config(&state.pool, proposal_id, &body.config_json).await?;
     Ok(Json(proposal_payload(&state, proposal_id).await?))
 }
@@ -193,7 +196,7 @@ async fn vote(
 ) -> WebResult<Json<Value>> {
     require_internal(&headers, &state)?;
     require_approver(&body.role_ids)?;
-    let proposal_id = resolve_active_id(&state, proposal_id).await?;
+    let (proposal_id, _lock) = lock_active_proposal(&state, proposal_id).await?;
     let proposal = proposals::get_proposal(&state.pool, proposal_id)
         .await?
         .ok_or_else(|| WebError::not_found("Vorschlag nicht gefunden"))?;
@@ -248,7 +251,7 @@ async fn revise(
 ) -> WebResult<Json<Value>> {
     require_internal(&headers, &state)?;
     require_approver(&body.role_ids)?;
-    let proposal_id = resolve_active_id(&state, proposal_id).await?;
+    let (proposal_id, _lock) = lock_active_proposal(&state, proposal_id).await?;
     let revised_id =
         proposals::prepare_revision(&state.pool, proposal_id, &body.config_json).await?;
     Ok(Json(proposal_payload(&state, revised_id).await?))
@@ -262,7 +265,11 @@ async fn activate_revision(
 ) -> WebResult<Json<Value>> {
     require_internal(&headers, &state)?;
     require_approver(&body.role_ids)?;
-    let proposal_id = resolve_active_id(&state, proposal_id).await?;
+    let _lock = proposal_lock::acquire(&state.pool, proposal_id).await?;
+    let active_id = resolve_active_id(&state, proposal_id).await?;
+    if active_id == revised_id {
+        return Ok(Json(proposal_payload(&state, revised_id).await?));
+    }
     proposals::activate_prepared_revision(
         &state.pool,
         proposal_id,
@@ -320,6 +327,22 @@ async fn resolve_active_id(state: &AppState, proposal_id: i64) -> WebResult<i64>
     proposals::resolve_active_proposal_id(&state.pool, proposal_id)
         .await?
         .ok_or_else(|| WebError::not_found("Vorschlag nicht gefunden"))
+}
+
+async fn lock_active_proposal(
+    state: &AppState,
+    requested_id: i64,
+) -> WebResult<(i64, ProposalLock)> {
+    let mut active_id = resolve_active_id(state, requested_id).await?;
+    loop {
+        let proposal_lock = proposal_lock::acquire(&state.pool, active_id).await?;
+        let current_id = resolve_active_id(state, requested_id).await?;
+        if current_id == active_id {
+            return Ok((active_id, proposal_lock));
+        }
+        drop(proposal_lock);
+        active_id = current_id;
+    }
 }
 
 async fn materialize(state: &AppState, proposal_id: i64, actor_id: &str) -> WebResult<(i64, bool)> {
