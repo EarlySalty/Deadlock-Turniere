@@ -649,6 +649,48 @@ async fn planned_config_cannot_change_after_first_vote() {
     assert!(proposal.proposal_message_id.is_none());
 }
 
+#[tokio::test]
+async fn planned_config_cannot_change_after_card_is_visible() {
+    let db = temp_db().await;
+    let pool = db.pool();
+    let original = r#"{"name":"Sichtbarer Plan"}"#;
+    let proposal_id = proposals::create_proposal(
+        pool,
+        None,
+        ProposalSource::Bot,
+        None,
+        original,
+    )
+    .await
+    .unwrap();
+    proposals::apply_event(pool, proposal_id, ProposalEvent::SubmitForApproval)
+        .await
+        .unwrap();
+    proposals::attach_rendered_message(
+        pool,
+        proposal_id,
+        original,
+        "1474543558793887937",
+        "1474543558793887999",
+    )
+    .await
+    .unwrap();
+
+    let error = proposals::store_planned_config(
+        pool,
+        proposal_id,
+        r#"{"name":"Unsichtbar ersetzt"}"#,
+    )
+    .await
+    .unwrap_err();
+    assert!(matches!(error, AutomatikError::PlanLocked));
+    let proposal = proposals::get_proposal(pool, proposal_id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(proposal.config_json.contains("Sichtbarer Plan"));
+}
+
 #[test]
 fn compute_recipients_filters_category_all_and_none() {
     let role_members = vec![

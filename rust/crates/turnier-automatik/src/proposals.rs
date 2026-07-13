@@ -412,7 +412,7 @@ pub async fn store_planned_config(
     let config_json = serde_json::from_str::<Value>(config_json)?;
     let result = sqlx::query(
         "UPDATE turnier.tournament_proposals SET config_json = $1 \
-         WHERE id = $2 AND state = 'pending_approval' \
+         WHERE id = $2 AND state = 'pending_approval' AND proposal_message_id IS NULL \
          AND NOT EXISTS (SELECT 1 FROM turnier.tournament_proposal_votes WHERE proposal_id = $2)",
     )
     .bind(config_json)
