@@ -563,6 +563,40 @@ async fn prepared_revision_keeps_old_live_until_discord_activation() {
     );
 }
 
+#[tokio::test]
+async fn prepared_revision_rejects_parallel_draft_without_deleting_first() {
+    let db = temp_db().await;
+    let pool = db.pool();
+    let proposal_id = proposals::create_proposal(
+        pool,
+        None,
+        ProposalSource::Bot,
+        Some("2026-07-10T18:00:00Z"),
+        r#"{"name":"Alt","revision":1}"#,
+    )
+    .await
+    .unwrap();
+    proposals::apply_event(pool, proposal_id, ProposalEvent::SubmitForApproval)
+        .await
+        .unwrap();
+
+    let first_revision =
+        proposals::prepare_revision(pool, proposal_id, r#"{"name":"Erster Entwurf"}"#)
+            .await
+            .unwrap();
+    let error =
+        proposals::prepare_revision(pool, proposal_id, r#"{"name":"Zweiter Entwurf"}"#)
+            .await
+            .unwrap_err();
+
+    assert!(matches!(error, AutomatikError::RevisionInProgress));
+    let first = proposals::get_proposal(pool, first_revision)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(first.state, ProposalState::Draft);
+}
+
 #[test]
 fn compute_recipients_filters_category_all_and_none() {
     let role_members = vec![

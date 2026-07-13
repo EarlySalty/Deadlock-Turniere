@@ -286,11 +286,12 @@ pub async fn prepare_revision(
             "_parent_proposal_id".to_string(),
             serde_json::json!(proposal_id),
         );
+    let mut tx = pool.begin().await?;
     let parent = sqlx::query_as::<_, ProposalRow>(
-        "SELECT * FROM turnier.tournament_proposals WHERE id = $1",
+        "SELECT * FROM turnier.tournament_proposals WHERE id = $1 FOR UPDATE",
     )
     .bind(proposal_id)
-    .fetch_one(pool)
+    .fetch_one(&mut *tx)
     .await?;
     if parent.state != ProposalState::PendingApproval {
         return Err(AutomatikError::InvalidTransition {
@@ -298,13 +299,16 @@ pub async fn prepare_revision(
             event: ProposalEvent::Feedback,
         });
     }
-    sqlx::query(
-        "DELETE FROM turnier.tournament_proposals \
-         WHERE state = 'draft' AND config_json->>'_parent_proposal_id' = $1",
+    let revision_in_progress: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM turnier.tournament_proposals \
+         WHERE state = 'draft' AND config_json->>'_parent_proposal_id' = $1)",
     )
     .bind(proposal_id.to_string())
-    .execute(pool)
+    .fetch_one(&mut *tx)
     .await?;
+    if revision_in_progress {
+        return Err(AutomatikError::RevisionInProgress);
+    }
     let id = sqlx::query_scalar(
         "INSERT INTO turnier.tournament_proposals \
              (preset_id, source, proposed_start, config_json, state, created_at) \
@@ -315,8 +319,9 @@ pub async fn prepare_revision(
     .bind(parent.proposed_start)
     .bind(config_json)
     .bind(now_utc())
-    .fetch_one(pool)
+    .fetch_one(&mut *tx)
     .await?;
+    tx.commit().await?;
     Ok(id)
 }
 

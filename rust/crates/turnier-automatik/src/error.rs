@@ -27,6 +27,10 @@ pub enum AutomatikError {
     #[error("feedback darf nicht leer sein")]
     MissingFeedback,
 
+    /// Fuer denselben Vorschlag wird bereits eine neue Version vorbereitet.
+    #[error("fuer diesen Vorschlag wird bereits eine Revision vorbereitet")]
+    RevisionInProgress,
+
     /// Strukturierter Vorschlagsplan ist kein JSON-Objekt.
     #[error("vorschlagsplan muss ein JSON-Objekt sein")]
     InvalidProposalConfig,
