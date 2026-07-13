@@ -333,8 +333,9 @@ pub async fn prepare_revision(
     Ok(id)
 }
 
-/// Aktiviert eine vorbereitete Version atomar, nachdem Discord erfolgreich
-/// editiert wurde. Erst hier verfallen die alte Version und ihre Stimmen.
+/// Aktiviert eine vorbereitete Version atomar, bevor der Master-Bot die
+/// Discord-Karte editiert. Erst hier verfallen alte Version und Stimmen; ein
+/// fehlgeschlagener Karten-Edit heilt beim naechsten Klick ueber die alte ID.
 pub async fn activate_prepared_revision(
     pool: &Pool,
     proposal_id: i64,
