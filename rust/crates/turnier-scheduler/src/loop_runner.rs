@@ -193,7 +193,8 @@ impl Scheduler {
             "SELECT id, status, tournament_mode, registration_start, registration_end, \
                     checkin_start, group_phase_start, bracket_start, is_test \
              FROM turnier.tournaments \
-             WHERE status IN ('draft', 'registration', 'checkin', 'group_phase') \
+             WHERE status IN ('registration', 'checkin', 'group_phase') \
+                OR (status = 'draft' AND source <> 'routine') \
              ORDER BY id",
         )
         .fetch_all(&self.pool)

@@ -105,7 +105,8 @@ pub async fn check_and_send_registration_reminders(
 ) -> sqlx::Result<()> {
     let tournaments: Vec<RegistrationReminderRow> = sqlx::query_as(
         "SELECT id, name, registration_end, reminder_offsets, is_test FROM turnier.tournaments \
-         WHERE status IN ('draft', 'registration') AND registration_end IS NOT NULL ORDER BY id",
+         WHERE (status = 'registration' OR (status = 'draft' AND source <> 'routine')) \
+           AND registration_end IS NOT NULL ORDER BY id",
     )
     .fetch_all(pool)
     .await?;

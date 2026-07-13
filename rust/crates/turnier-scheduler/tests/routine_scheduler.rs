@@ -1,7 +1,9 @@
 mod common;
 
 use chrono::{DateTime, Utc};
-use common::{fake_match_manager, fake_notifier, temp_db, test_config};
+use common::{
+    fake_match_manager, fake_notifier, insert_tournament, temp_db, test_config, tournament_status,
+};
 use turnier_automatik::presets::{self, Category, NewPreset, PresetConfig};
 use turnier_core::{BracketFormat, InviteMode, TournamentGameMode, TournamentMode};
 use turnier_scheduler::Scheduler;
@@ -90,4 +92,32 @@ async fn faelliger_check_erstellt_nur_einen_routine_vorschlag() {
             .await
             .expect("DM attempts");
     assert_eq!(dm_attempts, 0, "proposal creation must not invite by DM");
+}
+
+#[tokio::test]
+async fn minuten_loop_oeffnet_keinen_verwaisten_routine_entwurf() {
+    let db = temp_db().await;
+    let pool = db.pool().clone();
+    let config = test_config();
+    let scheduler = Scheduler::new(
+        pool.clone(),
+        fake_match_manager(pool.clone(), &config),
+        fake_notifier(pool.clone(), &config),
+        &config,
+    )
+    .expect("scheduler config");
+    let tournament_id = insert_tournament(&pool, "Verwaister Routine-Draft", "draft", false).await;
+    sqlx::query(
+        "UPDATE turnier.tournaments \
+         SET source = 'routine', registration_start = $1 WHERE id = $2",
+    )
+    .bind(utc("2026-07-11T17:00:00Z"))
+    .bind(tournament_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    scheduler.run_all_checks(utc("2026-07-11T18:01:00Z")).await;
+
+    assert_eq!(tournament_status(&pool, tournament_id).await, "draft");
 }
