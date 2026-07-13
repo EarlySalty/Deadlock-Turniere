@@ -79,6 +79,27 @@ async fn aktives_preset_erzeugt_genau_einen_entwurf_mit_remindern() {
     assert_eq!(row.2, preset.id);
     assert_eq!(row.3, serde_json::json!([1440, 120, 15]));
     assert_eq!(row.4, serde_json::json!([1440, 60]));
+
+    let mut revised = preset.clone();
+    revised.name = "Freigegebene Revision".to_string();
+    revised.description_template = Some("Neue Beschreibung".to_string());
+    revised.rules = Some("Neue Regeln".to_string());
+    revised.team_size = 5;
+    let retried = ensure_routine_tournament(pool, &revised, &plan)
+        .await
+        .expect("retry revised draft");
+    assert_eq!(retried.id, first.id);
+    let updated: (String, Option<String>, Option<String>, i64) = sqlx::query_as(
+        "SELECT name, description, rules, team_size FROM turnier.tournaments WHERE id = $1",
+    )
+    .bind(first.id)
+    .fetch_one(pool)
+    .await
+    .expect("load updated draft");
+    assert_eq!(updated.0, "Freigegebene Revision");
+    assert_eq!(updated.1.as_deref(), Some("Neue Beschreibung"));
+    assert_eq!(updated.2.as_deref(), Some("Neue Regeln"));
+    assert_eq!(updated.3, 5);
 }
 
 #[tokio::test]

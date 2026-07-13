@@ -134,6 +134,41 @@ pub async fn ensure_routine_tournament(
     .fetch_optional(&mut *tx)
     .await?
     {
+        if status == "draft" {
+            sqlx::query(
+                "UPDATE turnier.tournaments SET \
+                 name = $1, description = $2, team_size = $3, registration_start = $4, \
+                 registration_end = $5, checkin_start = $6, group_phase_start = $7, \
+                 bracket_start = $8, bracket_format = $9, invite_mode = $10, \
+                 tournament_mode = $11, series_format = $12, reminder_offsets = $13, \
+                 tournament_game_mode = $14, rules = $15, final_series_format = $16, \
+                 match_objective = $17, start_reminder_offsets = $18, updated_at = now() \
+                 WHERE id = $19 AND status = 'draft'",
+            )
+            .bind(&preset.name)
+            .bind(&preset.description_template)
+            .bind(preset.team_size)
+            .bind(plan.registration_start)
+            .bind(plan.registration_end)
+            .bind(plan.checkin_start)
+            .bind(plan.event_start)
+            .bind(plan.bracket_start)
+            .bind(preset.bracket_format)
+            .bind(preset.invite_mode)
+            .bind(preset.tournament_mode)
+            .bind(preset.series_format)
+            .bind(wire_string_to_jsonb(preset.reminder_offsets.as_deref()))
+            .bind(preset.tournament_game_mode)
+            .bind(&preset.rules)
+            .bind(preset.final_series_format)
+            .bind(&preset.match_objective)
+            .bind(wire_string_to_jsonb(
+                preset.start_reminder_offsets.as_deref(),
+            ))
+            .bind(id)
+            .execute(&mut *tx)
+            .await?;
+        }
         tx.commit().await?;
         return Ok(EnsuredRoutineTournament {
             id,
