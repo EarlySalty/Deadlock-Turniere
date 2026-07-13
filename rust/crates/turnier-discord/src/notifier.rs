@@ -107,7 +107,9 @@ impl DiscordNotifier {
     }
 
     /// Uebergibt einen persistierten Turniervorschlag an den Master-Bot. Der
-    /// Master besitzt KI, Discord-UI und Interactions; hier wird nichts
+    /// Empfaenger gehoert bewusst zum separaten `Deadlock-Bots`-Deployment:
+    /// `dl-bot/src/turnierglue.rs` registriert exakt diesen internen POST-Pfad.
+    /// Der Master besitzt KI, Discord-UI und Interactions; hier wird nichts
     /// veroeffentlicht oder freigegeben.
     pub async fn request_proposal_publish(
         &self,

@@ -33,6 +33,9 @@
   </table>
   <p>Der Planer veröffentlicht keine öffentliche Ankündigung und versendet keine Einladungs-DMs. Erst der zweite gültige J-Klick legt das Turnier idempotent an und öffnet die Anmeldung.</p>
 
+  <h2>Cross-Repo-Vertrag zum Master-Bot</h2>
+  <p><code>deadlock-turniere.service</code> sendet persistierte Vorschläge per <code>POST http://127.0.0.1:8770/internal/master/v1/turnier/proposals/publish</code> an <code>deadlock-bot.service</code>. Der Empfänger liegt absichtlich im separaten Repository <code>Deadlock-Bots</code> in <code>dl-bot/src/turnierglue.rs</code>; dort werden Route, interne Authentifizierung, KI-Planung, Discord-Karte und Mod-Interaktionen umgesetzt. Ein nicht erreichbarer Master erzeugt kein Turnier: Der Vorschlag bleibt gespeichert und der stündliche Lauf versucht die Übergabe erneut.</p>
+
   <h2>Kandidaten-Schnittstelle</h2>
   <p><code>load_invitation_candidate_ids(pool, tournament_id, guild_id, now)</code> liefert frühere Teilnehmer abgeschlossener/archivierter Turniere sowie in den letzten 14 Tagen Voice-aktive Mitglieder. Bereits im Zielturnier angemeldete Personen werden ausgeschlossen. Die Funktion versendet nichts; eine spätere zentrale Outbox kann sie direkt verwenden.</p>
 
