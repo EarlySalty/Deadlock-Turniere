@@ -403,6 +403,25 @@ pub async fn activate_prepared_revision(
     Ok(())
 }
 
+/// Entfernt ausschliesslich den noch inaktiven Entwurf einer fehlgeschlagenen
+/// Revision. Der weiterhin sichtbare Elternvorschlag bleibt unveraendert.
+pub async fn discard_prepared_revision(
+    pool: &Pool,
+    proposal_id: i64,
+    revised_id: i64,
+) -> AutomatikResult<()> {
+    sqlx::query(
+        "DELETE FROM turnier.tournament_proposals \
+         WHERE id = $1 AND state = 'draft' \
+         AND config_json->>'_parent_proposal_id' = $2",
+    )
+    .bind(revised_id)
+    .bind(proposal_id.to_string())
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
 /// Speichert den validierten KI-Plan, bevor eine Discord-Nachricht entsteht.
 pub async fn store_planned_config(
     pool: &Pool,

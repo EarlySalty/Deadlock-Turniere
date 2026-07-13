@@ -397,6 +397,71 @@ async fn failed_materialization_keeps_proposal_pending() {
 }
 
 #[tokio::test]
+async fn failed_revision_activation_does_not_block_retry() {
+    let (app, _db, pool, _session) = setup().await;
+    let proposal_id = turnier_automatik::proposals::create_proposal(
+        &pool,
+        None,
+        turnier_automatik::proposals::ProposalSource::Bot,
+        None,
+        r#"{"name":"Alt"}"#,
+    )
+    .await
+    .unwrap();
+    turnier_automatik::proposals::apply_event(
+        &pool,
+        proposal_id,
+        turnier_automatik::proposals::ProposalEvent::SubmitForApproval,
+    )
+    .await
+    .unwrap();
+    let revision_uri = format!("/internal/turnier/v1/proposals/{proposal_id}/revision");
+    let revision_body = json!({
+        "role_ids":["1337518124647579661"],
+        "config_json":"{\"name\":\"Neu\"}"
+    });
+    let (status, revision) = send_internal(
+        &app,
+        Some("internal-token"),
+        &revision_uri,
+        revision_body.clone(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let revised_id = revision["proposal"]["id"].as_i64().unwrap();
+    let activate_uri = format!(
+        "/internal/turnier/v1/proposals/{proposal_id}/revision/{revised_id}/activate"
+    );
+    let (status, _) = send_internal(
+        &app,
+        Some("internal-token"),
+        &activate_uri,
+        json!({
+            "actor_id":"keine-id",
+            "role_ids":["1337518124647579661"],
+            "feedback":"Später",
+            "channel_id":"1474543558793887937",
+            "message_id":"1474543558793887999"
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert!(turnier_automatik::proposals::get_proposal(&pool, revised_id)
+        .await
+        .unwrap()
+        .is_none());
+
+    let (status, _) = send_internal(
+        &app,
+        Some("internal-token"),
+        &revision_uri,
+        revision_body,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+}
+
+#[tokio::test]
 async fn preset_admin_roundtrip() {
     let (app, _db, _pool, token) = setup().await;
 

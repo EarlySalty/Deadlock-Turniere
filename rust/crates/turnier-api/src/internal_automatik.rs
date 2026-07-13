@@ -270,7 +270,7 @@ async fn activate_revision(
     if active_id == revised_id {
         return Ok(Json(proposal_payload(&state, revised_id).await?));
     }
-    proposals::activate_prepared_revision(
+    let activation = proposals::activate_prepared_revision(
         &state.pool,
         proposal_id,
         revised_id,
@@ -279,7 +279,20 @@ async fn activate_revision(
         &body.channel_id,
         &body.message_id,
     )
-    .await?;
+    .await;
+    if let Err(error) = activation {
+        if let Err(cleanup_error) =
+            proposals::discard_prepared_revision(&state.pool, proposal_id, revised_id).await
+        {
+            tracing::error!(
+                proposal_id,
+                revised_id,
+                error = %cleanup_error,
+                "Fehlgeschlagener Revisionsentwurf konnte nicht entfernt werden"
+            );
+        }
+        return Err(error.into());
+    }
     Ok(Json(proposal_payload(&state, revised_id).await?))
 }
 
