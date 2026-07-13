@@ -198,7 +198,7 @@ pub async fn create_proposal(
     .bind(preset_id)
     .bind(source)
     .bind(proposed_start)
-    .bind(config_json)
+    .bind(&config_json)
     .bind(now)
     .fetch_one(pool)
     .await?;
@@ -442,18 +442,32 @@ pub async fn store_planned_config(
     proposal_id: i64,
     config_json: &str,
 ) -> AutomatikResult<()> {
-    let config_json = serde_json::from_str::<Value>(config_json)?;
+    let mut config_json = serde_json::from_str::<Value>(config_json)?;
+    config_json
+        .as_object_mut()
+        .ok_or(AutomatikError::InvalidProposalConfig)?
+        .insert("_ai_planned".to_string(), Value::Bool(true));
     let result = sqlx::query(
         "UPDATE turnier.tournament_proposals SET config_json = $1 \
          WHERE id = $2 AND state = 'pending_approval' AND proposal_message_id IS NULL \
+         AND config_json->>'_ai_planned' IS DISTINCT FROM 'true' \
          AND NOT EXISTS (SELECT 1 FROM turnier.tournament_proposal_votes WHERE proposal_id = $2)",
     )
-    .bind(config_json)
+    .bind(&config_json)
     .bind(proposal_id)
     .execute(pool)
     .await?;
     if result.rows_affected() == 0 {
-        return Err(AutomatikError::PlanLocked);
+        let stored: Option<Value> = sqlx::query_scalar(
+            "SELECT config_json FROM turnier.tournament_proposals \
+             WHERE id = $1 AND state = 'pending_approval'",
+        )
+        .bind(proposal_id)
+        .fetch_optional(pool)
+        .await?;
+        if stored.as_ref() != Some(&config_json) {
+            return Err(AutomatikError::PlanLocked);
+        }
     }
     Ok(())
 }

@@ -762,6 +762,46 @@ async fn planned_config_cannot_change_after_card_is_visible() {
     assert!(proposal.config_json.contains("Sichtbarer Plan"));
 }
 
+#[tokio::test]
+async fn first_ai_plan_is_write_once_but_idempotent() {
+    let db = temp_db().await;
+    let pool = db.pool();
+    let proposal_id = proposals::create_proposal(
+        pool,
+        None,
+        ProposalSource::Bot,
+        None,
+        r#"{"name":"Rohplan"}"#,
+    )
+    .await
+    .unwrap();
+    proposals::apply_event(pool, proposal_id, ProposalEvent::SubmitForApproval)
+        .await
+        .unwrap();
+    let first = r#"{"name":"Plan A","_ai_planned":true}"#;
+    proposals::store_planned_config(pool, proposal_id, first)
+        .await
+        .unwrap();
+    proposals::store_planned_config(pool, proposal_id, first)
+        .await
+        .unwrap();
+
+    let error = proposals::store_planned_config(
+        pool,
+        proposal_id,
+        r#"{"name":"Plan B","_ai_planned":true}"#,
+    )
+    .await
+    .unwrap_err();
+    assert!(matches!(error, AutomatikError::PlanLocked));
+    assert!(proposals::get_proposal(pool, proposal_id)
+        .await
+        .unwrap()
+        .unwrap()
+        .config_json
+        .contains("Plan A"));
+}
+
 #[test]
 fn compute_recipients_filters_category_all_and_none() {
     let role_members = vec![
