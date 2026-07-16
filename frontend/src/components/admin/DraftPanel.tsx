@@ -24,7 +24,9 @@ export default function DraftPanel({ matchId, team1Name, team2Name }: Props) {
   const submitAction = useSubmitDraftAction(sessionId ?? 0)
 
   const draft: DraftState | undefined = sessionQuery.data
-  const heroes: string[] = heroesQuery.data?.heroes ?? []
+  // Die Heldenliste kommt seit der Live-Quelle als Objekte (id/name/image_url).
+  // Dieses Panel arbeitet mit Namen; die Bilder nutzt das oeffentliche Board.
+  const heroes: string[] = (heroesQuery.data?.heroes ?? []).map((h) => h.name)
   const bannedSet = new Set(draft?.bans ?? [])
   const pickedSet = new Set([...(draft?.picks_team1 ?? []), ...(draft?.picks_team2 ?? [])])
 

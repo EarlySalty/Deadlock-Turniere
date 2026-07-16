@@ -53,6 +53,10 @@ import type {
   VoteDecision,
   DmScope,
   DmOptoutStatus,
+  DraftHero,
+  CreateLobbyBody,
+  LobbyCredentials,
+  LobbyState,
 } from '@/types/tournament'
 
 const API_BASE = '/turnier/api'
@@ -565,8 +569,8 @@ export const voiceGetChannelMembers = (channelId: string) =>
   )
 
 // --- Draft ---
-export const fetchDraftHeroes = () =>
-  request<{ heroes: string[] }>('/draft/heroes')
+// fetchDraftHeroes liefert seit der Live-Heldenquelle Objekte statt nackter
+// Strings (id/name/image_url) und steht weiter unten bei den Lobby-Funktionen.
 
 export const startDraft = (matchId: number) =>
   request<DraftState>(`/draft/matches/${matchId}/start`, { method: 'POST' })
@@ -637,3 +641,38 @@ export const submitSeriesGameResult = (
       body: JSON.stringify({ winner_team: winnerTeam, duration_s: durationS ?? null }),
     }
   )
+
+// --- Freie Draft-Lobbys (oeffentlich, kein Login) ---
+//
+// Eigener Request-Pfad statt request<T>: der wirft bei JEDEM 401 pauschal
+// "Nicht authentifiziert" und verschluckt den Body. Hier sind 401/403 aber
+// fachliche Antworten ("kein Captain", "anderes Team ist am Zug") — die will
+// der Spieler wortwoertlich sehen.
+async function lobbyRequest<T>(path: string, options?: RequestInit): Promise<T> {
+  const res = await fetch(`${API_BASE}${path}`, {
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    ...options,
+  })
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}))
+    throw new ApiError(res.status, body.detail || 'Der Draft antwortet gerade nicht')
+  }
+  return res.json()
+}
+
+export const fetchDraftHeroes = () => lobbyRequest<{ heroes: DraftHero[] }>('/draft/heroes')
+
+export const createDraftLobby = (body: CreateLobbyBody) =>
+  lobbyRequest<LobbyCredentials>('/draft/lobbies', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  })
+
+export const fetchDraftLobby = (code: string) =>
+  lobbyRequest<LobbyState>(`/draft/lobbies/${encodeURIComponent(code)}`)
+
+export const submitDraftLobbyAction = (code: string, token: string, heroName: string) =>
+  lobbyRequest<LobbyState>(`/draft/lobbies/${encodeURIComponent(code)}/action`, {
+    method: 'POST',
+    body: JSON.stringify({ token, hero_name: heroName }),
+  })
