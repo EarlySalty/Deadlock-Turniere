@@ -16,7 +16,7 @@ use std::time::{Duration, Instant};
 
 use axum::extract::{ConnectInfo, Path, State};
 use axum::http::header::CACHE_CONTROL;
-use axum::http::StatusCode;
+use axum::http::{HeaderMap, StatusCode};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use serde::Deserialize;
@@ -84,10 +84,11 @@ struct LobbyActionRequest {
 async fn create_lobby(
     State(state): State<AppState>,
     ConnectInfo(address): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
     Json(body): Json<CreateLobbyRequest>,
 ) -> WebResult<Json<Value>> {
     let options = validate_lobby(body)?;
-    enforce_lobby_rate_limit(&state, address.ip())?;
+    enforce_lobby_rate_limit(&state, client_ip(&headers, address.ip()))?;
     let credentials = turnier_draft::create_lobby(&state.pool, options).await?;
     Ok(Json(json!({
         "code": credentials.code,
@@ -148,6 +149,15 @@ fn validate_team_name(name: String) -> WebResult<String> {
         ));
     }
     Ok(name.to_string())
+}
+
+fn client_ip(headers: &HeaderMap, peer_ip: std::net::IpAddr) -> std::net::IpAddr {
+    headers
+        .get("x-forwarded-for")
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.split(',').next())
+        .and_then(|value| value.trim().parse().ok())
+        .unwrap_or(peer_ip)
 }
 
 fn enforce_lobby_rate_limit(state: &AppState, ip: std::net::IpAddr) -> WebResult<()> {

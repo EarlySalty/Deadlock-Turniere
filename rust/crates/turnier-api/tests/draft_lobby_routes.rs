@@ -58,19 +58,32 @@ async fn send_json(
     uri: &str,
     body: Option<Value>,
 ) -> TestResponse {
+    send_json_with_forwarded_ip(app, ip, None, method, uri, body).await
+}
+
+async fn send_json_with_forwarded_ip(
+    app: &Router,
+    peer_ip: IpAddr,
+    forwarded_ip: Option<IpAddr>,
+    method: Method,
+    uri: &str,
+    body: Option<Value>,
+) -> TestResponse {
     let body = body
         .map(|value| Body::from(value.to_string()))
         .unwrap_or_else(Body::empty);
-    let mut request = Request::builder()
+    let mut builder = Request::builder()
         .method(method)
         .uri(uri)
         .header(HOST, "localhost")
-        .header(CONTENT_TYPE, "application/json")
-        .body(body)
-        .expect("request");
+        .header(CONTENT_TYPE, "application/json");
+    if let Some(forwarded_ip) = forwarded_ip {
+        builder = builder.header("x-forwarded-for", forwarded_ip.to_string());
+    }
+    let mut request = builder.body(body).expect("request");
     request
         .extensions_mut()
-        .insert(ConnectInfo(SocketAddr::new(ip, 40000)));
+        .insert(ConnectInfo(SocketAddr::new(peer_ip, 40000)));
     let response = app.clone().oneshot(request).await.expect("response");
     let status = response.status();
     let headers = response.headers().clone();
@@ -254,6 +267,38 @@ async fn elfte_lobby_derselben_ip_liefert_429() {
     )
     .await;
     assert_eq!(limited.status, StatusCode::TOO_MANY_REQUESTS);
+}
+
+#[tokio::test]
+async fn rate_limit_unterscheidet_client_ips_hinter_dem_proxy() {
+    let ctx = setup().await;
+    let proxy_ip = IpAddr::V4(Ipv4Addr::LOCALHOST);
+    let first_client = IpAddr::V4(Ipv4Addr::new(203, 0, 113, 7));
+    let second_client = IpAddr::V4(Ipv4Addr::new(203, 0, 113, 8));
+
+    for _ in 0..10 {
+        let response = send_json_with_forwarded_ip(
+            &ctx.app,
+            proxy_ip,
+            Some(first_client),
+            Method::POST,
+            "/api/draft/lobbies",
+            Some(lobby_body()),
+        )
+        .await;
+        assert_eq!(response.status, StatusCode::OK);
+    }
+
+    let other_client = send_json_with_forwarded_ip(
+        &ctx.app,
+        proxy_ip,
+        Some(second_client),
+        Method::POST,
+        "/api/draft/lobbies",
+        Some(lobby_body()),
+    )
+    .await;
+    assert_eq!(other_client.status, StatusCode::OK);
 }
 
 #[tokio::test]
