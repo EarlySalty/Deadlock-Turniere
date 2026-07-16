@@ -156,12 +156,24 @@ fn client_ip(headers: &HeaderMap, peer_ip: std::net::IpAddr) -> std::net::IpAddr
         return peer_ip;
     }
 
-    headers
-        .get("x-forwarded-for")
-        .and_then(|value| value.to_str().ok())
-        .and_then(|value| value.split(',').next())
-        .and_then(|value| value.trim().parse().ok())
-        .unwrap_or(peer_ip)
+    let mut forwarded_values = headers.get_all("x-forwarded-for").iter();
+    let Some(value) = forwarded_values.next() else {
+        return peer_ip;
+    };
+    if forwarded_values.next().is_some() {
+        return peer_ip;
+    }
+    let Ok(value) = value.to_str() else {
+        return peer_ip;
+    };
+    let mut addresses = value.split(',');
+    let Some(address) = addresses.next() else {
+        return peer_ip;
+    };
+    if addresses.next().is_some() {
+        return peer_ip;
+    }
+    address.trim().parse().unwrap_or(peer_ip)
 }
 
 fn enforce_lobby_rate_limit(state: &AppState, ip: std::net::IpAddr) -> WebResult<()> {
@@ -256,4 +268,25 @@ async fn submit_action(
         target.extend(extra);
     }
     Ok(Json(merged))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::net::{IpAddr, Ipv4Addr};
+
+    use axum::http::HeaderValue;
+
+    use super::*;
+
+    #[test]
+    fn forwarded_ketten_vom_proxy_werden_nicht_vertraut() {
+        let peer = IpAddr::V4(Ipv4Addr::LOCALHOST);
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "x-forwarded-for",
+            HeaderValue::from_static("198.51.100.7, 203.0.113.9"),
+        );
+
+        assert_eq!(client_ip(&headers, peer), peer);
+    }
 }
