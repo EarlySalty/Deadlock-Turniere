@@ -322,6 +322,36 @@ async fn rate_limit_unterscheidet_client_ips_hinter_dem_proxy() {
 }
 
 #[tokio::test]
+async fn rate_limit_ignoriert_forwarded_ip_von_externem_peer() {
+    let ctx = setup().await;
+    let peer_ip = IpAddr::V4(Ipv4Addr::new(203, 0, 113, 9));
+
+    for suffix in 1..=10 {
+        let response = send_json_with_forwarded_ip(
+            &ctx.app,
+            peer_ip,
+            Some(IpAddr::V4(Ipv4Addr::new(198, 51, 100, suffix))),
+            Method::POST,
+            "/api/draft/lobbies",
+            Some(lobby_body()),
+        )
+        .await;
+        assert_eq!(response.status, StatusCode::OK);
+    }
+
+    let limited = send_json_with_forwarded_ip(
+        &ctx.app,
+        peer_ip,
+        Some(IpAddr::V4(Ipv4Addr::new(198, 51, 100, 11))),
+        Method::POST,
+        "/api/draft/lobbies",
+        Some(lobby_body()),
+    )
+    .await;
+    assert_eq!(limited.status, StatusCode::TOO_MANY_REQUESTS);
+}
+
+#[tokio::test]
 async fn helden_route_liefert_objekte_mit_live_vertrag() {
     let ctx = setup().await;
     let response = send_json(
