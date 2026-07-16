@@ -27,15 +27,15 @@ pub enum DraftError {
     SessionNotActive,
 
     /// Lobby-Code existiert nicht.
-    #[error("PLATZHALTER: Lobby nicht gefunden")]
+    #[error("Diesen Draft-Code gibt es nicht")]
     LobbyNotFound,
 
     /// Captain-Token gehört zu keinem Team dieser Lobby.
-    #[error("PLATZHALTER: Captain-Token ungueltig")]
+    #[error("Du bist in diesem Draft kein Captain")]
     InvalidToken,
 
     /// Captain-Token ist gültig, aber das andere Team ist am Zug.
-    #[error("PLATZHALTER: Anderes Team ist am Zug")]
+    #[error("Das andere Team ist am Zug")]
     NotYourTurn,
 
     /// Der Held wurde in dieser Session bereits gebannt oder gepickt (Original:
