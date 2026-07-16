@@ -19,6 +19,8 @@ serde.workspace = true
 chrono.workspace = true
 thiserror.workspace = true
 once_cell.workspace = true
+reqwest.workspace = true
+rand.workspace = true
 
 [dev-dependencies]
 tokio = { workspace = true }

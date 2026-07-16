@@ -7,7 +7,7 @@
 //!
 //! Portiert `DEFAULT_SEQUENCE` aus `backend/draft/engine.py` 1:1.
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 /// Aktionstyp einer Draft-Position. TEXT-Spalte `draft_actions.action_type`
 /// (`'ban'` | `'pick'`).
@@ -48,10 +48,36 @@ impl TeamSlot {
     }
 }
 
+impl Serialize for TeamSlot {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_i64(self.as_i64())
+    }
+}
+
+impl<'de> Deserialize<'de> for TeamSlot {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        match i64::deserialize(deserializer)? {
+            1 => Ok(TeamSlot::One),
+            2 => Ok(TeamSlot::Two),
+            value => Err(serde::de::Error::custom(format!(
+                "ungueltiger Team-Slot: {value}"
+            ))),
+        }
+    }
+}
+
 /// Eine Position der Draft-Sequenz: was (Ban/Pick) macht welches Team.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SequenceStep {
+    #[serde(rename = "action")]
     pub action_type: ActionType,
+    #[serde(rename = "team")]
     pub team_slot: TeamSlot,
 }
 
@@ -80,6 +106,40 @@ pub const DEFAULT_SEQUENCE: [SequenceStep; 18] = [
     step(Pick, One),
 ];
 
+/// Wettbewerbs-Preset mit je einem Ban pro Team und dem Standard-Pickmuster.
+pub const COMPETITIVE_1BAN: [SequenceStep; 14] = [
+    step(Ban, One),
+    step(Ban, Two),
+    step(Pick, One),
+    step(Pick, Two),
+    step(Pick, Two),
+    step(Pick, One),
+    step(Pick, One),
+    step(Pick, Two),
+    step(Pick, Two),
+    step(Pick, One),
+    step(Pick, One),
+    step(Pick, Two),
+    step(Pick, Two),
+    step(Pick, One),
+];
+
+/// Schnelles Preset ohne Bans und mit dem Standard-Pickmuster.
+pub const QUICK_NO_BAN: [SequenceStep; 12] = [
+    step(Pick, One),
+    step(Pick, Two),
+    step(Pick, Two),
+    step(Pick, One),
+    step(Pick, One),
+    step(Pick, Two),
+    step(Pick, Two),
+    step(Pick, One),
+    step(Pick, One),
+    step(Pick, Two),
+    step(Pick, Two),
+    step(Pick, One),
+];
+
 /// Kurz-Konstruktor für die Sequenz-Tabelle (`const`-fähig).
 const fn step(action_type: ActionType, team_slot: TeamSlot) -> SequenceStep {
     SequenceStep {
@@ -91,17 +151,26 @@ const fn step(action_type: ActionType, team_slot: TeamSlot) -> SequenceStep {
 /// Anzahl der Aktionen in der Standard-Sequenz (entspricht `len(DEFAULT_SEQUENCE)`).
 pub const SEQUENCE_LEN: usize = DEFAULT_SEQUENCE.len();
 
+/// Liefert eines der genau drei unterstützten Sequenz-Presets.
+pub fn preset(name: &str) -> Option<&'static [SequenceStep]> {
+    match name {
+        "competitive_2ban" => Some(&DEFAULT_SEQUENCE),
+        "competitive_1ban" => Some(&COMPETITIVE_1BAN),
+        "quick_no_ban" => Some(&QUICK_NO_BAN),
+        _ => None,
+    }
+}
+
 /// Liefert die Aktion an `index` oder `None`, wenn der Index außerhalb der
-/// Sequenz liegt. Zentralisiert den Index-Zugriff (im Original an zwei Stellen
-/// uneinheitlich abgesichert) über `slice::get`.
-pub fn step_at(index: usize) -> Option<SequenceStep> {
-    DEFAULT_SEQUENCE.get(index).copied()
+/// Sequenz dieser Session liegt.
+pub fn step_at(sequence: &[SequenceStep], index: usize) -> Option<SequenceStep> {
+    sequence.get(index).copied()
 }
 
 /// `true`, wenn ein `current_action_index` das Sequenz-Ende erreicht/überschritten
 /// hat — die Session ist dann abgeschlossen. Spiegelt `next_idx >= len(...)`.
-pub fn is_complete(index: usize) -> bool {
-    index >= SEQUENCE_LEN
+pub fn is_complete(sequence: &[SequenceStep], index: usize) -> bool {
+    index >= sequence.len()
 }
 
 #[cfg(test)]
@@ -173,18 +242,18 @@ mod tests {
 
     #[test]
     fn step_at_ist_an_den_raendern_sicher() {
-        assert_eq!(step_at(0), Some(step(Ban, One)));
-        assert_eq!(step_at(17), Some(step(Pick, One)));
-        assert_eq!(step_at(18), None);
-        assert_eq!(step_at(999), None);
+        assert_eq!(step_at(&DEFAULT_SEQUENCE, 0), Some(step(Ban, One)));
+        assert_eq!(step_at(&DEFAULT_SEQUENCE, 17), Some(step(Pick, One)));
+        assert_eq!(step_at(&DEFAULT_SEQUENCE, 18), None);
+        assert_eq!(step_at(&DEFAULT_SEQUENCE, 999), None);
     }
 
     #[test]
     fn is_complete_greift_genau_am_ende() {
-        assert!(!is_complete(0));
-        assert!(!is_complete(17));
-        assert!(is_complete(18));
-        assert!(is_complete(19));
+        assert!(!is_complete(&DEFAULT_SEQUENCE, 0));
+        assert!(!is_complete(&DEFAULT_SEQUENCE, 17));
+        assert!(is_complete(&DEFAULT_SEQUENCE, 18));
+        assert!(is_complete(&DEFAULT_SEQUENCE, 19));
     }
 
     #[test]
@@ -197,5 +266,52 @@ mod tests {
             serde_json::to_string(&ActionType::Pick).unwrap(),
             "\"pick\""
         );
+    }
+
+    #[test]
+    fn presets_haben_die_erwartete_verteilung() {
+        for (name, bans, picks) in [
+            ("competitive_2ban", 6, 12),
+            ("competitive_1ban", 2, 12),
+            ("quick_no_ban", 0, 12),
+        ] {
+            let sequence = preset(name).expect("bekanntes Preset");
+            assert_eq!(
+                sequence
+                    .iter()
+                    .filter(|step| step.action_type == ActionType::Ban)
+                    .count(),
+                bans
+            );
+            assert_eq!(
+                sequence
+                    .iter()
+                    .filter(|step| step.action_type == ActionType::Pick)
+                    .count(),
+                picks
+            );
+        }
+        assert_eq!(
+            preset("competitive_2ban"),
+            Some(DEFAULT_SEQUENCE.as_slice())
+        );
+        assert!(preset("unbekannt").is_none());
+    }
+
+    #[test]
+    fn sequence_step_hat_den_jsonb_wire_roundtrip() {
+        let value = serde_json::to_value(step(Ban, Two)).expect("serialisierbar");
+        assert_eq!(value, serde_json::json!({"action": "ban", "team": 2}));
+        let decoded: SequenceStep = serde_json::from_value(value).expect("deserialisierbar");
+        assert_eq!(decoded, step(Ban, Two));
+    }
+
+    #[test]
+    fn abschluss_richtet_sich_nach_der_session_sequenz() {
+        let sequence = preset("quick_no_ban").expect("bekanntes Preset");
+        assert!(!is_complete(sequence, 11));
+        assert!(is_complete(sequence, 12));
+        assert_eq!(step_at(sequence, 11), Some(step(Pick, One)));
+        assert_eq!(step_at(sequence, 12), None);
     }
 }
