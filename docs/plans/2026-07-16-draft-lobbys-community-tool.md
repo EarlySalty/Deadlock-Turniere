@@ -154,16 +154,17 @@ Ehrlicher Zwischenstand. `[x]` heisst: gebaut UND verifiziert. Alles andere ist 
 - [x] Migration `2026071610_draft_lobbys.sql` (additiv, auf frischer DB durchgelaufen).
 - [x] Sequenz-Presets, Live-Heldenquelle mit Fallback, Lobby-Kern, fauler Timer.
       17 DB-Tests gruen (11 bestehende Turnier-Tests unveraendert + 6 neue Lobby-Tests).
-- [ ] HTTP-Routen in `turnier-api` — Code steht, Worker-Verifikation lief noch.
+- [x] HTTP-Routen in `turnier-api`, einschließlich Token-, Validierungs- und
+      Rate-Limit-Verträgen, gegen die zentrale Wegwerf-DB verifiziert.
 
 ## TODO — bis Slice 1 wirklich fertig ist
 
-- [ ] **Routen-Ergebnis reviewen.** Der Worker hat `turnier-draft/src/repo.rs` angefasst,
-      obwohl der Kern laut Auftrag fertig war. Drift oder berechtigt? Diff lesen.
-- [ ] **Migration nach `main`.** Liegt auf `origin/tmp/draft-migration` (Bots-Repo).
-      Der Push scheiterte am Review-Gate-**Timeout** (600s, ~47 parallele Codex-Prozesse) —
-      das war KEIN inhaltliches BLOCK. Bei Ruhe erneut versuchen.
-      Reihenfolge zwingend: Migration live VOR dem Turniere-Deploy.
+- [x] **Routen-Ergebnis reviewt.** Die Änderungen am Draft-Repository gehören zum
+      persistierten Lobby-, Timer- und Reconnect-Vertrag; ein frischer Kritiker fand
+      nach den Korrekturen keinen weiteren Blocker.
+- [x] **Migration nach `main` und live.** Die zentrale Migration `2026071610` liegt im
+      Deadlock-Bots-`main` und ist produktiv erfolgreich angewendet. `turnier-bot`
+      prüft diesen Vertrag beim Start und beendet sich verständlich, falls er fehlt.
 - [ ] **Turniere nach `main` mergen**, `cargo build --release --workspace`,
       `systemctl --user restart deadlock-turniere`.
 - [ ] **Live-Beweis** (alle drei): PID-Wechsel, `/proc/<pid>/exe` zeigt auf die neue Binary,
@@ -171,7 +172,8 @@ Ehrlicher Zwischenstand. `[x]` heisst: gebaut UND verifiziert. Alles andere ist 
 - [ ] **Echter Durchlauf zu zweit**: zwei Browser, Draft bis `completed`, Timer ablaufen
       lassen, Backend mittendrin neu starten (muss der Draft ueberleben — das ist der
       ganze Grund fuer Polling statt WebSocket).
-- [ ] `CHANGELOG.md` ergaenzen (user-sichtbares Feature) und Discord-Post — NUR auf Ansage.
+- [x] `CHANGELOG.md` ergänzt und auf die echte Route `/turnier/draft` korrigiert.
+- [ ] Discord-Post nach erfolgreichem Live-Beweis.
 
 ## TODO — Luecken, die ich kenne
 
