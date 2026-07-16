@@ -106,6 +106,26 @@ pub const DEFAULT_SEQUENCE: [SequenceStep; 18] = [
     step(Pick, One),
 ];
 
+/// Wettbewerbs-Preset mit je zwei Bans pro Team und dem Standard-Pickmuster.
+pub const COMPETITIVE_2BAN: [SequenceStep; 16] = [
+    step(Ban, One),
+    step(Ban, Two),
+    step(Ban, One),
+    step(Ban, Two),
+    step(Pick, One),
+    step(Pick, Two),
+    step(Pick, Two),
+    step(Pick, One),
+    step(Pick, One),
+    step(Pick, Two),
+    step(Pick, Two),
+    step(Pick, One),
+    step(Pick, One),
+    step(Pick, Two),
+    step(Pick, Two),
+    step(Pick, One),
+];
+
 /// Wettbewerbs-Preset mit je einem Ban pro Team und dem Standard-Pickmuster.
 pub const COMPETITIVE_1BAN: [SequenceStep; 14] = [
     step(Ban, One),
@@ -154,7 +174,7 @@ pub const SEQUENCE_LEN: usize = DEFAULT_SEQUENCE.len();
 /// Liefert eines der genau drei unterstützten Sequenz-Presets.
 pub fn preset(name: &str) -> Option<&'static [SequenceStep]> {
     match name {
-        "competitive_2ban" => Some(&DEFAULT_SEQUENCE),
+        "competitive_2ban" => Some(&COMPETITIVE_2BAN),
         "competitive_1ban" => Some(&COMPETITIVE_1BAN),
         "quick_no_ban" => Some(&QUICK_NO_BAN),
         _ => None,
@@ -271,7 +291,7 @@ mod tests {
     #[test]
     fn presets_haben_die_erwartete_verteilung() {
         for (name, bans, picks) in [
-            ("competitive_2ban", 6, 12),
+            ("competitive_2ban", 4, 12),
             ("competitive_1ban", 2, 12),
             ("quick_no_ban", 0, 12),
         ] {
@@ -291,11 +311,21 @@ mod tests {
                 picks
             );
         }
-        assert_eq!(
-            preset("competitive_2ban"),
-            Some(DEFAULT_SEQUENCE.as_slice())
-        );
         assert!(preset("unbekannt").is_none());
+    }
+
+    #[test]
+    fn competitive_2ban_hat_zwei_bans_je_team() {
+        let sequence = preset("competitive_2ban").expect("bekanntes Preset");
+        for team in [One, Two] {
+            assert_eq!(
+                sequence
+                    .iter()
+                    .filter(|step| step.action_type == Ban && step.team_slot == team)
+                    .count(),
+                2
+            );
+        }
     }
 
     #[test]

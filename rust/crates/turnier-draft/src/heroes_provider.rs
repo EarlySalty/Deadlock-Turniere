@@ -1,4 +1,4 @@
-//! Live-Heldenliste mit 24-Stunden-Prozesscache und statischem Fallback.
+//! Live-Heldenliste mit 24-Stunden-Prozesscache und kurz gecachtem statischem Fallback.
 
 use std::future::Future;
 use std::pin::Pin;
@@ -12,6 +12,7 @@ use crate::heroes::DEADLOCK_HEROES;
 
 const HEROES_URL: &str = "https://api.deadlock-api.com/v1/assets/heroes";
 const CACHE_TTL: Duration = Duration::from_secs(24 * 60 * 60);
+const FALLBACK_CACHE_TTL: Duration = Duration::from_secs(60);
 
 /// Für Drafts benötigte Helden-Stammdaten.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -30,14 +31,16 @@ pub trait HeroFetcher: Send + Sync {
 pub struct HeroesProvider<F> {
     fetcher: F,
     ttl: Duration,
-    cache: Mutex<Option<(Instant, Vec<Hero>)>>,
+    fallback_ttl: Duration,
+    cache: Mutex<Option<(Instant, Duration, Vec<Hero>)>>,
 }
 
 impl<F: HeroFetcher> HeroesProvider<F> {
-    pub fn new(fetcher: F, ttl: Duration) -> Self {
+    pub fn new(fetcher: F, ttl: Duration, fallback_ttl: Duration) -> Self {
         Self {
             fetcher,
             ttl,
+            fallback_ttl,
             cache: Mutex::new(None),
         }
     }
@@ -48,11 +51,11 @@ impl<F: HeroFetcher> HeroesProvider<F> {
             return heroes;
         }
 
-        let heroes = match self.fetcher.fetch().await {
-            Ok(heroes) if !heroes.is_empty() => heroes,
-            Ok(_) | Err(_) => static_heroes(),
+        let (heroes, ttl) = match self.fetcher.fetch().await {
+            Ok(heroes) if !heroes.is_empty() => (heroes, self.ttl),
+            Ok(_) | Err(_) => (static_heroes(), self.fallback_ttl),
         };
-        *self.cache_guard() = Some((Instant::now(), heroes.clone()));
+        *self.cache_guard() = Some((Instant::now(), ttl, heroes.clone()));
         heroes
     }
 
@@ -60,8 +63,8 @@ impl<F: HeroFetcher> HeroesProvider<F> {
     pub fn cached(&self) -> Option<Vec<Hero>> {
         self.cache_guard()
             .as_ref()
-            .filter(|(loaded_at, _)| loaded_at.elapsed() < self.ttl)
-            .map(|(_, heroes)| heroes.clone())
+            .filter(|(loaded_at, ttl, _)| loaded_at.elapsed() < *ttl)
+            .map(|(_, _, heroes)| heroes.clone())
     }
 
     /// Prüft exakt gegen die von diesem Provider geladene Liste.
@@ -69,7 +72,7 @@ impl<F: HeroFetcher> HeroesProvider<F> {
         self.heroes().await.iter().any(|hero| hero.name == name)
     }
 
-    fn cache_guard(&self) -> MutexGuard<'_, Option<(Instant, Vec<Hero>)>> {
+    fn cache_guard(&self) -> MutexGuard<'_, Option<(Instant, Duration, Vec<Hero>)>> {
         self.cache
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
@@ -159,7 +162,7 @@ fn static_heroes() -> Vec<Hero> {
 }
 
 pub(crate) static DEFAULT_PROVIDER: Lazy<HeroesProvider<ReqwestHeroFetcher>> =
-    Lazy::new(|| HeroesProvider::new(ReqwestHeroFetcher::default(), CACHE_TTL));
+    Lazy::new(|| HeroesProvider::new(ReqwestHeroFetcher::default(), CACHE_TTL, FALLBACK_CACHE_TTL));
 
 /// Liefert die gecachte Live-Liste beziehungsweise den statischen Fallback.
 pub async fn load_heroes() -> Vec<Hero> {

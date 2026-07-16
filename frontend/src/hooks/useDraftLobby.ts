@@ -16,6 +16,7 @@ import {
   submitDraftLobbyAction,
 } from '@/api/client'
 import type { CreateLobbyBody } from '@/types/tournament'
+import { remainingSeconds, selectCaptainToken } from './draftLobbyState.ts'
 
 /** Heldenliste. Live von der Deadlock-API, aendert sich hoechstens pro Patch. */
 export function useDraftHeroList() {
@@ -64,21 +65,15 @@ export function useDraftLobbyAction(code: string | undefined) {
  * dehnt die Zugzeit nicht, weil der Server beim naechsten Lesen abrechnet.
  */
 export function useCountdown(deadlineAt: string | null | undefined) {
-  const [restSekunden, setRestSekunden] = useState<number | null>(null)
+  const [nowMs, setNowMs] = useState(Date.now)
 
   useEffect(() => {
-    if (!deadlineAt) {
-      setRestSekunden(null)
-      return
-    }
-    const ziel = new Date(deadlineAt).getTime()
-    const tick = () => setRestSekunden(Math.max(0, Math.ceil((ziel - Date.now()) / 1000)))
-    tick()
-    const id = window.setInterval(tick, 250)
+    if (!deadlineAt) return
+    const id = window.setInterval(() => setNowMs(Date.now()), 250)
     return () => window.clearInterval(id)
   }, [deadlineAt])
 
-  return restSekunden
+  return remainingSeconds(deadlineAt, nowMs)
 }
 
 /**
@@ -90,22 +85,21 @@ export function useCountdown(deadlineAt: string | null | undefined) {
  * Adresszeile versehentlich mit dem Gegner.
  */
 export function useCaptainToken(code: string | undefined) {
-  const [token, setToken] = useState<string | null>(null)
+  const schluessel = code ? `draft-token:${code}` : null
+  const ausUrl = code ? new URLSearchParams(window.location.search).get('t') : null
+  const token = selectCaptainToken(
+    code,
+    ausUrl,
+    schluessel ? window.localStorage.getItem(schluessel) : null,
+  )
 
   useEffect(() => {
-    if (!code) return
-    const schluessel = `draft-token:${code}`
-    const ausUrl = new URLSearchParams(window.location.search).get('t')
-    if (ausUrl) {
-      window.localStorage.setItem(schluessel, ausUrl)
-      setToken(ausUrl)
-      const sauber = new URL(window.location.href)
-      sauber.searchParams.delete('t')
-      window.history.replaceState({}, '', sauber.toString())
-      return
-    }
-    setToken(window.localStorage.getItem(schluessel))
-  }, [code])
+    if (!schluessel || !ausUrl) return
+    window.localStorage.setItem(schluessel, ausUrl)
+    const sauber = new URL(window.location.href)
+    sauber.searchParams.delete('t')
+    window.history.replaceState({}, '', sauber.toString())
+  }, [ausUrl, schluessel])
 
   return token
 }

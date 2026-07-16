@@ -26,7 +26,11 @@ async fn fetch_fehler_faellt_auf_statische_liste_zurueck() {
         calls: Arc::new(AtomicUsize::new(0)),
         result: Err("nicht erreichbar".to_string()),
     };
-    let provider = HeroesProvider::new(fetcher, Duration::from_secs(24 * 60 * 60));
+    let provider = HeroesProvider::new(
+        fetcher,
+        Duration::from_secs(24 * 60 * 60),
+        Duration::from_secs(60),
+    );
 
     let heroes = provider.heroes().await;
 
@@ -45,11 +49,51 @@ async fn zweiter_aufruf_kommt_aus_dem_cache() {
             image_url: "https://example.invalid/test.webp".to_string(),
         }]),
     };
-    let provider = HeroesProvider::new(fetcher, Duration::from_secs(24 * 60 * 60));
+    let provider = HeroesProvider::new(
+        fetcher,
+        Duration::from_secs(24 * 60 * 60),
+        Duration::from_secs(60),
+    );
 
     assert_eq!(provider.heroes().await[0].name, "Testheld");
     assert_eq!(provider.heroes().await[0].name, "Testheld");
     assert!(provider.is_valid_hero("Testheld").await);
     assert!(!provider.is_valid_hero("testheld").await);
     assert_eq!(calls.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn fallback_hat_eine_eigene_kurze_cache_dauer() {
+    let calls = Arc::new(AtomicUsize::new(0));
+    let fetcher = FailOnceFetcher {
+        calls: Arc::clone(&calls),
+    };
+    let provider = HeroesProvider::new(fetcher, Duration::from_secs(24 * 60 * 60), Duration::ZERO);
+
+    assert_eq!(provider.heroes().await.len(), DEADLOCK_HEROES.len());
+    assert_eq!(provider.heroes().await[0].name, "Live-Held");
+    assert_eq!(provider.heroes().await[0].name, "Live-Held");
+    assert_eq!(calls.load(Ordering::SeqCst), 2);
+}
+
+#[derive(Clone)]
+struct FailOnceFetcher {
+    calls: Arc<AtomicUsize>,
+}
+
+impl HeroFetcher for FailOnceFetcher {
+    fn fetch(&self) -> Pin<Box<dyn Future<Output = Result<Vec<Hero>, String>> + Send + '_>> {
+        let call = self.calls.fetch_add(1, Ordering::SeqCst);
+        Box::pin(async move {
+            if call == 0 {
+                Err("vorübergehend nicht erreichbar".to_string())
+            } else {
+                Ok(vec![Hero {
+                    id: 99,
+                    name: "Live-Held".to_string(),
+                    image_url: "https://example.invalid/live.webp".to_string(),
+                }])
+            }
+        })
+    }
 }

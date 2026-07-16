@@ -122,16 +122,16 @@ fn validate_lobby(body: CreateLobbyRequest) -> WebResult<turnier_draft::CreateLo
     let team2_name = validate_team_name(body.team2_name)?;
     if !(10..=300).contains(&body.round_seconds) {
         return Err(WebError::bad_request(
-            "PLATZHALTER: Rundendauer liegt ausserhalb des erlaubten Bereichs",
+            "Die Rundendauer muss zwischen 10 und 300 Sekunden liegen.",
         ));
     }
     if !(0..=600).contains(&body.reserve_seconds) {
         return Err(WebError::bad_request(
-            "PLATZHALTER: Reservezeit liegt ausserhalb des erlaubten Bereichs",
+            "Die Reservezeit muss zwischen 0 und 600 Sekunden liegen.",
         ));
     }
     let sequence = turnier_draft::preset(&body.preset)
-        .ok_or_else(|| WebError::bad_request("PLATZHALTER: Unbekanntes Draft-Preset"))?;
+        .ok_or_else(|| WebError::bad_request("Dieses Draft-Preset wird nicht unterstützt."))?;
     Ok(turnier_draft::CreateLobbyOptions {
         team1_name,
         team2_name,
@@ -145,7 +145,7 @@ fn validate_team_name(name: String) -> WebResult<String> {
     let name = name.trim();
     if name.is_empty() || name.chars().count() > 40 {
         return Err(WebError::bad_request(
-            "PLATZHALTER: Teamname ist leer oder laenger als 40 Zeichen",
+            "Teamnamen müssen 1 bis 40 Zeichen lang sein.",
         ));
     }
     Ok(name.to_string())
@@ -172,7 +172,7 @@ fn enforce_lobby_rate_limit(state: &AppState, ip: std::net::IpAddr) -> WebResult
     if per_ip.len() >= 10 {
         return Err(WebError::new(
             StatusCode::TOO_MANY_REQUESTS,
-            "PLATZHALTER: Zu viele Draft-Lobbys in einer Stunde",
+            "Du kannst höchstens 10 Draft-Lobbys pro Stunde erstellen.",
         ));
     }
     per_ip.push(now);

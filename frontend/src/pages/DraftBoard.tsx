@@ -22,6 +22,7 @@ import {
   useDraftLobby,
   useDraftLobbyAction,
 } from '@/hooks/useDraftLobby'
+import { heroImageUrl } from '@/hooks/draftLobbyState'
 import type { DraftHero, LobbyState } from '@/types/tournament'
 
 function Uhr({ state }: { state: LobbyState }) {
@@ -54,6 +55,8 @@ function HeldKachel({
   klickbar: boolean
   onClick: () => void
 }) {
+  const imageUrl = heroImageUrl(held.image_url)
+
   return (
     <button
       type="button"
@@ -68,7 +71,17 @@ function HeldKachel({
             : 'border-border/60 cursor-default'
       }`}
     >
-      <img src={held.image_url} alt={held.name} loading="lazy" className="aspect-square w-full object-cover" />
+      {imageUrl ? (
+        <img src={imageUrl} alt={held.name} loading="lazy" className="aspect-square w-full object-cover" />
+      ) : (
+        <div
+          role="img"
+          aria-label={held.name}
+          className="flex aspect-square w-full items-center justify-center bg-card font-display text-3xl text-muted"
+        >
+          {held.name.slice(0, 1)}
+        </div>
+      )}
       <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/90 to-transparent px-1 pb-1 pt-3">
         <span className="block truncate text-[10px] font-semibold uppercase tracking-wide text-foreground">
           {held.name}

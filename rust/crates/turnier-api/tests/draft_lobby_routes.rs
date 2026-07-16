@@ -227,17 +227,33 @@ async fn lobby_anlegen_validiert_systemgrenzen() {
     let ctx = setup().await;
     let ip = IpAddr::V4(Ipv4Addr::new(203, 0, 113, 4));
     let cases = [
-        json!({"team1_name": "  ", "team2_name": "B", "preset": "quick_no_ban", "round_seconds": 60, "reserve_seconds": 0}),
-        json!({"team1_name": "A".repeat(41), "team2_name": "B", "preset": "quick_no_ban", "round_seconds": 60, "reserve_seconds": 0}),
-        json!({"team1_name": "A", "team2_name": "B", "preset": "quick_no_ban", "round_seconds": 5, "reserve_seconds": 0}),
-        json!({"team1_name": "A", "team2_name": "B", "preset": "quick_no_ban", "round_seconds": 60, "reserve_seconds": 601}),
-        json!({"team1_name": "A", "team2_name": "B", "preset": "unbekannt", "round_seconds": 60, "reserve_seconds": 0}),
+        (
+            json!({"team1_name": "  ", "team2_name": "B", "preset": "quick_no_ban", "round_seconds": 60, "reserve_seconds": 0}),
+            "Teamnamen müssen 1 bis 40 Zeichen lang sein.",
+        ),
+        (
+            json!({"team1_name": "A".repeat(41), "team2_name": "B", "preset": "quick_no_ban", "round_seconds": 60, "reserve_seconds": 0}),
+            "Teamnamen müssen 1 bis 40 Zeichen lang sein.",
+        ),
+        (
+            json!({"team1_name": "A", "team2_name": "B", "preset": "quick_no_ban", "round_seconds": 5, "reserve_seconds": 0}),
+            "Die Rundendauer muss zwischen 10 und 300 Sekunden liegen.",
+        ),
+        (
+            json!({"team1_name": "A", "team2_name": "B", "preset": "quick_no_ban", "round_seconds": 60, "reserve_seconds": 601}),
+            "Die Reservezeit muss zwischen 0 und 600 Sekunden liegen.",
+        ),
+        (
+            json!({"team1_name": "A", "team2_name": "B", "preset": "unbekannt", "round_seconds": 60, "reserve_seconds": 0}),
+            "Dieses Draft-Preset wird nicht unterstützt.",
+        ),
     ];
 
-    for body in cases {
+    for (body, detail) in cases {
         let response =
             send_json(&ctx.app, ip, Method::POST, "/api/draft/lobbies", Some(body)).await;
         assert_eq!(response.status, StatusCode::BAD_REQUEST);
+        assert_eq!(response.body["detail"], detail);
     }
 }
 
@@ -267,6 +283,10 @@ async fn elfte_lobby_derselben_ip_liefert_429() {
     )
     .await;
     assert_eq!(limited.status, StatusCode::TOO_MANY_REQUESTS);
+    assert_eq!(
+        limited.body["detail"],
+        "Du kannst höchstens 10 Draft-Lobbys pro Stunde erstellen."
+    );
 }
 
 #[tokio::test]
