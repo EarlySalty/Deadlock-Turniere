@@ -149,7 +149,7 @@ Ehrlicher Zwischenstand. `[x]` heisst: gebaut UND verifiziert. Alles andere ist 
 - [x] Draft-Seite `/turnier/draft` (Lobby anlegen) und `/turnier/draft/:code` (Board):
       Hero-Grid mit Live-Bildern, Countdown, Captain-Links, Zuschauer-Link.
 
-## Fertig auf dem Branch, NICHT live
+## Ebenfalls fertig und live
 
 - [x] Migration `2026071610_draft_lobbys.sql` (additiv, auf frischer DB durchgelaufen).
 - [x] Sequenz-Presets, Live-Heldenquelle mit Fallback, Lobby-Kern, fauler Timer.
@@ -165,10 +165,11 @@ Ehrlicher Zwischenstand. `[x]` heisst: gebaut UND verifiziert. Alles andere ist 
 - [x] **Migration nach `main` und live.** Die zentrale Migration `2026071610` liegt im
       Deadlock-Bots-`main` und ist produktiv erfolgreich angewendet. `turnier-bot`
       prüft diesen Vertrag beim Start und beendet sich verständlich, falls er fehlt.
-- [ ] **Turniere nach `main` mergen**, `cargo build --release --workspace`,
+- [x] **Turniere nach `main` gemergt**, `cargo build --release --workspace`,
       `systemctl --user restart deadlock-turniere`.
-- [ ] **Live-Beweis** (alle drei): PID-Wechsel, `/proc/<pid>/exe` zeigt auf die neue Binary,
-      `journalctl` sauber. Aktuell antwortet `POST /api/draft/lobbies` mit 404 (altes Binary).
+- [x] **Live-Beweis** (alle drei): PID-Wechsel, `/proc/<pid>/exe` zeigt auf die neue Binary,
+      `journalctl` sauber. Öffentliche Health-, Seiten- und Lobby-Routen antworten erfolgreich;
+      eine echte Aktion blieb über einen weiteren Backend-Neustart erhalten.
 - [ ] **Echter Durchlauf zu zweit**: zwei Browser, Draft bis `completed`, Timer ablaufen
       lassen, Backend mittendrin neu starten (muss der Draft ueberleben — das ist der
       ganze Grund fuer Polling statt WebSocket).
