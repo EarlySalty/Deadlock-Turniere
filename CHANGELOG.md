@@ -1,6 +1,6 @@
 ## #15 — Eigene Draft-Lobbys ohne Turnier
 
-**Ausgangslage:** Für einen Helden-Draft brauchte man bisher ein angelegtes Turnier und musste Picks, Bans und Zugzeiten außerhalb der Seite koordinieren. **Änderung:** Unter `/turnier/draft/neu` lässt sich eine freie Lobby mit Teamnamen, Preset und optionalem Zugtimer erstellen; beide Captains bekommen getrennte Links, und der Stand bleibt in der Datenbank erhalten. **Aktuelles Verhalten:** Zwei Captains können denselben Draft in getrennten Browsern bis zum Ende spielen, beim Wettbewerbs-Preset mit zwei Bans je Team; abgelaufene Züge werden automatisch ausgeführt und ein Backend-Neustart verliert die Lobby nicht.
+**Ausgangslage:** Für einen Helden-Draft brauchte man bisher ein angelegtes Turnier und musste Picks, Bans und Zugzeiten außerhalb der Seite koordinieren. **Änderung:** Unter `/turnier/draft` lässt sich eine freie Lobby mit Teamnamen, Preset und optionalem Zugtimer erstellen; beide Captains bekommen getrennte Links, und der Stand bleibt in der Datenbank erhalten. **Aktuelles Verhalten:** Zwei Captains können denselben Draft in getrennten Browsern bis zum Ende spielen, beim Wettbewerbs-Preset mit zwei Bans je Team; abgelaufene Züge werden automatisch ausgeführt und ein Backend-Neustart verliert die Lobby nicht.
 
 ## #14 — Turniere brauchen zwei Mod-Freigaben
 
