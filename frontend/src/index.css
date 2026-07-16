@@ -1,23 +1,26 @@
 @import "tailwindcss";
-@import "./ddc-design-tokens.css";
-@import "./industrial-gold.css";
+@import "./brand-tokens.css";
 @plugin "@tailwindcss/typography";
 
-/* Turnierplattform — Industrial Gold (Deutsche Deadlock Community)
+/* Turnierplattform — DDC-Marke: Patch-Schwarz + Gold
  *
  * Vorher: "Ethereal & Industrial" (Neon-Gruen + Okkult-Lila auf Blau-Schwarz).
- * Jetzt: dieselbe Marke wie das Twitch-Bot-Dashboard — Antik-Gold auf warmem
- * Eisen-Schwarz. Farben und Typo kommen aus ddc-design-tokens.css, das
- * Material (Kachel, Bevel, Nieten, Plasma) aus industrial-gold.css.
+ * Jetzt: der Marken-Look der Website — neutrales Patch-Schwarz (#0b0b0b) mit
+ * Gold als einzigem Chrome-Akzent. Farben kommen aus brand-tokens.css.
+ *
+ * Der Look ist FLACH. Kein Holz, kein gebuerstetes Metall, keine Nieten, keine
+ * Glow-Orbs — das ist die aeltere Braun-Materialschicht und ausdruecklich nicht
+ * die Marke. Tiefe entsteht nur durch Flaechenhelligkeit, einen goldigen
+ * Haarrahmen und einen Schlagschatten.
  *
  * Zwei Ebenen, die nie vermischt werden:
  *   CHROME (Navigation, Rahmen, Buttons, Links, aktive Zustaende) → GOLD.
- *   STATUS (laeuft/gewonnen/online, Diagramm-Serien)              → Plasma/Amber/Rot.
+ *   STATUS (laeuft/gewonnen/online, Diagramm-Serien)              → Gruen/Rust/Teal.
  *
  * Das alte Gruen war Chrome, kein Status: es sass in Buttons, Links und
- * Rahmen. Es wird deshalb Gold, nicht Plasma-Gruen. Die gruenen Utilities in
- * den Komponenten (text-green-400 & Co.) sind dagegen echte Statusmeldungen
- * (Erfolg, Sieger, Check-in erledigt) und bleiben bewusst gruen.
+ * Rahmen. Es wird deshalb Gold. Die gruenen Utilities in den Komponenten
+ * (text-green-400 & Co.) sind dagegen echte Statusmeldungen (Erfolg, Sieger,
+ * Check-in erledigt) und bleiben bewusst gruen.
  *
  * Die Token-Namen sind absichtlich unveraendert (primary/accent/card/border/
  * muted/foreground/background): dadurch greifen alle bestehenden
@@ -25,52 +28,18 @@
  */
 
 :root {
-  /* Flaechen. ddc-design-tokens.css liefert --color-bg/--color-card/... ;
-     hier nur die Namen, die dieses Frontend historisch benutzt. */
   --color-background: var(--color-bg);
   --color-foreground: var(--color-text);
 
-  /* Tinte fuer helle Gold-/Messingflaechen. Weiss auf Gold liegt bei ~1.8:1
-     und ist unlesbar — auf Metall wird mit dunkler Tinte geschrieben.
-     #140D0A auf #C5A059 liegt bei ~8.9:1. */
-  --color-on-gold: #140D0A;
-
-  /* Das Marken-Rot #FF5A3C ist genauso hell wie Gold (Luminanz ~0.29), also
-     gilt dieselbe Regel: dunkle Tinte. Weiss darauf liegt bei 3.1:1 — und der
-     Button wurde ausgerechnet im Hover am schlechtesten, weil das Rot dort
-     voll deckt und damit heller wird. */
-  --color-on-danger: #140D0A;
-
-  /* Status-Gruen: mattes Smaragd statt Neon. Das #00FF88 der Marken-Tokens
-     leuchtet auf dem dunklen Grund zu grell und konkurriert mit dem Gold —
-     dieselbe Korrektur trifft das Dashboard. Der Ton passt ausserdem zu den
-     text-green-400-Statusmeldungen in den Komponenten. */
-  --color-success: #43b581;
-  --color-success-soft: rgba(67, 181, 129, 0.15);
-
-  /* Auren: frueher Gruen/Lila, jetzt Gold. Kein Plasma im Chrome. */
-  --glow-primary: 0 0 15px rgba(197, 160, 89, 0.3);
-  --glow-accent: 0 0 15px rgba(241, 210, 153, 0.28);
+  /* Auren dezent: Gold-Anflug statt Neon-Schein. */
+  --glow-primary: 0 0 14px rgba(201, 168, 106, 0.22);
+  --glow-accent: 0 0 14px rgba(85, 151, 143, 0.22);
 }
 
 body {
   min-height: 100vh;
-  background-color: var(--color-background);
-  /* Schmiede-Grund: Gold-Schein von oben, warmer Anflug seitlich, darunter
-     die Holzmaserung. Kein Plasma im Grund — Plasma ist Status. */
-  background-image:
-    radial-gradient(circle at 20% 20%, rgba(197, 160, 89, 0.10), transparent 42%),
-    radial-gradient(circle at 80% 80%, rgba(241, 210, 153, 0.05), transparent 42%),
-    repeating-linear-gradient(
-      92deg,
-      rgba(0, 0, 0, 0.13) 0px,
-      rgba(0, 0, 0, 0) 2px,
-      rgba(241, 210, 153, 0.012) 3px,
-      rgba(0, 0, 0, 0) 6px,
-      rgba(0, 0, 0, 0.09) 9px,
-      rgba(0, 0, 0, 0) 14px
-    ),
-    var(--gradient-bg);
+  background-color: var(--color-bg);
+  background-image: var(--gradient-bg);
   background-attachment: fixed;
   color: var(--color-foreground);
   font-family: var(--font-sans);
@@ -78,9 +47,25 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
-/* Ueberschriften: Sora statt Cinzel. Das Versal-Setzen faellt weg — die Marke
-   setzt Ueberschriften gemischt; wo Versalien gewollt sind, steht das
-   uppercase weiterhin an der Komponente. */
+/* Gitternetz wie auf der Patch-Seite: technischer Grund, sehr flach.
+   Fest positioniert, damit es beim Scrollen nicht mitwandert. */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background-image:
+    linear-gradient(rgba(201, 168, 106, 0.045) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(201, 168, 106, 0.045) 1px, transparent 1px);
+  background-size: 64px 64px;
+  mask-image: radial-gradient(ellipse 100% 72% at 50% 0%, #000 30%, transparent 72%);
+  -webkit-mask-image: radial-gradient(ellipse 100% 72% at 50% 0%, #000 30%, transparent 72%);
+}
+
+/* Ueberschriften: Sora statt Cinzel. Das globale Versal-Setzen faellt weg —
+   die Marke setzt Ueberschriften gemischt; wo Versalien gewollt sind, steht
+   das uppercase weiterhin an der Komponente. */
 h1, h2, h3, h4, .font-display {
   font-family: var(--font-display);
   letter-spacing: var(--tracking-snug);
@@ -119,98 +104,48 @@ h1, h2, h3, h4, .font-display {
   background: var(--color-bg);
 }
 ::-webkit-scrollbar-thumb {
-  background: var(--color-border);
+  background: var(--color-border-strong);
   border-radius: 4px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--color-primary-soft);
+  background: var(--color-primary);
 }
 
 ::selection {
   background: color-mix(in srgb, var(--color-primary) 45%, transparent);
-  color: var(--color-foreground);
+  color: var(--color-bg);
 }
 
-/* ── Kachel-Material ──────────────────────────────────────────────────────
-   .panel-card ist die Kachel des Dashboards: Gusseisen-Platte mit Lichtabfall
-   von oben links, Schleifspuren und Bevel-Kante. .glass und .glass-card sind
-   die Klassen, die dieses Frontend schon benutzt — sie tragen jetzt dasselbe
-   Material, damit der Look ueberall greift, ohne jede Komponente anzufassen. */
-.panel-card {
+/* ── Kachel ───────────────────────────────────────────────────────────────
+   Flache Platte auf schwarzem Grund: etwas hellere Flaeche, goldiger
+   Haarrahmen, Schlagschatten. Mehr nicht — die Tiefe kommt aus dem Kontrast
+   zum Grund, nicht aus Textur.
+   .glass/.glass-card sind die Klassen, die dieses Frontend schon benutzt
+   (Tournament.tsx, CreateTournamentForm); sie tragen dasselbe Material, damit
+   der Look greift, ohne jede Komponente anzufassen. */
+.panel-card,
+.glass-card {
   position: relative;
-  overflow: hidden;
-  isolation: isolate;
-  background-color: var(--color-card);
-  background-image:
-    linear-gradient(158deg, rgba(241, 210, 153, 0.05) 0%, rgba(0, 0, 0, 0.18) 62%, rgba(0, 0, 0, 0.3) 100%),
-    repeating-linear-gradient(
-      177deg,
-      rgba(255, 255, 255, 0.016) 0px,
-      rgba(255, 255, 255, 0) 1px,
-      rgba(0, 0, 0, 0.045) 2px,
-      rgba(255, 255, 255, 0) 3px
-    );
+  background-color: var(--color-panel-solid);
   border: 1px solid var(--color-border);
-  box-shadow:
-    inset 0 1px 0 rgba(241, 210, 153, 0.14),
-    inset 0 -1px 0 rgba(0, 0, 0, 0.55),
-    0 14px 34px rgba(0, 0, 0, 0.45);
-}
-
-/* Nieten in den Ecken — der Griff, der die Platte "verschraubt" wirken laesst */
-.panel-card::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  background-image:
-    radial-gradient(circle at 11px 11px, #F1D299 0.6px, #9A7C42 1.7px, rgba(0, 0, 0, 0.5) 2.6px, transparent 3.2px),
-    radial-gradient(circle at calc(100% - 11px) 11px, #F1D299 0.6px, #9A7C42 1.7px, rgba(0, 0, 0, 0.5) 2.6px, transparent 3.2px),
-    radial-gradient(circle at 11px calc(100% - 11px), #F1D299 0.6px, #9A7C42 1.7px, rgba(0, 0, 0, 0.5) 2.6px, transparent 3.2px),
-    radial-gradient(circle at calc(100% - 11px) calc(100% - 11px), #F1D299 0.6px, #9A7C42 1.7px, rgba(0, 0, 0, 0.5) 2.6px, transparent 3.2px);
-  opacity: 0.6;
-}
-
-.glass {
-  background-color: color-mix(in srgb, var(--color-card) 82%, transparent);
-  background-image: repeating-linear-gradient(
-    177deg,
-    rgba(255, 255, 255, 0.016) 0px,
-    rgba(255, 255, 255, 0) 1px,
-    rgba(0, 0, 0, 0.045) 2px,
-    rgba(255, 255, 255, 0) 3px
-  );
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
-  border: 1px solid var(--color-border);
-  box-shadow:
-    inset 0 1px 0 rgba(241, 210, 153, 0.12),
-    inset 0 -1px 0 rgba(0, 0, 0, 0.5),
-    0 16px 40px rgba(0, 0, 0, 0.4);
+  box-shadow: var(--shadow-card-soft);
 }
 
 .glass-card {
-  background-color: var(--color-card);
-  background-image:
-    linear-gradient(158deg, rgba(241, 210, 153, 0.05) 0%, rgba(0, 0, 0, 0.18) 62%, rgba(0, 0, 0, 0.3) 100%),
-    repeating-linear-gradient(
-      177deg,
-      rgba(255, 255, 255, 0.016) 0px,
-      rgba(255, 255, 255, 0) 1px,
-      rgba(0, 0, 0, 0.045) 2px,
-      rgba(255, 255, 255, 0) 3px
-    );
-  border: 1px solid var(--color-border);
-  box-shadow:
-    inset 0 1px 0 rgba(241, 210, 153, 0.14),
-    inset 0 -1px 0 rgba(0, 0, 0, 0.55),
-    0 14px 34px rgba(0, 0, 0, 0.45);
   border-radius: 1rem; /* rounded-xl */
 }
 
+.glass {
+  background-color: var(--color-card);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border: 1px solid var(--color-border);
+  box-shadow: var(--shadow-card-soft);
+}
+
 /* Gold-Flaeche. Traegt IMMER dunkle Tinte — Kinder erben die Farbe, damit
-   niemand versehentlich weissen Text auf Messing setzt (~1.8:1, faellt keinem
-   Build auf). */
+   niemand versehentlich weissen Text auf Gold setzt (~1.9:1, faellt keinem
+   Build auf). #0b0b0b auf #c8a86b liegt bei 8.69:1. */
 .gradient-accent {
   background: linear-gradient(135deg, var(--color-primary) 0%, var(--color-primary-hover) 100%);
   color: var(--color-on-gold);
