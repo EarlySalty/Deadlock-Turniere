@@ -7,10 +7,37 @@
 
 use std::sync::Arc;
 
+use anyhow::Context;
 use turnier_api::{build_router, AppState};
 use turnier_config::Config;
 use turnier_discord::{BrokerClient, DiscordNotifier};
 use turnier_scheduler::{start_scheduler, Scheduler};
+
+const REQUIRED_CENTRAL_DRAFT_MIGRATIONS: [i64; 1] = [2_026_071_610];
+
+fn missing_required_draft_migrations(applied: &[i64]) -> Vec<i64> {
+    REQUIRED_CENTRAL_DRAFT_MIGRATIONS
+        .into_iter()
+        .filter(|version| !applied.contains(version))
+        .collect()
+}
+
+async fn verify_central_draft_schema(pool: &turnier_db::Pool) -> anyhow::Result<()> {
+    let applied = turnier_db::sqlx::query_scalar::<_, i64>(
+        "SELECT version FROM _sqlx_migrations WHERE success AND version = ANY($1)",
+    )
+    .bind(REQUIRED_CENTRAL_DRAFT_MIGRATIONS.as_slice())
+    .fetch_all(pool)
+    .await
+    .context("zentrale Draft-Migrationshistorie lesen")?;
+    let missing = missing_required_draft_migrations(&applied);
+    if !missing.is_empty() {
+        anyhow::bail!(
+            "zentrales Draft-Schema ist veraltet; fehlende Deadlock-Bots-Migrationen: {missing:?}. Zuerst Deadlock-Bots/rust/target/release/dl-central-migrate ausfuehren"
+        );
+    }
+    Ok(())
+}
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -23,7 +50,8 @@ async fn main() -> anyhow::Result<()> {
 
     // Zentrale PG-DB: DSN kommt aus DEADLOCK_CENTRAL_DSN; Wert niemals loggen.
     let pool = turnier_db::connect_central().await?;
-    tracing::info!("central DB pool opened");
+    verify_central_draft_schema(&pool).await?;
+    tracing::info!("central DB pool opened; Draft-Schema verifiziert");
 
     let state = AppState::build(pool.clone(), config.clone()).await?;
     let scheduler = Scheduler::new(
@@ -83,4 +111,26 @@ async fn shutdown_signal(shutdown_tx: tokio::sync::watch::Sender<bool>) {
     let _ = tokio::signal::ctrl_c().await;
     tracing::info!("Shutdown-Signal empfangen");
     let _ = shutdown_tx.send(true);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fehlende_zentrale_draft_migration_wird_gemeldet() {
+        assert_eq!(missing_required_draft_migrations(&[]), vec![2_026_071_610]);
+        assert!(missing_required_draft_migrations(&[2_026_071_610]).is_empty());
+    }
+
+    #[tokio::test]
+    #[ignore = "braucht die migrierte Wegwerf-DB aus central_test_db.sh"]
+    async fn migrierte_zentrale_db_erfuellt_den_draft_schema_vertrag() {
+        let pool = turnier_db::connect_central()
+            .await
+            .expect("Wegwerf-DB verbinden");
+        verify_central_draft_schema(&pool)
+            .await
+            .expect("zentraler Draft-Schema-Vertrag");
+    }
 }
