@@ -1,46 +1,89 @@
 @import "tailwindcss";
+@import "./ddc-design-tokens.css";
+@import "./industrial-gold.css";
 @plugin "@tailwindcss/typography";
 
-:root {
-  /* Deadlock Palette - Ethereal & Industrial */
-  --color-background: #08080c;
-  --color-foreground: #d1d1d6;
-  --color-card: rgba(22, 22, 30, 0.6);
-  --color-card-hover: rgba(30, 30, 42, 0.8);
-  --color-border: rgba(255, 255, 255, 0.08);
-  --color-primary: #4ade80; /* Deadlock Green */
-  --color-primary-hover: #22c55e;
-  --color-primary-soft: rgba(74, 222, 128, 0.1);
-  --color-accent: #a855f7; /* Occult Purple */
-  --color-accent-hover: #9333ea;
-  --color-accent-soft: rgba(168, 85, 247, 0.1);
-  --color-success: #10b981;
-  --color-danger: #ef4444;
-  --color-warning: #f59e0b;
-  --color-muted: #8e8e93;
+/* Turnierplattform — Industrial Gold (Deutsche Deadlock Community)
+ *
+ * Vorher: "Ethereal & Industrial" (Neon-Gruen + Okkult-Lila auf Blau-Schwarz).
+ * Jetzt: dieselbe Marke wie das Twitch-Bot-Dashboard — Antik-Gold auf warmem
+ * Eisen-Schwarz. Farben und Typo kommen aus ddc-design-tokens.css, das
+ * Material (Kachel, Bevel, Nieten, Plasma) aus industrial-gold.css.
+ *
+ * Zwei Ebenen, die nie vermischt werden:
+ *   CHROME (Navigation, Rahmen, Buttons, Links, aktive Zustaende) → GOLD.
+ *   STATUS (laeuft/gewonnen/online, Diagramm-Serien)              → Plasma/Amber/Rot.
+ *
+ * Das alte Gruen war Chrome, kein Status: es sass in Buttons, Links und
+ * Rahmen. Es wird deshalb Gold, nicht Plasma-Gruen. Die gruenen Utilities in
+ * den Komponenten (text-green-400 & Co.) sind dagegen echte Statusmeldungen
+ * (Erfolg, Sieger, Check-in erledigt) und bleiben bewusst gruen.
+ *
+ * Die Token-Namen sind absichtlich unveraendert (primary/accent/card/border/
+ * muted/foreground/background): dadurch greifen alle bestehenden
+ * Utility-Klassen weiter, ohne dass Komponenten angefasst werden muessen.
+ */
 
-  /* Ethereal Glows */
-  --glow-primary: 0 0 15px rgba(74, 222, 128, 0.3);
-  --glow-accent: 0 0 15px rgba(168, 85, 247, 0.3);
+:root {
+  /* Flaechen. ddc-design-tokens.css liefert --color-bg/--color-card/... ;
+     hier nur die Namen, die dieses Frontend historisch benutzt. */
+  --color-background: var(--color-bg);
+  --color-foreground: var(--color-text);
+
+  /* Tinte fuer helle Gold-/Messingflaechen. Weiss auf Gold liegt bei ~1.8:1
+     und ist unlesbar — auf Metall wird mit dunkler Tinte geschrieben.
+     #140D0A auf #C5A059 liegt bei ~8.9:1. */
+  --color-on-gold: #140D0A;
+
+  /* Das Marken-Rot #FF5A3C ist genauso hell wie Gold (Luminanz ~0.29), also
+     gilt dieselbe Regel: dunkle Tinte. Weiss darauf liegt bei 3.1:1 — und der
+     Button wurde ausgerechnet im Hover am schlechtesten, weil das Rot dort
+     voll deckt und damit heller wird. */
+  --color-on-danger: #140D0A;
+
+  /* Status-Gruen: mattes Smaragd statt Neon. Das #00FF88 der Marken-Tokens
+     leuchtet auf dem dunklen Grund zu grell und konkurriert mit dem Gold —
+     dieselbe Korrektur trifft das Dashboard. Der Ton passt ausserdem zu den
+     text-green-400-Statusmeldungen in den Komponenten. */
+  --color-success: #43b581;
+  --color-success-soft: rgba(67, 181, 129, 0.15);
+
+  /* Auren: frueher Gruen/Lila, jetzt Gold. Kein Plasma im Chrome. */
+  --glow-primary: 0 0 15px rgba(197, 160, 89, 0.3);
+  --glow-accent: 0 0 15px rgba(241, 210, 153, 0.28);
 }
 
 body {
   min-height: 100vh;
   background-color: var(--color-background);
+  /* Schmiede-Grund: Gold-Schein von oben, warmer Anflug seitlich, darunter
+     die Holzmaserung. Kein Plasma im Grund — Plasma ist Status. */
   background-image:
-    radial-gradient(circle at 20% 20%, rgba(74, 222, 128, 0.05), transparent 40%),
-    radial-gradient(circle at 80% 80%, rgba(168, 85, 247, 0.05), transparent 40%),
-    linear-gradient(to bottom, rgba(8, 8, 12, 0.8), rgba(8, 8, 12, 1));
+    radial-gradient(circle at 20% 20%, rgba(197, 160, 89, 0.10), transparent 42%),
+    radial-gradient(circle at 80% 80%, rgba(241, 210, 153, 0.05), transparent 42%),
+    repeating-linear-gradient(
+      92deg,
+      rgba(0, 0, 0, 0.13) 0px,
+      rgba(0, 0, 0, 0) 2px,
+      rgba(241, 210, 153, 0.012) 3px,
+      rgba(0, 0, 0, 0) 6px,
+      rgba(0, 0, 0, 0.09) 9px,
+      rgba(0, 0, 0, 0) 14px
+    ),
+    var(--gradient-bg);
   background-attachment: fixed;
   color: var(--color-foreground);
-  font-family: "Inter", system-ui, -apple-system, sans-serif;
+  font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
+/* Ueberschriften: Sora statt Cinzel. Das Versal-Setzen faellt weg — die Marke
+   setzt Ueberschriften gemischt; wo Versalien gewollt sind, steht das
+   uppercase weiterhin an der Komponente. */
 h1, h2, h3, h4, .font-display {
-  font-family: "Cinzel", serif; /* Fallback to serif if Cinzel isn't loaded */
-  letter-spacing: 0.02em;
-  text-transform: uppercase;
+  font-family: var(--font-display);
+  letter-spacing: var(--tracking-snug);
 }
 
 @theme inline {
@@ -49,16 +92,23 @@ h1, h2, h3, h4, .font-display {
   --color-card: var(--color-card);
   --color-card-hover: var(--color-card-hover);
   --color-border: var(--color-border);
+  --color-border-hover: var(--color-border-hover);
+  --color-border-strong: var(--color-border-strong);
   --color-primary: var(--color-primary);
   --color-primary-hover: var(--color-primary-hover);
   --color-primary-soft: var(--color-primary-soft);
   --color-accent: var(--color-accent);
   --color-accent-hover: var(--color-accent-hover);
   --color-accent-soft: var(--color-accent-soft);
+  --color-on-gold: var(--color-on-gold);
+  --color-on-danger: var(--color-on-danger);
   --color-success: var(--color-success);
   --color-danger: var(--color-danger);
   --color-warning: var(--color-warning);
   --color-muted: var(--color-muted);
+  --font-sans: var(--font-sans);
+  --font-display: var(--font-display);
+  --font-mono: var(--font-mono);
 }
 
 /* Custom Scrollbar */
@@ -66,28 +116,106 @@ h1, h2, h3, h4, .font-display {
   width: 8px;
 }
 ::-webkit-scrollbar-track {
-  background: var(--color-background);
+  background: var(--color-bg);
 }
 ::-webkit-scrollbar-thumb {
   background: var(--color-border);
   border-radius: 4px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--color-muted);
+  background: var(--color-primary-soft);
 }
 
-/* Glassmorphism Classes */
+::selection {
+  background: color-mix(in srgb, var(--color-primary) 45%, transparent);
+  color: var(--color-foreground);
+}
+
+/* ── Kachel-Material ──────────────────────────────────────────────────────
+   .panel-card ist die Kachel des Dashboards: Gusseisen-Platte mit Lichtabfall
+   von oben links, Schleifspuren und Bevel-Kante. .glass und .glass-card sind
+   die Klassen, die dieses Frontend schon benutzt — sie tragen jetzt dasselbe
+   Material, damit der Look ueberall greift, ohne jede Komponente anzufassen. */
+.panel-card {
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+  background-color: var(--color-card);
+  background-image:
+    linear-gradient(158deg, rgba(241, 210, 153, 0.05) 0%, rgba(0, 0, 0, 0.18) 62%, rgba(0, 0, 0, 0.3) 100%),
+    repeating-linear-gradient(
+      177deg,
+      rgba(255, 255, 255, 0.016) 0px,
+      rgba(255, 255, 255, 0) 1px,
+      rgba(0, 0, 0, 0.045) 2px,
+      rgba(255, 255, 255, 0) 3px
+    );
+  border: 1px solid var(--color-border);
+  box-shadow:
+    inset 0 1px 0 rgba(241, 210, 153, 0.14),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.55),
+    0 14px 34px rgba(0, 0, 0, 0.45);
+}
+
+/* Nieten in den Ecken — der Griff, der die Platte "verschraubt" wirken laesst */
+.panel-card::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image:
+    radial-gradient(circle at 11px 11px, #F1D299 0.6px, #9A7C42 1.7px, rgba(0, 0, 0, 0.5) 2.6px, transparent 3.2px),
+    radial-gradient(circle at calc(100% - 11px) 11px, #F1D299 0.6px, #9A7C42 1.7px, rgba(0, 0, 0, 0.5) 2.6px, transparent 3.2px),
+    radial-gradient(circle at 11px calc(100% - 11px), #F1D299 0.6px, #9A7C42 1.7px, rgba(0, 0, 0, 0.5) 2.6px, transparent 3.2px),
+    radial-gradient(circle at calc(100% - 11px) calc(100% - 11px), #F1D299 0.6px, #9A7C42 1.7px, rgba(0, 0, 0, 0.5) 2.6px, transparent 3.2px);
+  opacity: 0.6;
+}
+
 .glass {
-  background: rgba(255, 255, 255, 0.03);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background-color: color-mix(in srgb, var(--color-card) 82%, transparent);
+  background-image: repeating-linear-gradient(
+    177deg,
+    rgba(255, 255, 255, 0.016) 0px,
+    rgba(255, 255, 255, 0) 1px,
+    rgba(0, 0, 0, 0.045) 2px,
+    rgba(255, 255, 255, 0) 3px
+  );
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border: 1px solid var(--color-border);
+  box-shadow:
+    inset 0 1px 0 rgba(241, 210, 153, 0.12),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.5),
+    0 16px 40px rgba(0, 0, 0, 0.4);
 }
 
 .glass-card {
-  background: rgba(22, 22, 30, 0.7);
-  backdrop-filter: blur(8px);
-  border: 1px solid rgba(255, 255, 255, 0.05);
-  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.4);
+  background-color: var(--color-card);
+  background-image:
+    linear-gradient(158deg, rgba(241, 210, 153, 0.05) 0%, rgba(0, 0, 0, 0.18) 62%, rgba(0, 0, 0, 0.3) 100%),
+    repeating-linear-gradient(
+      177deg,
+      rgba(255, 255, 255, 0.016) 0px,
+      rgba(255, 255, 255, 0) 1px,
+      rgba(0, 0, 0, 0.045) 2px,
+      rgba(255, 255, 255, 0) 3px
+    );
+  border: 1px solid var(--color-border);
+  box-shadow:
+    inset 0 1px 0 rgba(241, 210, 153, 0.14),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.55),
+    0 14px 34px rgba(0, 0, 0, 0.45);
   border-radius: 1rem; /* rounded-xl */
+}
+
+/* Gold-Flaeche. Traegt IMMER dunkle Tinte — Kinder erben die Farbe, damit
+   niemand versehentlich weissen Text auf Messing setzt (~1.8:1, faellt keinem
+   Build auf). */
+.gradient-accent {
+  background: linear-gradient(135deg, var(--color-primary) 0%, var(--color-primary-hover) 100%);
+  color: var(--color-on-gold);
+}
+
+.gradient-accent svg {
+  color: var(--color-on-gold);
 }
