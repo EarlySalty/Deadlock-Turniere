@@ -13,8 +13,9 @@
 //! [`DraftError::ActionConflict`]. Welche Picks gültig sind, bleibt unverändert.
 
 use chrono::{DateTime, Duration, Utc};
+use rand::rngs::StdRng;
 use rand::seq::IteratorRandom;
-use rand::Rng;
+use rand::{Rng, SeedableRng};
 use sqlx::types::Json;
 use sqlx::{Postgres, QueryBuilder, Transaction};
 use turnier_core::{discord_id_to_string, now_utc, parse_discord_id};
@@ -203,7 +204,7 @@ pub async fn create_lobby(pool: &Pool, opts: CreateLobbyOptions) -> DraftResult<
     let deadline = opts
         .round_seconds
         .map(|round| now + Duration::seconds(i64::from(round.max(0)) + i64::from(reserve)));
-    let mut rng = rand::thread_rng();
+    let mut rng = StdRng::from_entropy();
     let code = random_string(&mut rng, 8);
     let team1_token = random_string(&mut rng, 48);
     let team2_token = random_string(&mut rng, 48);
@@ -385,7 +386,7 @@ pub async fn get_state_by_code(pool: &Pool, code: &str) -> DraftResult<DraftStat
     let heroes = load_heroes().await;
     let mut tx = pool.begin().await?;
     let mut session = load_lobby_for_update(&mut tx, code).await?;
-    let mut rng = rand::thread_rng();
+    let mut rng = StdRng::from_entropy();
     settle_expired(&mut tx, &mut session, &heroes, &mut rng).await?;
     let state = load_state(&mut tx, session.id).await?;
     tx.commit().await?;
@@ -406,7 +407,7 @@ pub async fn take_lobby_action(
 
     let mut tx = pool.begin().await?;
     let mut session = load_lobby_for_update(&mut tx, code).await?;
-    let mut rng = rand::thread_rng();
+    let mut rng = StdRng::from_entropy();
     settle_expired(&mut tx, &mut session, &heroes, &mut rng).await?;
     if session.status != "in_progress" {
         return Err(DraftError::SessionNotActive);

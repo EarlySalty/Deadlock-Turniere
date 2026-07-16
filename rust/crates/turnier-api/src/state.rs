@@ -4,7 +4,10 @@
 //! klonbar (Pool ist intern ref-gezählt; die Dienste liegen hinter `Arc`), sodass
 //! axum den State pro Request klonen kann.
 
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::net::IpAddr;
+use std::sync::{Arc, Mutex};
+use std::time::Instant;
 
 use turnier_config::Config;
 use turnier_db::Pool;
@@ -29,6 +32,8 @@ pub struct AppState {
     pub rank_resolver: Arc<dyn RankResolver>,
     /// Discord-Notifier für direkte Effekte aus Routen + `advance_tournament_status`.
     pub notifier: Arc<DiscordNotifier>,
+    /// Erstellungszeitpunkte freier Draft-Lobbys je Client-IP.
+    pub draft_lobby_creations: Arc<Mutex<HashMap<IpAddr, Vec<Instant>>>>,
 }
 
 impl AppState {
@@ -72,6 +77,7 @@ impl AppState {
             match_manager,
             rank_resolver,
             notifier: Arc::new(notifier),
+            draft_lobby_creations: Arc::new(Mutex::new(HashMap::new())),
         })
     }
 }
