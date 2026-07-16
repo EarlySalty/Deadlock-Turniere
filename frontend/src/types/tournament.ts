@@ -752,3 +752,72 @@ export interface PlayerProfile {
   total_points: number
   tournament_history: TournamentHistoryEntry[]
 }
+
+// --- Freie Draft-Lobbys ---
+
+/** Held aus GET /api/draft/heroes — live von der Deadlock-API, mit Bild. */
+export interface DraftHero {
+  id: number
+  name: string
+  image_url: string
+}
+
+export type DraftPreset = 'competitive_2ban' | 'competitive_1ban' | 'quick_no_ban'
+
+/** Ein Schritt der Draft-Reihenfolge dieser Lobby. */
+export interface DraftSequenceStep {
+  action_type: 'ban' | 'pick'
+  team_slot: 1 | 2
+}
+
+/** Antwort von POST /api/draft/lobbies. Die Tokens gibt es NUR hier, einmal. */
+export interface LobbyCredentials {
+  code: string
+  team1_token: string
+  team2_token: string
+}
+
+export interface CreateLobbyBody {
+  team1_name: string
+  team2_name: string
+  preset: DraftPreset
+  round_seconds: number
+  reserve_seconds: number
+}
+
+/**
+ * Zustand einer freien Lobby (GET /api/draft/lobbies/{code}).
+ * Enthaelt bewusst KEINE Tokens — der Zuschauer-Link darf nicht draften koennen.
+ */
+export interface LobbyState {
+  id: number
+  code: string | null
+  bracket_match_id: number | null
+  team1_name: string | null
+  team2_name: string | null
+  sequence: DraftSequenceStep[]
+  round_seconds: number | null
+  reserve_seconds: number | null
+  team1_reserve_left: number | null
+  team2_reserve_left: number | null
+  /** Wann der aktuelle Zug spaetestens faellt. Der Browser zaehlt lokal runter. */
+  deadline_at: string | null
+  status: 'pending' | 'in_progress' | 'completed' | 'cancelled'
+  current_action_index: number
+  current_action_type: 'ban' | 'pick' | null
+  current_team_slot: 1 | 2 | null
+  bans: string[]
+  picks_team1: string[]
+  picks_team2: string[]
+  actions: LobbyAction[]
+}
+
+export interface LobbyAction {
+  id: number
+  sequence_index: number
+  action_type: 'ban' | 'pick'
+  team_slot: 1 | 2
+  hero_name: string | null
+  /** true = der Timer lief ab und hat automatisch gewaehlt. */
+  is_auto: boolean
+}

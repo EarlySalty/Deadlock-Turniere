@@ -1,6 +1,9 @@
 //! Draft-Router — Pick/Ban-Endpunkte (portiert `draft/routes.py`).
 //!
-//! - `GET  /api/draft/heroes` — Heldenliste (öffentlich).
+//! - `GET  /api/draft/heroes` — Live-Heldenliste (öffentlich).
+//! - `POST /api/draft/lobbies` — freie Lobby anlegen (öffentlich).
+//! - `GET  /api/draft/lobbies/{code}` — freie Lobby ansehen (öffentlich).
+//! - `POST /api/draft/lobbies/{code}/action` — Lobby-Aktion (öffentlich).
 //! - `POST /api/draft/matches/{match_id}/start` — Draft starten (Admin).
 //! - `GET  /api/draft/sessions/{session_id}` — Zustand lesen (Admin).
 //! - `POST /api/draft/sessions/{session_id}/action` — Aktion ausführen (Admin).
@@ -8,7 +11,12 @@
 //! `taken_by` wird wie im Original aus dem Request-Body übernommen (nicht aus der
 //! Session — Parität, siehe `docs/known-issues.md` KI-DR01).
 
-use axum::extract::{Path, State};
+use std::net::SocketAddr;
+use std::time::{Duration, Instant};
+
+use axum::extract::{ConnectInfo, Path, State};
+use axum::http::header::CACHE_CONTROL;
+use axum::http::{HeaderMap, StatusCode};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use serde::Deserialize;
@@ -22,6 +30,12 @@ use crate::state::AppState;
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/api/draft/heroes", get(list_heroes))
+        .route("/api/draft/lobbies", post(create_lobby))
+        .route("/api/draft/lobbies/{code}", get(get_lobby))
+        .route(
+            "/api/draft/lobbies/{code}/action",
+            post(submit_lobby_action),
+        )
         .route(
             "/api/draft/matches/{match_id}/start",
             post(start_match_draft),
@@ -33,9 +47,140 @@ pub fn router() -> Router<AppState> {
         )
 }
 
-/// `GET /api/draft/heroes` — die geordnete Heldenliste.
+/// `GET /api/draft/heroes` — Live-Heldenliste mit statischem Fallback.
 async fn list_heroes() -> Json<Value> {
-    Json(json!({ "heroes": turnier_draft::DEADLOCK_HEROES }))
+    let heroes = turnier_draft::load_heroes()
+        .await
+        .into_iter()
+        .map(|hero| {
+            json!({
+                "id": hero.id,
+                "name": hero.name,
+                "image_url": hero.image_url,
+            })
+        })
+        .collect::<Vec<_>>();
+    Json(json!({ "heroes": heroes }))
+}
+
+/// Request-Body zum Anlegen einer freien Draft-Lobby.
+#[derive(Debug, Deserialize)]
+struct CreateLobbyRequest {
+    team1_name: String,
+    team2_name: String,
+    preset: String,
+    round_seconds: i32,
+    reserve_seconds: i32,
+}
+
+/// Request-Body einer freien Lobby-Aktion.
+#[derive(Debug, Deserialize)]
+struct LobbyActionRequest {
+    token: String,
+    hero_name: String,
+}
+
+/// `POST /api/draft/lobbies` — anonyme Draft-Lobby anlegen.
+async fn create_lobby(
+    State(state): State<AppState>,
+    ConnectInfo(address): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    Json(body): Json<CreateLobbyRequest>,
+) -> WebResult<Json<Value>> {
+    let options = validate_lobby(body)?;
+    enforce_lobby_rate_limit(&state, client_ip(&headers, address.ip()))?;
+    let credentials = turnier_draft::create_lobby(&state.pool, options).await?;
+    Ok(Json(json!({
+        "code": credentials.code,
+        "team1_token": credentials.team1_token,
+        "team2_token": credentials.team2_token,
+    })))
+}
+
+/// `GET /api/draft/lobbies/{code}` — öffentlichen Vollzustand lesen.
+async fn get_lobby(
+    State(state): State<AppState>,
+    Path(code): Path<String>,
+) -> WebResult<impl axum::response::IntoResponse> {
+    let draft_state = turnier_draft::get_state_by_code(&state.pool, &code).await?;
+    Ok(([(CACHE_CONTROL, "no-store")], Json(draft_state)))
+}
+
+/// `POST /api/draft/lobbies/{code}/action` — Captain-Aktion ausführen.
+async fn submit_lobby_action(
+    State(state): State<AppState>,
+    Path(code): Path<String>,
+    Json(body): Json<LobbyActionRequest>,
+) -> WebResult<Json<turnier_draft::DraftState>> {
+    turnier_draft::take_lobby_action(&state.pool, &code, &body.token, &body.hero_name).await?;
+    let draft_state = turnier_draft::get_state_by_code(&state.pool, &code).await?;
+    Ok(Json(draft_state))
+}
+
+fn validate_lobby(body: CreateLobbyRequest) -> WebResult<turnier_draft::CreateLobbyOptions> {
+    let team1_name = validate_team_name(body.team1_name)?;
+    let team2_name = validate_team_name(body.team2_name)?;
+    if !(10..=300).contains(&body.round_seconds) {
+        return Err(WebError::bad_request(
+            "Die Rundendauer muss zwischen 10 und 300 Sekunden liegen.",
+        ));
+    }
+    if !(0..=600).contains(&body.reserve_seconds) {
+        return Err(WebError::bad_request(
+            "Die Reservezeit muss zwischen 0 und 600 Sekunden liegen.",
+        ));
+    }
+    let sequence = turnier_draft::preset(&body.preset)
+        .ok_or_else(|| WebError::bad_request("Dieses Draft-Preset wird nicht unterstützt."))?;
+    Ok(turnier_draft::CreateLobbyOptions {
+        team1_name,
+        team2_name,
+        sequence: sequence.to_vec(),
+        round_seconds: Some(body.round_seconds),
+        reserve_seconds: Some(body.reserve_seconds),
+    })
+}
+
+fn validate_team_name(name: String) -> WebResult<String> {
+    let name = name.trim();
+    if name.is_empty() || name.chars().count() > 40 {
+        return Err(WebError::bad_request(
+            "Teamnamen müssen 1 bis 40 Zeichen lang sein.",
+        ));
+    }
+    Ok(name.to_string())
+}
+
+fn client_ip(headers: &HeaderMap, peer_ip: std::net::IpAddr) -> std::net::IpAddr {
+    if !peer_ip.is_loopback() {
+        return peer_ip;
+    }
+
+    headers
+        .get("x-forwarded-for")
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.split(',').next())
+        .and_then(|value| value.trim().parse().ok())
+        .unwrap_or(peer_ip)
+}
+
+fn enforce_lobby_rate_limit(state: &AppState, ip: std::net::IpAddr) -> WebResult<()> {
+    let now = Instant::now();
+    let mut creations = state
+        .draft_lobby_creations
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    // ponytail: Prozesslokal reicht bei einem Prozess; bei mehreren Instanzen neu denken.
+    let per_ip = creations.entry(ip).or_default();
+    per_ip.retain(|created| now.duration_since(*created) < Duration::from_secs(60 * 60));
+    if per_ip.len() >= 10 {
+        return Err(WebError::new(
+            StatusCode::TOO_MANY_REQUESTS,
+            "Du kannst höchstens 10 Draft-Lobbys pro Stunde erstellen.",
+        ));
+    }
+    per_ip.push(now);
+    Ok(())
 }
 
 /// `POST /api/draft/matches/{match_id}/start` — Draft für ein Bracket-Match starten.

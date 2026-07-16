@@ -7,6 +7,8 @@ import Admin from '@/pages/Admin'
 import Hilfe from '@/pages/Hilfe'
 import Leaderboard from '@/pages/Leaderboard'
 import PlayerProfile from '@/pages/PlayerProfile'
+import DraftLobbyNeu from '@/pages/DraftLobbyNeu'
+import DraftBoard from '@/pages/DraftBoard'
 import ProtectedRoute from '@/components/auth/ProtectedRoute'
 
 export default function App() {
@@ -14,6 +16,11 @@ export default function App() {
     <Routes>
       <Route element={<Layout />}>
         <Route index element={<Home />} />
+        {/* Vor der :id-Route: sonst liest der Router "draft" als Turnier-ID und
+            zeigt eine leere Arena. React Router rankt statische Segmente zwar
+            hoeher, aber die Reihenfolge hier macht es fuer den Leser eindeutig. */}
+        <Route path="draft" element={<DraftLobbyNeu />} />
+        <Route path="draft/:code" element={<DraftBoard />} />
         <Route path=":id" element={<Tournament />} />
         <Route path="hilfe" element={<Hilfe />} />
         <Route path="login" element={<Login />} />

@@ -7,7 +7,7 @@
 
 use serde::Serialize;
 
-use crate::sequence::ActionType;
+use crate::sequence::{ActionType, SequenceStep};
 
 /// Eine einzelne Aktionszeile (`draft_actions`), so wie das Python-`dict(action)`.
 #[derive(Debug, Clone, Serialize, sqlx::FromRow)]
@@ -24,13 +24,25 @@ pub struct DraftAction {
     pub taken_by: Option<String>,
     pub taken_at: Option<String>,
     pub is_admin_forced: bool,
+    /// `true`, wenn der Timer diese Position automatisch aufgelöst hat.
+    pub is_auto: bool,
 }
 
 /// Die Session-Stammzeile (`draft_sessions`).
 #[derive(Debug, Clone, Serialize, sqlx::FromRow)]
 pub struct DraftSession {
     pub id: i64,
-    pub bracket_match_id: i64,
+    pub bracket_match_id: Option<i64>,
+    pub code: Option<String>,
+    pub team1_name: Option<String>,
+    pub team2_name: Option<String>,
+    /// Effektive Sequenz; bei Bestandszeilen aus [`crate::DEFAULT_SEQUENCE`].
+    pub sequence: Vec<SequenceStep>,
+    pub round_seconds: Option<i32>,
+    pub reserve_seconds: Option<i32>,
+    pub team1_reserve_left: Option<i32>,
+    pub team2_reserve_left: Option<i32>,
+    pub deadline_at: Option<String>,
     pub status: String,
     pub current_action_index: i64,
     pub started_by: Option<String>,

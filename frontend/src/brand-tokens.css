@@ -1,0 +1,80 @@
+/*
+ * DDC-Marken-Tokens — Patch-Schwarz + Gold
+ * ─────────────────────────────────────────
+ * Uebernommen aus der SSOT: Website/dl-brand/tokens.css.
+ * Aendert sich die Marke, aendert sie sich DORT zuerst — diese Datei ist eine
+ * Kopie, kein zweiter Ursprung. (Cross-Repo-@import wuerde den Vite-Build
+ * brechen, deshalb Kopie.)
+ *
+ * Der Grund ist neutrales Patch-Schwarz (#0b0b0b), NICHT das warme Braun der
+ * aelteren Dashboard-Tokens (#140D0A/#1F1815). Das Braun war der Vorgaenger-
+ * stand; die Marke ist bereits auf Schwarz umgestellt (siehe den Kommentarkopf
+ * von Deadlock-Twitch-Bot/website/src/theme-v2.css: "warm-braun -> neutral-
+ * schwarz"). Der Look ist flach: kein Holz, kein gebuerstetes Metall.
+ *
+ * Die Token-NAMEN bleiben die des Turnier-Frontends (primary/card/border/...),
+ * damit alle bestehenden Utility-Klassen weiter aufloesen und keine Komponente
+ * angefasst werden muss.
+ */
+
+:root {
+  /* ── Flaechen: Patch-Schwarz ── */
+  --color-bg:          #0b0b0b;   /* Grund */
+  --color-bg-soft:     #121211;
+  --color-bg-raised:   #1a1a18;
+  --color-card:        rgba(22, 22, 22, 0.9);
+  --color-card-hover:  #1a1a18;
+  --color-panel-solid: #161616;
+
+  /* ── Schrift: Bone ── */
+  --color-text:        #f2eee6;
+  --color-text-dim:    #b5aea2;
+  --color-muted:       #8d867a;
+
+  /* ── Chrome: Gold ── */
+  --color-primary:       #c8a86b;
+  --color-primary-hover: #efd49d;
+  --color-primary-soft:  rgba(201, 168, 106, 0.14);
+  --color-primary-deep:  #806534;
+
+  /* Rahmen leicht goldig statt reinem Grau — sonst kippt alles Neutrale ins
+     Tote. Werte wie im Streamer-Schwarz-Theme. */
+  --color-border:        rgba(201, 168, 106, 0.16);
+  --color-border-hover:  rgba(201, 168, 106, 0.28);
+  --color-border-strong: rgba(201, 168, 106, 0.42);
+
+  /* ── Akzent: Teal ── */
+  --color-accent:       #55978f;
+  --color-accent-hover: #6fb3aa;
+  --color-accent-soft:  rgba(85, 151, 143, 0.16);
+
+  /* ── Status (NIE im Chrome) ── */
+  --color-success: #66b39b;
+  --color-danger:  #ad4932;
+  --color-warning: #dd6a4d;
+  --color-info:    #55978f;
+
+  --color-success-soft: rgba(102, 179, 155, 0.15);
+  --color-danger-soft:  rgba(173, 73, 50, 0.15);
+  --color-warning-soft: rgba(221, 106, 77, 0.15);
+
+  /* ── Tinte auf gefuellten Flaechen ──
+     Pro Flaeche gerechnet, nicht per Faustregel:
+       #0b0b0b auf Gold  #c8a86b -> 8.69:1  (Weiss waere 1.9:1)
+       #f2eee6 auf Rust  #ad4932 -> 4.81:1  (dunkle Tinte waere 3.5:1)
+     Gold ist hell, Rust ist dunkel — die Tinte dreht sich entsprechend um. */
+  --color-on-gold:   #0b0b0b;
+  --color-on-danger: #f2eee6;
+
+  /* ── Typo ── */
+  --font-sans:    "Manrope", system-ui, -apple-system, sans-serif;
+  --font-display: "Sora", "Manrope", system-ui, sans-serif;
+  --font-mono:    ui-monospace, "SF Mono", Menlo, monospace;
+  --tracking-snug: -0.01em;
+
+  /* ── Grund-Verlauf: flach, neutral, kein Braun ── */
+  --gradient-bg: linear-gradient(180deg, #0f0f0e 0%, #0b0b0b 55%, #101010 100%);
+
+  --shadow-card:      0 26px 70px rgba(0, 0, 0, 0.62), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  --shadow-card-soft: 0 16px 45px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.035);
+}

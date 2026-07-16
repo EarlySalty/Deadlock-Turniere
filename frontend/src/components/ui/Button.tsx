@@ -9,11 +9,13 @@ interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   children: ReactNode
 }
 
+// Gold ist ein HELLER Akzent: auf der gefuellten Flaeche steht dunkle Tinte
+// (--color-on-gold, ~8.9:1), nie Weiss (~1.8:1 und keinem Build aufgefallen).
 const variantStyles: Record<ButtonVariant, string> = {
-  primary: 'bg-primary hover:bg-primary-hover text-black shadow-[var(--glow-primary)]',
-  secondary: 'bg-white/5 hover:bg-white/10 text-foreground border border-white/10 backdrop-blur-sm',
-  danger: 'bg-danger/80 hover:bg-danger text-white',
-  ghost: 'bg-transparent hover:bg-white/5 text-foreground',
+  primary: 'bg-primary hover:bg-primary-hover text-on-gold shadow-[var(--glow-primary)]',
+  secondary: 'bg-card hover:bg-card-hover text-foreground border border-border hover:border-border-hover',
+  danger: 'bg-danger hover:brightness-110 text-on-danger',
+  ghost: 'bg-transparent hover:bg-card-hover text-foreground',
   outline: 'bg-transparent border border-primary/50 text-primary hover:bg-primary/10',
 }
 

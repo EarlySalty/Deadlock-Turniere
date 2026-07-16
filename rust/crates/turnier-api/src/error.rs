@@ -149,6 +149,9 @@ impl From<turnier_draft::DraftError> for WebError {
         use turnier_draft::DraftError::*;
         match err {
             SessionNotFound => Self::not_found("Draft-Session nicht gefunden"),
+            LobbyNotFound => Self::not_found("Diesen Draft-Code gibt es nicht"),
+            InvalidToken => Self::unauthorized("Du bist in diesem Draft kein Captain"),
+            NotYourTurn => Self::forbidden("Das andere Team ist am Zug"),
             UnknownHero(msg) => Self::bad_request(msg),
             SessionNotActive => Self::bad_request("Draft ist nicht aktiv"),
             HeroAlreadyTaken(msg) => Self::bad_request(msg),
@@ -205,5 +208,22 @@ impl From<turnier_steam::SteamError> for WebError {
     fn from(err: turnier_steam::SteamError) -> Self {
         tracing::error!(error = %err, "Steam-/Rang-Fehler in Route");
         Self::internal("Rang-/Steam-Fehler")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use turnier_draft::DraftError;
+
+    #[test]
+    fn lobby_fehler_erhalten_passende_http_status() {
+        for (error, status) in [
+            (DraftError::LobbyNotFound, StatusCode::NOT_FOUND),
+            (DraftError::InvalidToken, StatusCode::UNAUTHORIZED),
+            (DraftError::NotYourTurn, StatusCode::FORBIDDEN),
+        ] {
+            assert_eq!(WebError::from(error).status, status);
+        }
     }
 }

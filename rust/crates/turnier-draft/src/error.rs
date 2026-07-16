@@ -26,6 +26,18 @@ pub enum DraftError {
     #[error("Draft-Session nicht gefunden oder bereits abgeschlossen")]
     SessionNotActive,
 
+    /// Lobby-Code existiert nicht.
+    #[error("Diesen Draft-Code gibt es nicht")]
+    LobbyNotFound,
+
+    /// Captain-Token gehört zu keinem Team dieser Lobby.
+    #[error("Du bist in diesem Draft kein Captain")]
+    InvalidToken,
+
+    /// Captain-Token ist gültig, aber das andere Team ist am Zug.
+    #[error("Das andere Team ist am Zug")]
+    NotYourTurn,
+
     /// Der Held wurde in dieser Session bereits gebannt oder gepickt (Original:
     /// `ValueError("{hero} wurde bereits gebannt oder gepickt")`). turnier-api → HTTP 400.
     #[error("{0} wurde bereits gebannt oder gepickt")]

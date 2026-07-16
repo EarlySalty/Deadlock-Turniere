@@ -15,6 +15,7 @@
 
 pub mod error;
 pub mod heroes;
+pub mod heroes_provider;
 pub mod sequence;
 pub mod state;
 
@@ -22,8 +23,13 @@ mod repo;
 
 pub use error::{DraftError, DraftResult};
 pub use heroes::{is_valid_hero, DEADLOCK_HEROES};
-pub use repo::{get_draft_state, start_draft, take_action};
+pub use heroes_provider::{load_heroes, Hero, HeroFetcher, HeroesProvider, ReqwestHeroFetcher};
+pub use repo::{
+    create_lobby, get_draft_state, get_state_by_code, start_draft, take_action, take_lobby_action,
+    CreateLobbyOptions, LobbyCredentials,
+};
 pub use sequence::{
-    is_complete, step_at, ActionType, SequenceStep, TeamSlot, DEFAULT_SEQUENCE, SEQUENCE_LEN,
+    is_complete, preset, step_at, ActionType, SequenceStep, TeamSlot, COMPETITIVE_1BAN,
+    DEFAULT_SEQUENCE, QUICK_NO_BAN, SEQUENCE_LEN,
 };
 pub use state::{ActionOutcome, DraftAction, DraftSession, DraftState};
