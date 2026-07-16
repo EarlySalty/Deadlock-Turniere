@@ -174,7 +174,7 @@ Ehrlicher Zwischenstand. `[x]` heisst: gebaut UND verifiziert. Alles andere ist 
       lassen, Backend mittendrin neu starten (muss der Draft ueberleben — das ist der
       ganze Grund fuer Polling statt WebSocket).
 - [x] `CHANGELOG.md` ergänzt und auf die echte Route `/turnier/draft` korrigiert.
-- [ ] Discord-Post nach erfolgreichem Live-Beweis.
+- [x] Discord-Post nach erfolgreichem Live-Beweis in `#dev-updates` veröffentlicht.
 
 ## TODO — Luecken, die ich kenne
 
