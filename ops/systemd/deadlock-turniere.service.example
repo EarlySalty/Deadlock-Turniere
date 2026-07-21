@@ -22,7 +22,7 @@ LoadCredential=JWT_SECRET:/etc/deadlock-turniere/secrets/jwt_secret
 # Environment=JWT_SECRET_FILE=/run/deadlock-turniere-secrets/JWT_SECRET
 # Environment=STEAM_BRIDGE_DB_PATH_FILE=/run/deadlock-turniere-secrets/STEAM_BRIDGE_DB_PATH
 
-ExecStart=/opt/deadlock-turniere/venv/bin/python -m uvicorn main:app --host 127.0.0.1 --port 8900
+ExecStart=/opt/deadlock-turniere/rust/target/release/turnier-bot
 Restart=on-failure
 RestartSec=5
 

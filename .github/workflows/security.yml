@@ -37,76 +37,6 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITLEAKS_ENABLE_SUMMARY: true
 
-  python-security:
-    name: "Python SAST + Dependency Audit"
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      security-events: write
-    steps:
-      - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-
-      - name: Set up Python
-        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
-        with:
-          python-version: "3.13"
-
-      - name: Install security tools
-        run: pip install bandit pip-audit
-
-      - name: Run Bandit
-        run: |
-          bandit -r backend -ll -ii -f json -o bandit-report.json || true
-          bandit -r backend -ll -ii -f sarif -o bandit.sarif || true
-
-      - name: Upload Bandit report
-        if: always() && hashFiles('bandit-report.json') != ''
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: bandit-report
-          path: bandit-report.json
-          if-no-files-found: ignore
-
-      - name: Upload Bandit SARIF
-        if: always() && hashFiles('bandit.sarif') != ''
-        uses: github/codeql-action/upload-sarif@95e58e9a2cdfd71adc6e0353d5c52f41a045d225 # v4
-        with:
-          sarif_file: bandit.sarif
-          category: bandit
-
-      - name: Run pip-audit
-        run: pip-audit --strict --desc -r backend/requirements.txt
-
-      - name: Check dependency pinning
-        run: |
-          if grep -Eq ">=|<=|~=|!=" backend/requirements.txt; then
-            echo "::error::backend/requirements.txt enthält unpinned dependencies. Bitte == verwenden."
-            grep -E ">=|<=|~=|!=" backend/requirements.txt
-            exit 1
-          fi
-          echo "Pinning OK: alle Abhängigkeiten auf == fixiert."
-
-      - name: License audit
-        continue-on-error: true
-        run: |
-          pip install pip-licenses
-          pip install -r backend/requirements.txt
-          pip-licenses --format=json --output-file=licenses.json
-          python3 - <<'PY'
-          import json, sys
-          with open('licenses.json') as f:
-              pkgs = json.load(f)
-          blocklist = ['GPL-2.0', 'GPL-2.0-only', 'GPL-3.0', 'GPL-3.0-only', 'AGPL-3.0', 'AGPL-3.0-only']
-          bad = [p for p in pkgs if any(b in (p.get('License') or '') for b in blocklist)]
-          if bad:
-              print('Copyleft-Lizenzen gefunden:')
-              for p in bad:
-                  print(f"  {p['Name']} {p['Version']}: {p['License']}")
-              sys.exit(1)
-          print(f'Lizenz-Audit OK: {len(pkgs)} Pakete geprüft, keine Copyleft-Lizenzen.')
-          PY
-
   javascript-security:
     name: "JavaScript Dependency Audit"
     runs-on: ubuntu-latest
@@ -143,7 +73,6 @@ jobs:
         run: |
           semgrep scan \
             --config p/default \
-            --config p/python \
             --exclude node_modules \
             --exclude .venv \
             --exclude venv \
@@ -167,16 +96,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        language: [python, javascript-typescript]
+        language: [javascript-typescript]
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-
-      - name: Set up Python
-        if: matrix.language == 'python'
-        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
-        with:
-          python-version: "3.13"
 
       - name: Set up Node.js
         if: matrix.language == 'javascript-typescript'
