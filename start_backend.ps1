@@ -1,9 +1,10 @@
-# Deadlock Turniere — Backend Server starten
+# Deadlock Turniere — Rust Backend starten
 $ErrorActionPreference = "Stop"
 
 $ProjectDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $BackendDir = Join-Path $ProjectDir "backend"
-$VenvDir = Join-Path $ProjectDir "venv"
+$RustDir = Join-Path $ProjectDir "rust"
+$Binary = Join-Path $RustDir "target\release\turnier-bot.exe"
 $DataDir = Join-Path $BackendDir "data"
 
 # Data-Verzeichnis erstellen falls nötig
@@ -12,15 +13,13 @@ if (-not (Test-Path $DataDir)) {
     Write-Host "Data-Verzeichnis erstellt: $DataDir"
 }
 
-# Venv erstellen falls nötig
-if (-not (Test-Path "$VenvDir\Scripts\activate.ps1")) {
-    Write-Host "Erstelle Python Virtual Environment..."
-    python -m venv $VenvDir
-    & "$VenvDir\Scripts\pip.exe" install -r "$BackendDir\requirements.txt"
-    Write-Host "Dependencies installiert."
+if (-not (Test-Path $Binary)) {
+    Write-Host "Baue Rust Backend..."
+    Set-Location $RustDir
+    cargo build --release -p turnier-bot
 }
 
 # Starten
 Write-Host "Starte Deadlock Turniere Backend auf Port 8900..."
 Set-Location $BackendDir
-& "$VenvDir\Scripts\python.exe" -m uvicorn main:app --host 127.0.0.1 --port 8900 --reload
+& $Binary

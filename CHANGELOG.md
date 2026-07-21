@@ -1,3 +1,7 @@
+## #16 — Python-Altstand liegt nur noch im Archiv
+
+**Ausgangslage:** Nach dem Rust-Cutover lag der alte Python-Stand weiter im Hauptrepo. Dadurch war nicht klar, was noch produktiv ist und was nur noch als Referenz dient. **Änderung:** Der alte Stand wurde im Backup festgehalten und aus dem laufenden Repo entfernt. Die Dienste laden ihre Geheimnisse jetzt über den Rust-Weg. **Aktuelles Verhalten:** Das Hauptrepo zeigt den aktuellen Rust-Betrieb, während der entfernte Altstand im Backup nachvollziehbar bleibt.
+
 ## #15 — Eigene Draft-Lobbys ohne Turnier
 
 **Ausgangslage:** Für einen Helden-Draft brauchte man bisher ein angelegtes Turnier und musste Picks, Bans und Zugzeiten außerhalb der Seite koordinieren. **Änderung:** Unter `/turnier/draft` lässt sich eine freie Lobby mit Teamnamen, Preset und optionalem Zugtimer erstellen; beide Captains bekommen getrennte Links, und der Stand bleibt in der Datenbank erhalten. **Aktuelles Verhalten:** Zwei Captains können denselben Draft in getrennten Browsern bis zum Ende spielen, beim Wettbewerbs-Preset mit zwei Bans je Team; abgelaufene Züge werden automatisch ausgeführt und ein Backend-Neustart verliert die Lobby nicht.

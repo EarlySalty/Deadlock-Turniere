@@ -8,6 +8,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CONFIG_FILE="${TURNIERE_CONFIG_FILE:-$HOME/.config/deadlock-turniere/turniere.env}"
 INFISICAL_CONFIG_FILE="${INFISICAL_CONFIG_FILE:-$HOME/.config/deadlock-bots/infisical.conf}"
+INFISICAL_LOADER="${INFISICAL_LOADER:-/home/naniadm/.local/bin/dl-infisical-env}"
 
 if [[ ! -f "$CONFIG_FILE" ]]; then
   echo "Missing Turniere config: $CONFIG_FILE" >&2
@@ -34,32 +35,16 @@ if [[ -z "${INFISICAL_SERVICE_TOKEN:-}" ]]; then
   exit 1
 fi
 
-# Python nur fuer den Infisical-Export-Helfer (kein Laufzeit-Python mehr danach).
-if [[ -x "$ROOT_DIR/.venv/bin/python" ]]; then
-  PYTHON_BIN="${PYTHON_BIN:-$ROOT_DIR/.venv/bin/python}"
-else
-  PYTHON_BIN="${PYTHON_BIN:-python3}"
-fi
-
-INFISICAL_RETRY_DELAY="${INFISICAL_RETRY_DELAY:-5}"
-INFISICAL_MAX_ATTEMPTS="${INFISICAL_MAX_ATTEMPTS:-0}"
-attempt=0
-
-while true; do
-  if INFISICAL_EXPORT="$("$PYTHON_BIN" /home/naniadm/Documents/Deadlock-Bots/scripts/export_infisical_env.py --format shell)"; then
-    eval "$INFISICAL_EXPORT"
-    break
-  fi
-
-  attempt=$((attempt + 1))
-  if [[ "$INFISICAL_MAX_ATTEMPTS" -gt 0 && "$attempt" -ge "$INFISICAL_MAX_ATTEMPTS" ]]; then
-    echo "Infisical secrets could not be loaded after $attempt attempt(s)." >&2
+if [[ "${DL_INFISICAL_READY:-0}" != "1" ]]; then
+  if [[ ! -x "$INFISICAL_LOADER" ]]; then
+    echo "Infisical loader nicht gefunden oder nicht ausführbar: $INFISICAL_LOADER" >&2
     exit 1
   fi
-
-  echo "Infisical not ready for Turniere Backend (Rust), retrying in ${INFISICAL_RETRY_DELAY}s (attempt $attempt)." >&2
-  sleep "$INFISICAL_RETRY_DELAY"
-done
+  export DL_INFISICAL_READY=1
+  exec "$INFISICAL_LOADER" --profile all -- "$0" "$@"
+fi
+unset DL_INFISICAL_READY
+unset INFISICAL_SERVICE_TOKEN
 
 export DISCORD_BOT_TOKEN="${DISCORD_BOT_TOKEN:-${DISCORD_TOKEN:-}}"
 
