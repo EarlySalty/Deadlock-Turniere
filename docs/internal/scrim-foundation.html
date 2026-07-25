@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Scrim foundation contract</title>
+</head>
+<body>
+  <main>
+    <h1>Scrim foundation contract</h1>
+    <p>Scrims remain a separate Turnier domain. Tournament matches and Scrim matches share only storage-independent result mappings; they do not share a lifecycle.</p>
+
+    <h2>Production read model</h2>
+    <p>The read adapter queries the existing <code>scrim.*</code> schema directly. It does not discover tables dynamically and does not return raw table dumps.</p>
+    <ul>
+      <li>Participants include the current status, source, availability and structured availability fields.</li>
+      <li>Teams include their current coach, Discord references, default time window and typed team members with rank, Discord ID, roles, availability, structured availability and notes.</li>
+      <li>Matches retain independent <code>status</code> and <code>lobby_state</code> fields, an optional second team and the canonical selected result from <code>scrim.selected_match_results</code>.</li>
+      <li>Match-request batches contain typed requests, structured slots and participant-level slot responses. The second team may be absent for an open opponent.</li>
+      <li>Lagebild snapshots expose typed metadata and evidence references, not a schema-wide JSON mirror.</li>
+      <li>All wire identifiers are serialized as strings. Database-backed integer identifiers must be positive decimal strings at the boundary.</li>
+      <li>Raw result, lobby and privacy JSON is not exposed by reads.</li>
+    </ul>
+
+    <h2>Match requests</h2>
+    <ul>
+      <li>A batch needs at least one pairing. Every pairing needs two to five valid weekly time windows, supplied either once for the batch or for that pairing.</li>
+      <li>A team may occur only once in a batch and may not already occur in another active request window.</li>
+      <li>Availability counts, starter counts, missing responses and replacement needs are derived from the current roster and participant responses.</li>
+      <li>The planning request must contain <code>deadline_at</code>. Recommendation and replacement facts remain hidden until the deadline has passed.</li>
+      <li>The legacy tie-break is preserved: most available participants, then most available starters, then the first original slot.</li>
+      <li>A released slot is selected before a calculated recommendation when replacement needs are derived.</li>
+      <li>Historical participant responses remain readable after roster changes; stale responses do not abort the complete read model.</li>
+      <li>Scrim history contains only non-cancelled matches with a canonical selected result. Finished lobby state, raw result JSON and unselected fetched refs do not make history.</li>
+    </ul>
+
+    <h2>Match core</h2>
+    <ul>
+      <li>Canonical result sides are <code>team0</code> and <code>team1</code>.</li>
+      <li>Bracket keeps its existing 0/1 convention; Group keeps its existing 1/2 convention and winner-ID precedence.</li>
+      <li>The shared crate defines result and finality mappings only. It does not define transitions or terminal statuses.</li>
+      <li>Existing same-team behavior is preserved; the shared mapper does not add a new duplicate-team guard.</li>
+    </ul>
+
+    <h2>Internal API</h2>
+    <p>All routes use the prefix <code>/internal/turnier/v1/scrims</code>, require a loopback peer and require the token from <code>TURNIER_INTERNAL_API_TOKEN</code>. BFF callers use <code>TURNIER_INTERNAL_API_BASE_URL</code> for the loopback origin.</p>
+    <h3>Reads</h3>
+    <ul>
+      <li><code>GET /command-center</code>, <code>/me</code>, <code>/pool</code>, <code>/coaches</code>, <code>/teams</code> and <code>/history</code>.</li>
+      <li><code>GET /teams/{id}/board</code> and <code>/teams/{id}/timeline</code>.</li>
+      <li><code>GET /match-requests/defaults</code>, <code>/match-request-batches</code>, <code>/match-request-batches/{id}</code>, <code>/match-requests/{id}</code>, <code>/match-requests/{id}/status-preview</code> and <code>/match-requests/{id}/replacement-needs</code>.</li>
+      <li><code>GET /replacement-needs/{id}/candidates</code>.</li>
+      <li><code>GET /matches</code> and <code>/matches/{id}</code>.</li>
+      <li><code>GET /blocks/{id}/announcement-preview</code> and <code>/actions/{id}</code>.</li>
+    </ul>
+    <h3>Mutations</h3>
+    <ul>
+      <li><code>PUT /me/availability</code>; <code>POST /signup</code> and <code>/teams</code>; <code>PATCH /teams/{id}</code> and <code>/participants/{id}</code>.</li>
+      <li><code>POST /teams/{id}/announce</code>, <code>/teams/{id}/suggest</code>, <code>/teams/{id}/substitute</code> and <code>/participants/{id}/resync-discord</code>.</li>
+      <li><code>POST /match-request-batches</code>, <code>/match-requests/{id}/release</code>, <code>/match-requests/{id}/reminders</code> and <code>/match-requests/{id}/status-publications</code>.</li>
+      <li><code>POST /replacement-needs/{id}/requests</code> and <code>PATCH /replacement-requests/{id}</code>.</li>
+      <li><code>POST /matches</code>, <code>PUT /matches/{id}/lobby-code</code>, <code>POST /matches/{id}/match-ids</code>, <code>POST /matches/{id}/result-fetches</code> and <code>PATCH /matches/{id}/result-refs/{ref_id}</code>.</li>
+      <li><code>POST /blocks/{id}/announcement-publications</code>.</li>
+      <li><code>POST /interactions/match-request-response</code> is the canonical DL-Bots relay boundary using schema <code>turnier-scrim-match-request-response:v1</code>.</li>
+    </ul>
+    <p>The BFF planning body is strict and typed: <code>{technical_template_key?,deadline_at,slots?:[{day,from_minute,to_minute}],pairings:[{team_a_id,team_b_id,slots?}]}</code>. Pairing IDs are strings, <code>team_b_id</code> may be <code>null</code> for open opponents, omitted <code>technical_template_key</code> uses the default technical template, and each effective slot list must contain two to five valid minute windows; per-pairing <code>slots</code> override the global list.</p>
+    <p>Every mutation requires <code>X-Request-Id</code> and a persistent <code>Idempotency-Key</code>; both must satisfy the same domain-ref format as <code>scrim.is_domain_ref</code>. BFF actor identity is accepted only through <code>X-Actor-Discord-Id</code> and <code>X-Actor-Display-Name</code>. Management actions require an active coach; there is no admin/mod fallback. Participant interactions require the actor's own Discord identity and team membership.</p>
+    <p>The DL interaction body uses schema <code>turnier-scrim-match-request-response:v1</code> with fields <code>schema_version</code>, <code>event</code>, <code>idempotency</code>, <code>action</code>, <code>request</code>, <code>team</code>, <code>slot</code>, <code>interaction</code>, <code>guild</code>, <code>channel</code>, <code>message</code>, <code>actor</code> and <code>actor_role_ids</code>. The request must still be open and the channel/message pair must match the original team query.</p>
+
+    <h2>Runtime control</h2>
+    <p>Reads are allowed after loopback/token and actor authorization. Mutations acquire the runtime advisory transaction lock, then read <code>scrim.runtime_control</code> from the central database; only <code>operational_writer=turniere</code> with mode <code>draining</code> or <code>turniere</code> may mutate. Otherwise the API returns HTTP 409.</p>
+    <p>Planning batch create, participant match-request response and match-request release persist transactionally in Postgres, record <code>scrim.command_receipts</code> for idempotent replay and write pseudonymous <code>scrim.audit_events</code>. Other capabilities return HTTP 501 with <code>{available:false, verified:false, message}</code> without deserializing or validating the unused body. There is no SQLite path and no dual-write.</p>
+  </main>
+</body>
+</html>

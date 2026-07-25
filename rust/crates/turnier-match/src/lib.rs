@@ -29,6 +29,7 @@
 //! (siehe Modul-Dokus + `bugs_preserved`).
 
 pub mod auto_lobby;
+pub mod core_adapter;
 pub mod error;
 pub mod kind;
 pub mod lobby;

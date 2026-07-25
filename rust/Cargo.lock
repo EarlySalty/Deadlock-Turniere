@@ -2201,6 +2201,7 @@ dependencies = [
  "turnier-engine",
  "turnier-match",
  "turnier-scheduler",
+ "turnier-scrim",
  "turnier-steam",
 ]
 
@@ -2354,6 +2355,15 @@ dependencies = [
  "turnier-discord",
  "turnier-draft",
  "turnier-engine",
+ "turnier-match-core",
+]
+
+[[package]]
+name = "turnier-match-core"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "thiserror",
 ]
 
 [[package]]
@@ -2373,6 +2383,21 @@ dependencies = [
  "turnier-discord",
  "turnier-engine",
  "turnier-match",
+]
+
+[[package]]
+name = "turnier-scrim"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "serde",
+ "serde_json",
+ "sha2",
+ "sqlx",
+ "thiserror",
+ "tokio",
+ "turnier-db",
 ]
 
 [[package]]

@@ -58,6 +58,9 @@ pub struct Config {
     // --- Benachrichtigungen ---
     pub discord_webhook_url: String,
 
+    // --- Scrim cutover ---
+    pub turnier_internal_api_token: String,
+
     // --- Routine-Turniere (sicherer Default: aus) ---
     pub routine_tournaments_enabled: bool,
     pub routine_proposal_channel_id: i64,
@@ -166,6 +169,7 @@ impl Config {
                 "https://deutsche-deadlock-community.de/turnier",
             ),
             discord_webhook_url: get_string("DISCORD_WEBHOOK_URL", ""),
+            turnier_internal_api_token: get_string("TURNIER_INTERNAL_API_TOKEN", ""),
             routine_tournaments_enabled: get_bool("ROUTINE_TOURNAMENTS_ENABLED", false),
             routine_proposal_channel_id: get_int(
                 "ROUTINE_PROPOSAL_CHANNEL_ID",

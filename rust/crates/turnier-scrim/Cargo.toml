@@ -1,0 +1,27 @@
+[package]
+name = "turnier-scrim"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+turnier-db = { path = "../turnier-db" }
+
+async-trait.workspace = true
+chrono.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2 = "0.10"
+sqlx.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+tokio.workspace = true
+
+[lints]
+workspace = true
+
+[features]
+default = []
+testing = ["turnier-db/testing"]

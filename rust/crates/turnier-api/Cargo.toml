@@ -20,6 +20,7 @@ turnier-match = { path = "../turnier-match" }
 turnier-draft = { path = "../turnier-draft" }
 turnier-scheduler = { path = "../turnier-scheduler" }
 turnier-automatik = { path = "../turnier-automatik" }
+turnier-scrim = { path = "../turnier-scrim" }
 
 sqlx.workspace = true
 axum.workspace = true
