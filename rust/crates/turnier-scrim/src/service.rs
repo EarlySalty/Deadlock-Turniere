@@ -1,15 +1,22 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 
 use chrono::{DateTime, Utc};
 use serde::Serialize;
 
 use crate::decision::{is_scrim_history_entry, validate_match_request_batch};
-use crate::dto::{SelfServiceParticipant, SignupRequest, WeeklyAvailability};
-use crate::model::{
-    AvailabilitySlot, AvailabilityStatus, MatchRequestBatchInput, ScrimMatch, ScrimReadModel,
-    ValidatedMatchRequestBatch,
+use crate::dto::{
+    CreateTeamRequest, ParticipantPatchRequest, PatchValue, RosterSuggestResponse,
+    RosterSuggestionCandidate, SelfServiceParticipant, SignupRequest, SuggestTeamRequest,
+    TeamPatchRequest, WeeklyAvailability,
 };
-use crate::repository::{PgScrimReadRepository, ScrimReadRepository, SignupMutation};
+use crate::model::{
+    AvailabilitySlot, AvailabilityStatus, MatchRequestBatchInput, ScrimDay, ScrimMatch,
+    ScrimReadModel, ScrimSlot, ValidatedMatchRequestBatch,
+};
+use crate::repository::{
+    DiscordRoleSyncPlan, ParticipantMutation, PgScrimReadRepository, RosterPoolCandidate,
+    ScrimReadRepository, SignupMutation, SubstituteMutation, TeamMutation,
+};
 use crate::{ScrimError, ScrimResult};
 
 pub struct ScrimService<R> {
@@ -83,6 +90,120 @@ impl<R: ScrimReadRepository> ScrimService<R> {
 }
 
 impl ScrimService<PgScrimReadRepository> {
+    pub async fn roster_team(&self, team_id: i32) -> ScrimResult<crate::dto::RosterTeam> {
+        self.repository.roster_team(team_id).await
+    }
+
+    pub async fn create_team(
+        &self,
+        idempotency_key: &str,
+        request: CreateTeamRequest,
+    ) -> ScrimResult<crate::dto::RosterTeam> {
+        validate_team_name(&request.name)?;
+        validate_team_window(request.default_from, request.default_to)?;
+        self.repository.create_team(idempotency_key, &request).await
+    }
+
+    pub async fn finish_team_creation(
+        &self,
+        team_id: i32,
+        discord_role_id: Option<i64>,
+    ) -> ScrimResult<TeamMutation> {
+        self.repository
+            .set_team_discord_role(team_id, discord_role_id)
+            .await
+    }
+
+    pub async fn patch_team(
+        &self,
+        team_id: i32,
+        request: TeamPatchRequest,
+    ) -> ScrimResult<TeamMutation> {
+        if let PatchValue::Value(name) = &request.name {
+            validate_team_name(name)?;
+        }
+        self.repository.patch_team(team_id, request).await
+    }
+
+    pub async fn patch_participant(
+        &self,
+        participant_id: i32,
+        request: ParticipantPatchRequest,
+        reserve_role_id: Option<u64>,
+        signup_role_id: Option<u64>,
+    ) -> ScrimResult<ParticipantMutation> {
+        self.repository
+            .patch_participant(participant_id, request, reserve_role_id, signup_role_id)
+            .await
+    }
+
+    pub async fn substitute(
+        &self,
+        idempotency_key: &str,
+        team_id: i32,
+        participant_id: i32,
+        window: ScrimSlot,
+        reserve_role_id: Option<u64>,
+        signup_role_id: Option<u64>,
+    ) -> ScrimResult<SubstituteMutation> {
+        validate_scrim_window(&window)?;
+        let payload = serde_json::json!({
+            "team_id": team_id,
+            "participant_id": participant_id,
+            "window": window,
+        });
+        self.repository
+            .substitute(
+                idempotency_key,
+                &payload,
+                team_id,
+                participant_id,
+                reserve_role_id,
+                signup_role_id,
+            )
+            .await
+    }
+
+    pub async fn participant_resync_plan(
+        &self,
+        participant_id: i32,
+        reserve_role_id: Option<u64>,
+        signup_role_id: Option<u64>,
+    ) -> ScrimResult<DiscordRoleSyncPlan> {
+        self.repository
+            .participant_resync_plan(participant_id, reserve_role_id, signup_role_id)
+            .await
+    }
+
+    pub async fn suggest_roster(
+        &self,
+        team_id: i32,
+        request: SuggestTeamRequest,
+    ) -> ScrimResult<RosterSuggestResponse> {
+        if let Some(window) = &request.window {
+            validate_scrim_window(window)?;
+        }
+        let reserve = match request.pool.as_deref().unwrap_or("players") {
+            "players" => false,
+            "reserve" => true,
+            _ => return Err(ScrimError::InvalidProposal("Platzhalter".to_string())),
+        };
+        let requested_size = request.size.unwrap_or(6);
+        let (team, pool) = self
+            .repository
+            .roster_suggestion_pool(team_id, reserve)
+            .await?;
+        let (fit_count, best_window, candidates) =
+            build_roster_suggestion(&pool, request.window, requested_size);
+        Ok(RosterSuggestResponse {
+            team,
+            requested_size,
+            fit_count,
+            best_window,
+            candidates,
+        })
+    }
+
     pub async fn signup(
         &self,
         discord_id: &str,
@@ -119,6 +240,199 @@ impl ScrimService<PgScrimReadRepository> {
         self.repository
             .update_availability(discord_id, &availability, &legacy_availability)
             .await
+    }
+}
+
+fn validate_team_name(name: &str) -> ScrimResult<()> {
+    if name.trim().is_empty() {
+        Err(ScrimError::InvalidProposal("Platzhalter".to_string()))
+    } else {
+        Ok(())
+    }
+}
+
+pub(crate) fn validate_team_window(from: Option<i32>, to: Option<i32>) -> ScrimResult<()> {
+    match (from, to) {
+        (None, None) => Ok(()),
+        (Some(from), Some(to)) if 0 <= from && from < to && to <= 1_440 => Ok(()),
+        _ => Err(ScrimError::InvalidProposal("Platzhalter".to_string())),
+    }
+}
+
+fn validate_scrim_window(window: &ScrimSlot) -> ScrimResult<()> {
+    if window.from < window.to && window.to <= 1_440 {
+        Ok(())
+    } else {
+        Err(ScrimError::InvalidProposal("Platzhalter".to_string()))
+    }
+}
+
+fn build_roster_suggestion(
+    pool: &[RosterPoolCandidate],
+    requested_window: Option<ScrimSlot>,
+    requested_size: u32,
+) -> (u32, Option<ScrimSlot>, Vec<RosterSuggestionCandidate>) {
+    let pool = dedupe_roster_pool(pool);
+    let window = requested_window.or_else(|| best_pool_window(&pool));
+    let mut candidates = pool
+        .iter()
+        .map(|candidate| {
+            let fit_minutes = window
+                .as_ref()
+                .map(|window| fit_minutes(&candidate.availability_slots, window))
+                .unwrap_or(0);
+            let fit_ratio = window
+                .as_ref()
+                .map(|window| u32::from(window.to - window.from))
+                .filter(|minutes| *minutes > 0)
+                .map(|minutes| f64::from(fit_minutes) / f64::from(minutes))
+                .unwrap_or(0.0);
+            RosterSuggestionCandidate {
+                participant_id: candidate.participant_id,
+                display_name: candidate.display_name.clone(),
+                rank: candidate.rank.clone(),
+                roles: candidate.roles.clone(),
+                availability: candidate.availability.clone(),
+                availability_slots: candidate.availability_slots.clone(),
+                availability_confirmed: candidate.availability_confirmed,
+                status: candidate.status.clone(),
+                source: candidate.source.clone(),
+                fit_minutes,
+                fit_ratio,
+            }
+        })
+        .collect::<Vec<_>>();
+    candidates.sort_by(|left, right| {
+        right
+            .fit_minutes
+            .cmp(&left.fit_minutes)
+            .then_with(|| {
+                right
+                    .availability_confirmed
+                    .cmp(&left.availability_confirmed)
+            })
+            .then_with(|| left.display_name.cmp(&right.display_name))
+            .then_with(|| left.participant_id.cmp(&right.participant_id))
+    });
+    candidates.truncate(usize::try_from(requested_size).unwrap_or(usize::MAX));
+    let fit_count = u32::try_from(
+        candidates
+            .iter()
+            .filter(|candidate| candidate.fit_minutes > 0)
+            .count(),
+    )
+    .unwrap_or(u32::MAX);
+    let best_window = window.and_then(|window| common_window(window, &candidates));
+    (fit_count, best_window, candidates)
+}
+
+fn dedupe_roster_pool(pool: &[RosterPoolCandidate]) -> Vec<RosterPoolCandidate> {
+    let mut selected = Vec::<RosterPoolCandidate>::new();
+    let mut by_discord_id = HashMap::<i64, usize>::new();
+    for candidate in pool {
+        let Some(discord_id) = candidate.discord_id else {
+            selected.push(candidate.clone());
+            continue;
+        };
+        if let Some(index) = by_discord_id.get(&discord_id).copied() {
+            if candidate.availability_confirmed && !selected[index].availability_confirmed {
+                selected[index] = candidate.clone();
+            }
+        } else {
+            by_discord_id.insert(discord_id, selected.len());
+            selected.push(candidate.clone());
+        }
+    }
+    selected
+}
+
+fn best_pool_window(pool: &[RosterPoolCandidate]) -> Option<ScrimSlot> {
+    let mut best: Option<(ScrimSlot, u32, u32)> = None;
+    for candidate in pool {
+        for day in [
+            ScrimDay::Monday,
+            ScrimDay::Tuesday,
+            ScrimDay::Wednesday,
+            ScrimDay::Thursday,
+            ScrimDay::Friday,
+            ScrimDay::Saturday,
+            ScrimDay::Sunday,
+        ] {
+            let slot = availability_slot(&candidate.availability_slots, day);
+            let Some(window) = slot_window(day, slot) else {
+                continue;
+            };
+            let fits = pool
+                .iter()
+                .map(|other| fit_minutes(&other.availability_slots, &window))
+                .collect::<Vec<_>>();
+            let count =
+                u32::try_from(fits.iter().filter(|fit| **fit > 0).count()).unwrap_or(u32::MAX);
+            let total = fits.into_iter().sum::<u32>();
+            if best.as_ref().is_none_or(|(_, best_count, best_total)| {
+                count > *best_count || (count == *best_count && total > *best_total)
+            }) {
+                best = Some((window, count, total));
+            }
+        }
+    }
+    best.map(|(window, _, _)| window)
+}
+
+fn common_window(
+    requested: ScrimSlot,
+    candidates: &[RosterSuggestionCandidate],
+) -> Option<ScrimSlot> {
+    let mut from = requested.from;
+    let mut to = requested.to;
+    let mut found = false;
+    for candidate in candidates
+        .iter()
+        .filter(|candidate| candidate.fit_minutes > 0)
+    {
+        let slot = availability_slot(&candidate.availability_slots, requested.day);
+        from = from.max(slot.from.unwrap_or(requested.from));
+        to = to.min(slot.to.unwrap_or(requested.to));
+        found = true;
+    }
+    (found && from < to).then_some(ScrimSlot {
+        day: requested.day,
+        from,
+        to,
+    })
+}
+
+fn fit_minutes(availability: &WeeklyAvailability, window: &ScrimSlot) -> u32 {
+    let slot = availability_slot(availability, window.day);
+    if slot.status != AvailabilityStatus::Available {
+        return 0;
+    }
+    let from = window.from.max(slot.from.unwrap_or(window.from));
+    let to = window.to.min(slot.to.unwrap_or(window.to));
+    u32::from(to.saturating_sub(from))
+}
+
+fn slot_window(day: ScrimDay, slot: &AvailabilitySlot) -> Option<ScrimSlot> {
+    if slot.status != AvailabilityStatus::Available {
+        return None;
+    }
+    let window = ScrimSlot {
+        day,
+        from: slot.from.unwrap_or(0),
+        to: slot.to.unwrap_or(1_440),
+    };
+    (window.from < window.to && window.to <= 1_440).then_some(window)
+}
+
+fn availability_slot(availability: &WeeklyAvailability, day: ScrimDay) -> &AvailabilitySlot {
+    match day {
+        ScrimDay::Monday => &availability.mon,
+        ScrimDay::Tuesday => &availability.tue,
+        ScrimDay::Wednesday => &availability.wed,
+        ScrimDay::Thursday => &availability.thu,
+        ScrimDay::Friday => &availability.fri,
+        ScrimDay::Saturday => &availability.sat,
+        ScrimDay::Sunday => &availability.sun,
     }
 }
 

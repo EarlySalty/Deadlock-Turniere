@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
-use serde::Serialize;
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use sqlx::{Postgres, Row, Transaction};
@@ -11,8 +11,10 @@ use turnier_db::Pool;
 
 use crate::decision::derive_match_request_facts;
 use crate::dto::{
-    ActionReceipt, MatchRequestAction, MatchRequestResponseRequest, ReleaseMatchRequest,
-    SelfServiceParticipant, SignupRequest, WeeklyAvailability as SelfServiceAvailability,
+    ActionReceipt, CreateTeamRequest, MatchRequestAction, MatchRequestResponseRequest,
+    ParticipantPatchRequest, PatchValue, ReleaseMatchRequest, RosterParticipant, RosterTeam,
+    SelfServiceParticipant, SignupRequest, TeamPatchRequest,
+    WeeklyAvailability as SelfServiceAvailability,
 };
 use crate::model::{
     AvailabilitySlot, AvailabilityStatus, Coach, LagebildEvidenceRef, LagebildSnapshotRef,
@@ -53,6 +55,59 @@ pub struct SignupMutation {
     pub role_ids: BTreeSet<u64>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum RoleOperation {
+    Add,
+    Remove,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DiscordRoleAction {
+    pub operation: RoleOperation,
+    pub role_id: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DiscordRoleSyncPlan {
+    pub subject: String,
+    pub discord_user_id: Option<u64>,
+    pub actions: Vec<DiscordRoleAction>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TeamMutation {
+    pub team: RosterTeam,
+    pub sync_plans: Vec<DiscordRoleSyncPlan>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ParticipantMutation {
+    pub participant: RosterParticipant,
+    pub sync_plan: DiscordRoleSyncPlan,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SubstituteMutation {
+    pub participant: RosterParticipant,
+    pub sync_plan: DiscordRoleSyncPlan,
+    pub discord_user_id: Option<u64>,
+    pub team_name: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RosterPoolCandidate {
+    pub participant_id: i32,
+    pub discord_id: Option<i64>,
+    pub display_name: String,
+    pub rank: Option<String>,
+    pub roles: Option<String>,
+    pub availability: Option<String>,
+    pub availability_slots: SelfServiceAvailability,
+    pub availability_confirmed: bool,
+    pub status: String,
+    pub source: String,
+}
+
 impl PgScrimReadRepository {
     pub fn new(pool: Pool) -> Self {
         Self { pool }
@@ -60,6 +115,11 @@ impl PgScrimReadRepository {
 
     pub async fn runtime_control(&self) -> ScrimResult<RuntimeControl> {
         load_runtime_control(&self.pool).await
+    }
+
+    pub async fn roster_team(&self, team_id: i32) -> ScrimResult<RosterTeam> {
+        let mut tx = self.pool.begin().await?;
+        load_roster_team(&mut tx, team_id).await
     }
 
     pub async fn signup(
@@ -234,6 +294,384 @@ impl PgScrimReadRepository {
         let participant = load_self_service_participant(&mut tx, participant_id).await?;
         tx.commit().await?;
         Ok(participant)
+    }
+
+    pub async fn create_team(
+        &self,
+        idempotency_key: &str,
+        request: &CreateTeamRequest,
+    ) -> ScrimResult<RosterTeam> {
+        let coach_discord_id = request
+            .coach_discord_id
+            .as_deref()
+            .map(parse_positive_i64)
+            .transpose()?;
+        let mut tx = self.pool.begin().await?;
+        sqlx::query("SELECT pg_advisory_xact_lock($1)")
+            .bind(SELF_SERVICE_ADVISORY_LOCK)
+            .execute(&mut *tx)
+            .await?;
+        let payload = serde_json::to_value(request).map_err(|error| {
+            ScrimError::InvalidStoredData(format!("team serialization failed: {error}"))
+        })?;
+        let receipt_id =
+            match begin_command(&mut tx, "roster_team_create", idempotency_key, &payload).await? {
+                CommandStart::New(id) => id,
+                CommandStart::Replay(team) => {
+                    tx.commit().await?;
+                    return Ok(team);
+                }
+            };
+        let coach = resolve_coach(
+            &mut tx,
+            coach_discord_id,
+            request.coach.as_deref().and_then(trimmed_nonempty),
+        )
+        .await?;
+        let id: i32 =
+            sqlx::query_scalar("SELECT (COALESCE(MAX(id), 0) + 1)::int4 FROM scrim.teams")
+                .fetch_one(&mut *tx)
+                .await?;
+        sqlx::query(
+            "INSERT INTO scrim.teams(\
+                 id, name, coach, coach_discord_id, default_from, default_to, created_at\
+             ) VALUES($1, $2, $3, $4, $5, $6, now())",
+        )
+        .bind(id)
+        .bind(request.name.trim())
+        .bind(coach)
+        .bind(coach_discord_id)
+        .bind(request.default_from)
+        .bind(request.default_to)
+        .execute(&mut *tx)
+        .await?;
+        let team = load_roster_team(&mut tx, id).await?;
+        complete_command(&mut tx, receipt_id, &team).await?;
+        tx.commit().await?;
+        Ok(team)
+    }
+
+    pub async fn set_team_discord_role(
+        &self,
+        team_id: i32,
+        discord_role_id: Option<i64>,
+    ) -> ScrimResult<TeamMutation> {
+        let mut tx = self.pool.begin().await?;
+        sqlx::query("SELECT pg_advisory_xact_lock($1)")
+            .bind(SELF_SERVICE_ADVISORY_LOCK)
+            .execute(&mut *tx)
+            .await?;
+        let team = load_roster_team(&mut tx, team_id).await?;
+        let coach_discord_id = team
+            .coach_discord_id
+            .as_deref()
+            .map(parse_positive_i64)
+            .transpose()?;
+        let before = match coach_discord_id {
+            Some(id) => vec![coach_role_snapshot(&mut tx, id).await?],
+            None => Vec::new(),
+        };
+        sqlx::query("UPDATE scrim.teams SET discord_role_id=$2 WHERE id=$1")
+            .bind(team_id)
+            .bind(discord_role_id)
+            .execute(&mut *tx)
+            .await?;
+        let team = load_roster_team(&mut tx, team_id).await?;
+        let sync_plans = coach_sync_plans(&mut tx, before).await?;
+        tx.commit().await?;
+        Ok(TeamMutation { team, sync_plans })
+    }
+
+    pub async fn patch_team(
+        &self,
+        team_id: i32,
+        request: TeamPatchRequest,
+    ) -> ScrimResult<TeamMutation> {
+        let mut tx = self.pool.begin().await?;
+        sqlx::query("SELECT pg_advisory_xact_lock($1)")
+            .bind(SELF_SERVICE_ADVISORY_LOCK)
+            .execute(&mut *tx)
+            .await?;
+        let team = load_roster_team(&mut tx, team_id).await?;
+        let old_coach_id = team
+            .coach_discord_id
+            .as_deref()
+            .map(parse_positive_i64)
+            .transpose()?;
+        let requested_coach_id = match &request.coach_discord_id {
+            PatchValue::Omitted => None,
+            PatchValue::Null => Some(None),
+            PatchValue::Value(value) => Some(Some(parse_positive_i64(value)?)),
+        };
+        let coach_id = requested_coach_id.unwrap_or(old_coach_id);
+        let coach = match (requested_coach_id, request.coach) {
+            (Some(Some(coach_id)), _) => resolve_coach(&mut tx, Some(coach_id), None).await?,
+            (Some(None), _) => team.coach.clone(),
+            (None, PatchValue::Value(value)) => trimmed_nonempty(&value).map(str::to_string),
+            (None, PatchValue::Null) => None,
+            (None, PatchValue::Omitted) => team.coach.clone(),
+        };
+        let name = match request.name {
+            PatchValue::Value(value) => value.trim().to_string(),
+            PatchValue::Omitted | PatchValue::Null => team.name.clone(),
+        };
+        let default_from = patch_option(request.default_from, team.default_from);
+        let default_to = patch_option(request.default_to, team.default_to);
+        crate::service::validate_team_window(default_from, default_to)?;
+        let mut affected = [old_coach_id, coach_id]
+            .into_iter()
+            .flatten()
+            .collect::<BTreeSet<_>>();
+        if requested_coach_id.is_none() {
+            affected.clear();
+        }
+        let mut before = Vec::new();
+        for coach_id in affected {
+            before.push(coach_role_snapshot(&mut tx, coach_id).await?);
+        }
+        sqlx::query(
+            "UPDATE scrim.teams \
+             SET name=$2, coach=$3, coach_discord_id=$4, default_from=$5, default_to=$6 \
+             WHERE id=$1",
+        )
+        .bind(team_id)
+        .bind(name)
+        .bind(coach)
+        .bind(coach_id)
+        .bind(default_from)
+        .bind(default_to)
+        .execute(&mut *tx)
+        .await?;
+        let team = load_roster_team(&mut tx, team_id).await?;
+        let sync_plans = coach_sync_plans(&mut tx, before).await?;
+        tx.commit().await?;
+        Ok(TeamMutation { team, sync_plans })
+    }
+
+    pub async fn patch_participant(
+        &self,
+        participant_id: i32,
+        request: ParticipantPatchRequest,
+        reserve_role_id: Option<u64>,
+        signup_role_id: Option<u64>,
+    ) -> ScrimResult<ParticipantMutation> {
+        let mut tx = self.pool.begin().await?;
+        sqlx::query("SELECT pg_advisory_xact_lock($1)")
+            .bind(SELF_SERVICE_ADVISORY_LOCK)
+            .execute(&mut *tx)
+            .await?;
+        let before =
+            participant_role_snapshot(&mut tx, participant_id, reserve_role_id, signup_role_id)
+                .await?;
+        let rank = patch_text_value(request.rank);
+        let roles = patch_text_value(request.roles);
+        let notes = patch_text_value(request.notes);
+        if rank.is_some() || roles.is_some() || notes.is_some() {
+            sqlx::query(
+                "UPDATE scrim.participants \
+                 SET rank=COALESCE($2, rank), roles=COALESCE($3, roles), \
+                     notes=COALESCE($4, notes), updated_at=now() \
+                 WHERE id=$1",
+            )
+            .bind(participant_id)
+            .bind(rank)
+            .bind(roles)
+            .bind(notes)
+            .execute(&mut *tx)
+            .await?;
+        }
+        if let PatchValue::Value(status) = request.status {
+            sqlx::query("UPDATE scrim.participants SET status=$2, updated_at=now() WHERE id=$1")
+                .bind(participant_id)
+                .bind(&status)
+                .execute(&mut *tx)
+                .await?;
+            if status.trim().eq_ignore_ascii_case("assigned") {
+                sqlx::query(
+                    "UPDATE scrim.team_members SET substitute_until=NULL WHERE participant_id=$1",
+                )
+                .bind(participant_id)
+                .execute(&mut *tx)
+                .await?;
+            }
+        }
+        match request.team_id {
+            PatchValue::Value(team_id) => {
+                load_roster_team(&mut tx, team_id).await?;
+                sqlx::query(
+                    "DELETE FROM scrim.team_members WHERE participant_id=$1 AND team_id<>$2",
+                )
+                .bind(participant_id)
+                .bind(team_id)
+                .execute(&mut *tx)
+                .await?;
+                sqlx::query(
+                    "INSERT INTO scrim.team_members(\
+                         team_id, participant_id, role, is_captain, is_bench\
+                     ) VALUES($1, $2, NULL, COALESCE($3, false), COALESCE($4, false)) \
+                     ON CONFLICT (team_id, participant_id) DO UPDATE SET \
+                         is_captain=COALESCE($3, scrim.team_members.is_captain), \
+                         is_bench=COALESCE($4, scrim.team_members.is_bench)",
+                )
+                .bind(team_id)
+                .bind(participant_id)
+                .bind(patch_bool(request.is_captain))
+                .bind(patch_bool(request.is_bench))
+                .execute(&mut *tx)
+                .await?;
+            }
+            PatchValue::Null => {
+                sqlx::query("DELETE FROM scrim.team_members WHERE participant_id=$1")
+                    .bind(participant_id)
+                    .execute(&mut *tx)
+                    .await?;
+            }
+            PatchValue::Omitted => {
+                if !request.is_captain.is_omitted() || !request.is_bench.is_omitted() {
+                    sqlx::query(
+                        "UPDATE scrim.team_members \
+                         SET is_captain=COALESCE($2, is_captain), \
+                             is_bench=COALESCE($3, is_bench) \
+                         WHERE participant_id=$1",
+                    )
+                    .bind(participant_id)
+                    .bind(patch_bool(request.is_captain))
+                    .bind(patch_bool(request.is_bench))
+                    .execute(&mut *tx)
+                    .await?;
+                }
+            }
+        }
+        let participant = load_roster_participant(&mut tx, participant_id).await?;
+        let after =
+            participant_role_snapshot(&mut tx, participant_id, reserve_role_id, signup_role_id)
+                .await?;
+        let sync_plan = role_diff(&before, &after);
+        tx.commit().await?;
+        Ok(ParticipantMutation {
+            participant,
+            sync_plan,
+        })
+    }
+
+    pub async fn substitute(
+        &self,
+        idempotency_key: &str,
+        payload: &Value,
+        team_id: i32,
+        participant_id: i32,
+        reserve_role_id: Option<u64>,
+        signup_role_id: Option<u64>,
+    ) -> ScrimResult<SubstituteMutation> {
+        let mut tx = self.pool.begin().await?;
+        sqlx::query("SELECT pg_advisory_xact_lock($1)")
+            .bind(SELF_SERVICE_ADVISORY_LOCK)
+            .execute(&mut *tx)
+            .await?;
+        let receipt_id =
+            match begin_command(&mut tx, "roster_team_substitute", idempotency_key, payload).await?
+            {
+                CommandStart::New(id) => id,
+                CommandStart::Replay(mutation) => {
+                    tx.commit().await?;
+                    return Ok(mutation);
+                }
+            };
+        let team = load_roster_team(&mut tx, team_id).await?;
+        let status: Option<String> =
+            sqlx::query_scalar("SELECT status FROM scrim.participants WHERE id=$1")
+                .bind(participant_id)
+                .fetch_optional(&mut *tx)
+                .await?;
+        let status = status.ok_or_else(|| ScrimError::NotFound("Platzhalter".to_string()))?;
+        if !status.trim().eq_ignore_ascii_case("reserve") {
+            return Err(ScrimError::InvalidProposal("Platzhalter".to_string()));
+        }
+        sqlx::query(
+            "INSERT INTO scrim.team_members(\
+                 team_id, participant_id, is_bench, is_captain, substitute_until\
+             ) VALUES($1, $2, TRUE, FALSE, now() + interval '24 hours') \
+             ON CONFLICT (team_id, participant_id) DO UPDATE SET \
+                 is_bench=TRUE, substitute_until=now() + interval '24 hours'",
+        )
+        .bind(team_id)
+        .bind(participant_id)
+        .execute(&mut *tx)
+        .await?;
+        let participant = load_roster_participant(&mut tx, participant_id).await?;
+        let snapshot =
+            participant_role_snapshot(&mut tx, participant_id, reserve_role_id, signup_role_id)
+                .await?;
+        let discord_user_id = snapshot.discord_user_id;
+        let sync_plan = role_resync(&snapshot);
+        let mutation = SubstituteMutation {
+            participant,
+            sync_plan,
+            discord_user_id,
+            team_name: team.name,
+        };
+        complete_command(&mut tx, receipt_id, &mutation).await?;
+        tx.commit().await?;
+        Ok(mutation)
+    }
+
+    pub async fn participant_resync_plan(
+        &self,
+        participant_id: i32,
+        reserve_role_id: Option<u64>,
+        signup_role_id: Option<u64>,
+    ) -> ScrimResult<DiscordRoleSyncPlan> {
+        let mut tx = self.pool.begin().await?;
+        let snapshot =
+            participant_role_snapshot(&mut tx, participant_id, reserve_role_id, signup_role_id)
+                .await?;
+        Ok(role_resync(&snapshot))
+    }
+
+    pub async fn roster_suggestion_pool(
+        &self,
+        team_id: i32,
+        reserve: bool,
+    ) -> ScrimResult<(RosterTeam, Vec<RosterPoolCandidate>)> {
+        let mut tx = self.pool.begin().await?;
+        let team = load_roster_team(&mut tx, team_id).await?;
+        let status_filter = if reserve { "reserve" } else { "players" };
+        let rows = sqlx::query(
+            "SELECT p.id, p.discord_id, p.display_name, p.rank, p.roles, p.availability, \
+                    p.availability_slots, p.status, p.source \
+             FROM scrim.participants p \
+             WHERE (($1 = 'reserve' AND p.status = 'reserve') OR \
+                    ($1 = 'players' AND p.status NOT IN ('inactive', 'reserve'))) \
+               AND NOT EXISTS (\
+                   SELECT 1 FROM scrim.team_members tm WHERE tm.participant_id=p.id\
+               ) \
+             ORDER BY p.created_at ASC, p.id ASC",
+        )
+        .bind(status_filter)
+        .fetch_all(&mut *tx)
+        .await?;
+        let mut candidates = Vec::with_capacity(rows.len());
+        for row in rows {
+            let availability: Option<String> = row.try_get("availability")?;
+            let slots: Option<Value> = row.try_get("availability_slots")?;
+            let confirmed = slots.is_some();
+            candidates.push(RosterPoolCandidate {
+                participant_id: row.try_get("id")?,
+                discord_id: row.try_get("discord_id")?,
+                display_name: row.try_get("display_name")?,
+                rank: row.try_get("rank")?,
+                roles: row.try_get("roles")?,
+                availability: availability.clone(),
+                availability_slots: effective_self_service_availability(
+                    slots,
+                    availability.as_deref(),
+                ),
+                availability_confirmed: confirmed,
+                status: row.try_get("status")?,
+                source: row.try_get("source")?,
+            });
+        }
+        Ok((team, candidates))
     }
 
     pub async fn create_match_request_batch(
@@ -719,9 +1157,9 @@ pub struct RuntimeControl {
     pub epoch: i64,
 }
 
-enum CommandStart {
+enum CommandStart<T> {
     New(i64),
-    Replay(ActionReceipt),
+    Replay(T),
 }
 
 #[async_trait]
@@ -848,6 +1286,273 @@ async fn load_self_service_participant(
         status: row.try_get("status")?,
         source: row.try_get("source")?,
     })
+}
+
+#[derive(Debug, Clone)]
+struct RoleSnapshot {
+    subject: String,
+    discord_user_id: Option<u64>,
+    role_ids: BTreeSet<u64>,
+}
+
+async fn load_roster_team(
+    tx: &mut Transaction<'_, Postgres>,
+    team_id: i32,
+) -> ScrimResult<RosterTeam> {
+    let row = sqlx::query(
+        "SELECT id, name, coach, coach_discord_id, discord_role_id, discord_channel_id, \
+                default_from, default_to \
+         FROM scrim.teams WHERE id=$1",
+    )
+    .bind(team_id)
+    .fetch_optional(&mut **tx)
+    .await?
+    .ok_or_else(|| ScrimError::NotFound("Platzhalter".to_string()))?;
+    Ok(RosterTeam {
+        id: row.try_get("id")?,
+        name: row.try_get("name")?,
+        coach: row.try_get("coach")?,
+        coach_discord_id: row
+            .try_get::<Option<i64>, _>("coach_discord_id")?
+            .map(|id| id.to_string()),
+        discord_role_id: row.try_get("discord_role_id")?,
+        discord_channel_id: row.try_get("discord_channel_id")?,
+        default_from: row.try_get("default_from")?,
+        default_to: row.try_get("default_to")?,
+    })
+}
+
+async fn load_roster_participant(
+    tx: &mut Transaction<'_, Postgres>,
+    participant_id: i32,
+) -> ScrimResult<RosterParticipant> {
+    let row = sqlx::query(
+        "SELECT p.id, p.display_name, p.rank, p.roles, p.availability, \
+                p.availability_slots, (p.discord_id IS NOT NULL) AS discord_linked, \
+                p.notes, p.status, p.source, t.id AS team_id, t.name AS team_name, \
+                t.coach AS team_coach, t.coach_discord_id AS team_coach_discord_id, \
+                t.discord_role_id AS team_discord_role_id, \
+                t.discord_channel_id AS team_discord_channel_id, \
+                t.default_from AS team_default_from, t.default_to AS team_default_to, \
+                tm.role AS team_member_role, \
+                COALESCE(tm.is_captain, false) AS is_captain, \
+                COALESCE(tm.is_bench, false) AS is_bench \
+         FROM scrim.participants p \
+         LEFT JOIN LATERAL (\
+             SELECT team_id, role, is_captain, is_bench \
+             FROM scrim.team_members WHERE participant_id=p.id \
+             ORDER BY team_id ASC LIMIT 1\
+         ) tm ON true \
+         LEFT JOIN scrim.teams t ON t.id=tm.team_id \
+         WHERE p.id=$1",
+    )
+    .bind(participant_id)
+    .fetch_optional(&mut **tx)
+    .await?
+    .ok_or_else(|| ScrimError::NotFound("Platzhalter".to_string()))?;
+    let availability: Option<String> = row.try_get("availability")?;
+    let slots: Option<Value> = row.try_get("availability_slots")?;
+    let availability_confirmed = slots.is_some();
+    let team_id: Option<i32> = row.try_get("team_id")?;
+    let team = match team_id {
+        Some(id) => Some(RosterTeam {
+            id,
+            name: row.try_get("team_name")?,
+            coach: row.try_get("team_coach")?,
+            coach_discord_id: row
+                .try_get::<Option<i64>, _>("team_coach_discord_id")?
+                .map(|id| id.to_string()),
+            discord_role_id: row.try_get("team_discord_role_id")?,
+            discord_channel_id: row.try_get("team_discord_channel_id")?,
+            default_from: row.try_get("team_default_from")?,
+            default_to: row.try_get("team_default_to")?,
+        }),
+        None => None,
+    };
+    Ok(RosterParticipant {
+        id: row.try_get("id")?,
+        display_name: row.try_get("display_name")?,
+        rank: row.try_get("rank")?,
+        roles: row.try_get("roles")?,
+        availability_slots: effective_self_service_availability(slots, availability.as_deref()),
+        availability_confirmed,
+        availability,
+        discord_linked: row.try_get("discord_linked")?,
+        notes: row.try_get("notes")?,
+        status: row.try_get("status")?,
+        source: row.try_get("source")?,
+        team,
+        role: row.try_get("team_member_role")?,
+        is_captain: row.try_get("is_captain")?,
+        is_bench: row.try_get("is_bench")?,
+    })
+}
+
+async fn resolve_coach(
+    tx: &mut Transaction<'_, Postgres>,
+    coach_discord_id: Option<i64>,
+    fallback: Option<&str>,
+) -> ScrimResult<Option<String>> {
+    let Some(coach_discord_id) = coach_discord_id else {
+        return Ok(fallback.map(str::to_string));
+    };
+    sqlx::query_scalar(
+        "SELECT display_name FROM coaching.coaches \
+         WHERE discord_user_id=$1 AND status='active'",
+    )
+    .bind(coach_discord_id)
+    .fetch_optional(&mut **tx)
+    .await?
+    .ok_or_else(|| ScrimError::InvalidProposal("Platzhalter".to_string()))
+    .map(Some)
+}
+
+async fn coach_role_snapshot(
+    tx: &mut Transaction<'_, Postgres>,
+    coach_discord_id: i64,
+) -> ScrimResult<RoleSnapshot> {
+    let roles = sqlx::query_scalar::<_, Option<i64>>(
+        "SELECT discord_role_id FROM scrim.teams \
+         WHERE coach_discord_id=$1 ORDER BY discord_role_id ASC NULLS LAST",
+    )
+    .bind(coach_discord_id)
+    .fetch_all(&mut **tx)
+    .await?;
+    Ok(RoleSnapshot {
+        subject: format!("coach-{coach_discord_id}"),
+        discord_user_id: u64::try_from(coach_discord_id).ok(),
+        role_ids: positive_roles(roles),
+    })
+}
+
+async fn coach_sync_plans(
+    tx: &mut Transaction<'_, Postgres>,
+    before: Vec<RoleSnapshot>,
+) -> ScrimResult<Vec<DiscordRoleSyncPlan>> {
+    let mut plans = Vec::with_capacity(before.len());
+    for before in before {
+        let coach_id = before
+            .discord_user_id
+            .and_then(|id| i64::try_from(id).ok())
+            .ok_or(ScrimError::InvalidActor)?;
+        let after = coach_role_snapshot(tx, coach_id).await?;
+        plans.push(role_diff(&before, &after));
+    }
+    Ok(plans)
+}
+
+async fn participant_role_snapshot(
+    tx: &mut Transaction<'_, Postgres>,
+    participant_id: i32,
+    reserve_role_id: Option<u64>,
+    signup_role_id: Option<u64>,
+) -> ScrimResult<RoleSnapshot> {
+    let rows = sqlx::query(
+        "SELECT p.discord_id, p.status, t.discord_role_id \
+         FROM scrim.participants p \
+         LEFT JOIN scrim.team_members tm ON tm.participant_id=p.id \
+         LEFT JOIN scrim.teams t ON t.id=tm.team_id \
+         WHERE p.id=$1 ORDER BY t.discord_role_id ASC NULLS LAST",
+    )
+    .bind(participant_id)
+    .fetch_all(&mut **tx)
+    .await?;
+    let first = rows
+        .first()
+        .ok_or_else(|| ScrimError::NotFound("Platzhalter".to_string()))?;
+    let discord_id: Option<i64> = first.try_get("discord_id")?;
+    let status: String = first.try_get("status")?;
+    let team_roles = rows
+        .iter()
+        .map(|row| row.try_get::<Option<i64>, _>("discord_role_id"))
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(RoleSnapshot {
+        subject: participant_id.to_string(),
+        discord_user_id: discord_id.and_then(|id| u64::try_from(id).ok()),
+        role_ids: managed_role_ids(&status, signup_role_id, reserve_role_id, team_roles),
+    })
+}
+
+fn role_diff(before: &RoleSnapshot, after: &RoleSnapshot) -> DiscordRoleSyncPlan {
+    let removes = before
+        .role_ids
+        .difference(&after.role_ids)
+        .map(|role_id| DiscordRoleAction {
+            operation: RoleOperation::Remove,
+            role_id: *role_id,
+        });
+    let adds = after
+        .role_ids
+        .difference(&before.role_ids)
+        .map(|role_id| DiscordRoleAction {
+            operation: RoleOperation::Add,
+            role_id: *role_id,
+        });
+    DiscordRoleSyncPlan {
+        subject: after.subject.clone(),
+        discord_user_id: after.discord_user_id.or(before.discord_user_id),
+        actions: removes.chain(adds).collect(),
+    }
+}
+
+fn role_resync(snapshot: &RoleSnapshot) -> DiscordRoleSyncPlan {
+    DiscordRoleSyncPlan {
+        subject: snapshot.subject.clone(),
+        discord_user_id: snapshot.discord_user_id,
+        actions: snapshot
+            .role_ids
+            .iter()
+            .map(|role_id| DiscordRoleAction {
+                operation: RoleOperation::Add,
+                role_id: *role_id,
+            })
+            .collect(),
+    }
+}
+
+fn positive_roles(values: Vec<Option<i64>>) -> BTreeSet<u64> {
+    values
+        .into_iter()
+        .flatten()
+        .filter_map(|value| u64::try_from(value).ok())
+        .filter(|value| *value > 0)
+        .collect()
+}
+
+fn parse_positive_i64(value: &str) -> ScrimResult<i64> {
+    value
+        .trim()
+        .parse::<i64>()
+        .ok()
+        .filter(|id| *id > 0)
+        .ok_or(ScrimError::InvalidActor)
+}
+
+fn trimmed_nonempty(value: &str) -> Option<&str> {
+    let value = value.trim();
+    (!value.is_empty()).then_some(value)
+}
+
+fn patch_option<T>(value: PatchValue<T>, current: Option<T>) -> Option<T> {
+    match value {
+        PatchValue::Omitted => current,
+        PatchValue::Null => None,
+        PatchValue::Value(value) => Some(value),
+    }
+}
+
+fn patch_text_value(value: PatchValue<String>) -> Option<String> {
+    match value {
+        PatchValue::Value(value) => Some(value),
+        PatchValue::Omitted | PatchValue::Null => None,
+    }
+}
+
+fn patch_bool(value: PatchValue<bool>) -> Option<bool> {
+    match value {
+        PatchValue::Value(value) => Some(value),
+        PatchValue::Omitted | PatchValue::Null => None,
+    }
 }
 
 fn managed_role_ids(
@@ -1379,12 +2084,12 @@ fn runtime_control_from_row(row: &sqlx::postgres::PgRow) -> ScrimResult<RuntimeC
     })
 }
 
-async fn begin_command(
+async fn begin_command<T: DeserializeOwned>(
     tx: &mut Transaction<'_, Postgres>,
     scope: &str,
     idempotency_key: &str,
     payload: &Value,
-) -> ScrimResult<CommandStart> {
+) -> ScrimResult<CommandStart<T>> {
     let hash = payload_hash(payload)?;
     let inserted = sqlx::query_scalar::<_, i64>(
         "INSERT INTO scrim.command_receipts(\
@@ -1439,10 +2144,10 @@ async fn begin_command(
     }
 }
 
-async fn complete_command(
+async fn complete_command<T: Serialize>(
     tx: &mut Transaction<'_, Postgres>,
     receipt_id: i64,
-    receipt: &ActionReceipt,
+    receipt: &T,
 ) -> ScrimResult<()> {
     let result_payload = serde_json::to_value(receipt).map_err(|error| {
         ScrimError::InvalidStoredData(format!("receipt serialization failed: {error}"))

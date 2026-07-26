@@ -224,7 +224,7 @@ pub struct ParticipantPatchRequest {
         deserialize_with = "deserialize_patch_value",
         skip_serializing_if = "PatchValue::is_omitted"
     )]
-    pub team_id: PatchValue<String>,
+    pub team_id: PatchValue<i32>,
     #[serde(
         default,
         deserialize_with = "deserialize_patch_value",
@@ -274,8 +274,102 @@ pub struct SuggestTeamRequest {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SubstituteRequest {
-    pub participant_id: String,
+    pub participant_id: i32,
     pub window: ScrimSlot,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RosterTeam {
+    pub id: i32,
+    pub name: String,
+    pub coach: Option<String>,
+    pub coach_discord_id: Option<String>,
+    pub discord_role_id: Option<i64>,
+    pub discord_channel_id: Option<i64>,
+    pub default_from: Option<i32>,
+    pub default_to: Option<i32>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RosterParticipant {
+    pub id: i32,
+    pub display_name: String,
+    pub rank: Option<String>,
+    pub roles: Option<String>,
+    pub availability: Option<String>,
+    pub availability_slots: WeeklyAvailability,
+    pub availability_confirmed: bool,
+    pub discord_linked: bool,
+    pub notes: Option<String>,
+    pub status: String,
+    pub source: String,
+    pub team: Option<RosterTeam>,
+    pub role: Option<String>,
+    pub is_captain: bool,
+    pub is_bench: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DiscordSyncStatus {
+    pub ok: bool,
+    pub detail: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TeamMutationResponse {
+    #[serde(flatten)]
+    pub team: RosterTeam,
+    pub discord_sync: DiscordSyncStatus,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ParticipantPatchResponse {
+    #[serde(flatten)]
+    pub participant: RosterParticipant,
+    pub discord_sync: DiscordSyncStatus,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DiscordResyncResponse {
+    pub discord_sync: DiscordSyncStatus,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AnnounceTeamResponse {
+    pub message_id: Option<String>,
+    pub ok: bool,
+    pub detail: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RosterSuggestionCandidate {
+    pub participant_id: i32,
+    pub display_name: String,
+    pub rank: Option<String>,
+    pub roles: Option<String>,
+    pub availability: Option<String>,
+    pub availability_slots: WeeklyAvailability,
+    pub availability_confirmed: bool,
+    pub status: String,
+    pub source: String,
+    pub fit_minutes: u32,
+    pub fit_ratio: f64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RosterSuggestResponse {
+    pub team: RosterTeam,
+    pub requested_size: u32,
+    pub fit_count: u32,
+    pub best_window: Option<ScrimSlot>,
+    pub candidates: Vec<RosterSuggestionCandidate>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SubstituteResponse {
+    pub participant: RosterParticipant,
+    pub discord_sync: DiscordSyncStatus,
+    pub dm: DiscordSyncStatus,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
