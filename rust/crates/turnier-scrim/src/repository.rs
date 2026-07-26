@@ -34,6 +34,7 @@ const RUNTIME_LOCK_NAMESPACE: i32 = 724060001;
 const RUNTIME_LOCK_KEY: i32 = 724060002;
 const COMMAND_LEASE_OWNER: &str = "turniere:api";
 const SELF_SERVICE_ADVISORY_LOCK: i64 = 0x4451_0008_0004_0001;
+const SUBSTITUTE_EXPIRY_SCOPE: &str = "substitute_expiry_role_sync";
 
 #[async_trait]
 pub trait ScrimReadRepository: Send + Sync {
@@ -77,6 +78,40 @@ pub struct DiscordRoleSyncPlan {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExpiredSubstituteRoleSync {
+    pub receipt_ids: Vec<i64>,
+    pub participant_id: i32,
+}
+
+pub struct ExpiredSubstituteRoleSyncDelivery {
+    tx: Transaction<'static, Postgres>,
+    receipt_ids: Vec<i64>,
+    pub participant_id: i32,
+    pub plan: DiscordRoleSyncPlan,
+}
+
+impl ExpiredSubstituteRoleSyncDelivery {
+    pub async fn finish(mut self, delivered: bool) -> ScrimResult<()> {
+        if delivered {
+            sqlx::query(
+                "UPDATE scrim.command_receipts \
+                 SET result_payload=jsonb_set(result_payload, '{delivered}', 'true'::jsonb), \
+                     updated_at=now() \
+                 WHERE command_scope=$1 AND state='completed' \
+                   AND result_payload->>'delivered'='false' \
+                   AND id=ANY($2)",
+            )
+            .bind(SUBSTITUTE_EXPIRY_SCOPE)
+            .bind(&self.receipt_ids)
+            .execute(&mut *self.tx)
+            .await?;
+        }
+        self.tx.commit().await?;
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TeamMutation {
     pub team: RosterTeam,
     pub sync_plans: Vec<DiscordRoleSyncPlan>,
@@ -94,6 +129,12 @@ pub struct SubstituteMutation {
     pub sync_plan: DiscordRoleSyncPlan,
     pub discord_user_id: Option<u64>,
     pub team_name: String,
+}
+
+#[derive(Serialize, Deserialize)]
+struct ExpiredSubstituteSync {
+    participant_id: i32,
+    delivered: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1106,11 +1147,7 @@ impl PgScrimReadRepository {
         Ok(role_resync(&snapshot, &managed))
     }
 
-    pub async fn sweep_expired_substitutes(
-        &self,
-        reserve_role_id: Option<u64>,
-        signup_role_id: Option<u64>,
-    ) -> ScrimResult<Vec<DiscordRoleSyncPlan>> {
+    pub async fn sweep_expired_substitutes(&self) -> ScrimResult<Vec<ExpiredSubstituteRoleSync>> {
         let rows = sqlx::query(
             "SELECT team_id, participant_id FROM scrim.team_members \
              WHERE substitute_until IS NOT NULL AND substitute_until <= now() \
@@ -1118,60 +1155,119 @@ impl PgScrimReadRepository {
         )
         .fetch_all(&self.pool)
         .await?;
-        let mut plans = Vec::with_capacity(rows.len());
         for row in rows {
             let team_id = row.try_get("team_id")?;
             let participant_id = row.try_get("participant_id")?;
-            match self
-                .expire_substitute(team_id, participant_id, reserve_role_id, signup_role_id)
-                .await
-            {
-                Ok(Some(plan)) => plans.push(plan),
-                Ok(None) => {}
-                Err(error) => tracing::warn!(
+            if let Err(error) = self.expire_substitute(team_id, participant_id).await {
+                tracing::warn!(
                     %error,
                     team_id,
                     participant_id,
                     "Scrim-Aushilfe konnte nicht abgeraeumt werden"
-                ),
+                );
             }
         }
-        Ok(plans)
+        pending_expired_substitute_syncs(&self.pool).await
     }
 
-    async fn expire_substitute(
+    pub async fn begin_expired_substitute_sync_delivery(
         &self,
-        team_id: i32,
-        participant_id: i32,
+        sync: &ExpiredSubstituteRoleSync,
         reserve_role_id: Option<u64>,
         signup_role_id: Option<u64>,
-    ) -> ScrimResult<Option<DiscordRoleSyncPlan>> {
+    ) -> ScrimResult<Option<ExpiredSubstituteRoleSyncDelivery>> {
         let mut tx = self.pool.begin().await?;
         sqlx::query("SELECT pg_advisory_xact_lock($1)")
             .bind(SELF_SERVICE_ADVISORY_LOCK)
             .execute(&mut *tx)
             .await?;
-        let before =
-            participant_role_snapshot(&mut tx, participant_id, reserve_role_id, signup_role_id)
-                .await?;
-        let result = sqlx::query(
+        sqlx::query("SET LOCAL idle_in_transaction_session_timeout = '30s'")
+            .execute(&mut *tx)
+            .await?;
+        let receipt_ids = sqlx::query_scalar::<_, i64>(
+            "SELECT id FROM scrim.command_receipts \
+             WHERE command_scope=$1 AND state='completed' \
+               AND result_payload->>'delivered'='false' \
+               AND id=ANY($2) \
+             ORDER BY id ASC",
+        )
+        .bind(SUBSTITUTE_EXPIRY_SCOPE)
+        .bind(&sync.receipt_ids)
+        .fetch_all(&mut *tx)
+        .await?;
+        if receipt_ids.is_empty() {
+            tx.commit().await?;
+            return Ok(None);
+        }
+        let snapshot = participant_role_snapshot(
+            &mut tx,
+            sync.participant_id,
+            reserve_role_id,
+            signup_role_id,
+        )
+        .await?;
+        let managed = all_managed_role_ids(&mut tx, signup_role_id, reserve_role_id).await?;
+        Ok(Some(ExpiredSubstituteRoleSyncDelivery {
+            tx,
+            receipt_ids,
+            participant_id: sync.participant_id,
+            plan: role_resync(&snapshot, &managed),
+        }))
+    }
+
+    async fn expire_substitute(&self, team_id: i32, participant_id: i32) -> ScrimResult<()> {
+        let mut tx = self.pool.begin().await?;
+        sqlx::query("SELECT pg_advisory_xact_lock($1)")
+            .bind(SELF_SERVICE_ADVISORY_LOCK)
+            .execute(&mut *tx)
+            .await?;
+        let Some(expired_at) = sqlx::query_scalar::<_, DateTime<Utc>>(
             "DELETE FROM scrim.team_members \
              WHERE team_id=$1 AND participant_id=$2 \
-               AND substitute_until IS NOT NULL AND substitute_until <= now()",
+               AND substitute_until IS NOT NULL AND substitute_until <= now() \
+             RETURNING substitute_until",
         )
         .bind(team_id)
         .bind(participant_id)
-        .execute(&mut *tx)
+        .fetch_optional(&mut *tx)
+        .await?
+        else {
+            return Ok(());
+        };
+        let idempotency_key = format!(
+            "substitute:{team_id}:{participant_id}:{}",
+            Utc::now().timestamp_micros()
+        );
+        let payload = json!({
+            "team_id": team_id,
+            "participant_id": participant_id,
+            "expired_at": expired_at,
+        });
+        let receipt_id = match begin_command::<ExpiredSubstituteSync>(
+            &mut tx,
+            SUBSTITUTE_EXPIRY_SCOPE,
+            &idempotency_key,
+            &payload,
+        )
+        .await?
+        {
+            CommandStart::New(id) => id,
+            CommandStart::Replay(_) => {
+                tx.commit().await?;
+                return Ok(());
+            }
+        };
+        complete_command(
+            &mut tx,
+            receipt_id,
+            &ExpiredSubstituteSync {
+                participant_id,
+                delivered: false,
+            },
+        )
         .await?;
-        if result.rows_affected() == 0 {
-            return Ok(None);
-        }
-        let after =
-            participant_role_snapshot(&mut tx, participant_id, reserve_role_id, signup_role_id)
-                .await?;
-        let plan = role_diff(&before, &after);
         tx.commit().await?;
-        Ok(Some(plan))
+        Ok(())
     }
 
     pub async fn roster_suggestion_pool(
@@ -2772,11 +2868,21 @@ async fn participant_role_snapshot(
     signup_role_id: Option<u64>,
 ) -> ScrimResult<RoleSnapshot> {
     let rows = sqlx::query(
-        "SELECT p.discord_id, p.status, t.discord_role_id \
+        "SELECT p.discord_id, p.status, roles.discord_role_id \
          FROM scrim.participants p \
-         LEFT JOIN scrim.team_members tm ON tm.participant_id=p.id \
-         LEFT JOIN scrim.teams t ON t.id=tm.team_id \
-         WHERE p.id=$1 ORDER BY t.discord_role_id ASC NULLS LAST",
+         LEFT JOIN LATERAL (\
+             SELECT t.discord_role_id \
+             FROM scrim.participants member \
+             JOIN scrim.team_members tm ON tm.participant_id=member.id \
+             JOIN scrim.teams t ON t.id=tm.team_id \
+             WHERE (member.id=p.id OR (p.discord_id IS NOT NULL AND member.discord_id=p.discord_id)) \
+               AND trim(member.status) NOT ILIKE 'inactive' \
+             UNION \
+             SELECT t.discord_role_id \
+             FROM scrim.teams t \
+             WHERE t.coach_discord_id=p.discord_id\
+         ) roles ON true \
+         WHERE p.id=$1 ORDER BY roles.discord_role_id ASC NULLS LAST",
     )
     .bind(participant_id)
     .fetch_all(&mut **tx)
@@ -2795,6 +2901,44 @@ async fn participant_role_snapshot(
         discord_user_id: discord_id.and_then(|id| u64::try_from(id).ok()),
         role_ids: managed_role_ids(&status, signup_role_id, reserve_role_id, team_roles),
     })
+}
+
+async fn pending_expired_substitute_syncs(
+    pool: &Pool,
+) -> ScrimResult<Vec<ExpiredSubstituteRoleSync>> {
+    let rows = sqlx::query(
+        "SELECT id, result_payload \
+         FROM scrim.command_receipts \
+         WHERE command_scope=$1 AND state='completed' \
+           AND result_payload->>'delivered'='false' \
+         ORDER BY id ASC",
+    )
+    .bind(SUBSTITUTE_EXPIRY_SCOPE)
+    .fetch_all(pool)
+    .await?;
+    let mut receipts_by_participant = BTreeMap::<i32, Vec<i64>>::new();
+    for row in rows {
+        let receipt_id = row.try_get("id")?;
+        let payload: Value = row.try_get("result_payload")?;
+        match serde_json::from_value::<ExpiredSubstituteSync>(payload) {
+            Ok(sync) => receipts_by_participant
+                .entry(sync.participant_id)
+                .or_default()
+                .push(receipt_id),
+            Err(error) => tracing::warn!(
+                %error,
+                receipt_id,
+                "Ungueltiger Scrim-Aushilfe-Rollen-Retry wird uebersprungen"
+            ),
+        }
+    }
+    Ok(receipts_by_participant
+        .into_iter()
+        .map(|(participant_id, receipt_ids)| ExpiredSubstituteRoleSync {
+            receipt_ids,
+            participant_id,
+        })
+        .collect())
 }
 
 fn role_diff(before: &RoleSnapshot, after: &RoleSnapshot) -> DiscordRoleSyncPlan {
@@ -2920,13 +3064,12 @@ fn managed_role_ids(
     reserve_role_id: Option<u64>,
     team_role_ids: Vec<Option<i64>>,
 ) -> BTreeSet<u64> {
-    if status.trim().eq_ignore_ascii_case("inactive") {
-        return BTreeSet::new();
-    }
     let mut role_ids = BTreeSet::new();
-    role_ids.extend(signup_role_id);
-    if status.trim().eq_ignore_ascii_case("reserve") {
-        role_ids.extend(reserve_role_id);
+    if !status.trim().eq_ignore_ascii_case("inactive") {
+        role_ids.extend(signup_role_id);
+        if status.trim().eq_ignore_ascii_case("reserve") {
+            role_ids.extend(reserve_role_id);
+        }
     }
     role_ids.extend(
         team_role_ids

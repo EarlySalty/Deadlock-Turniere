@@ -52,6 +52,7 @@ const DISCORD_SYNC_FAILED: &str = "Discord-Sync fehlgeschlagen.";
 const DM_NO_ACCOUNT: &str = "No linked Discord account; DM not sent.";
 const DM_SUCCESS: &str = "DM sent.";
 const DM_FAILED: &str = "DM delivery failed.";
+const SUBSTITUTE_DISCORD_SYNC_TIMEOUT: Duration = Duration::from_secs(20);
 
 pub fn router() -> Router<AppState> {
     Router::new()
@@ -189,13 +190,10 @@ pub fn spawn_substitute_sweep_worker(state: AppState) {
     tokio::spawn(async move {
         let interval = Duration::from_secs(state.config.scrim_substitute_sweep_interval_seconds);
         loop {
-            let plans = match PgScrimReadRepository::new(state.pool.clone())
-                .sweep_expired_substitutes(
-                    positive_config_id(state.config.scrim_reserve_role_id),
-                    positive_config_id(state.config.scrim_signup_role_id),
-                )
-                .await
-            {
+            let repository = PgScrimReadRepository::new(state.pool.clone());
+            let reserve_role_id = positive_config_id(state.config.scrim_reserve_role_id);
+            let signup_role_id = positive_config_id(state.config.scrim_signup_role_id);
+            let plans = match repository.sweep_expired_substitutes().await {
                 Ok(plans) => plans,
                 Err(error) => {
                     tracing::warn!(%error, "Scrim-Aushilfe-Ablauf konnte nicht geprueft werden");
@@ -206,7 +204,61 @@ pub fn spawn_substitute_sweep_worker(state: AppState) {
             // Jeder Durchlauf ist ein eigener Vorgang: sonst wuerde ein spaeterer Ablauf
             // derselben Rolle im Zwischenspeicher des Brokers haengen bleiben.
             let sweep_key = format!("substitute-sweep-{}", Utc::now().timestamp());
-            sync_discord_roles(&state, plans, &sweep_key).await;
+            for pending in plans {
+                let delivery = match repository
+                    .begin_expired_substitute_sync_delivery(
+                        &pending,
+                        reserve_role_id,
+                        signup_role_id,
+                    )
+                    .await
+                {
+                    Ok(Some(delivery)) => delivery,
+                    Ok(None) => continue,
+                    Err(error) => {
+                        tracing::warn!(
+                            %error,
+                            participant_id = pending.participant_id,
+                            "Scrim-Aushilfe-Rollen-Sync konnte nicht vorbereitet werden"
+                        );
+                        continue;
+                    }
+                };
+                let participant_id = delivery.participant_id;
+                let subject = delivery.plan.subject.clone();
+                let user_id = delivery.plan.discord_user_id;
+                let status = match tokio::time::timeout(
+                    SUBSTITUTE_DISCORD_SYNC_TIMEOUT,
+                    sync_discord_roles(&state, vec![delivery.plan.clone()], &sweep_key),
+                )
+                .await
+                {
+                    Ok(status) => status,
+                    Err(_) => DiscordSyncStatus {
+                        ok: false,
+                        detail: "timeout".to_string(),
+                    },
+                };
+                if !status.ok {
+                    tracing::warn!(
+                        participant_id,
+                        subject,
+                        user_id = ?user_id,
+                        detail = %status.detail,
+                        "Scrim-Aushilfe-Rollen-Sync bleibt fuer Retry offen"
+                    );
+                }
+                if let Err(error) = delivery.finish(status.ok).await {
+                    tracing::warn!(
+                        %error,
+                        participant_id,
+                        subject,
+                        user_id = ?user_id,
+                        delivered = status.ok,
+                        "Scrim-Aushilfe-Rollen-Sync konnte nicht abgeschlossen werden"
+                    );
+                }
+            }
             tracing::info!(count, "Scrim-Aushilfe-Ablauf geprueft");
             tokio::time::sleep(interval).await;
         }
@@ -1267,6 +1319,7 @@ async fn sync_discord_roles(
     };
     let mut ok = true;
     let mut changed = false;
+    let mut tasks = tokio::task::JoinSet::new();
     for plan in plans {
         let Some(discord_user_id) = plan.discord_user_id else {
             continue;
@@ -1279,34 +1332,47 @@ async fn sync_discord_roles(
                     ("/internal/master/v1/discord/member/remove-role", "remove")
                 }
             };
-            let result = state
-                .notifier
-                .broker()
-                .post_internal::<serde_json::Value, _>(
-                    path,
-                    &serde_json::json!({
-                        "guild_id": guild_id,
-                        "user_id": discord_user_id,
-                        "role_id": action.role_id,
-                        "reason": format!("scrim {} {operation} role {}", plan.subject, action.role_id),
-                        "idempotency_key": format!(
-                            "scrim-{operation_key}-{}-{}-{operation}",
-                            plan.subject, action.role_id
-                        ),
-                    }),
-                )
-                .await;
-            if let Err(error) = result {
+            let broker = state.notifier.broker().clone();
+            let subject = plan.subject.clone();
+            let role_id = action.role_id;
+            let payload = serde_json::json!({
+                "guild_id": guild_id,
+                "user_id": discord_user_id,
+                "role_id": role_id,
+                "reason": format!("scrim {subject} {operation} role {role_id}"),
+                "idempotency_key": format!(
+                    "scrim-{operation_key}-{}-{}-{operation}",
+                    subject, role_id
+                ),
+            });
+            tasks.spawn(async move {
+                match broker
+                    .post_internal::<serde_json::Value, _>(path, &payload)
+                    .await
+                {
+                    Ok(_) => true,
+                    Err(error) => {
+                        tracing::warn!(
+                            subject,
+                            participant_id = subject,
+                            user_id = discord_user_id,
+                            role_id,
+                            operation,
+                            %error,
+                            "Scrim-Discord-Rollen-Sync fail-open"
+                        );
+                        false
+                    }
+                }
+            });
+        }
+    }
+    while let Some(result) = tasks.join_next().await {
+        match result {
+            Ok(action_ok) => ok &= action_ok,
+            Err(error) => {
                 ok = false;
-                tracing::warn!(
-                    subject = %plan.subject,
-                    participant_id = %plan.subject,
-                    user_id = discord_user_id,
-                    role_id = action.role_id,
-                    operation,
-                    %error,
-                    "Scrim-Discord-Rollen-Sync fail-open"
-                );
+                tracing::warn!(%error, "Scrim-Discord-Rollen-Sync-Task fehlgeschlagen");
             }
         }
     }
