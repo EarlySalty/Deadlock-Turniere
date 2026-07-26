@@ -110,7 +110,7 @@ pub struct RosterPoolCandidate {
     pub source: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DiscordDispatch {
     pub record_id: i64,
     pub user_id: Option<i64>,
@@ -118,7 +118,10 @@ pub struct DiscordDispatch {
     pub content: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// Wird vollstaendig im Command-Receipt abgelegt, damit ein Replay auch die offenen
+/// Discord-Zustellungen erneut liefert. Der Broker dedupliziert ueber den
+/// Idempotenzschluessel, ein zweiter Versuch kann also nichts doppelt zustellen.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MutationDispatch {
     pub receipt: ActionReceipt,
     pub discord: Vec<DiscordDispatch>,
@@ -1261,12 +1264,11 @@ impl PgScrimReadRepository {
                 .await?
             {
                 CommandStart::New(id) => id,
-                CommandStart::Replay(receipt) => {
+                // Replay liefert die Discord-Zustellungen mit: ist der erste Versuch
+                // nach dem Commit gescheitert, holt ein erneuter Aufruf ihn nach.
+                CommandStart::Replay(dispatch) => {
                     tx.commit().await?;
-                    return Ok(MutationDispatch {
-                        receipt,
-                        discord: Vec::new(),
-                    });
+                    return Ok(dispatch);
                 }
             };
         let row = sqlx::query(
@@ -1411,9 +1413,12 @@ impl PgScrimReadRepository {
         )
         .await?;
         let receipt = placeholder_receipt();
-        complete_command(&mut tx, receipt_id, &receipt).await?;
+        // Den vollstaendigen Dispatch ablegen, nicht nur die Quittung: sonst geht bei einem
+        // Replay verloren, welche Discord-Zustellungen noch offen sind.
+        let dispatch = MutationDispatch { receipt, discord };
+        complete_command(&mut tx, receipt_id, &dispatch).await?;
         tx.commit().await?;
-        Ok(MutationDispatch { receipt, discord })
+        Ok(dispatch)
     }
 
     pub async fn create_status_publication(
@@ -1444,12 +1449,11 @@ impl PgScrimReadRepository {
         .await?
         {
             CommandStart::New(id) => id,
-            CommandStart::Replay(receipt) => {
+            // Replay liefert die Discord-Zustellungen mit: ist der erste Versuch
+            // nach dem Commit gescheitert, holt ein erneuter Aufruf ihn nach.
+            CommandStart::Replay(dispatch) => {
                 tx.commit().await?;
-                return Ok(MutationDispatch {
-                    receipt,
-                    discord: Vec::new(),
-                });
+                return Ok(dispatch);
             }
         };
         let row = sqlx::query(
@@ -1526,9 +1530,12 @@ impl PgScrimReadRepository {
         )
         .await?;
         let receipt = placeholder_receipt();
-        complete_command(&mut tx, receipt_id, &receipt).await?;
+        // Den vollstaendigen Dispatch ablegen, nicht nur die Quittung: sonst geht bei einem
+        // Replay verloren, welche Discord-Zustellungen noch offen sind.
+        let dispatch = MutationDispatch { receipt, discord };
+        complete_command(&mut tx, receipt_id, &dispatch).await?;
         tx.commit().await?;
-        Ok(MutationDispatch { receipt, discord })
+        Ok(dispatch)
     }
 
     pub async fn replacement_candidates(
@@ -1615,12 +1622,11 @@ impl PgScrimReadRepository {
         .await?
         {
             CommandStart::New(id) => id,
-            CommandStart::Replay(receipt) => {
+            // Replay liefert die Discord-Zustellungen mit: ist der erste Versuch
+            // nach dem Commit gescheitert, holt ein erneuter Aufruf ihn nach.
+            CommandStart::Replay(dispatch) => {
                 tx.commit().await?;
-                return Ok(MutationDispatch {
-                    receipt,
-                    discord: Vec::new(),
-                });
+                return Ok(dispatch);
             }
         };
         let need = sqlx::query(
@@ -1702,8 +1708,6 @@ impl PgScrimReadRepository {
         )
         .await?;
         let receipt = placeholder_receipt();
-        complete_command(&mut tx, receipt_id, &receipt).await?;
-        tx.commit().await?;
         let discord = discord_user_id
             .map(|user_id| DiscordDispatch {
                 record_id: replacement_request_id,
@@ -1713,7 +1717,12 @@ impl PgScrimReadRepository {
             })
             .into_iter()
             .collect();
-        Ok(MutationDispatch { receipt, discord })
+        // Den vollstaendigen Dispatch ablegen, nicht nur die Quittung: sonst geht bei einem
+        // Replay verloren, welche Discord-Zustellungen noch offen sind.
+        let dispatch = MutationDispatch { receipt, discord };
+        complete_command(&mut tx, receipt_id, &dispatch).await?;
+        tx.commit().await?;
+        Ok(dispatch)
     }
 
     pub async fn patch_replacement_request(
@@ -3813,9 +3822,39 @@ mod tests {
     use std::collections::BTreeSet;
 
     use super::{
-        blocks_lobby_code_write, is_allowed_lagebild_evidence_url, role_resync, RoleOperation,
-        RoleSnapshot,
+        blocks_lobby_code_write, is_allowed_lagebild_evidence_url, role_resync, DiscordDispatch,
+        MutationDispatch, RoleOperation, RoleSnapshot,
     };
+    use crate::dto::ActionReceipt;
+
+    /// Der Dispatch landet im Command-Receipt und wird beim Replay wieder herausgelesen.
+    /// Geht dabei die Discord-Zustellung verloren, wird eine fehlgeschlagene DM nie
+    /// nachgeholt — genau das soll dieser Rundlauf verhindern.
+    #[test]
+    fn dispatch_survives_the_receipt_round_trip() {
+        let dispatch = MutationDispatch {
+            receipt: ActionReceipt {
+                accepted: true,
+                message: "Wird ausgeführt.".to_string(),
+            },
+            discord: vec![DiscordDispatch {
+                record_id: 7,
+                user_id: Some(123),
+                channel_id: None,
+                content: "Erinnerung".to_string(),
+            }],
+        };
+
+        let stored = serde_json::to_value(&dispatch).expect("dispatch serialisierbar");
+        let replayed: MutationDispatch =
+            serde_json::from_value(stored).expect("dispatch wieder lesbar");
+
+        assert_eq!(replayed, dispatch);
+        assert!(
+            !replayed.discord.is_empty(),
+            "Replay muss die offene Zustellung mitbringen"
+        );
+    }
 
     /// Ein falsch eingetippter Lobbycode muss korrigierbar bleiben.
     ///
