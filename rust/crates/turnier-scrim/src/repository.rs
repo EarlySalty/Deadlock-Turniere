@@ -213,7 +213,7 @@ impl PgScrimReadRepository {
                 .await?
                 .ok_or_else(|| ScrimError::NotFound("Match not found".to_string()))?;
         let lobby_state = row.try_get::<Option<String>, _>("lobby_state")?;
-        if lobby_state.as_deref().is_some_and(is_bot_owned_lobby_state) {
+        if lobby_state.as_deref().is_some_and(blocks_lobby_code_write) {
             return Err(ScrimError::Conflict(format!(
                 "Lobby state is controlled by bot: {}",
                 lobby_state.unwrap_or_default()
@@ -3088,6 +3088,16 @@ fn state_blocks_lobby_request(current: &str, requested_state: &str) -> bool {
         && is_bot_owned_lobby_state(current)
 }
 
+/// Sperrt das Setzen des Lobbycodes, sobald der Bot die Lobby tatsaechlich fuehrt.
+///
+/// `lobby_open` ist bewusst ausgenommen: diesen Zustand setzt das Eintragen des Codes
+/// selbst. Zaehlte er als bot-gesteuert, waere schon die erste Korrektur eines
+/// vertippten Codes gesperrt und die mitgefuehrte Korrekturhistorie nie erreichbar.
+/// Das weicht bewusst vom alten Admin-Dashboard ab, das hier zumacht.
+fn blocks_lobby_code_write(state: &str) -> bool {
+    state != "lobby_open" && is_bot_owned_lobby_state(state)
+}
+
 fn is_bot_owned_lobby_state(state: &str) -> bool {
     matches!(
         state,
@@ -3802,7 +3812,39 @@ fn is_allowed_lagebild_evidence_url(value: &str) -> bool {
 mod tests {
     use std::collections::BTreeSet;
 
-    use super::{is_allowed_lagebild_evidence_url, role_resync, RoleOperation, RoleSnapshot};
+    use super::{
+        blocks_lobby_code_write, is_allowed_lagebild_evidence_url, role_resync, RoleOperation,
+        RoleSnapshot,
+    };
+
+    /// Ein falsch eingetippter Lobbycode muss korrigierbar bleiben.
+    ///
+    /// Das Setzen selbst schaltet den Zustand auf `lobby_open`. Zaehlte der als
+    /// bot-gesteuert, waere jede Korrektur nach dem ersten Setzen gesperrt — und die
+    /// mitgefuehrte Korrekturhistorie koennte nie greifen.
+    #[test]
+    fn lobby_code_stays_correctable_while_the_lobby_is_only_open() {
+        assert!(!blocks_lobby_code_write("lobby_open"));
+        assert!(!blocks_lobby_code_write("lobby_closed"));
+    }
+
+    /// Sobald der Bot die Lobby tatsaechlich fuehrt, faesst der Operator sie nicht mehr an.
+    #[test]
+    fn lobby_code_is_locked_once_the_bot_runs_the_lobby() {
+        for state in [
+            "start_requested",
+            "starting",
+            "lobby_posting",
+            "in_progress",
+            "finished",
+            "result_requested",
+            "result_fetching",
+            "result_failed",
+            "start_failed",
+        ] {
+            assert!(blocks_lobby_code_write(state), "{state} muss sperren");
+        }
+    }
 
     /// Der Resync-Knopf soll den Soll-Zustand herstellen, nicht nur ergaenzen.
     /// Ohne Remove behaelt ein Spieler nach einem Teamwechsel die alte Teamrolle
