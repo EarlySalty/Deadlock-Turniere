@@ -43,6 +43,15 @@ const IDEMPOTENCY_KEY_HEADER: &str = "Idempotency-Key";
 const ACTOR_DISCORD_ID_HEADER: &str = "X-Actor-Discord-Id";
 const ACTOR_DISPLAY_NAME_HEADER: &str = "X-Actor-Display-Name";
 
+// Wortgleich zum bisherigen Weg (Website routes/scrim.rs): dieselben Meldungen im Coach-UI.
+const DISCORD_SYNC_NOOP: &str = "Keine Discord-Änderung nötig.";
+const DISCORD_SYNC_NOT_CONFIGURED: &str = "Discord-Sync ist nicht konfiguriert.";
+const DISCORD_SYNC_SUCCESS: &str = "Discord-Rollen aktualisiert.";
+const DISCORD_SYNC_FAILED: &str = "Discord-Sync fehlgeschlagen.";
+const DM_NO_ACCOUNT: &str = "No linked Discord account; DM not sent.";
+const DM_SUCCESS: &str = "DM sent.";
+const DM_FAILED: &str = "DM delivery failed.";
+
 pub fn router() -> Router<AppState> {
     Router::new()
         .route(
@@ -1018,7 +1027,9 @@ async fn announce_team(
         .as_ref()
         .is_some_and(|note| note.chars().count() > 500)
     {
-        return Err(WebError::bad_request("Platzhalter"));
+        return Err(WebError::bad_request(
+            "Die Notiz ist zu lang — höchstens 500 Zeichen.",
+        ));
     }
     let team = service.roster_team(parse_db_id(&id, "team_id")?).await?;
     Ok(Json(
@@ -1161,7 +1172,7 @@ async fn sync_discord_roles(
         tracing::warn!("Scrim-Rollen-Sync ohne gueltige Guild-ID");
         return DiscordSyncStatus {
             ok: false,
-            detail: "Platzhalter".to_string(),
+            detail: DISCORD_SYNC_NOT_CONFIGURED.to_string(),
         };
     };
     let mut ok = true;
@@ -1210,7 +1221,13 @@ async fn sync_discord_roles(
     }
     DiscordSyncStatus {
         ok: ok || !changed,
-        detail: "Platzhalter".to_string(),
+        detail: if !changed {
+            DISCORD_SYNC_NOOP.to_string()
+        } else if ok {
+            DISCORD_SYNC_SUCCESS.to_string()
+        } else {
+            DISCORD_SYNC_FAILED.to_string()
+        },
     }
 }
 
@@ -1225,12 +1242,26 @@ async fn post_team_announcement(
         return AnnounceTeamResponse {
             message_id: None,
             ok: false,
-            detail: "Platzhalter".to_string(),
+            detail: "Kein Ankündigungskanal konfiguriert — es wurde nichts gepostet.".to_string(),
         };
     };
     let allowed_role_ids = positive_config_id(state.config.scrim_signup_role_id)
         .into_iter()
         .collect::<Vec<_>>();
+    // Wortgleich zum bisherigen Weg (Website routes/scrim.rs, build_team_announcement):
+    // Die Community soll nach der Umstellung dieselbe Nachricht sehen.
+    let content = allowed_role_ids
+        .first()
+        .map(|role_id| format!("<@&{role_id}>"))
+        .unwrap_or_default();
+    let description = match (team.default_from, team.default_to) {
+        (Some(from), Some(to)) => format!(
+            "Das Team spielt üblicherweise **{}**. Wenn du zu der Zeit kannst und Lust hast, reagier hier mit ✅ — wir melden uns bei dir.",
+            format_team_window(from, to)
+        ),
+        _ => "Wenn du Lust hast, in diesem Team zu spielen, reagier hier mit ✅ — wir melden uns bei dir."
+            .to_string(),
+    };
     let response = state
         .notifier
         .broker()
@@ -1238,16 +1269,17 @@ async fn post_team_announcement(
             "/internal/master/v1/discord/send-rich-message",
             &serde_json::json!({
                 "channel_id": channel_id,
-                "content": "Platzhalter",
+                "content": content,
                 "embed": {
-                    "title": "Platzhalter",
-                    "description": "Platzhalter",
+                    "color": 0x00C8_A86B,
+                    "title": format!("{} sucht Verstärkung", team.name),
+                    "description": description,
                     "fields": note.map(|value| serde_json::json!({
-                        "name": "Platzhalter",
+                        "name": "Dazu noch",
                         "value": value,
                         "inline": false,
                     })).into_iter().collect::<Vec<_>>(),
-                    "footer": {"text": "Platzhalter"},
+                    "footer": {"text": "Deutsche Deadlock Community"},
                 },
                 "allowed_role_ids": allowed_role_ids,
                 "idempotency_key": idempotency_key,
@@ -1282,7 +1314,8 @@ async fn post_team_announcement(
         return AnnounceTeamResponse {
             message_id: None,
             ok: false,
-            detail: "Platzhalter".to_string(),
+            detail: "Die Ankündigung konnte nicht gepostet werden. Versuch es gleich noch mal."
+                .to_string(),
         };
     };
     if let Err(error) = state
@@ -1308,7 +1341,46 @@ async fn post_team_announcement(
     AnnounceTeamResponse {
         message_id: Some(message_id),
         ok: true,
-        detail: "Platzhalter".to_string(),
+        detail: "Ankündigung ist gepostet.".to_string(),
+    }
+}
+
+/// DM an eine Aushilfe, wortgleich zum bisherigen Weg (Website routes/scrim.rs).
+/// Sagt explizit, dass der Auswechselspieler-Status bleibt — sonst denken Leute,
+/// sie waeren fest im Team.
+fn substitute_dm_content(team_name: &str, window: &ScrimSlot) -> String {
+    let day = match window.day {
+        ScrimDay::Monday => "Montag",
+        ScrimDay::Tuesday => "Dienstag",
+        ScrimDay::Wednesday => "Mittwoch",
+        ScrimDay::Thursday => "Donnerstag",
+        ScrimDay::Friday => "Freitag",
+        ScrimDay::Saturday => "Samstag",
+        ScrimDay::Sunday => "Sonntag",
+    };
+    let format_minutes = |minutes: u16| format!("{:02}:{:02}", minutes / 60, minutes % 60);
+    let time = format!(
+        "{day}, {}–{} Uhr",
+        format_minutes(window.from),
+        format_minutes(window.to)
+    );
+    format!(
+        "Hey! 👋 Du springst für **{team_name}** ein — **{time}**.\n\nDie Team-Rolle hast du gerade bekommen, damit siehst du den Team-Kanal und wirst bei Pings mitgenommen. Du bleibst weiterhin Auswechselspieler.\n\nWenn's doch nicht klappt, sag bitte kurz im Team-Kanal Bescheid, damit wir Ersatz finden. Viel Spaß! 🎮"
+    )
+}
+
+/// Stammzeit als Text, wortgleich zum bisherigen Weg (Website routes/scrim.rs).
+/// `1440` steht fuer offenes Ende, deshalb "ab 20:00 Uhr" statt "20:00–24:00 Uhr".
+fn format_team_window(default_from: i32, default_to: i32) -> String {
+    let format_minutes = |minutes: i32| format!("{:02}:{:02}", minutes / 60, minutes % 60);
+    if default_to == 1440 {
+        format!("ab {} Uhr", format_minutes(default_from))
+    } else {
+        format!(
+            "{}–{} Uhr",
+            format_minutes(default_from),
+            format_minutes(default_to)
+        )
     }
 }
 
@@ -1323,7 +1395,7 @@ async fn send_substitute_dm(
     let Some(user_id) = discord_user_id else {
         return DiscordSyncStatus {
             ok: false,
-            detail: "Platzhalter".to_string(),
+            detail: DM_NO_ACCOUNT.to_string(),
         };
     };
     let result = state
@@ -1333,7 +1405,7 @@ async fn send_substitute_dm(
             "/internal/master/v1/discord/send-dm",
             &serde_json::json!({
                 "user_id": user_id,
-                "content": "Platzhalter",
+                "content": substitute_dm_content(team_name, &window),
                 "team_name": team_name,
                 "window": window,
                 "idempotency_key": format!("{idempotency_key}:dm"),
@@ -1349,12 +1421,12 @@ async fn send_substitute_dm(
         );
         return DiscordSyncStatus {
             ok: false,
-            detail: "Platzhalter".to_string(),
+            detail: DM_FAILED.to_string(),
         };
     }
     DiscordSyncStatus {
         ok: true,
-        detail: "Platzhalter".to_string(),
+        detail: DM_SUCCESS.to_string(),
     }
 }
 

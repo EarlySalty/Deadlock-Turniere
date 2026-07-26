@@ -462,8 +462,8 @@ impl PgScrimReadRepository {
             None => AnnouncementPreview {
                 id: None,
                 block_id: block_id.to_string(),
-                title: "Platzhalter".to_string(),
-                message: "Platzhalter".to_string(),
+                title: "Noch keine Ankündigung".to_string(),
+                message: "Für diesen Block gibt es noch keinen Ankündigungstext.".to_string(),
                 channel_id: None,
                 status: "preview".to_string(),
                 published_at: None,
@@ -479,7 +479,7 @@ impl PgScrimReadRepository {
         actor_display_name: &str,
         request: &AnnouncementPublicationRequest,
     ) -> ScrimResult<AnnouncementPreview> {
-        let title = request.title.as_deref().unwrap_or("Platzhalter");
+        let title = request.title.as_deref().unwrap_or("Scrim-Ankündigung");
         let payload = json!({"channel_id": request.channel_id});
         let block_key = announcement_block_key(block_id);
         let mut tx = self.pool.begin().await?;
@@ -1050,9 +1050,12 @@ impl PgScrimReadRepository {
                 .bind(participant_id)
                 .fetch_optional(&mut *tx)
                 .await?;
-        let status = status.ok_or_else(|| ScrimError::NotFound("Platzhalter".to_string()))?;
+        let status =
+            status.ok_or_else(|| ScrimError::NotFound("Spieler nicht gefunden.".to_string()))?;
         if !status.trim().eq_ignore_ascii_case("reserve") {
-            return Err(ScrimError::InvalidProposal("Platzhalter".to_string()));
+            return Err(ScrimError::InvalidProposal(
+                "Nur Auswechselspieler können als Aushilfe einspringen.".to_string(),
+            ));
         }
         sqlx::query(
             "INSERT INTO scrim.team_members(\
@@ -1153,7 +1156,9 @@ impl PgScrimReadRepository {
         let status = match &request.status {
             PatchValue::Omitted => None,
             PatchValue::Null => {
-                return Err(ScrimError::InvalidProposal("Platzhalter".to_string()));
+                return Err(ScrimError::InvalidProposal(
+                    "Unbekannter Status für diese Abfrage.".to_string(),
+                ));
             }
             PatchValue::Value(status)
                 if matches!(
@@ -1164,7 +1169,9 @@ impl PgScrimReadRepository {
                 Some(status.as_str())
             }
             PatchValue::Value(_) => {
-                return Err(ScrimError::InvalidProposal("Platzhalter".to_string()));
+                return Err(ScrimError::InvalidProposal(
+                    "Ungültiger Slot: er gehört nicht zu dieser Abfrage.".to_string(),
+                ));
             }
         };
         let note = match &request.note {
@@ -1172,11 +1179,15 @@ impl PgScrimReadRepository {
             PatchValue::Null => Some(None),
             PatchValue::Value(note) if note.chars().count() <= 1_000 => Some(Some(note.as_str())),
             PatchValue::Value(_) => {
-                return Err(ScrimError::InvalidProposal("Platzhalter".to_string()));
+                return Err(ScrimError::InvalidProposal(
+                    "Die Notiz ist zu lang — höchstens 1000 Zeichen.".to_string(),
+                ));
             }
         };
         if status.is_none() && note.is_none() {
-            return Err(ScrimError::InvalidProposal("Platzhalter".to_string()));
+            return Err(ScrimError::InvalidProposal(
+                "Es gibt nichts zu ändern: weder Status noch Notiz angegeben.".to_string(),
+            ));
         }
 
         let mut tx = self.pool.begin().await?;
@@ -1197,7 +1208,9 @@ impl PgScrimReadRepository {
         .fetch_optional(&mut *tx)
         .await?;
         if exists.is_none() {
-            return Err(ScrimError::NotFound("Platzhalter".to_string()));
+            return Err(ScrimError::NotFound(
+                "Diese Abfrage gibt es nicht.".to_string(),
+            ));
         }
         sqlx::query(
             "UPDATE scrim.match_requests \
@@ -1261,10 +1274,12 @@ impl PgScrimReadRepository {
         .bind(request_id)
         .fetch_optional(&mut *tx)
         .await?
-        .ok_or_else(|| ScrimError::NotFound("Platzhalter".to_string()))?;
+        .ok_or_else(|| ScrimError::NotFound("Diese Abfrage gibt es nicht.".to_string()))?;
         let status = row.try_get::<String, _>("status")?;
         if !matches!(status.as_str(), "open" | "post_failed") {
-            return Err(ScrimError::Conflict("Platzhalter".to_string()));
+            return Err(ScrimError::Conflict(
+                "Erinnerungen gehen nur an offene Abfragen.".to_string(),
+            ));
         }
         let message_ids = row.try_get::<Value, _>("team_query_message_ids")?;
         let team_ids = [
@@ -1314,18 +1329,23 @@ impl PgScrimReadRepository {
             };
             let channel_id = team
                 .try_get::<Option<i64>, _>("discord_channel_id")?
-                .ok_or_else(|| ScrimError::InvalidStoredData("Platzhalter".to_string()))?;
+                .ok_or_else(|| {
+                    ScrimError::InvalidStoredData("Dem Team fehlt der Discord-Kanal.".to_string())
+                })?;
             if source.0 != channel_id {
-                return Err(ScrimError::InvalidStoredData("Platzhalter".to_string()));
+                return Err(ScrimError::InvalidStoredData(
+                    "Die Abfrage gehört zu einem anderen Kanal als das Team.".to_string(),
+                ));
             }
             let role_id = team.try_get::<Option<i64>, _>("discord_role_id")?;
             let target_role_id = if all_have_discord {
                 None
             } else {
-                Some(
-                    role_id
-                        .ok_or_else(|| ScrimError::InvalidStoredData("Platzhalter".to_string()))?,
-                )
+                Some(role_id.ok_or_else(|| {
+                    ScrimError::InvalidStoredData(
+                        "Zur Abfrage ist keine Nachricht hinterlegt.".to_string(),
+                    )
+                })?)
             };
             let reminder_id: i64 = sqlx::query_scalar(
                 "INSERT INTO scrim.match_request_reminders(\
@@ -1342,10 +1362,11 @@ impl PgScrimReadRepository {
             .bind(&participant_ids)
             .bind(&target_discord_ids)
             .bind(target_role_id)
-            .bind(
-                i32::try_from(participant_ids.len())
-                    .map_err(|_| ScrimError::InvalidStoredData("Platzhalter".to_string()))?,
-            )
+            .bind(i32::try_from(participant_ids.len()).map_err(|_| {
+                ScrimError::InvalidStoredData(
+                    "Die hinterlegten Nachrichten-IDs sind unbrauchbar.".to_string(),
+                )
+            })?)
             .bind(actor.0)
             .bind(actor.1)
             .bind(channel_id)
@@ -1373,7 +1394,9 @@ impl PgScrimReadRepository {
             }
         }
         if discord.is_empty() {
-            return Err(ScrimError::Conflict("Platzhalter".to_string()));
+            return Err(ScrimError::Conflict(
+                "Niemand im Team hat einen verknüpften Discord-Account.".to_string(),
+            ));
         }
         insert_audit_event(
             &mut tx,
@@ -1433,9 +1456,12 @@ impl PgScrimReadRepository {
         .bind(request_id)
         .fetch_optional(&mut *tx)
         .await?
-        .ok_or_else(|| ScrimError::NotFound("Platzhalter".to_string()))?;
-        let publication_payload = serde_json::to_value(request)
-            .map_err(|_| ScrimError::InvalidProposal("Platzhalter".to_string()))?;
+        .ok_or_else(|| ScrimError::NotFound("Diese Abfrage gibt es nicht.".to_string()))?;
+        let publication_payload = serde_json::to_value(request).map_err(|_| {
+            ScrimError::InvalidProposal(
+                "Die Statusmeldung ließ sich nicht verarbeiten.".to_string(),
+            )
+        })?;
         let publication_id: i64 = sqlx::query_scalar(
             "INSERT INTO scrim.status_publication_approvals(\
                  target_kind, target_id, status_kind, payload, payload_hash, decision, \
@@ -1474,7 +1500,9 @@ impl PgScrimReadRepository {
             .collect()
         };
         if channels.is_empty() {
-            return Err(ScrimError::InvalidStoredData("Platzhalter".to_string()));
+            return Err(ScrimError::InvalidStoredData(
+                "Für diese Abfrage ist kein Kanal hinterlegt.".to_string(),
+            ));
         }
         let discord = channels
             .into_iter()
@@ -1511,9 +1539,13 @@ impl PgScrimReadRepository {
         .bind(need_id)
         .fetch_optional(&self.pool)
         .await?
-        .ok_or_else(|| ScrimError::NotFound("Platzhalter".to_string()))?;
+        .ok_or_else(|| {
+            ScrimError::NotFound("Dieser Ersatzbedarf ist nicht bekannt.".to_string())
+        })?;
         if !matches!(status.as_str(), "open" | "contacting") {
-            return Err(ScrimError::Conflict("Platzhalter".to_string()));
+            return Err(ScrimError::Conflict(
+                "Für diesen Bedarf wird kein Ersatz mehr gesucht.".to_string(),
+            ));
         }
         let rows = sqlx::query(
             "SELECT c.id, c.need_id, c.participant_id, c.discord_user_id, \
@@ -1565,7 +1597,9 @@ impl PgScrimReadRepository {
             .as_ref()
             .is_some_and(|reason| reason.chars().count() > 1_000)
         {
-            return Err(ScrimError::InvalidProposal("Platzhalter".to_string()));
+            return Err(ScrimError::InvalidProposal(
+                "Es wurde kein Kandidat angegeben.".to_string(),
+            ));
         }
         let mut tx = self.pool.begin().await?;
         lock_runtime_control(&mut tx).await?;
@@ -1594,12 +1628,16 @@ impl PgScrimReadRepository {
         .bind(need_id)
         .fetch_optional(&mut *tx)
         .await?
-        .ok_or_else(|| ScrimError::NotFound("Platzhalter".to_string()))?;
+        .ok_or_else(|| {
+            ScrimError::NotFound("Dieser Ersatzbedarf ist nicht bekannt.".to_string())
+        })?;
         if !matches!(
             need.try_get::<String, _>("status")?.as_str(),
             "open" | "contacting"
         ) {
-            return Err(ScrimError::Conflict("Platzhalter".to_string()));
+            return Err(ScrimError::Conflict(
+                "Für diesen Bedarf wird kein Ersatz mehr gesucht.".to_string(),
+            ));
         }
         validate_optional_id(request.match_id.as_deref(), need.try_get("match_id")?)?;
         validate_optional_id(request.team_id.as_deref(), need.try_get("team_id")?)?;
@@ -1613,11 +1651,16 @@ impl PgScrimReadRepository {
         .bind(participant_id)
         .fetch_optional(&mut *tx)
         .await?
-        .ok_or_else(|| ScrimError::InvalidProposal("Platzhalter".to_string()))?;
+        .ok_or_else(|| {
+            ScrimError::InvalidProposal(
+                "Dieser Kandidat steht nicht auf der Liste für diesen Bedarf.".to_string(),
+            )
+        })?;
         let candidate_id = candidate.try_get::<i64, _>("id")?;
         let discord_user_id = candidate.try_get::<Option<i64>, _>("discord_user_id")?;
-        let request_payload = serde_json::to_value(request)
-            .map_err(|_| ScrimError::InvalidProposal("Platzhalter".to_string()))?;
+        let request_payload = serde_json::to_value(request).map_err(|_| {
+            ScrimError::InvalidProposal("Die Anfrage ließ sich nicht verarbeiten.".to_string())
+        })?;
         let replacement_request_id: i64 = sqlx::query_scalar(
             "INSERT INTO scrim.replacement_requests(\
                  need_id, candidate_id, participant_id, discord_user_id, status, request_payload, \
@@ -1664,7 +1707,7 @@ impl PgScrimReadRepository {
                 record_id: replacement_request_id,
                 user_id: Some(user_id),
                 channel_id: None,
-                content: "Platzhalter".to_string(),
+                content: "Hey! 👋 Für ein Scrim wird noch jemand gesucht — du stehst als möglicher Ersatz auf der Liste. Wenn du Zeit und Lust hast, meld dich kurz im Team-Kanal. Danke dir! 🎮".to_string(),
             })
             .into_iter()
             .collect();
@@ -1704,12 +1747,14 @@ impl PgScrimReadRepository {
         .bind(replacement_request_id)
         .fetch_optional(&mut *tx)
         .await?
-        .ok_or_else(|| ScrimError::NotFound("Platzhalter".to_string()))?;
+        .ok_or_else(|| ScrimError::NotFound("Diese Ersatzanfrage gibt es nicht.".to_string()))?;
         if !matches!(
             row.try_get::<String, _>("status")?.as_str(),
             "pending" | "sent" | "uncertain"
         ) {
-            return Err(ScrimError::Conflict("Platzhalter".to_string()));
+            return Err(ScrimError::Conflict(
+                "Diese Ersatzanfrage ist schon abgeschlossen.".to_string(),
+            ));
         }
         let need_id = row.try_get::<i64, _>("need_id")?;
         let candidate_id = row.try_get::<Option<i64>, _>("candidate_id")?;
@@ -2401,7 +2446,7 @@ async fn load_roster_team(
     .bind(team_id)
     .fetch_optional(&mut **tx)
     .await?
-    .ok_or_else(|| ScrimError::NotFound("Platzhalter".to_string()))?;
+    .ok_or_else(|| ScrimError::NotFound("Dieses Team gibt es nicht.".to_string()))?;
     Ok(RosterTeam {
         id: row.try_get("id")?,
         name: row.try_get("name")?,
@@ -2443,7 +2488,7 @@ async fn load_roster_participant(
     .bind(participant_id)
     .fetch_optional(&mut **tx)
     .await?
-    .ok_or_else(|| ScrimError::NotFound("Platzhalter".to_string()))?;
+    .ok_or_else(|| ScrimError::NotFound("Diesen Spieler gibt es nicht.".to_string()))?;
     let availability: Option<String> = row.try_get("availability")?;
     let slots: Option<Value> = row.try_get("availability_slots")?;
     let availability_confirmed = slots.is_some();
@@ -2497,7 +2542,7 @@ async fn resolve_coach(
     .bind(coach_discord_id)
     .fetch_optional(&mut **tx)
     .await?
-    .ok_or_else(|| ScrimError::InvalidProposal("Platzhalter".to_string()))
+    .ok_or_else(|| ScrimError::InvalidProposal("Diesen Coach gibt es nicht.".to_string()))
     .map(Some)
 }
 
@@ -2553,7 +2598,7 @@ async fn participant_role_snapshot(
     .await?;
     let first = rows
         .first()
-        .ok_or_else(|| ScrimError::NotFound("Platzhalter".to_string()))?;
+        .ok_or_else(|| ScrimError::NotFound("Diesen Spieler gibt es nicht.".to_string()))?;
     let discord_id: Option<i64> = first.try_get("discord_id")?;
     let status: String = first.try_get("status")?;
     let team_roles = rows
@@ -3377,22 +3422,24 @@ async fn insert_audit_event(
 fn placeholder_receipt() -> ActionReceipt {
     ActionReceipt {
         accepted: true,
-        message: "Platzhalter".to_string(),
+        message: "Wird ausgeführt.".to_string(),
     }
 }
 
 fn validated_message(message: Option<&str>) -> ScrimResult<String> {
     match message.map(str::trim).filter(|message| !message.is_empty()) {
         Some(message) if message.chars().count() <= 2_000 => Ok(message.to_string()),
-        Some(_) => Err(ScrimError::InvalidProposal("Platzhalter".to_string())),
-        None => Ok("Platzhalter".to_string()),
+        Some(_) => Err(ScrimError::InvalidProposal(
+            "Die Nachricht ist zu lang — höchstens 2000 Zeichen.".to_string(),
+        )),
+        None => Ok("Kurze Erinnerung: eure Rückmeldung zum Scrim fehlt noch.".to_string()),
     }
 }
 
 fn team_query_message(message_ids: &Value, team_id: i32) -> ScrimResult<(i64, i64)> {
-    let entry = message_ids
-        .get(team_id.to_string())
-        .ok_or_else(|| ScrimError::InvalidStoredData("Platzhalter".to_string()))?;
+    let entry = message_ids.get(team_id.to_string()).ok_or_else(|| {
+        ScrimError::InvalidStoredData("Für dieses Team ist keine Nachricht hinterlegt.".to_string())
+    })?;
     let parse = |name| {
         entry
             .get(name)
@@ -3404,7 +3451,11 @@ fn team_query_message(message_ids: &Value, team_id: i32) -> ScrimResult<(i64, i6
                         .filter(|value| *value > 0)
                 })
             })
-            .ok_or_else(|| ScrimError::InvalidStoredData("Platzhalter".to_string()))
+            .ok_or_else(|| {
+                ScrimError::InvalidStoredData(
+                    "Die hinterlegte Nachricht ist unvollständig.".to_string(),
+                )
+            })
     };
     Ok((parse("channel_id")?, parse("message_id")?))
 }
@@ -3418,7 +3469,9 @@ fn validate_optional_id(provided: Option<&str>, actual: Option<i32>) -> ScrimRes
     if Some(provided) == actual {
         Ok(())
     } else {
-        Err(ScrimError::InvalidProposal("Platzhalter".to_string()))
+        Err(ScrimError::InvalidProposal(
+            "Die angegebene ID passt nicht zum Datensatz.".to_string(),
+        ))
     }
 }
 

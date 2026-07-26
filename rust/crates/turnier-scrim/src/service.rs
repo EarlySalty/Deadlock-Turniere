@@ -303,7 +303,11 @@ impl ScrimService<PgScrimReadRepository> {
         let reserve = match request.pool.as_deref().unwrap_or("players") {
             "players" => false,
             "reserve" => true,
-            _ => return Err(ScrimError::InvalidProposal("Platzhalter".to_string())),
+            _ => {
+                return Err(ScrimError::InvalidProposal(
+                    "Unbekannter Topf: erlaubt sind \"players\" und \"reserve\".".to_string(),
+                ))
+            }
         };
         let requested_size = request.size.unwrap_or(6);
         let (team, pool) = self
@@ -594,7 +598,9 @@ impl ScrimService<PgScrimReadRepository> {
 
 fn validate_team_name(name: &str) -> ScrimResult<()> {
     if name.trim().is_empty() {
-        Err(ScrimError::InvalidProposal("Platzhalter".to_string()))
+        Err(ScrimError::InvalidProposal(
+            "Das Team braucht einen Namen.".to_string(),
+        ))
     } else {
         Ok(())
     }
@@ -604,7 +610,10 @@ pub(crate) fn validate_team_window(from: Option<i32>, to: Option<i32>) -> ScrimR
     match (from, to) {
         (None, None) => Ok(()),
         (Some(from), Some(to)) if 0 <= from && from < to && to <= 1_440 => Ok(()),
-        _ => Err(ScrimError::InvalidProposal("Platzhalter".to_string())),
+        _ => Err(ScrimError::InvalidProposal(
+            "Ungültige Stammzeit: Anfang muss vor Ende liegen, beide innerhalb eines Tages."
+                .to_string(),
+        )),
     }
 }
 
@@ -612,7 +621,10 @@ fn validate_scrim_window(window: &ScrimSlot) -> ScrimResult<()> {
     if window.from < window.to && window.to <= 1_440 {
         Ok(())
     } else {
-        Err(ScrimError::InvalidProposal("Platzhalter".to_string()))
+        Err(ScrimError::InvalidProposal(
+            "Ungültiges Zeitfenster: Anfang muss vor Ende liegen, beide innerhalb eines Tages."
+                .to_string(),
+        ))
     }
 }
 
