@@ -719,8 +719,11 @@ async fn publish_announcement(
         .await;
     match result {
         Ok(response) => {
+            // Der Broker antwortet als {"ok": true, "result": {...}} — die uebrigen Pfade
+            // sind nur Rueckfalloptionen, damit eine abweichende Antwortform nichts verliert.
             let remote_message_id = response
-                .pointer("/data/message_id")
+                .pointer("/result/message_id")
+                .or_else(|| response.pointer("/data/message_id"))
                 .or_else(|| response.get("message_id"))
                 .and_then(|value| {
                     value
@@ -950,7 +953,19 @@ async fn create_team(
     let service = service(&state);
     service.authorize_operator(actor.discord_id).await?;
     let team = service.create_team(mutation.idempotency_key, body).await?;
-    let discord_role_id = create_team_discord_role(&state, &team, mutation.idempotency_key).await;
+    // Bei einer Wiederholung liegt die Rolle schon an. Der Idempotenzschutz des Brokers
+    // laeuft ueber eine Zwischenspeicherung mit Ablaufzeit, taugt also nicht als
+    // Dauerschutz — sonst legte ein spaeter Wiederholungsversuch eine zweite Rolle an
+    // und ueberschriebe die hinterlegte ID.
+    let existing_role_id = service
+        .roster_team(team.id)
+        .await
+        .ok()
+        .and_then(|current| current.discord_role_id);
+    let discord_role_id = match existing_role_id {
+        Some(role_id) => Some(role_id),
+        None => create_team_discord_role(&state, &team, mutation.idempotency_key).await,
+    };
     let mutation = service
         .finish_team_creation(team.id, discord_role_id)
         .await?;
