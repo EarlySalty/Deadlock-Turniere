@@ -203,7 +203,10 @@ pub fn spawn_substitute_sweep_worker(state: AppState) {
                 }
             };
             let count = plans.len();
-            sync_discord_roles(&state, plans).await;
+            // Jeder Durchlauf ist ein eigener Vorgang: sonst wuerde ein spaeterer Ablauf
+            // derselben Rolle im Zwischenspeicher des Brokers haengen bleiben.
+            let sweep_key = format!("substitute-sweep-{}", Utc::now().timestamp());
+            sync_discord_roles(&state, plans, &sweep_key).await;
             tracing::info!(count, "Scrim-Aushilfe-Ablauf geprueft");
             tokio::time::sleep(interval).await;
         }
@@ -1003,10 +1006,11 @@ async fn create_team(
         Some(role_id) => Some(role_id),
         None => create_team_discord_role(&state, &team, mutation.idempotency_key).await,
     };
+    let request_key = mutation.idempotency_key;
     let mutation = service
         .finish_team_creation(team.id, discord_role_id)
         .await?;
-    let discord_sync = sync_discord_roles(&state, mutation.sync_plans).await;
+    let discord_sync = sync_discord_roles(&state, mutation.sync_plans, request_key).await;
     Ok(Json(TeamMutationResponse {
         team: mutation.team,
         discord_sync,
@@ -1021,14 +1025,14 @@ async fn patch_team(
     Json(body): Json<TeamPatchRequest>,
 ) -> WebResult<Json<TeamMutationResponse>> {
     require_internal_boundary(peer, &headers, &state)?;
-    require_mutation_headers(&headers)?;
+    let request_key = require_mutation_headers(&headers)?.idempotency_key;
     let actor = require_bff_actor(&headers)?;
     let service = service(&state);
     service.authorize_operator(actor.discord_id).await?;
     let mutation = service
         .patch_team(parse_db_id(&id, "team_id")?, body)
         .await?;
-    let discord_sync = sync_discord_roles(&state, mutation.sync_plans).await;
+    let discord_sync = sync_discord_roles(&state, mutation.sync_plans, request_key).await;
     Ok(Json(TeamMutationResponse {
         team: mutation.team,
         discord_sync,
@@ -1043,7 +1047,7 @@ async fn patch_participant(
     Json(body): Json<ParticipantPatchRequest>,
 ) -> WebResult<Json<ParticipantPatchResponse>> {
     require_internal_boundary(peer, &headers, &state)?;
-    require_mutation_headers(&headers)?;
+    let request_key = require_mutation_headers(&headers)?.idempotency_key;
     let actor = require_bff_actor(&headers)?;
     let service = service(&state);
     service.authorize_operator(actor.discord_id).await?;
@@ -1055,7 +1059,7 @@ async fn patch_participant(
             positive_config_id(state.config.scrim_signup_role_id),
         )
         .await?;
-    let discord_sync = sync_discord_roles(&state, vec![mutation.sync_plan]).await;
+    let discord_sync = sync_discord_roles(&state, vec![mutation.sync_plan], request_key).await;
     Ok(Json(ParticipantPatchResponse {
         participant: mutation.participant,
         discord_sync,
@@ -1131,7 +1135,8 @@ async fn substitute(
             positive_config_id(state.config.scrim_signup_role_id),
         )
         .await?;
-    let discord_sync = sync_discord_roles(&state, vec![mutation.sync_plan]).await;
+    let discord_sync =
+        sync_discord_roles(&state, vec![mutation.sync_plan], request.idempotency_key).await;
     let dm = send_substitute_dm(
         &state,
         mutation.participant.id,
@@ -1155,7 +1160,7 @@ async fn resync_participant_discord(
     headers: HeaderMap,
 ) -> WebResult<Json<DiscordResyncResponse>> {
     require_internal_boundary(peer, &headers, &state)?;
-    require_mutation_headers(&headers)?;
+    let request_key = require_mutation_headers(&headers)?.idempotency_key;
     let actor = require_bff_actor(&headers)?;
     let service = service(&state);
     service.authorize_operator(actor.discord_id).await?;
@@ -1166,7 +1171,7 @@ async fn resync_participant_discord(
             positive_config_id(state.config.scrim_signup_role_id),
         )
         .await?;
-    let discord_sync = sync_discord_roles(&state, vec![plan]).await;
+    let discord_sync = sync_discord_roles(&state, vec![plan], request_key).await;
     Ok(Json(DiscordResyncResponse { discord_sync }))
 }
 
@@ -1196,7 +1201,14 @@ async fn create_team_discord_role(
     match response {
         Ok(response) => response
             .pointer("/result/role_id")
-            .and_then(serde_json::Value::as_u64)
+            // Discord-IDs kommen als Zahl oder als Zeichenkette — in JSON ist die
+            // Zeichenkette die uebliche Form, weil die IDs groesser als 2^53 werden.
+            // Nur Zahlen zu akzeptieren hiesse: Rolle angelegt, aber nicht gemerkt.
+            .and_then(|value| {
+                value
+                    .as_u64()
+                    .or_else(|| value.as_str().and_then(|value| value.trim().parse().ok()))
+            })
             .and_then(|role_id| i64::try_from(role_id).ok())
             .or_else(|| {
                 tracing::warn!(
@@ -1216,9 +1228,17 @@ async fn create_team_discord_role(
     }
 }
 
+/// `operation_key` benennt den ausloesenden Vorgang und geht in den Idempotenzschluessel ein.
+///
+/// Der Broker merkt sich erfolgreiche Rollenaktionen fuer eine begrenzte Zeit. Ohne
+/// Vorgangsbezug waere "Rolle entziehen und kurz darauf neu vergeben" innerhalb dieser
+/// Zeitspanne ein Treffer im Zwischenspeicher: die Datenbank fuehrt die Rolle wieder,
+/// Discord hat sie nicht. Mit Vorgangsbezug greift die Absicherung weiterhin bei einer
+/// Wiederholung desselben Aufrufs, aber nicht mehr ueber verschiedene Vorgaenge hinweg.
 async fn sync_discord_roles(
     state: &AppState,
     plans: Vec<DiscordRoleSyncPlan>,
+    operation_key: &str,
 ) -> DiscordSyncStatus {
     let Some(guild_id) = positive_config_id(Some(state.config.scrim_guild_id)) else {
         tracing::warn!("Scrim-Rollen-Sync ohne gueltige Guild-ID");
@@ -1252,7 +1272,7 @@ async fn sync_discord_roles(
                         "role_id": action.role_id,
                         "reason": format!("scrim {} {operation} role {}", plan.subject, action.role_id),
                         "idempotency_key": format!(
-                            "scrim-{}-{}-{operation}",
+                            "scrim-{operation_key}-{}-{}-{operation}",
                             plan.subject, action.role_id
                         ),
                     }),
@@ -1341,11 +1361,17 @@ async fn post_team_announcement(
         .await;
     let message_id = match response {
         Ok(response) => {
+            // Zahl oder Zeichenkette akzeptieren: ohne Message-ID wird die Reaktion nicht
+            // gesetzt, und dann kann sich niemand auf die Ankuendigung melden.
             let message_id = response
                 .pointer("/result/message_id")
-                .and_then(serde_json::Value::as_str)
-                .filter(|message_id| !message_id.is_empty())
-                .map(str::to_string);
+                .and_then(|value| {
+                    value
+                        .as_str()
+                        .map(str::to_string)
+                        .or_else(|| value.as_u64().map(|id| id.to_string()))
+                })
+                .filter(|message_id| !message_id.is_empty());
             if message_id.is_none() {
                 tracing::warn!(
                     team_id = team.id,
