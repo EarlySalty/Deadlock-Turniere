@@ -112,6 +112,10 @@ pub struct RosterPoolCandidate {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DiscordDispatch {
+    /// Herkunft des Datensatzes. Ohne sie kollidieren gleiche Tabellen-IDs aus
+    /// verschiedenen Quellen im Idempotenzschluessel des Brokers, und eine legitime
+    /// zweite Nachricht wuerde als Wiederholung verworfen.
+    pub kind: String,
     pub record_id: i64,
     pub user_id: Option<i64>,
     pub channel_id: Option<i64>,
@@ -1382,6 +1386,7 @@ impl PgScrimReadRepository {
                     target_discord_ids
                         .into_iter()
                         .map(|user_id| DiscordDispatch {
+                            kind: "match_request_reminder".to_string(),
                             record_id: reminder_id,
                             user_id: Some(user_id),
                             channel_id: None,
@@ -1390,6 +1395,7 @@ impl PgScrimReadRepository {
                 );
             } else {
                 discord.push(DiscordDispatch {
+                    kind: "match_request_reminder".to_string(),
                     record_id: reminder_id,
                     user_id: None,
                     channel_id: Some(source.0),
@@ -1513,6 +1519,7 @@ impl PgScrimReadRepository {
         let discord = channels
             .into_iter()
             .map(|channel_id| DiscordDispatch {
+                kind: "status_publication".to_string(),
                 record_id: publication_id,
                 user_id: None,
                 channel_id: Some(channel_id),
@@ -1710,6 +1717,7 @@ impl PgScrimReadRepository {
         let receipt = placeholder_receipt();
         let discord = discord_user_id
             .map(|user_id| DiscordDispatch {
+                kind: "replacement_request".to_string(),
                 record_id: replacement_request_id,
                 user_id: Some(user_id),
                 channel_id: None,
@@ -3838,6 +3846,7 @@ mod tests {
                 message: "Wird ausgeführt.".to_string(),
             },
             discord: vec![DiscordDispatch {
+                kind: "match_request_reminder".to_string(),
                 record_id: 7,
                 user_id: Some(123),
                 channel_id: None,

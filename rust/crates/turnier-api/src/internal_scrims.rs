@@ -1492,7 +1492,7 @@ async fn dispatch_discord(state: &AppState, dispatch: &MutationDispatch) {
                     &serde_json::json!({
                         "user_id": user_id,
                         "content": target.content,
-                        "idempotency_key": format!("scrim_dispatch:{}:user:{}", target.record_id, user_id),
+                        "idempotency_key": format!("scrim_dispatch:{}:{}:user:{}", target.kind, target.record_id, user_id),
                     }),
                 )
                 .await
@@ -1505,7 +1505,7 @@ async fn dispatch_discord(state: &AppState, dispatch: &MutationDispatch) {
                     &serde_json::json!({
                         "channel_id": channel_id,
                         "content": target.content,
-                        "idempotency_key": format!("scrim_dispatch:{}:channel:{}", target.record_id, channel_id),
+                        "idempotency_key": format!("scrim_dispatch:{}:{}:channel:{}", target.kind, target.record_id, channel_id),
                     }),
                 )
                 .await
