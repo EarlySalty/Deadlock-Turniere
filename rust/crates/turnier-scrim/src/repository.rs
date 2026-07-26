@@ -75,7 +75,11 @@ impl PgScrimReadRepository {
             .as_ref()
             .map(serde_json::to_value)
             .transpose()
-            .map_err(|_| ScrimError::InvalidProposal("Platzhalter".to_string()))?;
+            .map_err(|_| {
+                ScrimError::InvalidProposal(
+                    "Deine Verfügbarkeit ließ sich nicht speichern. Bitte trag die Zeiten erneut ein.".to_string(),
+                )
+            })?;
         let mut tx = self.pool.begin().await?;
 
         // Gleicher Advisory-Key wie der Live-Reaktions-Hook (dl-community/reaction_roles.rs:475) — serialisiert Web-Signup gegen Discord-Reaktion. store.rs nutzt abweichend 42060004001 (Reconcile = separater Bot-Task).
@@ -185,8 +189,12 @@ impl PgScrimReadRepository {
         availability: &SelfServiceAvailability,
         legacy_availability: &str,
     ) -> ScrimResult<SelfServiceParticipant> {
-        let availability_slots = serde_json::to_value(availability)
-            .map_err(|_| ScrimError::InvalidProposal("Platzhalter".to_string()))?;
+        let availability_slots = serde_json::to_value(availability).map_err(|_| {
+            ScrimError::InvalidProposal(
+                "Deine Verfügbarkeit ließ sich nicht speichern. Bitte trag die Zeiten erneut ein."
+                    .to_string(),
+            )
+        })?;
         let mut tx = self.pool.begin().await?;
         sqlx::query("SELECT pg_advisory_xact_lock($1)")
             .bind(SELF_SERVICE_ADVISORY_LOCK)
@@ -200,7 +208,9 @@ impl PgScrimReadRepository {
         .fetch_optional(&mut *tx)
         .await?;
         let Some(participant_id) = participant_id else {
-            return Err(ScrimError::NotFound("Platzhalter".to_string()));
+            return Err(ScrimError::NotFound(
+                "Du bist noch nicht im Scrim-Pool. Melde dich zuerst an, dann kannst du deine Verfügbarkeit pflegen.".to_string(),
+            ));
         };
         sqlx::query(
             "UPDATE scrim.participants \

@@ -161,7 +161,10 @@ fn canonicalize_availability_slot(slot: &mut AvailabilitySlot) -> ScrimResult<()
         || slot.to.is_some_and(|to| to > 1_440)
         || matches!((slot.from, slot.to), (Some(from), Some(to)) if from >= to)
     {
-        return Err(ScrimError::InvalidProposal("Platzhalter".to_string()));
+        return Err(ScrimError::InvalidProposal(
+            "Ungültige Zeitangabe: Start muss vor Ende liegen, beide innerhalb eines Tages."
+                .to_string(),
+        ));
     }
     Ok(())
 }
@@ -196,7 +199,12 @@ fn render_legacy_availability(weekly: &WeeklyAvailability) -> ScrimResult<String
         sa: &rendered[5],
         so: &rendered[6],
     })
-    .map_err(|_| ScrimError::InvalidProposal("Platzhalter".to_string()))
+    .map_err(|_| {
+        ScrimError::InvalidProposal(
+            "Deine Verfügbarkeit ließ sich nicht verarbeiten. Bitte trag die Zeiten erneut ein."
+                .to_string(),
+        )
+    })
 }
 
 fn render_legacy_slot(slot: &AvailabilitySlot) -> String {
