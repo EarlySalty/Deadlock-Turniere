@@ -14,6 +14,7 @@ license.workspace = true
 # Abstraktion ersetzt, die das SQL kapselt (keine Tabellennamen als String).
 [dependencies]
 turnier-core = { path = "../turnier-core" }
+turnier-match-core = { path = "../turnier-match-core" }
 turnier-db = { path = "../turnier-db" }
 turnier-config = { path = "../turnier-config" }
 turnier-discord = { path = "../turnier-discord" }

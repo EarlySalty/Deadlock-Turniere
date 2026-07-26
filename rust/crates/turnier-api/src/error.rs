@@ -211,6 +211,34 @@ impl From<turnier_steam::SteamError> for WebError {
     }
 }
 
+impl From<turnier_scrim::ScrimError> for WebError {
+    fn from(err: turnier_scrim::ScrimError) -> Self {
+        use turnier_scrim::ScrimError::*;
+        match err {
+            CoachUnauthorized => Self::forbidden("Aktiver Scrim-Coach erforderlich"),
+            ParticipantUnauthorized => {
+                Self::forbidden("Diese Scrim-Aktion gehört nicht zu deinem Team")
+            }
+            RuntimeNotWritable { .. } => Self::conflict(
+                "Scrim-Runtime erlaubt Turniere-Mutationen nur in draining/turniere.",
+            ),
+            IdempotencyConflict => {
+                Self::conflict("Idempotency-Key wurde bereits mit anderem Payload verwendet")
+            }
+            CommandInProgress => Self::conflict("Scrim-Befehl wird bereits verarbeitet"),
+            NotFound(message) => Self::not_found(message),
+            Conflict(message) => Self::conflict(message),
+            InvalidProposal(message) | InvalidResponse(message) => Self::bad_request(message),
+            InvalidStoredData(message) => {
+                tracing::error!(detail = %message, "Ungueltige gespeicherte Scrim-Daten");
+                Self::internal("Interner Scrim-Datenfehler")
+            }
+            InvalidActor => Self::bad_request("Ungueltige Actor-Discord-ID"),
+            Database(error) => error.into(),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

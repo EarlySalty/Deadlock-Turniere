@@ -1,3 +1,7 @@
+## #17 — Scrim-Planung bekommt einen neutralen Turnierkern
+
+**Ausgangslage:** Scrim-Planung, Terminantworten und Match-Auswertung waren noch an den Discord-Bot gekoppelt und konnten nicht sicher schrittweise umgezogen werden. **Änderung:** Der Turnierdienst erhält einen neutralen Matchkern sowie eine interne, abgesicherte Scrim-Schnittstelle mit eindeutigen Übergaben, offenen Gegnern, gemeinsamen oder matchspezifischen Slots und nachvollziehbaren Freigaben. **Aktuelles Verhalten:** Der bestehende Betrieb bleibt unverändert aktiv; der neue Pfad kann parallel geprüft werden und übernimmt erst nach der kontrollierten Umschaltung Schreibzugriffe.
+
 ## #16 — Python-Altstand liegt nur noch im Archiv
 
 **Ausgangslage:** Nach dem Rust-Cutover lag der alte Python-Stand weiter im Hauptrepo. Dadurch war nicht klar, was noch produktiv ist und was nur noch als Referenz dient. **Änderung:** Der alte Stand wurde im Backup festgehalten und aus dem laufenden Repo entfernt. Die Dienste laden ihre Geheimnisse jetzt über den Rust-Weg. **Aktuelles Verhalten:** Das Hauptrepo zeigt den aktuellen Rust-Betrieb, während der entfernte Altstand im Backup nachvollziehbar bleibt.

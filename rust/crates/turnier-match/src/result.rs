@@ -28,6 +28,9 @@ use turnier_core::{discord_id_to_string, now_utc};
 use turnier_discord::PlayerStat;
 use turnier_engine::mini_groups::{aggregate, select_mini_group_winner, MiniGroupMatch};
 
+use crate::core_adapter::{
+    bracket_winning_team, group_winning_team, resolve_bracket_result, resolve_group_result,
+};
 use crate::error::{MatchError, MatchResult};
 use crate::MatchManager;
 
@@ -186,8 +189,10 @@ impl MatchManager {
             )));
         };
 
-        let (winner_id_value, winning_team_value) =
-            resolve_bracket_winner(team1_id, team2_id, params.winning_team, params.winner_id)?;
+        let canonical =
+            resolve_bracket_result(team1_id, team2_id, params.winning_team, params.winner_id)?;
+        let winner_id_value = canonical.winner_id;
+        let winning_team_value = bracket_winning_team(canonical.winner_slot);
 
         // Force-Reset bei Gewinnerwechsel.
         if params.force
@@ -346,27 +351,39 @@ impl MatchManager {
             )));
         }
 
-        // winner_id aus winning_team (1-basiert!) ableiten, falls nicht gesetzt.
-        let mut winner_id = params.winner_id;
-        if winner_id.is_none() {
-            if params.winning_team == Some(1) {
-                winner_id = team1_id;
-            } else if params.winning_team == Some(2) {
-                winner_id = team2_id;
-            }
-        }
-        let winner_id = winner_id
-            .filter(|w| Some(*w) == team1_id || Some(*w) == team2_id)
-            .ok_or_else(|| {
-                MatchError::invalid("winner_id muss eines der beiden Teams im Match sein")
-            })?;
-
-        let winning_team_value = if Some(winner_id) == team1_id { 1 } else { 2 };
-        let loser_id = if winning_team_value == 1 {
-            team2_id
-        } else {
-            team1_id
-        };
+        let (winner_id, winning_team_value, loser_id) =
+            if let (Some(team1), Some(team2)) = (team1_id, team2_id) {
+                let canonical =
+                    resolve_group_result(team1, team2, params.winning_team, params.winner_id)?;
+                let winning_team = group_winning_team(canonical.winner_slot);
+                let loser_id = if winning_team == 1 {
+                    Some(team2)
+                } else {
+                    Some(team1)
+                };
+                (canonical.winner_id, winning_team, loser_id)
+            } else {
+                // Preserve the legacy nullable-team behavior while normal matches use
+                // the canonical core above.
+                let winner_id = params
+                    .winner_id
+                    .or(match params.winning_team {
+                        Some(1) => team1_id,
+                        Some(2) => team2_id,
+                        _ => None,
+                    })
+                    .filter(|winner| Some(*winner) == team1_id || Some(*winner) == team2_id)
+                    .ok_or_else(|| {
+                        MatchError::invalid("winner_id muss eines der beiden Teams im Match sein")
+                    })?;
+                let winning_team = if Some(winner_id) == team1_id { 1 } else { 2 };
+                let loser_id = if winning_team == 1 {
+                    team2_id
+                } else {
+                    team1_id
+                };
+                (winner_id, winning_team, loser_id)
+            };
         let match_stats = params
             .players
             .as_ref()
@@ -935,72 +952,18 @@ fn resolve_next_slot_is_team1(
 
 /// Löst `winner_id` und `winning_team` (0-basiert!) aus den Eingaben auf.
 /// Portiert die Winner-Auflösungslogik von `apply_bracket_match_result`.
+#[cfg(test)]
 fn resolve_bracket_winner(
     team1_id: i64,
     team2_id: i64,
     winning_team: Option<i64>,
     winner_id: Option<i64>,
 ) -> MatchResult<(i64, i64)> {
-    if winning_team.is_none() && winner_id.is_none() {
-        return Err(MatchError::invalid(
-            "winner_id oder winning_team ist erforderlich",
-        ));
-    }
-
-    let (winner_id_value, winning_team_value) = match (winner_id, winning_team) {
-        // Nur winning_team gegeben (0-basiert): 0 → team1, 1 → team2.
-        (None, Some(wt)) => match wt {
-            0 => (team1_id, 0),
-            1 => (team2_id, 1),
-            other => {
-                return Err(MatchError::invalid(format!(
-                    "Ungültiger winning_team-Wert: {other}"
-                )))
-            }
-        },
-        // Nur winner_id gegeben: Slot ableiten.
-        (Some(wid), None) => {
-            let wt = resolve_winning_team(team1_id, team2_id, wid)?;
-            (wid, wt)
-        }
-        // Beide gegeben: Konsistenz prüfen.
-        (Some(wid), Some(wt)) => {
-            if wt != 0 && wt != 1 {
-                return Err(MatchError::invalid(format!(
-                    "Ungültiger winning_team-Wert: {wt}"
-                )));
-            }
-            let expected = resolve_winning_team(team1_id, team2_id, wid)?;
-            if wt != expected {
-                return Err(MatchError::invalid(
-                    "winning_team passt nicht zum übergebenen winner_id",
-                ));
-            }
-            (wid, wt)
-        }
-        (None, None) => unreachable!("bereits oben abgefangen"),
-    };
-
-    if winner_id_value != team1_id && winner_id_value != team2_id {
-        return Err(MatchError::invalid(format!(
-            "winner_id {winner_id_value} gehört nicht zum Match"
-        )));
-    }
-    Ok((winner_id_value, winning_team_value))
-}
-
-/// `0` für team1, `1` für team2 (Bracket-Konvention). Portiert
-/// `_resolve_winning_team`.
-fn resolve_winning_team(team1_id: i64, team2_id: i64, winner_id: i64) -> MatchResult<i64> {
-    if winner_id == team1_id {
-        return Ok(0);
-    }
-    if winner_id == team2_id {
-        return Ok(1);
-    }
-    Err(MatchError::invalid(format!(
-        "winner_id {winner_id} gehört nicht zu diesem Match"
-    )))
+    let canonical = resolve_bracket_result(team1_id, team2_id, winning_team, winner_id)?;
+    Ok((
+        canonical.winner_id,
+        bracket_winning_team(canonical.winner_slot),
+    ))
 }
 
 /// Löst die Spieler-Stats auf: explizite `players`-Liste serialisieren, sonst die
