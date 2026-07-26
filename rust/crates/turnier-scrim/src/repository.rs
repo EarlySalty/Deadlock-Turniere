@@ -1073,7 +1073,8 @@ impl PgScrimReadRepository {
             participant_role_snapshot(&mut tx, participant_id, reserve_role_id, signup_role_id)
                 .await?;
         let discord_user_id = snapshot.discord_user_id;
-        let sync_plan = role_resync(&snapshot);
+        let managed = all_managed_role_ids(&mut tx, signup_role_id, reserve_role_id).await?;
+        let sync_plan = role_resync(&snapshot, &managed);
         let mutation = SubstituteMutation {
             participant,
             sync_plan,
@@ -1095,7 +1096,8 @@ impl PgScrimReadRepository {
         let snapshot =
             participant_role_snapshot(&mut tx, participant_id, reserve_role_id, signup_role_id)
                 .await?;
-        Ok(role_resync(&snapshot))
+        let managed = all_managed_role_ids(&mut tx, signup_role_id, reserve_role_id).await?;
+        Ok(role_resync(&snapshot, &managed))
     }
 
     pub async fn roster_suggestion_pool(
@@ -2634,19 +2636,54 @@ fn role_diff(before: &RoleSnapshot, after: &RoleSnapshot) -> DiscordRoleSyncPlan
     }
 }
 
-fn role_resync(snapshot: &RoleSnapshot) -> DiscordRoleSyncPlan {
+/// Stellt den Soll-Zustand her, statt ihn nur zu ergaenzen.
+///
+/// Die Ist-Rollen auf Discord kennen wir nicht — wohl aber die Menge der Rollen, die wir
+/// selbst verwalten (alle Team-Rollen plus Anmelde- und Reserve-Rolle). Innerhalb dieser
+/// Menge koennen wir gefahrlos entfernen, was nicht ins Soll gehoert; alles andere am
+/// Discord-Mitglied bleibt unberuehrt.
+///
+/// Ohne das Entfernen behaelt ein Spieler nach einem Teamwechsel die alte Teamrolle und
+/// sieht weiter den alten Team-Kanal. Zugleich ist das der Reparaturweg, wenn ein Sync
+/// nach dem DB-Commit fehlgeschlagen ist: ein erneuter Aufruf stellt den vollen Soll-Zustand
+/// her, auch wenn die Datenbank laengst den Zielzustand traegt.
+fn role_resync(snapshot: &RoleSnapshot, managed_role_ids: &BTreeSet<u64>) -> DiscordRoleSyncPlan {
+    let removes = managed_role_ids
+        .difference(&snapshot.role_ids)
+        .map(|role_id| DiscordRoleAction {
+            operation: RoleOperation::Remove,
+            role_id: *role_id,
+        });
+    let adds = snapshot.role_ids.iter().map(|role_id| DiscordRoleAction {
+        operation: RoleOperation::Add,
+        role_id: *role_id,
+    });
     DiscordRoleSyncPlan {
         subject: snapshot.subject.clone(),
         discord_user_id: snapshot.discord_user_id,
-        actions: snapshot
-            .role_ids
-            .iter()
-            .map(|role_id| DiscordRoleAction {
-                operation: RoleOperation::Add,
-                role_id: *role_id,
-            })
-            .collect(),
+        actions: removes.chain(adds).collect(),
     }
+}
+
+/// Alle Rollen, die der Scrim-Betrieb selbst vergibt: jede Team-Rolle plus Anmelde- und
+/// Reserve-Rolle. Grenzt ab, was ein Resync anfassen darf.
+async fn all_managed_role_ids(
+    tx: &mut Transaction<'_, Postgres>,
+    signup_role_id: Option<u64>,
+    reserve_role_id: Option<u64>,
+) -> ScrimResult<BTreeSet<u64>> {
+    let rows =
+        sqlx::query("SELECT discord_role_id FROM scrim.teams WHERE discord_role_id IS NOT NULL")
+            .fetch_all(&mut **tx)
+            .await?;
+    let team_roles = rows
+        .iter()
+        .map(|row| row.try_get::<Option<i64>, _>("discord_role_id"))
+        .collect::<Result<Vec<_>, _>>()?;
+    let mut role_ids = positive_roles(team_roles);
+    role_ids.extend(signup_role_id);
+    role_ids.extend(reserve_role_id);
+    Ok(role_ids)
 }
 
 fn positive_roles(values: Vec<Option<i64>>) -> BTreeSet<u64> {
@@ -3763,7 +3800,64 @@ fn is_allowed_lagebild_evidence_url(value: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::is_allowed_lagebild_evidence_url;
+    use std::collections::BTreeSet;
+
+    use super::{is_allowed_lagebild_evidence_url, role_resync, RoleOperation, RoleSnapshot};
+
+    /// Der Resync-Knopf soll den Soll-Zustand herstellen, nicht nur ergaenzen.
+    /// Ohne Remove behaelt ein Spieler nach einem Teamwechsel die alte Teamrolle
+    /// und damit Zugriff auf den alten Team-Kanal.
+    #[test]
+    fn resync_removes_managed_roles_that_are_no_longer_wanted() {
+        let snapshot = RoleSnapshot {
+            subject: "7".to_string(),
+            discord_user_id: Some(42),
+            role_ids: BTreeSet::from([100, 200]),
+        };
+        let managed = BTreeSet::from([100, 200, 300, 400]);
+
+        let plan = role_resync(&snapshot, &managed);
+
+        let mut added = plan
+            .actions
+            .iter()
+            .filter(|action| action.operation == RoleOperation::Add)
+            .map(|action| action.role_id)
+            .collect::<Vec<_>>();
+        let mut removed = plan
+            .actions
+            .iter()
+            .filter(|action| action.operation == RoleOperation::Remove)
+            .map(|action| action.role_id)
+            .collect::<Vec<_>>();
+        added.sort_unstable();
+        removed.sort_unstable();
+
+        assert_eq!(added, vec![100, 200], "Soll-Rollen werden gesetzt");
+        assert_eq!(
+            removed,
+            vec![300, 400],
+            "fremde verwaltete Rollen fliegen raus"
+        );
+    }
+
+    /// Nur verwaltete Rollen anfassen: alles andere am Discord-Mitglied bleibt unberuehrt.
+    #[test]
+    fn resync_never_touches_roles_outside_the_managed_set() {
+        let snapshot = RoleSnapshot {
+            subject: "7".to_string(),
+            discord_user_id: Some(42),
+            role_ids: BTreeSet::from([100]),
+        };
+        let managed = BTreeSet::from([100, 200]);
+
+        let plan = role_resync(&snapshot, &managed);
+
+        assert!(plan
+            .actions
+            .iter()
+            .all(|action| managed.contains(&action.role_id)));
+    }
 
     #[test]
     fn lagebild_evidence_urls_are_limited_to_main_guild_message_links() {
