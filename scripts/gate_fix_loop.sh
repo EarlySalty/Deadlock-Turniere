@@ -3,8 +3,10 @@
 #
 # Ablauf je Runde:
 #   1. review_gate.py urteilt ueber HEAD gegen origin/main  (derselbe Kritiker wie im Push-Hook)
-#   2. ALLOW  -> fertig, Exit 0. Der eigentliche Push bleibt Handarbeit und laeuft
-#                erneut durch den echten Hook. Dieses Skript umgeht das Gate nicht.
+#   2. ALLOW  -> verifizieren und selbst nach main pushen, Exit 0. Das Skript pusht
+#                bewusst automatisch; es umgeht das Gate dabei nicht, sondern erfuellt
+#                genau dessen zwei Bedingungen selbst: ALLOW des Kritikers UND ein
+#                gruener Testlauf. Ohne beides wird nicht gepusht.
 #   3. BLOCK  -> Codex bekommt den Befund als Auftrag, fixt ihn nach TDD
 #   4. fmt + clippy + Tests; nur bei Gruen wird committet, sonst Abbruch
 #   5. naechste Runde
@@ -21,13 +23,17 @@ MODEL="${MODEL:-gpt-5.6-sol}"
 EFFORT="${EFFORT:-high}"
 LOG_DIR="${LOG_DIR:-$REPO/.gate-loop}"
 
-mkdir -p "$LOG_DIR"
+say() { printf '\n=== [%s] %s\n' "$(date +%H:%M:%S)" "$*"; }
+
 cd "$REPO" || exit 2
+if [[ -n "$(git status --porcelain)" ]]; then
+  say "Arbeitsbaum ist nicht sauber -- Abbruch ohne Kritiker oder Commit"
+  exit 3
+fi
+mkdir -p "$LOG_DIR"
 
 # Vorbestehend rot, nicht von dieser Arbeit verursacht (gegen unveraendertes main belegt).
 KNOWN_RED="invalid_proposal_transition_returns_conflict"
-
-say() { printf '\n=== [%s] %s\n' "$(date +%H:%M:%S)" "$*"; }
 
 verify() {
   say "fmt + clippy"
@@ -57,13 +63,22 @@ for round in $(seq 1 "$MAX_ROUNDS"); do
 
   if [[ "$verdict" == ALLOW:* ]]; then
     say "Kritiker laesst durch nach $round Runde(n)."
-    # Vor dem manuellen Push beide Bedingungen erfuellen, die auch der Push-Hook stellt.
+    # Vor dem Push beide Bedingungen erfuellen, die auch der Push-Hook stellt:
+    # gruener Testlauf und ein ALLOW des Kritikers. Erst dann rausschieben.
     if ! verify; then
       say "Kritiker waere zufrieden, aber die Verifikation ist rot -- kein Push."
       exit 6
     fi
-    say "Platzhalter"
-    exit 0
+    # HEAD:main, nicht "main" — die Arbeit liegt auf einem Feature-Branch, der lokale
+    # main-Zeiger kennt sie nicht. "git push origin main" haette leer gepusht.
+    say "Push nach main"
+    if git push origin HEAD:main >"$LOG_DIR/push.log" 2>&1; then
+      say "gepusht: $(git log --oneline -1)"
+      exit 0
+    fi
+    say "Push fehlgeschlagen -- siehe $LOG_DIR/push.log"
+    tail -5 "$LOG_DIR/push.log"
+    exit 8
   fi
   if [[ "$verdict" != BLOCK:* ]]; then
     say "unklare Antwort des Kritikers -- Abbruch zur Sichtung"; exit 2

@@ -36,7 +36,7 @@ printf '%s\n' \
   'printf "%s\n" "$*" >>"$GIT_LOG"' \
   'case "$1 $2 $3" in' \
   '  "rev-parse --verify origin/main") exit 0 ;;' \
-  '  "status --porcelain ") printf " M tracked-file\n"; exit 0 ;;' \
+  '  "status --porcelain ") printf "%b" "${GIT_STATUS_OUTPUT:-}"; exit 0 ;;' \
   '  "log --oneline -1") printf "deadbee Platzhalter\n"; exit 0 ;;' \
   'esac' \
   'exit 0' >"$fake_bin/git"
@@ -53,8 +53,39 @@ GIT_LOG="$git_log" PATH="$fake_bin:$PATH" REPO="$tmp_dir/allow-repo" \
   LOG_DIR="$tmp_dir/allow-log" MAX_ROUNDS=1 \
   bash "$repo_root/scripts/gate_fix_loop.sh"
 
-if grep -Eq '^(add|commit|push)( |$)' "$git_log"; then
-  printf 'gate loop must leave commit and push to the caller\n' >&2
+# Der Loop soll nach einem ALLOW selbst pushen -- das ist sein Zweck. Er darf dabei
+# nur den aktuellen HEAD rausschieben, nie den lokalen main-Zeiger.
+if ! grep -Eq '^push origin HEAD:main$' "$git_log"; then
+  printf 'gate loop must push HEAD:main after ALLOW\n' >&2
+  cat "$git_log" >&2
+  exit 1
+fi
+if grep -Eq '^(add|commit)( |$)' "$git_log"; then
+  printf 'gate loop must not create commits of its own on the ALLOW path\n' >&2
+  cat "$git_log" >&2
+  exit 1
+fi
+
+: >"$git_log"
+dirty_output="$tmp_dir/dirty-output.log"
+set +e
+GIT_LOG="$git_log" GIT_STATUS_OUTPUT=' M tracked-file\n' PATH="$fake_bin:$PATH" \
+  REPO="$tmp_dir/allow-repo" LOG_DIR="$tmp_dir/dirty-log" MAX_ROUNDS=1 \
+  bash "$repo_root/scripts/gate_fix_loop.sh" >"$dirty_output" 2>&1
+status=$?
+set -e
+
+if [[ $status -ne 3 ]]; then
+  printf 'expected dirty repository exit 3, got %s\n' "$status" >&2
+  exit 1
+fi
+if ! grep -q 'Arbeitsbaum ist nicht sauber' "$dirty_output"; then
+  printf 'dirty repository must report why it aborted\n' >&2
+  cat "$dirty_output" >&2
+  exit 1
+fi
+if grep -Eq '^(fetch|rev-parse|add|commit|push)( |$)' "$git_log"; then
+  printf 'dirty repository must abort before critic or mutation\n' >&2
   cat "$git_log" >&2
   exit 1
 fi
