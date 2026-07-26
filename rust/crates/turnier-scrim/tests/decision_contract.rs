@@ -2,11 +2,12 @@ use std::collections::BTreeSet;
 
 use chrono::{Duration, TimeZone, Utc};
 use turnier_scrim::decision::{
-    derive_match_request_facts, is_scrim_history_entry, validate_match_request_batch,
+    derive_match_request_facts, is_scrim_history_entry, rank_replacement_candidates,
+    validate_match_request_batch,
 };
 use turnier_scrim::model::{
     MatchRequestBatchInput, MatchRequestPairingInput, MatchRequestResponse, MatchRequestTemplate,
-    ResponseChoice, RosterMember, ScrimDay, ScrimSlot,
+    ReplacementCandidate, ResponseChoice, RosterMember, ScrimDay, ScrimSlot,
 };
 use turnier_scrim::ScrimError;
 
@@ -299,4 +300,32 @@ fn history_uses_only_final_selected_result_and_never_cancelled() {
 #[test]
 fn response_deadline_example_is_strict() {
     assert!(at(0) + Duration::hours(1) < at(2));
+}
+
+#[test]
+fn replacement_candidates_rank_by_score_then_stable_id() {
+    let candidate = |id, score| ReplacementCandidate {
+        id,
+        need_id: 1,
+        participant_id: Some(i32::try_from(id).expect("fixture id")),
+        discord_user_id: None,
+        display_name: None,
+        rank: None,
+        roles: None,
+        availability: None,
+        candidate_data: serde_json::json!({}),
+        score_data: serde_json::json!({"score": score}),
+        status: "candidate".to_string(),
+    };
+    let mut candidates = vec![candidate(3, 50), candidate(2, 90), candidate(1, 50)];
+
+    rank_replacement_candidates(&mut candidates);
+
+    assert_eq!(
+        candidates
+            .into_iter()
+            .map(|candidate| candidate.id)
+            .collect::<Vec<_>>(),
+        vec![2, 1, 3]
+    );
 }

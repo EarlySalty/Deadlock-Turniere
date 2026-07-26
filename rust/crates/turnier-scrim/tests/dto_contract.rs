@@ -1,7 +1,10 @@
 use serde_json::json;
 use turnier_scrim::dto::{
-    ActionReceipt, MatchRequestAction, MatchRequestResponseRequest, PatchValue,
-    PlanningCreateRequest, TeamPatchRequest, MATCH_REQUEST_RESPONSE_SCHEMA_VERSION,
+    ActionReceipt, AnnouncementPublicationRequest, CreateMatchRequest, LobbyCodeRequest,
+    MatchIdPatchRequest, MatchIdsRequest, MatchRequestAction, MatchRequestPatch,
+    MatchRequestResponseRequest, PatchValue, PlanningCreateRequest, ReplacementRequestAction,
+    ReplacementRequestPatch, ResultFetchRequest, TeamPatchRequest,
+    MATCH_REQUEST_RESPONSE_SCHEMA_VERSION,
 };
 
 #[test]
@@ -25,6 +28,42 @@ fn planning_contract_accepts_the_exact_bff_fixture() {
     assert_eq!(request.pairings[1].slots.as_ref().expect("slots").len(), 2);
     assert_eq!(serde_json::to_value(request).unwrap(), fixture);
     assert_eq!(serde_json::to_string(&fixture).unwrap(), fixture_source);
+}
+
+#[test]
+fn match_operator_contract_accepts_the_exact_bff_payloads() {
+    let create: CreateMatchRequest = serde_json::from_value(json!({
+        "team_a_id": "1",
+        "team_b_id": "2",
+        "match_request_id": null,
+        "scheduled_at": "2026-08-01T18:00:00Z",
+        "note": null
+    }))
+    .expect("canonical match create DTO");
+    assert_eq!(create.team_a_id.as_deref(), Some("1"));
+    assert_eq!(create.team_b_id.as_deref(), Some("2"));
+
+    let lobby: LobbyCodeRequest =
+        serde_json::from_value(json!({"lobby_code":"a1b2c"})).expect("canonical lobby DTO");
+    assert_eq!(lobby.lobby_code, "a1b2c");
+
+    let match_ids: MatchIdsRequest =
+        serde_json::from_value(json!({"match_ids":["9007199254740991"]}))
+            .expect("canonical match IDs DTO");
+    assert_eq!(match_ids.match_ids, ["9007199254740991"]);
+
+    let fetch: ResultFetchRequest =
+        serde_json::from_value(json!({})).expect("empty result-fetch capability DTO");
+    assert!(fetch.match_id_ref.is_none());
+
+    let selection: MatchIdPatchRequest = serde_json::from_value(json!({"message":"wrong_winner"}))
+        .expect("canonical result-ref patch DTO");
+    assert_eq!(selection.message, "wrong_winner");
+
+    let publication: AnnouncementPublicationRequest =
+        serde_json::from_value(json!({"message":"announcement"}))
+            .expect("canonical announcement publication DTO");
+    assert_eq!(publication.message, "announcement");
 }
 
 #[test]
@@ -144,4 +183,26 @@ fn nullable_patch_fields_distinguish_omitted_null_and_value() {
     assert!(matches!(patch.name, PatchValue::Omitted));
     assert!(matches!(patch.coach, PatchValue::Null));
     assert!(matches!(patch.coach_discord_id, PatchValue::Value(value) if value == "123"));
+}
+
+#[test]
+fn operator_patch_contracts_match_bff_and_discord_relay() {
+    let patch: MatchRequestPatch = serde_json::from_value(json!({
+        "status": "cancelled",
+        "note": null,
+    }))
+    .expect("BFF match-request patch");
+    assert!(matches!(patch.status, PatchValue::Value(value) if value == "cancelled"));
+    assert!(matches!(patch.note, PatchValue::Null));
+
+    let patch: ReplacementRequestPatch =
+        serde_json::from_value(json!({"action": "accept"})).expect("Discord relay patch");
+    assert_eq!(patch.action, ReplacementRequestAction::Accept);
+    assert_eq!(
+        serde_json::to_value(patch).expect("serialize replacement patch"),
+        json!({"action": "accept"})
+    );
+    assert!(
+        serde_json::from_value::<ReplacementRequestPatch>(json!({"status": "accepted"})).is_err()
+    );
 }

@@ -43,6 +43,7 @@ pub struct Config {
     pub scrim_guild_id: i64,
     pub scrim_signup_role_id: Option<i64>,
     pub scrim_reserve_role_id: Option<i64>,
+    pub scrim_announce_channel_id: i64,
 
     // --- JWT (im Port effektiv ungenutzt: Sessions sind opake Tokens) ---
     pub jwt_secret: String,
@@ -165,6 +166,10 @@ impl Config {
             scrim_reserve_role_id: optional_positive_int(
                 "SCRIM_RESERVE_ROLE_ID",
                 1_523_803_562_306_703_430,
+            ),
+            scrim_announce_channel_id: get_int(
+                "SCRIM_ANNOUNCE_CHANNEL_ID",
+                1_520_842_755_037_855_975,
             ),
             jwt_secret: get_string("JWT_SECRET", ""),
             avatar_dir: get_string("AVATAR_DIR", "data/avatars"),
