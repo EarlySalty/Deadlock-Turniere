@@ -33,3 +33,6 @@ backend/data/*.db-shm
 data/
 ops/logs/*
 scripts/run_turniere_backend.sh
+
+# Protokolle des Gate-Loops, gehoeren nicht ins Repo
+.gate-loop/
