@@ -705,6 +705,17 @@ async fn publish_announcement(
     else {
         return;
     };
+    // Wurde der Block schon veroeffentlicht, nicht erneut posten. Bei gleichem
+    // Idempotenzschluessel liefert die Datenbank denselben Entwurf zurueck; die
+    // Absicherung des Brokers gegen Doppelausfuehrung haelt nur begrenzte Zeit vor,
+    // ein spaeter Wiederholungsversuch wuerde die Ankuendigung sonst doppelt posten.
+    if publication.published_at.is_some() {
+        tracing::debug!(
+            announcement_id,
+            "Scrim-Ankuendigung bereits veroeffentlicht, kein erneuter Versand"
+        );
+        return;
+    }
     let result = state
         .notifier
         .broker()
