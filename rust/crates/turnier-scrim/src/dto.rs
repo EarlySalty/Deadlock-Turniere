@@ -124,15 +124,22 @@ pub struct CreateMatchRequest {
     pub coach_spectator_discord_id: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct WeeklyAvailability {
+    #[serde(default)]
     pub mon: AvailabilitySlot,
+    #[serde(default)]
     pub tue: AvailabilitySlot,
+    #[serde(default)]
     pub wed: AvailabilitySlot,
+    #[serde(default)]
     pub thu: AvailabilitySlot,
+    #[serde(default)]
     pub fri: AvailabilitySlot,
+    #[serde(default)]
     pub sat: AvailabilitySlot,
+    #[serde(default)]
     pub sun: AvailabilitySlot,
 }
 
@@ -143,6 +150,19 @@ pub struct SignupRequest {
     pub roles: Option<String>,
     pub availability: Option<String>,
     pub availability_slots: Option<WeeklyAvailability>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SelfServiceParticipant {
+    pub id: i32,
+    pub display_name: String,
+    pub rank: Option<String>,
+    pub roles: Option<String>,
+    pub availability: Option<String>,
+    pub availability_slots: WeeklyAvailability,
+    pub availability_confirmed: bool,
+    pub status: String,
+    pub source: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

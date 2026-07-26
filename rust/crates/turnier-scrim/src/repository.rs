@@ -12,12 +12,13 @@ use turnier_db::Pool;
 use crate::decision::derive_match_request_facts;
 use crate::dto::{
     ActionReceipt, MatchRequestAction, MatchRequestResponseRequest, ReleaseMatchRequest,
+    SelfServiceParticipant, SignupRequest, WeeklyAvailability as SelfServiceAvailability,
 };
 use crate::model::{
-    Coach, LagebildEvidenceRef, LagebildSnapshotRef, MatchRequest, MatchRequestBatch,
-    MatchRequestResponse, MatchRequestTemplate, Participant, ResponseChoice, RosterMember,
-    ScrimMatch, ScrimReadModel, ScrimSlot, SelectedMatchResult, Team, TeamMember, TeamRef,
-    ValidatedMatchRequestBatch, WeeklyAvailability,
+    AvailabilitySlot, AvailabilityStatus, Coach, LagebildEvidenceRef, LagebildSnapshotRef,
+    MatchRequest, MatchRequestBatch, MatchRequestResponse, MatchRequestTemplate, Participant,
+    ResponseChoice, RosterMember, ScrimMatch, ScrimReadModel, ScrimSlot, SelectedMatchResult, Team,
+    TeamMember, TeamRef, ValidatedMatchRequestBatch, WeeklyAvailability,
 };
 use crate::{ScrimError, ScrimResult};
 
@@ -28,6 +29,7 @@ const ID_LOCK_NAMESPACE: i32 = 20260726;
 const RUNTIME_LOCK_NAMESPACE: i32 = 724060001;
 const RUNTIME_LOCK_KEY: i32 = 724060002;
 const COMMAND_LEASE_OWNER: &str = "turniere:api";
+const SELF_SERVICE_ADVISORY_LOCK: i64 = 0x4451_0008_0004_0001;
 
 #[async_trait]
 pub trait ScrimReadRepository: Send + Sync {
@@ -44,6 +46,13 @@ pub struct PgScrimReadRepository {
     pool: Pool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SignupMutation {
+    pub participant: SelfServiceParticipant,
+    pub discord_user_id: Option<u64>,
+    pub role_ids: BTreeSet<u64>,
+}
+
 impl PgScrimReadRepository {
     pub fn new(pool: Pool) -> Self {
         Self { pool }
@@ -51,6 +60,161 @@ impl PgScrimReadRepository {
 
     pub async fn runtime_control(&self) -> ScrimResult<RuntimeControl> {
         load_runtime_control(&self.pool).await
+    }
+
+    pub async fn signup(
+        &self,
+        discord_id: i64,
+        display_name: &str,
+        request: &SignupRequest,
+        signup_role_id: Option<u64>,
+        reserve_role_id: Option<u64>,
+    ) -> ScrimResult<SignupMutation> {
+        let availability_slots = request
+            .availability_slots
+            .as_ref()
+            .map(serde_json::to_value)
+            .transpose()
+            .map_err(|_| ScrimError::InvalidProposal("Platzhalter".to_string()))?;
+        let mut tx = self.pool.begin().await?;
+
+        // Gleicher Advisory-Key wie der Live-Reaktions-Hook (dl-community/reaction_roles.rs:475) — serialisiert Web-Signup gegen Discord-Reaktion. store.rs nutzt abweichend 42060004001 (Reconcile = separater Bot-Task).
+        sqlx::query("SELECT pg_advisory_xact_lock($1)")
+            .bind(SELF_SERVICE_ADVISORY_LOCK)
+            .execute(&mut *tx)
+            .await?;
+
+        let participant_id: Option<i32> = sqlx::query_scalar(
+            "SELECT id FROM scrim.participants \
+              WHERE discord_id=$1 ORDER BY id ASC LIMIT 1",
+        )
+        .bind(discord_id)
+        .fetch_optional(&mut *tx)
+        .await?;
+        let participant_id = if let Some(participant_id) = participant_id {
+            sqlx::query(
+                "UPDATE scrim.participants \
+                    SET display_name=$2, rank=$3, roles=$4, availability=$5, \
+                        availability_slots=COALESCE($6::jsonb, availability_slots), \
+                        updated_at=now() \
+                  WHERE id=$1",
+            )
+            .bind(participant_id)
+            .bind(display_name)
+            .bind(request.rank.as_deref())
+            .bind(request.roles.as_deref())
+            .bind(request.availability.as_deref())
+            .bind(availability_slots.clone())
+            .execute(&mut *tx)
+            .await?;
+            participant_id
+        } else if let Some(participant_id) = sqlx::query_scalar(
+            "SELECT id FROM scrim.participants \
+              WHERE display_name=$1 AND discord_id IS NULL \
+              ORDER BY id ASC LIMIT 1",
+        )
+        .bind(display_name)
+        .fetch_optional(&mut *tx)
+        .await?
+        {
+            sqlx::query(
+                "UPDATE scrim.participants \
+                    SET discord_id=$2, rank=$3, roles=$4, availability=$5, \
+                        availability_slots=COALESCE($6::jsonb, availability_slots), \
+                        updated_at=now() \
+                  WHERE id=$1",
+            )
+            .bind(participant_id)
+            .bind(discord_id)
+            .bind(request.rank.as_deref())
+            .bind(request.roles.as_deref())
+            .bind(request.availability.as_deref())
+            .bind(availability_slots.clone())
+            .execute(&mut *tx)
+            .await?;
+            participant_id
+        } else {
+            sqlx::query_scalar(
+                "INSERT INTO scrim.participants(\
+                     id, discord_id, display_name, rank, rank_source, rank_verified, roles, \
+                     availability, availability_slots, status, source, created_at, updated_at\
+                 ) VALUES (\
+                     (SELECT COALESCE(MAX(id), 0) + 1 FROM scrim.participants), \
+                     $1, $2, $3, 'self', false, $4, $5, $6::jsonb, \
+                     'new', 'web_form', now(), now()\
+                 ) RETURNING id",
+            )
+            .bind(discord_id)
+            .bind(display_name)
+            .bind(request.rank.as_deref())
+            .bind(request.roles.as_deref())
+            .bind(request.availability.as_deref())
+            .bind(availability_slots)
+            .fetch_one(&mut *tx)
+            .await?
+        };
+
+        let participant = load_self_service_participant(&mut tx, participant_id).await?;
+        let team_role_ids = sqlx::query_scalar::<_, Option<i64>>(
+            "SELECT t.discord_role_id \
+               FROM scrim.team_members tm \
+               JOIN scrim.teams t ON t.id=tm.team_id \
+              WHERE tm.participant_id=$1 \
+              ORDER BY t.discord_role_id ASC NULLS LAST",
+        )
+        .bind(participant_id)
+        .fetch_all(&mut *tx)
+        .await?;
+        let role_ids = managed_role_ids(
+            &participant.status,
+            signup_role_id,
+            reserve_role_id,
+            team_role_ids,
+        );
+        tx.commit().await?;
+        Ok(SignupMutation {
+            participant,
+            discord_user_id: u64::try_from(discord_id).ok(),
+            role_ids,
+        })
+    }
+
+    pub async fn update_availability(
+        &self,
+        discord_id: i64,
+        availability: &SelfServiceAvailability,
+        legacy_availability: &str,
+    ) -> ScrimResult<SelfServiceParticipant> {
+        let availability_slots = serde_json::to_value(availability)
+            .map_err(|_| ScrimError::InvalidProposal("Platzhalter".to_string()))?;
+        let mut tx = self.pool.begin().await?;
+        sqlx::query("SELECT pg_advisory_xact_lock($1)")
+            .bind(SELF_SERVICE_ADVISORY_LOCK)
+            .execute(&mut *tx)
+            .await?;
+        let participant_id: Option<i32> = sqlx::query_scalar(
+            "SELECT id FROM scrim.participants \
+              WHERE discord_id=$1 ORDER BY id ASC LIMIT 1",
+        )
+        .bind(discord_id)
+        .fetch_optional(&mut *tx)
+        .await?;
+        let Some(participant_id) = participant_id else {
+            return Err(ScrimError::NotFound("Platzhalter".to_string()));
+        };
+        sqlx::query(
+            "UPDATE scrim.participants \
+                SET availability_slots=$2::jsonb, availability=$3, updated_at=now() \
+              WHERE id=$1",
+        )
+        .bind(participant_id)
+        .bind(availability_slots)
+        .bind(legacy_availability)
+        .execute(&mut *tx)
+        .await?;
+        let participant = load_self_service_participant(&mut tx, participant_id).await?;
+        tx.commit().await?;
+        Ok(participant)
     }
 
     pub async fn create_match_request_batch(
@@ -634,6 +798,191 @@ impl ScrimReadRepository for PgScrimReadRepository {
         .await?
         .into_iter()
         .collect())
+    }
+}
+
+async fn load_self_service_participant(
+    tx: &mut Transaction<'_, Postgres>,
+    participant_id: i32,
+) -> ScrimResult<SelfServiceParticipant> {
+    let row = sqlx::query(
+        "SELECT id, display_name, rank, roles, availability, availability_slots, status, source \
+           FROM scrim.participants WHERE id=$1",
+    )
+    .bind(participant_id)
+    .fetch_one(&mut **tx)
+    .await?;
+    let availability = row.try_get::<Option<String>, _>("availability")?;
+    let availability_slots = row.try_get::<Option<Value>, _>("availability_slots")?;
+    let availability_confirmed = availability_slots.is_some();
+    Ok(SelfServiceParticipant {
+        id: row.try_get("id")?,
+        display_name: row.try_get("display_name")?,
+        rank: row.try_get("rank")?,
+        roles: row.try_get("roles")?,
+        availability_slots: effective_self_service_availability(
+            availability_slots,
+            availability.as_deref(),
+        ),
+        availability_confirmed,
+        availability,
+        status: row.try_get("status")?,
+        source: row.try_get("source")?,
+    })
+}
+
+fn managed_role_ids(
+    status: &str,
+    signup_role_id: Option<u64>,
+    reserve_role_id: Option<u64>,
+    team_role_ids: Vec<Option<i64>>,
+) -> BTreeSet<u64> {
+    if status.trim().eq_ignore_ascii_case("inactive") {
+        return BTreeSet::new();
+    }
+    let mut role_ids = BTreeSet::new();
+    role_ids.extend(signup_role_id);
+    if status.trim().eq_ignore_ascii_case("reserve") {
+        role_ids.extend(reserve_role_id);
+    }
+    role_ids.extend(
+        team_role_ids
+            .into_iter()
+            .flatten()
+            .filter_map(|role_id| u64::try_from(role_id).ok())
+            .filter(|role_id| *role_id > 0),
+    );
+    role_ids
+}
+
+fn effective_self_service_availability(
+    slots: Option<Value>,
+    legacy: Option<&str>,
+) -> SelfServiceAvailability {
+    if let Some(slots) = slots {
+        return serde_json::from_value(slots).unwrap_or_default();
+    }
+    legacy.map(parse_legacy_availability).unwrap_or_default()
+}
+
+fn parse_legacy_availability(text: &str) -> SelfServiceAvailability {
+    let text = text.trim();
+    if text.is_empty() {
+        return SelfServiceAvailability::default();
+    }
+    if let Ok(Value::Object(values)) = serde_json::from_str::<Value>(text) {
+        let mut weekly = SelfServiceAvailability::default();
+        for (key, slot) in [
+            ("mo", &mut weekly.mon),
+            ("di", &mut weekly.tue),
+            ("mi", &mut weekly.wed),
+            ("do", &mut weekly.thu),
+            ("fr", &mut weekly.fri),
+            ("sa", &mut weekly.sat),
+            ("so", &mut weekly.sun),
+        ] {
+            if let Some(value) = values.get(key) {
+                *slot = parse_legacy_slot(&legacy_value_to_string(value));
+            }
+        }
+        return weekly;
+    }
+    let slot = parse_legacy_slot(text);
+    SelfServiceAvailability {
+        mon: slot.clone(),
+        tue: slot.clone(),
+        wed: slot.clone(),
+        thu: slot.clone(),
+        fri: slot.clone(),
+        sat: slot.clone(),
+        sun: slot,
+    }
+}
+
+fn parse_legacy_slot(raw: &str) -> AvailabilitySlot {
+    let lower = raw.trim().to_ascii_lowercase();
+    let lower = lower.trim();
+    if lower.is_empty() || lower == "?" {
+        return AvailabilitySlot::default();
+    }
+    if lower.contains("geht nicht") || lower.contains("nein") || lower.contains("keine zeit") {
+        return AvailabilitySlot {
+            status: AvailabilityStatus::Unavailable,
+            from: None,
+            to: None,
+        };
+    }
+    if matches!(
+        lower,
+        "flexibel" | "immer" | "immer zeit" | "jederzeit" | "optimal"
+    ) {
+        return available_slot(None, None);
+    }
+    if let Some((from, to)) = parse_hour_range(lower) {
+        return available_slot(Some(from), Some(to));
+    }
+    if let Some(from) = parse_time(lower) {
+        return available_slot(Some(from), None);
+    }
+    if let Some(rest) = lower.strip_prefix("ab ") {
+        if let Some(from) = parse_time_or_hour(rest.trim()) {
+            return available_slot(Some(from), None);
+        }
+    }
+    if let Some(from) = parse_hour(lower) {
+        return available_slot(Some(from), None);
+    }
+    for (needle, from) in [
+        ("abend", 18 * 60),
+        ("nachmittag", 14 * 60),
+        ("mittag", 12 * 60),
+    ] {
+        if lower.contains(needle) {
+            return available_slot(Some(from), None);
+        }
+    }
+    available_slot(None, None)
+}
+
+fn available_slot(from: Option<u16>, to: Option<u16>) -> AvailabilitySlot {
+    AvailabilitySlot {
+        status: AvailabilityStatus::Available,
+        from,
+        to,
+    }
+}
+
+fn parse_hour_range(value: &str) -> Option<(u16, u16)> {
+    let (from, to) = value.split_once('-')?;
+    let from = parse_time_or_hour(from.trim())?;
+    let to = parse_time_or_hour(to.trim())?;
+    (from < to && from <= 1_440 && to <= 1_440).then_some((from, to))
+}
+
+fn parse_time_or_hour(value: &str) -> Option<u16> {
+    parse_time(value).or_else(|| parse_hour(value))
+}
+
+fn parse_time(value: &str) -> Option<u16> {
+    let (hour, minute) = value.split_once(':')?;
+    let hour = hour.trim().parse::<u16>().ok()?;
+    let minute = minute.trim().parse::<u16>().ok()?;
+    if hour > 24 || minute > 59 || (hour == 24 && minute != 0) {
+        return None;
+    }
+    Some(hour * 60 + minute)
+}
+
+fn parse_hour(value: &str) -> Option<u16> {
+    let hour = value.parse::<u16>().ok()?;
+    (hour <= 24).then_some(hour * 60)
+}
+
+fn legacy_value_to_string(value: &Value) -> String {
+    match value {
+        Value::Null => String::new(),
+        Value::String(value) => value.clone(),
+        value => value.to_string(),
     }
 }
 

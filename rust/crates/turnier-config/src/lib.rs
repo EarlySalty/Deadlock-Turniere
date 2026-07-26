@@ -40,6 +40,9 @@ pub struct Config {
     pub discord_admin_role_ids: String,
     pub discord_tournament_admin_role_ids: String,
     pub discord_mod_role_ids: String,
+    pub scrim_guild_id: i64,
+    pub scrim_signup_role_id: Option<i64>,
+    pub scrim_reserve_role_id: Option<i64>,
 
     // --- JWT (im Port effektiv ungenutzt: Sessions sind opake Tokens) ---
     pub jwt_secret: String,
@@ -154,6 +157,15 @@ impl Config {
                 "1494120177577754747",
             ),
             discord_mod_role_ids: get_string("DISCORD_MOD_ROLE_IDS", "1474210107255554331"),
+            scrim_guild_id: get_int("SCRIM_GUILD_ID", 1_289_721_245_281_292_288),
+            scrim_signup_role_id: optional_positive_int(
+                "SCRIM_SIGNUP_ROLE_ID",
+                1_520_849_762_851_618_817,
+            ),
+            scrim_reserve_role_id: optional_positive_int(
+                "SCRIM_RESERVE_ROLE_ID",
+                1_523_803_562_306_703_430,
+            ),
             jwt_secret: get_string("JWT_SECRET", ""),
             avatar_dir: get_string("AVATAR_DIR", "data/avatars"),
             steam_bridge_db_path: get_string(
@@ -256,6 +268,13 @@ fn split_csv(raw: &str) -> impl Iterator<Item = String> + '_ {
     raw.split(',')
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
+}
+
+fn optional_positive_int(key: &str, default: i64) -> Option<i64> {
+    match std::env::var(key) {
+        Ok(value) => value.trim().parse().ok().filter(|value| *value > 0),
+        Err(_) => Some(default),
+    }
 }
 
 /// Extrahiert den normalisierten Hostnamen aus einer URL oder einem Host:Port-String.

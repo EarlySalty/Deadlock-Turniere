@@ -110,6 +110,16 @@ pub struct AvailabilitySlot {
     pub to: Option<u16>,
 }
 
+impl Default for AvailabilitySlot {
+    fn default() -> Self {
+        Self {
+            status: AvailabilityStatus::Unknown,
+            from: None,
+            to: None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WeeklyAvailability {
     #[serde(default)]

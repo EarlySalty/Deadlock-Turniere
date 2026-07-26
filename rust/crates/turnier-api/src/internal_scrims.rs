@@ -14,6 +14,7 @@ use turnier_scrim::decision::validate_match_request_batch;
 use turnier_scrim::dto::{
     ActionReceipt, CapabilityReceipt, MatchRequestAction, MatchRequestDefaults,
     MatchRequestResponseRequest, PlanningCreateRequest, ReleaseMatchRequest,
+    SelfServiceParticipant, SignupRequest, WeeklyAvailability,
     MATCH_REQUEST_RESPONSE_SCHEMA_VERSION,
 };
 use turnier_scrim::model::{
@@ -21,7 +22,7 @@ use turnier_scrim::model::{
     Participant, ReplacementNeed, ScrimDay, ScrimMatch, ScrimMe, ScrimReadModel, ScrimSlot, Team,
     TeamBoard, TeamRef, TeamTimeline,
 };
-use turnier_scrim::repository::{PgScrimReadRepository, ScrimReadRepository};
+use turnier_scrim::repository::{PgScrimReadRepository, ScrimReadRepository, SignupMutation};
 use turnier_scrim::service::ScrimService;
 
 use crate::error::{WebError, WebResult};
@@ -43,12 +44,9 @@ pub fn router() -> Router<AppState> {
         .route("/internal/turnier/v1/scrims/me", get(read_me))
         .route(
             "/internal/turnier/v1/scrims/me/availability",
-            put(disabled_user_mutation),
+            put(update_my_availability),
         )
-        .route(
-            "/internal/turnier/v1/scrims/signup",
-            post(disabled_user_mutation),
-        )
+        .route("/internal/turnier/v1/scrims/signup", post(signup))
         .route("/internal/turnier/v1/scrims/pool", get(read_pool))
         .route("/internal/turnier/v1/scrims/coaches", get(read_coaches))
         .route(
@@ -472,15 +470,84 @@ async fn release_match_request(
     Ok((StatusCode::OK, Json(receipt)))
 }
 
-async fn disabled_user_mutation(
+async fn signup(
     State(state): State<AppState>,
     ConnectInfo(peer): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
-) -> WebResult<(StatusCode, Json<CapabilityReceipt>)> {
+    Json(body): Json<SignupRequest>,
+) -> WebResult<Json<SelfServiceParticipant>> {
     require_internal_boundary(peer, &headers, &state)?;
     require_mutation_headers(&headers)?;
-    require_bff_actor(&headers)?;
-    Ok(disabled_capability())
+    let actor = require_bff_actor(&headers)?;
+    let signup = service(&state)
+        .signup(
+            actor.discord_id,
+            actor.display_name,
+            body,
+            positive_config_id(state.config.scrim_signup_role_id),
+            positive_config_id(state.config.scrim_reserve_role_id),
+        )
+        .await?;
+    sync_signup_roles(&state, &signup).await;
+    Ok(Json(signup.participant))
+}
+
+async fn update_my_availability(
+    State(state): State<AppState>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    Json(body): Json<WeeklyAvailability>,
+) -> WebResult<Json<SelfServiceParticipant>> {
+    require_internal_boundary(peer, &headers, &state)?;
+    require_mutation_headers(&headers)?;
+    let actor = require_bff_actor(&headers)?;
+    Ok(Json(
+        service(&state)
+            .update_availability(actor.discord_id, body)
+            .await?,
+    ))
+}
+
+async fn sync_signup_roles(state: &AppState, signup: &SignupMutation) {
+    let Some(discord_user_id) = signup.discord_user_id else {
+        return;
+    };
+    let Some(guild_id) = positive_config_id(Some(state.config.scrim_guild_id)) else {
+        tracing::warn!("SCRIM_GUILD_ID ist ungueltig; Scrim-Rollen-Sync deaktiviert");
+        return;
+    };
+    for role_id in &signup.role_ids {
+        let reason = format!("scrim {} add role {}", signup.participant.id, role_id);
+        let idempotency_key = format!("scrim-{}-{}-add", signup.participant.id, role_id);
+        if let Err(error) = state
+            .notifier
+            .broker()
+            .post_internal::<serde_json::Value, _>(
+                "/internal/master/v1/discord/member/add-role",
+                &serde_json::json!({
+                    "guild_id": guild_id,
+                    "user_id": discord_user_id,
+                    "role_id": role_id,
+                    "reason": reason,
+                    "idempotency_key": idempotency_key,
+                }),
+            )
+            .await
+        {
+            tracing::warn!(
+                participant_id = signup.participant.id,
+                role_id,
+                %error,
+                "Scrim-Signup-Discord-Sync fail-open"
+            );
+        }
+    }
+}
+
+fn positive_config_id(value: Option<i64>) -> Option<u64> {
+    value
+        .and_then(|value| u64::try_from(value).ok())
+        .filter(|value| *value > 0)
 }
 
 async fn disabled_operator_mutation(
