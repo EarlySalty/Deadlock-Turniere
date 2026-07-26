@@ -2662,9 +2662,32 @@ async fn coach_sync_plans(
             .and_then(|id| i64::try_from(id).ok())
             .ok_or(ScrimError::InvalidActor)?;
         let after = coach_role_snapshot(tx, coach_id).await?;
-        plans.push(role_diff(&before, &after));
+        plans.push(repairing_role_plan(&before, &after));
     }
     Ok(plans)
+}
+
+/// Vergleich plus Reparatur: entfernt wird nur, was der Vergleich hergibt, gesetzt wird der
+/// gesamte Sollzustand.
+///
+/// Ein reiner Vergleich sieht nach einem fehlgeschlagenen Discord-Aufruf nichts mehr, weil die
+/// Datenbank den Zielzustand bereits traegt — die Rolle bliebe dauerhaft fehlend. Zusaetzliche
+/// Add-Aktionen sind gefahrlos, ein zweites Vergeben derselben Rolle aendert nichts.
+///
+/// Bewusst kein voller Abgleich gegen alle verwalteten Rollen: ein Coach kann in einem anderen
+/// Team Spieler sein, und dessen Rolle steht nicht in seinem Coach-Sollzustand. Sie duerfte ihm
+/// dabei nicht entzogen werden.
+fn repairing_role_plan(before: &RoleSnapshot, after: &RoleSnapshot) -> DiscordRoleSyncPlan {
+    let mut plan = role_diff(before, after);
+    for role_id in &after.role_ids {
+        if !plan.actions.iter().any(|action| action.role_id == *role_id) {
+            plan.actions.push(DiscordRoleAction {
+                operation: RoleOperation::Add,
+                role_id: *role_id,
+            });
+        }
+    }
+    plan
 }
 
 async fn participant_role_snapshot(
@@ -3898,9 +3921,62 @@ mod tests {
     use std::collections::BTreeSet;
 
     use super::{
-        blocks_lobby_code_write, is_allowed_lagebild_evidence_url, role_resync, DiscordDispatch,
-        MutationDispatch, RoleOperation, RoleSnapshot,
+        blocks_lobby_code_write, is_allowed_lagebild_evidence_url, repairing_role_plan,
+        role_resync, DiscordDispatch, MutationDispatch, RoleOperation, RoleSnapshot,
     };
+
+    /// Nach einem fehlgeschlagenen Discord-Aufruf traegt die Datenbank schon den Zielzustand.
+    /// Ein reiner Vergleich faende dann nichts mehr — die Rolle bliebe dauerhaft fehlend.
+    #[test]
+    fn unchanged_roles_are_set_again_so_a_failed_sync_can_heal() {
+        let snapshot = |ids: [u64; 1]| RoleSnapshot {
+            subject: "coach".to_string(),
+            discord_user_id: Some(42),
+            role_ids: BTreeSet::from(ids),
+        };
+
+        let plan = repairing_role_plan(&snapshot([100]), &snapshot([100]));
+
+        assert_eq!(
+            plan.actions
+                .iter()
+                .filter(|action| action.operation == RoleOperation::Add)
+                .map(|action| action.role_id)
+                .collect::<Vec<_>>(),
+            vec![100]
+        );
+        assert!(
+            plan.actions
+                .iter()
+                .all(|action| action.operation != RoleOperation::Remove),
+            "ohne Aenderung darf nichts entzogen werden"
+        );
+    }
+
+    /// Weggefallene Rollen kommen weiterhin nur aus dem Vergleich — nie mehr entziehen als das.
+    #[test]
+    fn removals_still_come_only_from_the_comparison() {
+        let before = RoleSnapshot {
+            subject: "coach".to_string(),
+            discord_user_id: Some(42),
+            role_ids: BTreeSet::from([100, 200]),
+        };
+        let after = RoleSnapshot {
+            subject: "coach".to_string(),
+            discord_user_id: Some(42),
+            role_ids: BTreeSet::from([200]),
+        };
+
+        let plan = repairing_role_plan(&before, &after);
+
+        let removed = plan
+            .actions
+            .iter()
+            .filter(|action| action.operation == RoleOperation::Remove)
+            .map(|action| action.role_id)
+            .collect::<Vec<_>>();
+        assert_eq!(removed, vec![100]);
+    }
     use crate::dto::ActionReceipt;
 
     /// Der Dispatch landet im Command-Receipt und wird beim Replay wieder herausgelesen.
