@@ -5,13 +5,15 @@ use serde::Serialize;
 
 use crate::decision::{is_scrim_history_entry, validate_match_request_batch};
 use crate::dto::{
-    CreateTeamRequest, ParticipantPatchRequest, PatchValue, RosterSuggestResponse,
-    RosterSuggestionCandidate, SelfServiceParticipant, SignupRequest, SuggestTeamRequest,
-    TeamPatchRequest, WeeklyAvailability,
+    AnnouncementPublicationRequest, CreateMatchRequest, CreateTeamRequest, LobbyCodeRequest,
+    MatchIdPatchRequest, MatchIdsRequest, ParticipantPatchRequest, PatchValue, ResultFetchRequest,
+    RosterSuggestResponse, RosterSuggestionCandidate, SelfServiceParticipant, SignupRequest,
+    SuggestTeamRequest, TeamPatchRequest, WeeklyAvailability,
 };
 use crate::model::{
-    AvailabilitySlot, AvailabilityStatus, MatchRequestBatchInput, ScrimDay, ScrimMatch,
-    ScrimReadModel, ScrimSlot, ValidatedMatchRequestBatch,
+    wire_id, AnnouncementPreview, AvailabilitySlot, AvailabilityStatus, LobbyStateMutation,
+    MatchMutation, MatchRequestBatchInput, ScrimAction, ScrimDay, ScrimMatch, ScrimReadModel,
+    ScrimSlot, ValidatedMatchRequestBatch,
 };
 use crate::repository::{
     DiscordRoleSyncPlan, ParticipantMutation, PgScrimReadRepository, RosterPoolCandidate,
@@ -164,6 +166,76 @@ impl ScrimService<PgScrimReadRepository> {
             .await
     }
 
+    pub async fn create_match(
+        &self,
+        idempotency_key: &str,
+        request: CreateMatchRequest,
+    ) -> ScrimResult<MatchMutation> {
+        if request
+            .note
+            .as_ref()
+            .is_some_and(|note| !note.trim().is_empty())
+        {
+            return Err(ScrimError::InvalidProposal(
+                "note is not supported by the canonical match record".to_string(),
+            ));
+        }
+        let model = self.read_model().await?;
+        let request_teams = request
+            .match_request_id
+            .as_deref()
+            .map(parse_id)
+            .transpose()?
+            .map(|request_id| {
+                model
+                    .match_request_batches
+                    .iter()
+                    .flat_map(|batch| &batch.requests)
+                    .find(|item| item.id == request_id)
+                    .map(|item| (item.team_a.id, item.team_b.as_ref().map(|team| team.id)))
+                    .ok_or_else(|| {
+                        ScrimError::InvalidProposal("match_request_id was not found".to_string())
+                    })
+            })
+            .transpose()?;
+        let explicit_a = request.team_a_id.as_deref().map(parse_id).transpose()?;
+        let explicit_b = request.team_b_id.as_deref().map(parse_id).transpose()?;
+        if let Some((request_a, request_b)) = request_teams {
+            if explicit_a.is_some_and(|team_id| team_id != request_a)
+                || explicit_b.is_some_and(|team_id| Some(team_id) != request_b)
+            {
+                return Err(ScrimError::InvalidProposal(
+                    "match_request_id does not match the supplied teams".to_string(),
+                ));
+            }
+        }
+        let team_a_id = explicit_a
+            .or_else(|| request_teams.map(|teams| teams.0))
+            .ok_or_else(|| ScrimError::InvalidProposal("team_a_id is required".to_string()))?;
+        let team_b_id = explicit_b
+            .or_else(|| request_teams.and_then(|teams| teams.1))
+            .ok_or_else(|| ScrimError::InvalidProposal("team_b_id is required".to_string()))?;
+        if team_a_id == team_b_id {
+            return Err(ScrimError::InvalidProposal(
+                "team_a_id and team_b_id must differ".to_string(),
+            ));
+        }
+        let coach_spectator_discord_id = request
+            .coach_spectator_discord_id
+            .as_deref()
+            .map(parse_i64_id)
+            .transpose()?;
+        self.repository
+            .create_match(
+                idempotency_key,
+                team_a_id,
+                team_b_id,
+                request.scheduled_at,
+                coach_spectator_discord_id,
+            )
+            .await
+    }
+
     pub async fn participant_resync_plan(
         &self,
         participant_id: i32,
@@ -202,6 +274,168 @@ impl ScrimService<PgScrimReadRepository> {
             best_window,
             candidates,
         })
+    }
+
+    pub async fn set_lobby_code(
+        &self,
+        idempotency_key: &str,
+        match_id: i32,
+        actor_user_id: &str,
+        actor_display_name: &str,
+        request: LobbyCodeRequest,
+    ) -> ScrimResult<MatchMutation> {
+        let code = request.lobby_code.trim();
+        if code.chars().count() != 5 || !code.chars().all(|ch| ch.is_ascii_alphanumeric()) {
+            return Err(ScrimError::InvalidProposal(
+                "lobby_code must be exactly 5 letters or numbers".to_string(),
+            ));
+        }
+        self.repository
+            .set_lobby_code(
+                idempotency_key,
+                match_id,
+                &code.to_ascii_uppercase(),
+                actor_user_id,
+                actor_display_name,
+            )
+            .await
+    }
+
+    pub async fn add_match_ids(
+        &self,
+        idempotency_key: &str,
+        match_id: i32,
+        actor_user_id: &str,
+        actor_display_name: &str,
+        request: MatchIdsRequest,
+    ) -> ScrimResult<MatchMutation> {
+        if request.match_ids.is_empty() {
+            return Err(ScrimError::InvalidProposal(
+                "match_ids must not be empty".to_string(),
+            ));
+        }
+        let match_ids = request
+            .match_ids
+            .iter()
+            .map(|value| parse_i64_id(value))
+            .collect::<ScrimResult<Vec<_>>>()?;
+        if match_ids.iter().collect::<BTreeSet<_>>().len() != match_ids.len() {
+            return Err(ScrimError::InvalidProposal(
+                "match_ids must be unique".to_string(),
+            ));
+        }
+        self.repository
+            .add_match_ids(
+                idempotency_key,
+                match_id,
+                &match_ids,
+                actor_user_id,
+                actor_display_name,
+            )
+            .await
+    }
+
+    pub async fn request_result_fetch(
+        &self,
+        idempotency_key: &str,
+        match_id: i32,
+        request: ResultFetchRequest,
+    ) -> ScrimResult<LobbyStateMutation> {
+        let result_ref_id = request
+            .match_id_ref
+            .as_deref()
+            .map(parse_i64_id)
+            .transpose()?;
+        if let Some(winner_team_id) = request
+            .winner_team_id
+            .as_deref()
+            .map(parse_id)
+            .transpose()?
+        {
+            let is_match_team = self
+                .read_model()
+                .await?
+                .matches
+                .into_iter()
+                .find(|item| item.id == match_id)
+                .is_some_and(|item| {
+                    item.team_a
+                        .as_ref()
+                        .is_some_and(|team| team.id == winner_team_id)
+                        || item
+                            .team_b
+                            .as_ref()
+                            .is_some_and(|team| team.id == winner_team_id)
+                });
+            if !is_match_team {
+                return Err(ScrimError::InvalidProposal(
+                    "winner_team_id does not belong to the match".to_string(),
+                ));
+            }
+        }
+        validate_optional_text(request.score.as_deref(), "score", 100)?;
+        validate_optional_text(request.notes.as_deref(), "notes", 1_000)?;
+        self.repository
+            .request_result_fetch(idempotency_key, match_id, result_ref_id)
+            .await
+    }
+
+    pub async fn select_result_ref(
+        &self,
+        idempotency_key: &str,
+        match_id: i32,
+        result_ref_id: i64,
+        actor_user_id: &str,
+        actor_display_name: &str,
+        request: MatchIdPatchRequest,
+    ) -> ScrimResult<MatchMutation> {
+        validate_required_text(&request.message, "message", 1_000)?;
+        let selection_reason = selection_reason(&request.message);
+        self.repository
+            .select_result_ref(
+                idempotency_key,
+                match_id,
+                result_ref_id,
+                actor_user_id,
+                actor_display_name,
+                &selection_reason,
+            )
+            .await
+    }
+
+    pub async fn announcement_preview(&self, block_id: &str) -> ScrimResult<AnnouncementPreview> {
+        validate_block_id(block_id)?;
+        self.repository.announcement_preview(block_id).await
+    }
+
+    pub async fn create_announcement_publication(
+        &self,
+        block_id: &str,
+        idempotency_key: &str,
+        actor_user_id: &str,
+        actor_display_name: &str,
+        request: AnnouncementPublicationRequest,
+    ) -> ScrimResult<AnnouncementPreview> {
+        validate_block_id(block_id)?;
+        validate_required_text(&request.message, "message", 4_000)?;
+        validate_optional_text(request.title.as_deref(), "title", 200)?;
+        let channel_id = request.channel_id.as_deref().ok_or_else(|| {
+            ScrimError::InvalidProposal("channel_id is required for publication".to_string())
+        })?;
+        parse_i64_id(channel_id)?;
+        self.repository
+            .create_announcement_publication(
+                block_id,
+                idempotency_key,
+                actor_user_id,
+                actor_display_name,
+                &request,
+            )
+            .await
+    }
+
+    pub async fn action(&self, id: i64) -> ScrimResult<ScrimAction> {
+        self.repository.action(id).await
     }
 
     pub async fn signup(
@@ -433,6 +667,90 @@ fn availability_slot(availability: &WeeklyAvailability, day: ScrimDay) -> &Avail
         ScrimDay::Friday => &availability.fri,
         ScrimDay::Saturday => &availability.sat,
         ScrimDay::Sunday => &availability.sun,
+    }
+}
+
+fn parse_id(value: &str) -> ScrimResult<i32> {
+    wire_id::parse_i32(value.trim()).map_err(ScrimError::InvalidProposal)
+}
+
+fn parse_i64_id(value: &str) -> ScrimResult<i64> {
+    wire_id::parse_i64(value.trim()).map_err(ScrimError::InvalidProposal)
+}
+
+fn validate_required_text(value: &str, field: &str, max_chars: usize) -> ScrimResult<()> {
+    let value = value.trim();
+    if value.is_empty() || value.chars().count() > max_chars {
+        return Err(ScrimError::InvalidProposal(format!(
+            "{field} must contain between 1 and {max_chars} characters"
+        )));
+    }
+    Ok(())
+}
+
+fn validate_optional_text(value: Option<&str>, field: &str, max_chars: usize) -> ScrimResult<()> {
+    if let Some(value) = value {
+        validate_required_text(value, field, max_chars)?;
+    }
+    Ok(())
+}
+
+fn validate_block_id(value: &str) -> ScrimResult<()> {
+    let valid = if let Some((prefix, reference)) = value.split_once(':') {
+        (2..=32).contains(&prefix.len())
+            && prefix.bytes().enumerate().all(|(index, byte)| {
+                matches!(
+                    (index, byte),
+                    (0, b'a'..=b'z') | (_, b'a'..=b'z' | b'0'..=b'9' | b'_')
+                )
+            })
+            && (1..=96).contains(&reference.len())
+            && reference
+                .bytes()
+                .next()
+                .is_some_and(|byte| byte.is_ascii_alphanumeric())
+            && reference.bytes().all(|byte| {
+                byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'.' | b':' | b'-')
+            })
+    } else {
+        (1..=96).contains(&value.len())
+            && value
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'.' | b'-'))
+    };
+    if !valid {
+        return Err(ScrimError::InvalidProposal(
+            "block_id is invalid".to_string(),
+        ));
+    }
+    Ok(())
+}
+
+fn selection_reason(message: &str) -> String {
+    let mut reason = String::new();
+    for byte in message.bytes() {
+        let next = if byte.is_ascii_alphanumeric() {
+            byte.to_ascii_lowercase() as char
+        } else {
+            '_'
+        };
+        if next != '_' || !reason.ends_with('_') {
+            reason.push(next);
+        }
+        if reason.len() == 64 {
+            break;
+        }
+    }
+    let reason = reason.trim_matches('_');
+    if reason.len() >= 3
+        && reason
+            .bytes()
+            .next()
+            .is_some_and(|byte| byte.is_ascii_lowercase())
+    {
+        reason.to_string()
+    } else {
+        "operator_selection".to_string()
     }
 }
 

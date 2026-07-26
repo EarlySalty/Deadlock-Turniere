@@ -1,7 +1,9 @@
 use serde_json::json;
 use turnier_scrim::dto::{
-    ActionReceipt, MatchRequestAction, MatchRequestResponseRequest, PatchValue,
-    PlanningCreateRequest, TeamPatchRequest, MATCH_REQUEST_RESPONSE_SCHEMA_VERSION,
+    ActionReceipt, AnnouncementPublicationRequest, CreateMatchRequest, LobbyCodeRequest,
+    MatchIdPatchRequest, MatchIdsRequest, MatchRequestAction, MatchRequestResponseRequest,
+    PatchValue, PlanningCreateRequest, ResultFetchRequest, TeamPatchRequest,
+    MATCH_REQUEST_RESPONSE_SCHEMA_VERSION,
 };
 
 #[test]
@@ -25,6 +27,42 @@ fn planning_contract_accepts_the_exact_bff_fixture() {
     assert_eq!(request.pairings[1].slots.as_ref().expect("slots").len(), 2);
     assert_eq!(serde_json::to_value(request).unwrap(), fixture);
     assert_eq!(serde_json::to_string(&fixture).unwrap(), fixture_source);
+}
+
+#[test]
+fn match_operator_contract_accepts_the_exact_bff_payloads() {
+    let create: CreateMatchRequest = serde_json::from_value(json!({
+        "team_a_id": "1",
+        "team_b_id": "2",
+        "match_request_id": null,
+        "scheduled_at": "2026-08-01T18:00:00Z",
+        "note": null
+    }))
+    .expect("canonical match create DTO");
+    assert_eq!(create.team_a_id.as_deref(), Some("1"));
+    assert_eq!(create.team_b_id.as_deref(), Some("2"));
+
+    let lobby: LobbyCodeRequest =
+        serde_json::from_value(json!({"lobby_code":"a1b2c"})).expect("canonical lobby DTO");
+    assert_eq!(lobby.lobby_code, "a1b2c");
+
+    let match_ids: MatchIdsRequest =
+        serde_json::from_value(json!({"match_ids":["9007199254740991"]}))
+            .expect("canonical match IDs DTO");
+    assert_eq!(match_ids.match_ids, ["9007199254740991"]);
+
+    let fetch: ResultFetchRequest =
+        serde_json::from_value(json!({})).expect("empty result-fetch capability DTO");
+    assert!(fetch.match_id_ref.is_none());
+
+    let selection: MatchIdPatchRequest = serde_json::from_value(json!({"message":"wrong_winner"}))
+        .expect("canonical result-ref patch DTO");
+    assert_eq!(selection.message, "wrong_winner");
+
+    let publication: AnnouncementPublicationRequest =
+        serde_json::from_value(json!({"message":"announcement"}))
+            .expect("canonical announcement publication DTO");
+    assert_eq!(publication.message, "announcement");
 }
 
 #[test]

@@ -13,16 +13,19 @@ use chrono::{DateTime, Utc};
 use turnier_scrim::decision::validate_match_request_batch;
 use turnier_scrim::dto::{
     ActionReceipt, AnnounceTeamRequest, AnnounceTeamResponse, CapabilityReceipt, CreateTeamRequest,
-    DiscordResyncResponse, DiscordSyncStatus, MatchRequestAction, MatchRequestDefaults,
-    MatchRequestResponseRequest, ParticipantPatchRequest, ParticipantPatchResponse,
-    PlanningCreateRequest, ReleaseMatchRequest, SelfServiceParticipant, SignupRequest,
-    SubstituteRequest, SubstituteResponse, SuggestTeamRequest, TeamMutationResponse,
-    TeamPatchRequest, WeeklyAvailability, MATCH_REQUEST_RESPONSE_SCHEMA_VERSION,
+    AnnouncementPublicationRequest, CreateMatchRequest, DiscordResyncResponse, DiscordSyncStatus,
+    LobbyCodeRequest, MatchIdPatchRequest, MatchIdsRequest, MatchRequestAction,
+    MatchRequestDefaults, MatchRequestResponseRequest, ParticipantPatchRequest,
+    ParticipantPatchResponse, PlanningCreateRequest, ReleaseMatchRequest, ResultFetchRequest,
+    SelfServiceParticipant, SignupRequest, SubstituteRequest, SubstituteResponse,
+    SuggestTeamRequest, TeamMutationResponse, TeamPatchRequest, WeeklyAvailability,
+    MATCH_REQUEST_RESPONSE_SCHEMA_VERSION,
 };
 use turnier_scrim::model::{
-    Coach, MatchRequest, MatchRequestBatch, MatchRequestBatchInput, MatchRequestTemplate,
-    Participant, ReplacementNeed, ScrimDay, ScrimMatch, ScrimMe, ScrimReadModel, ScrimSlot, Team,
-    TeamBoard, TeamRef, TeamTimeline,
+    AnnouncementPreview, Coach, LobbyStateMutation, MatchMutation, MatchRequest, MatchRequestBatch,
+    MatchRequestBatchInput, MatchRequestTemplate, Participant, ReplacementNeed, ScrimAction,
+    ScrimDay, ScrimMatch, ScrimMe, ScrimReadModel, ScrimSlot, Team, TeamBoard, TeamRef,
+    TeamTimeline,
 };
 use turnier_scrim::repository::{
     DiscordRoleSyncPlan, PgScrimReadRepository, RoleOperation, ScrimReadRepository, SignupMutation,
@@ -137,37 +140,34 @@ pub fn router() -> Router<AppState> {
         )
         .route(
             "/internal/turnier/v1/scrims/matches",
-            get(read_matches).post(disabled_operator_mutation),
+            get(read_matches).post(create_match),
         )
         .route("/internal/turnier/v1/scrims/matches/{id}", get(read_match))
         .route(
             "/internal/turnier/v1/scrims/matches/{id}/lobby-code",
-            put(disabled_operator_path_mutation),
+            put(set_lobby_code),
         )
         .route(
             "/internal/turnier/v1/scrims/matches/{id}/match-ids",
-            post(disabled_operator_path_mutation),
+            post(add_match_ids),
         )
         .route(
             "/internal/turnier/v1/scrims/matches/{id}/result-fetches",
-            post(disabled_operator_path_mutation),
+            post(request_result_fetch),
         )
         .route(
             "/internal/turnier/v1/scrims/matches/{id}/result-refs/{ref_id}",
-            patch(disabled_operator_two_path_mutation),
+            patch(select_result_ref),
         )
         .route(
             "/internal/turnier/v1/scrims/blocks/{id}/announcement-preview",
-            get(disabled_operator_read),
+            get(read_announcement_preview),
         )
         .route(
             "/internal/turnier/v1/scrims/blocks/{id}/announcement-publications",
-            post(disabled_operator_path_mutation),
+            post(create_announcement_publication),
         )
-        .route(
-            "/internal/turnier/v1/scrims/actions/{id}",
-            get(disabled_operator_read),
-        )
+        .route("/internal/turnier/v1/scrims/actions/{id}", get(read_action))
         .route(
             "/internal/turnier/v1/scrims/interactions/match-request-response",
             post(match_request_response),
@@ -469,6 +469,276 @@ async fn release_match_request(
         )
         .await?;
     Ok((StatusCode::OK, Json(receipt)))
+}
+
+async fn create_match(
+    State(state): State<AppState>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    Json(body): Json<CreateMatchRequest>,
+) -> WebResult<Json<MatchMutation>> {
+    require_internal_boundary(peer, &headers, &state)?;
+    let mutation = require_mutation_headers(&headers)?;
+    let actor = require_bff_actor(&headers)?;
+    let service = service(&state);
+    service.authorize_operator(actor.discord_id).await?;
+    Ok(Json(
+        service.create_match(mutation.idempotency_key, body).await?,
+    ))
+}
+
+async fn set_lobby_code(
+    State(state): State<AppState>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    Path(id): Path<String>,
+    headers: HeaderMap,
+    Json(body): Json<LobbyCodeRequest>,
+) -> WebResult<Json<MatchMutation>> {
+    let id = parse_db_id(&id, "match_id")?;
+    require_internal_boundary(peer, &headers, &state)?;
+    let mutation_headers = require_mutation_headers(&headers)?;
+    let actor = require_bff_actor(&headers)?;
+    let service = service(&state);
+    service.authorize_operator(actor.discord_id).await?;
+    let mutation = service
+        .set_lobby_code(
+            mutation_headers.idempotency_key,
+            id,
+            actor.discord_id,
+            actor.display_name,
+            body,
+        )
+        .await?;
+    distribute_lobby_code(&state, &mutation).await;
+    Ok(Json(mutation))
+}
+
+async fn add_match_ids(
+    State(state): State<AppState>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    Path(id): Path<String>,
+    headers: HeaderMap,
+    Json(body): Json<MatchIdsRequest>,
+) -> WebResult<Json<MatchMutation>> {
+    let id = parse_db_id(&id, "match_id")?;
+    require_internal_boundary(peer, &headers, &state)?;
+    let mutation = require_mutation_headers(&headers)?;
+    let actor = require_bff_actor(&headers)?;
+    let service = service(&state);
+    service.authorize_operator(actor.discord_id).await?;
+    Ok(Json(
+        service
+            .add_match_ids(
+                mutation.idempotency_key,
+                id,
+                actor.discord_id,
+                actor.display_name,
+                body,
+            )
+            .await?,
+    ))
+}
+
+async fn request_result_fetch(
+    State(state): State<AppState>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    Path(id): Path<String>,
+    headers: HeaderMap,
+    Json(body): Json<ResultFetchRequest>,
+) -> WebResult<Json<LobbyStateMutation>> {
+    let id = parse_db_id(&id, "match_id")?;
+    require_internal_boundary(peer, &headers, &state)?;
+    let mutation = require_mutation_headers(&headers)?;
+    let actor = require_bff_actor(&headers)?;
+    let service = service(&state);
+    service.authorize_operator(actor.discord_id).await?;
+    Ok(Json(
+        service
+            .request_result_fetch(mutation.idempotency_key, id, body)
+            .await?,
+    ))
+}
+
+async fn select_result_ref(
+    State(state): State<AppState>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    Path((id, ref_id)): Path<(String, String)>,
+    headers: HeaderMap,
+    Json(body): Json<MatchIdPatchRequest>,
+) -> WebResult<Json<MatchMutation>> {
+    let id = parse_db_id(&id, "match_id")?;
+    let ref_id = parse_i64_db_id(&ref_id, "result_ref_id")?;
+    require_internal_boundary(peer, &headers, &state)?;
+    let mutation = require_mutation_headers(&headers)?;
+    let actor = require_bff_actor(&headers)?;
+    let service = service(&state);
+    service.authorize_operator(actor.discord_id).await?;
+    Ok(Json(
+        service
+            .select_result_ref(
+                mutation.idempotency_key,
+                id,
+                ref_id,
+                actor.discord_id,
+                actor.display_name,
+                body,
+            )
+            .await?,
+    ))
+}
+
+async fn read_announcement_preview(
+    State(state): State<AppState>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    Path(id): Path<String>,
+    headers: HeaderMap,
+) -> WebResult<Json<AnnouncementPreview>> {
+    require_operator(&state, peer, &headers).await?;
+    Ok(Json(service(&state).announcement_preview(&id).await?))
+}
+
+async fn create_announcement_publication(
+    State(state): State<AppState>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    Path(id): Path<String>,
+    headers: HeaderMap,
+    Json(body): Json<AnnouncementPublicationRequest>,
+) -> WebResult<Json<AnnouncementPreview>> {
+    require_internal_boundary(peer, &headers, &state)?;
+    let mutation = require_mutation_headers(&headers)?;
+    let actor = require_bff_actor(&headers)?;
+    let service = service(&state);
+    service.authorize_operator(actor.discord_id).await?;
+    let publication = service
+        .create_announcement_publication(
+            &id,
+            mutation.idempotency_key,
+            actor.discord_id,
+            actor.display_name,
+            body,
+        )
+        .await?;
+    publish_announcement(&state, &publication, mutation.idempotency_key).await;
+    Ok(Json(service.announcement_preview(&id).await?))
+}
+
+async fn read_action(
+    State(state): State<AppState>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    Path(id): Path<String>,
+    headers: HeaderMap,
+) -> WebResult<Json<ScrimAction>> {
+    let id = parse_i64_db_id(&id, "action_id")?;
+    require_operator(&state, peer, &headers).await?;
+    Ok(Json(service(&state).action(id).await?))
+}
+
+async fn distribute_lobby_code(state: &AppState, mutation: &MatchMutation) {
+    let Some(code) = mutation.scrim_match.join_code.as_deref() else {
+        return;
+    };
+    let team_ids = [
+        mutation.scrim_match.team_a.as_ref().map(|team| team.id),
+        mutation.scrim_match.team_b.as_ref().map(|team| team.id),
+    ];
+    let model = match service(state).read_model().await {
+        Ok(model) => model,
+        Err(error) => {
+            tracing::warn!(
+                match_id = mutation.scrim_match.id,
+                %error,
+                "Scrim-Lobbycode-Kanaele konnten nicht geladen werden; Discord-Sync fail-open"
+            );
+            return;
+        }
+    };
+    for channel_id in model
+        .teams
+        .iter()
+        .filter(|team| team_ids.contains(&Some(team.id)))
+        .filter_map(|team| team.discord_channel_id.as_deref())
+    {
+        let idempotency_key = format!(
+            "scrim-lobby-code-{}-{channel_id}-{code}",
+            mutation.scrim_match.id
+        );
+        if let Err(error) = state
+            .notifier
+            .broker()
+            .post_internal::<serde_json::Value, _>(
+                "/internal/master/v1/discord/send-message",
+                &serde_json::json!({
+                    "channel_id": channel_id,
+                    "content": format!("Platzhalter: {code}"),
+                    "idempotency_key": idempotency_key,
+                }),
+            )
+            .await
+        {
+            tracing::warn!(
+                match_id = mutation.scrim_match.id,
+                channel_id,
+                %error,
+                "Scrim-Lobbycode-Discord-Sync fail-open"
+            );
+        }
+    }
+}
+
+async fn publish_announcement(
+    state: &AppState,
+    publication: &AnnouncementPreview,
+    idempotency_key: &str,
+) {
+    let (Some(announcement_id), Some(channel_id)) =
+        (publication.id, publication.channel_id.as_deref())
+    else {
+        return;
+    };
+    let result = state
+        .notifier
+        .broker()
+        .post_internal::<serde_json::Value, _>(
+            "/internal/master/v1/discord/send-message",
+            &serde_json::json!({
+                "channel_id": channel_id,
+                "content": publication.message,
+                "idempotency_key": idempotency_key,
+            }),
+        )
+        .await;
+    match result {
+        Ok(response) => {
+            let remote_message_id = response
+                .pointer("/data/message_id")
+                .or_else(|| response.get("message_id"))
+                .and_then(|value| {
+                    value
+                        .as_str()
+                        .map(ToOwned::to_owned)
+                        .or_else(|| value.as_u64().map(|id| id.to_string()))
+                });
+            if let Err(error) = service(state)
+                .repository()
+                .mark_announcement_published(announcement_id, remote_message_id.as_deref())
+                .await
+            {
+                tracing::warn!(
+                    announcement_id,
+                    %error,
+                    "Scrim-Ankuendigungsstatus konnte nach Discord-Versand nicht aktualisiert werden"
+                );
+            }
+        }
+        Err(error) => {
+            tracing::warn!(
+                announcement_id,
+                channel_id,
+                %error,
+                "Scrim-Ankuendigungs-Discord-Versand fail-open"
+            );
+        }
+    }
 }
 
 async fn signup(
@@ -1005,19 +1275,6 @@ async fn disabled_operator_path_mutation(
     Ok(disabled_capability())
 }
 
-async fn disabled_operator_two_path_mutation(
-    State(state): State<AppState>,
-    ConnectInfo(peer): ConnectInfo<SocketAddr>,
-    Path((_id, _ref_id)): Path<(String, String)>,
-    headers: HeaderMap,
-) -> WebResult<(StatusCode, Json<CapabilityReceipt>)> {
-    require_internal_boundary(peer, &headers, &state)?;
-    require_mutation_headers(&headers)?;
-    let actor = require_bff_actor(&headers)?;
-    service(&state).authorize_operator(actor.discord_id).await?;
-    Ok(disabled_capability())
-}
-
 async fn disabled_operator_read(
     State(state): State<AppState>,
     ConnectInfo(peer): ConnectInfo<SocketAddr>,
@@ -1350,6 +1607,15 @@ fn parse_db_id(value: &str, name: &str) -> WebResult<i32> {
     require_positive_decimal(value, name)?;
     value
         .parse::<i32>()
+        .ok()
+        .filter(|id| *id > 0)
+        .ok_or_else(|| WebError::bad_request(format!("{name} ist zu groß")))
+}
+
+fn parse_i64_db_id(value: &str, name: &str) -> WebResult<i64> {
+    require_positive_decimal(value, name)?;
+    value
+        .parse::<i64>()
         .ok()
         .filter(|id| *id > 0)
         .ok_or_else(|| WebError::bad_request(format!("{name} ist zu groß")))
