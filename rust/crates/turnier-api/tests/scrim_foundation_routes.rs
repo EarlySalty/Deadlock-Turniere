@@ -4,8 +4,14 @@ use std::sync::{Arc, Mutex};
 
 use axum::body::{to_bytes, Body};
 use axum::extract::ConnectInfo;
+#[cfg(feature = "testing")]
+use axum::extract::State;
 use axum::http::header::{CONTENT_TYPE, HOST};
 use axum::http::{Method, Request, StatusCode};
+#[cfg(feature = "testing")]
+use axum::routing::post;
+#[cfg(feature = "testing")]
+use axum::Json;
 use axum::Router;
 use serde_json::{json, Value};
 use sqlx::postgres::PgPoolOptions;
@@ -28,10 +34,17 @@ fn app() -> Router {
 }
 
 fn app_with_pool(pool: PgPool) -> Router {
+    app_with_pool_and_broker(pool, None)
+}
+
+fn app_with_pool_and_broker(pool: PgPool, broker_base_url: Option<&str>) -> Router {
     let mut config = Config::from_env();
     config.turnier_internal_api_token = "internal-token".to_string();
     config.discord_bot_token = String::new();
-    config.discord_master_broker_token = String::new();
+    config.discord_master_broker_base_url = broker_base_url.unwrap_or_default().to_string();
+    config.discord_master_broker_token = broker_base_url
+        .map(|_| "broker-token".to_string())
+        .unwrap_or_default();
     config.scrim_signup_role_id = None;
     config.scrim_reserve_role_id = None;
     config.steam_bridge_db_path = String::new();
@@ -56,6 +69,15 @@ fn app_with_pool(pool: PgPool) -> Router {
         draft_lobby_creations: Arc::new(Mutex::new(HashMap::new())),
     };
     build_router(state)
+}
+
+#[cfg(feature = "testing")]
+async fn record_and_fail_broker(
+    State(requests): State<Arc<Mutex<Vec<Value>>>>,
+    Json(payload): Json<Value>,
+) -> StatusCode {
+    requests.lock().expect("broker requests").push(payload);
+    StatusCode::SERVICE_UNAVAILABLE
 }
 
 #[derive(Clone, Copy, Default)]
@@ -2483,6 +2505,79 @@ async fn match_block_and_action_operator_routes_persist_the_canonical_flow() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(action["id"], action_id.to_string());
     assert_eq!(action["state"], "completed");
+}
+
+#[cfg(feature = "testing")]
+#[tokio::test]
+async fn lobby_code_delivery_uses_the_existing_message_and_is_fail_open() {
+    let db = turnier_db::test_pool().await.expect("central test pool");
+    enable_turniere_runtime(db.pool()).await;
+    seed_coach(db.pool(), 123456789).await;
+    seed_teams(db.pool(), &[810101, 810102]).await;
+    sqlx::query(
+        "UPDATE scrim.teams SET discord_channel_id = 700000 + id WHERE id IN (810101, 810102)",
+    )
+    .execute(db.pool())
+    .await
+    .expect("team channel ids");
+
+    let requests = Arc::new(Mutex::new(Vec::new()));
+    let broker = Router::new()
+        .route(
+            "/internal/master/v1/discord/send-message",
+            post(record_and_fail_broker),
+        )
+        .with_state(requests.clone());
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("broker listener");
+    let broker_url = format!("http://{}", listener.local_addr().expect("broker address"));
+    let broker_task = tokio::spawn(async move {
+        axum::serve(listener, broker).await.expect("broker server");
+    });
+    let app = app_with_pool_and_broker(db.pool().clone(), Some(&broker_url));
+
+    let (status, created) = send(
+        &app,
+        IpAddr::V4(Ipv4Addr::LOCALHOST),
+        coach_headers("match:create:lobby-delivery", "123456789"),
+        Method::POST,
+        "/internal/turnier/v1/scrims/matches",
+        Some(json!({"team_a_id":"810101","team_b_id":"810102"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let match_id = created["match"]["id"].as_str().expect("wire match id");
+    let route = format!("/internal/turnier/v1/scrims/matches/{match_id}/lobby-code");
+    let (status, _) = send(
+        &app,
+        IpAddr::V4(Ipv4Addr::LOCALHOST),
+        coach_headers("match:lobby:delivery", "123456789"),
+        Method::PUT,
+        &route,
+        Some(json!({"lobby_code":"a1b2c"})),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK);
+    let persisted: String = sqlx::query_scalar("SELECT join_code FROM scrim.matches WHERE id=$1")
+        .bind(match_id.parse::<i32>().expect("database match id"))
+        .fetch_one(db.pool())
+        .await
+        .expect("persisted lobby code");
+    assert_eq!(persisted, "A1B2C");
+    let mut payloads = requests.lock().expect("broker requests").clone();
+    payloads.sort_by_key(|payload| {
+        payload["channel_id"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string()
+    });
+    assert_eq!(payloads.len(), 2);
+    assert_eq!(payloads[0]["content"], "Lobby Code: A1B2C");
+    assert_eq!(payloads[1]["content"], "Lobby Code: A1B2C");
+
+    broker_task.abort();
 }
 
 #[cfg(feature = "testing")]

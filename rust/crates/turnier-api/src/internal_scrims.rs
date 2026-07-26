@@ -760,7 +760,7 @@ async fn distribute_lobby_code(state: &AppState, mutation: &MatchMutation) {
                 "/internal/master/v1/discord/send-message",
                 &serde_json::json!({
                     "channel_id": channel_id,
-                    "content": format!("Platzhalter: {code}"),
+                    "content": format!("Lobby Code: {code}"),
                     "idempotency_key": idempotency_key,
                 }),
             )
