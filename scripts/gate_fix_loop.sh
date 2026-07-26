@@ -66,8 +66,10 @@ for round in $(seq 1 "$MAX_ROUNDS"); do
       exit 6
     fi
     [[ -n "$(git status --porcelain)" ]] && { git add -A; git commit -q -m "chore: Restaenderungen vor dem Push"; }
+    # HEAD:main, nicht "main" — die Arbeit liegt auf einem Feature-Branch, der lokale
+    # main-Zeiger kennt sie nicht. "git push origin main" haette leer gepusht.
     say "Push nach main"
-    if git push origin main >"$LOG_DIR/push.log" 2>&1; then
+    if git push origin HEAD:main >"$LOG_DIR/push.log" 2>&1; then
       say "gepusht: $(git log --oneline -1)"
       exit 0
     fi
