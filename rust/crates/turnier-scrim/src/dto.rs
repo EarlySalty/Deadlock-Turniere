@@ -386,6 +386,23 @@ pub struct ReminderRequest {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct MatchRequestPatch {
+    #[serde(
+        default,
+        deserialize_with = "deserialize_patch_value",
+        skip_serializing_if = "PatchValue::is_omitted"
+    )]
+    pub status: PatchValue<String>,
+    #[serde(
+        default,
+        deserialize_with = "deserialize_patch_value",
+        skip_serializing_if = "PatchValue::is_omitted"
+    )]
+    pub note: PatchValue<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct StatusPublicationRequest {
     pub channel_id: Option<String>,
     pub message: Option<String>,
@@ -400,27 +417,17 @@ pub struct ReplacementRequestCreate {
     pub reason: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReplacementRequestAction {
+    Accept,
+    Decline,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ReplacementRequestPatch {
-    #[serde(
-        default,
-        deserialize_with = "deserialize_patch_value",
-        skip_serializing_if = "PatchValue::is_omitted"
-    )]
-    pub status: PatchValue<String>,
-    #[serde(
-        default,
-        deserialize_with = "deserialize_patch_value",
-        skip_serializing_if = "PatchValue::is_omitted"
-    )]
-    pub participant_id: PatchValue<String>,
-    #[serde(
-        default,
-        deserialize_with = "deserialize_patch_value",
-        skip_serializing_if = "PatchValue::is_omitted"
-    )]
-    pub reason: PatchValue<String>,
+    pub action: ReplacementRequestAction,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]

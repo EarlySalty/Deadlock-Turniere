@@ -587,7 +587,7 @@ async fn every_canonical_mutation_requires_request_and_idempotency_headers() {
         (
             Method::PATCH,
             "/internal/turnier/v1/scrims/replacement-requests/1",
-            json!({"status":"accepted"}),
+            json!({"action":"accept"}),
         ),
         (
             Method::POST,
@@ -1922,7 +1922,7 @@ async fn roster_operator_routes_keep_boundary_and_operator_authorization() {
 
 #[cfg(feature = "testing")]
 #[tokio::test]
-async fn unimplemented_steam_facing_mutations_return_disabled_unverified_capability() {
+async fn unrelated_steam_facing_mutations_return_disabled_unverified_capability() {
     let db = turnier_db::test_pool().await.expect("central test pool");
     seed_coach(db.pool(), 123456789).await;
     let app = app_with_pool(db.pool().clone());
@@ -1938,20 +1938,197 @@ async fn unimplemented_steam_facing_mutations_return_disabled_unverified_capabil
     assert_eq!(status, StatusCode::NOT_IMPLEMENTED);
     assert_eq!(body["available"], false);
     assert_eq!(body["verified"], false);
+}
+
+#[cfg(feature = "testing")]
+#[tokio::test]
+async fn operator_request_routes_keep_boundary_and_operator_authorization() {
+    let db = turnier_db::test_pool().await.expect("central test pool");
+    let app = app_with_pool(db.pool().clone());
+    let routes = [
+        (
+            Method::PATCH,
+            "/internal/turnier/v1/scrims/match-requests/1",
+            Some(json!({"status":"cancelled"})),
+        ),
+        (
+            Method::POST,
+            "/internal/turnier/v1/scrims/match-requests/1/reminders",
+            Some(json!({})),
+        ),
+        (
+            Method::POST,
+            "/internal/turnier/v1/scrims/match-requests/1/status-publications",
+            Some(json!({})),
+        ),
+        (
+            Method::GET,
+            "/internal/turnier/v1/scrims/replacement-needs/1/candidates",
+            None,
+        ),
+        (
+            Method::POST,
+            "/internal/turnier/v1/scrims/replacement-needs/1/requests",
+            Some(json!({"participant_id":"1"})),
+        ),
+        (
+            Method::PATCH,
+            "/internal/turnier/v1/scrims/replacement-requests/1",
+            Some(json!({"action":"accept"})),
+        ),
+    ];
+    for (index, (method, route, body)) in routes.into_iter().enumerate() {
+        let headers = TestHeaders {
+            token: Some("internal-token"),
+            request_id: Some("request:operator_auth"),
+            idempotency_key: Some("operator_auth:route"),
+            actor_id: Some("987654321"),
+            actor_name: Some("Not Coach"),
+        };
+        let (status, _) = send(
+            &app,
+            IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2)),
+            headers,
+            method.clone(),
+            route,
+            body.clone(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "boundary route {index}");
+
+        let (status, _) = send(
+            &app,
+            IpAddr::V4(Ipv4Addr::LOCALHOST),
+            headers,
+            method,
+            route,
+            body,
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "operator route {index}");
+    }
+}
+
+#[cfg(feature = "testing")]
+#[tokio::test]
+async fn match_request_patch_reminder_and_publication_persist_and_validate() {
+    let db = turnier_db::test_pool().await.expect("central test pool");
+    enable_turniere_runtime(db.pool()).await;
+    seed_coach(db.pool(), 123456789).await;
+    seed_teams(db.pool(), &[1, 2]).await;
+    seed_operator_request_fixture(db.pool()).await;
+    let app = app_with_pool(db.pool().clone());
 
     let (status, body) = send(
         &app,
         IpAddr::V4(Ipv4Addr::LOCALHOST),
-        coach_headers("request_patch:invalid_body", "123456789"),
+        coach_headers("match_request_patch:91", "123456789"),
         Method::PATCH,
-        "/internal/turnier/v1/scrims/match-requests/1",
-        Some(json!({"unknown":"ignored","slot_index":"not validated here"})),
+        "/internal/turnier/v1/scrims/match-requests/91",
+        Some(json!({"status":"cancelled","note":"Platzhalter"})),
     )
     .await;
-    assert_eq!(status, StatusCode::NOT_IMPLEMENTED);
-    assert_eq!(body["available"], false);
-    assert_eq!(body["verified"], false);
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["accepted"], true);
+    let patched: (String, Option<String>) =
+        sqlx::query_as("SELECT status, override_reason FROM scrim.match_requests WHERE id=91")
+            .fetch_one(db.pool())
+            .await
+            .expect("patched request");
+    assert_eq!(
+        patched,
+        ("cancelled".to_string(), Some("Platzhalter".to_string()))
+    );
 
+    let (status, body) = send(
+        &app,
+        IpAddr::V4(Ipv4Addr::LOCALHOST),
+        coach_headers("match_request_reminder:92", "123456789"),
+        Method::POST,
+        "/internal/turnier/v1/scrims/match-requests/92/reminders",
+        Some(json!({"message":"Platzhalter"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["accepted"], true);
+    let reminder: (i32, Vec<i32>, Vec<i64>, Option<i64>, String) = sqlx::query_as(
+        "SELECT missing_count, target_participant_ids, target_discord_user_ids, \
+                target_role_id, target_kind \
+           FROM scrim.match_request_reminders WHERE request_id=92",
+    )
+    .fetch_one(db.pool())
+    .await
+    .expect("reminder");
+    assert_eq!(
+        reminder,
+        (1, vec![101], vec![1001], None, "members".to_string())
+    );
+
+    let (status, body) = send(
+        &app,
+        IpAddr::V4(Ipv4Addr::LOCALHOST),
+        coach_headers("status_publication:93", "123456789"),
+        Method::POST,
+        "/internal/turnier/v1/scrims/match-requests/93/status-publications",
+        Some(json!({"channel_id":"7001","message":"Platzhalter"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["accepted"], true);
+    let publication: (String, String, Value) = sqlx::query_as(
+        "SELECT decision, status_kind, payload \
+           FROM scrim.status_publication_approvals WHERE target_kind='match_request' AND target_id='93'",
+    )
+    .fetch_one(db.pool())
+    .await
+    .expect("status publication");
+    assert_eq!(publication.0, "approved");
+    assert_eq!(publication.1, "match_status");
+    assert_eq!(publication.2["message"], "Platzhalter");
+
+    let (status, _) = send(
+        &app,
+        IpAddr::V4(Ipv4Addr::LOCALHOST),
+        coach_headers("match_request_patch:invalid", "123456789"),
+        Method::PATCH,
+        "/internal/turnier/v1/scrims/match-requests/92",
+        Some(json!({"status":"unknown"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    let (status, _) = send(
+        &app,
+        IpAddr::V4(Ipv4Addr::LOCALHOST),
+        coach_headers("match_request_reminder:invalid", "123456789"),
+        Method::POST,
+        "/internal/turnier/v1/scrims/match-requests/92/reminders",
+        Some(json!({"message":"x".repeat(2001)})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    let (status, _) = send(
+        &app,
+        IpAddr::V4(Ipv4Addr::LOCALHOST),
+        coach_headers("status_publication:invalid", "123456789"),
+        Method::POST,
+        "/internal/turnier/v1/scrims/match-requests/93/status-publications",
+        Some(json!({"channel_id":"not-an-id"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+}
+
+#[cfg(feature = "testing")]
+#[tokio::test]
+async fn replacement_candidates_are_ranked_and_requests_persist_and_transition() {
+    let db = turnier_db::test_pool().await.expect("central test pool");
+    enable_turniere_runtime(db.pool()).await;
+    seed_coach(db.pool(), 123456789).await;
+    seed_teams(db.pool(), &[1]).await;
+    let need_id = seed_replacement_fixture(db.pool()).await;
+    let app = app_with_pool(db.pool().clone());
+
+    let route = format!("/internal/turnier/v1/scrims/replacement-needs/{need_id}/candidates");
     let (status, body) = send(
         &app,
         IpAddr::V4(Ipv4Addr::LOCALHOST),
@@ -1962,13 +2139,88 @@ async fn unimplemented_steam_facing_mutations_return_disabled_unverified_capabil
             ..TestHeaders::default()
         },
         Method::GET,
-        "/internal/turnier/v1/scrims/replacement-needs/1/candidates",
+        &route,
         None,
     )
     .await;
-    assert_eq!(status, StatusCode::NOT_IMPLEMENTED);
-    assert_eq!(body["available"], false);
-    assert_eq!(body["verified"], false);
+    assert_eq!(status, StatusCode::OK);
+    let candidates = body.as_array().expect("candidate array");
+    assert_eq!(candidates.len(), 3);
+    assert_eq!(candidates[0]["participant_id"], "302");
+    assert_eq!(candidates[1]["participant_id"], "301");
+    assert_eq!(candidates[2]["participant_id"], "303");
+    assert!(candidates
+        .iter()
+        .all(|candidate| candidate["id"].is_string()));
+
+    let route = format!("/internal/turnier/v1/scrims/replacement-needs/{need_id}/requests");
+    let (status, body) = send(
+        &app,
+        IpAddr::V4(Ipv4Addr::LOCALHOST),
+        coach_headers("replacement_request:create", "123456789"),
+        Method::POST,
+        &route,
+        Some(json!({"participant_id":"302","reason":"Platzhalter"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["accepted"], true);
+    let request_id: i64 = sqlx::query_scalar(
+        "SELECT id FROM scrim.replacement_requests WHERE need_id=$1 AND participant_id=302",
+    )
+    .bind(need_id)
+    .fetch_one(db.pool())
+    .await
+    .expect("replacement request");
+
+    let route = format!("/internal/turnier/v1/scrims/replacement-requests/{request_id}");
+    let (status, body) = send(
+        &app,
+        IpAddr::V4(Ipv4Addr::LOCALHOST),
+        coach_headers("replacement_request:accept", "123456789"),
+        Method::PATCH,
+        &route,
+        Some(json!({"action":"accept"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["accepted"], true);
+    let state: (String, bool) = sqlx::query_as(
+        "SELECT status, responded_at IS NOT NULL FROM scrim.replacement_requests WHERE id=$1",
+    )
+    .bind(request_id)
+    .fetch_one(db.pool())
+    .await
+    .expect("replacement response");
+    assert_eq!(state, ("accepted".to_string(), true));
+    let need_status: String =
+        sqlx::query_scalar("SELECT status FROM scrim.replacement_needs WHERE id=$1")
+            .bind(need_id)
+            .fetch_one(db.pool())
+            .await
+            .expect("replacement need");
+    assert_eq!(need_status, "filled");
+
+    let (status, _) = send(
+        &app,
+        IpAddr::V4(Ipv4Addr::LOCALHOST),
+        coach_headers("replacement_request:invalid", "123456789"),
+        Method::POST,
+        &format!("/internal/turnier/v1/scrims/replacement-needs/{need_id}/requests"),
+        Some(json!({"participant_id":"not-an-id"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    let (status, _) = send(
+        &app,
+        IpAddr::V4(Ipv4Addr::LOCALHOST),
+        coach_headers("replacement_request:repeat", "123456789"),
+        Method::PATCH,
+        &route,
+        Some(json!({"action":"decline"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
 }
 
 #[cfg(feature = "testing")]
@@ -2500,6 +2752,80 @@ async fn seed_roster_fixture(pool: &PgPool) {
     .execute(pool)
     .await
     .expect("roster fixture");
+}
+
+#[cfg(feature = "testing")]
+async fn seed_operator_request_fixture(pool: &PgPool) {
+    sqlx::raw_sql(
+        r#"
+        UPDATE scrim.teams
+           SET discord_role_id = 8000 + id,
+               discord_channel_id = 7000 + id
+         WHERE id IN (1, 2);
+        INSERT INTO scrim.participants(id, discord_id, display_name, rank_source, rank_verified, status, source, created_at, updated_at)
+        VALUES
+            (101, 1001, 'A', 'self', false, 'assigned', 'test', now(), now()),
+            (201, 2001, 'B', 'self', false, 'assigned', 'test', now(), now());
+        INSERT INTO scrim.team_members(team_id, participant_id, role, is_captain, is_bench)
+        VALUES (1, 101, 'player', true, false), (2, 201, 'player', true, false);
+        INSERT INTO scrim.match_request_batches(id, template, deadline_at, status, created_by_user_id, created_by_display_name)
+        VALUES (90, 'regular_scrim', now() - interval '1 hour', 'open', '123456789', 'Coach');
+        INSERT INTO scrim.match_requests(id, batch_id, team_a_id, team_b_id, status, slot_options, team_query_message_ids)
+        VALUES
+            (91, 90, 1, 2, 'draft', '[]'::jsonb, '{}'::jsonb),
+            (92, 90, 1, 2, 'open', '[{"day":"sat","from":1200,"to":1320}]'::jsonb,
+             '{"1":{"channel_id":7001,"message_id":7101},"2":{"channel_id":7002,"message_id":7102}}'::jsonb),
+            (93, 90, 1, 2, 'closed', '[{"day":"sat","from":1200,"to":1320}]'::jsonb, '{}'::jsonb);
+        INSERT INTO scrim.match_request_responses(request_id, team_id, participant_id, discord_user_id, slot_index, response, source, responded_at, updated_at)
+        VALUES (92, 2, 201, 2001, 0, 'available', 'button', now(), now());
+        "#,
+    )
+    .execute(pool)
+    .await
+    .expect("operator request fixture");
+}
+
+#[cfg(feature = "testing")]
+async fn seed_replacement_fixture(pool: &PgPool) -> i64 {
+    sqlx::raw_sql(
+        r#"
+        INSERT INTO scrim.participants(id, discord_id, display_name, rank, rank_source, rank_verified, roles, status, source, created_at, updated_at)
+        VALUES
+            (101, 1001, 'Missing', 'Initiate', 'self', false, 'front', 'assigned', 'test', now(), now()),
+            (301, 3001, 'First', 'Alchemist', 'self', false, 'front', 'new', 'test', now(), now()),
+            (302, 3002, 'Best', 'Arcanist', 'self', false, 'support', 'new', 'test', now(), now()),
+            (303, 3003, 'Stable', 'Alchemist', 'self', false, 'front', 'new', 'test', now(), now());
+        INSERT INTO scrim.team_members(team_id, participant_id, role, is_captain, is_bench)
+        VALUES (1, 101, 'player', true, false);
+        "#,
+    )
+    .execute(pool)
+    .await
+    .expect("replacement participants");
+    let need_id: i64 = sqlx::query_scalar(
+        "INSERT INTO scrim.replacement_needs(\
+             team_id, participant_id, needed_role, reason, status, created_by_user_id, created_by_display_name\
+         ) VALUES (1, 101, 'front', 'participant_unavailable', 'open', '123456789', 'Coach') \
+         RETURNING id",
+    )
+    .fetch_one(pool)
+    .await
+    .expect("replacement need");
+    for (participant_id, score) in [(301, 50), (302, 90), (303, 50)] {
+        sqlx::query(
+            "INSERT INTO scrim.replacement_candidates(\
+                 need_id, participant_id, discord_user_id, candidate_data, score_data, status\
+             ) VALUES ($1, $2, $3, '{}'::jsonb, jsonb_build_object('score', $4::integer), 'candidate')",
+        )
+        .bind(need_id)
+        .bind(participant_id)
+        .bind(i64::from(participant_id) + 2700)
+        .bind(score)
+        .execute(pool)
+        .await
+        .expect("replacement candidate");
+    }
+    need_id
 }
 
 #[cfg(feature = "testing")]

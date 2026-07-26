@@ -3,8 +3,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use chrono::{DateTime, Utc};
 
 use crate::model::{
-    MatchRequestBatchInput, MatchRequestFacts, MatchRequestResponse, ReplacementNeed,
-    ResponseChoice, RosterMember, SlotFacts, ValidatedMatchRequest, ValidatedMatchRequestBatch,
+    MatchRequestBatchInput, MatchRequestFacts, MatchRequestResponse, ReplacementCandidate,
+    ReplacementNeed, ResponseChoice, RosterMember, SlotFacts, ValidatedMatchRequest,
+    ValidatedMatchRequestBatch,
 };
 use crate::{ScrimError, ScrimResult};
 
@@ -269,4 +270,21 @@ pub fn is_scrim_history_entry(
         status.to_ascii_lowercase().as_str(),
         "cancelled" | "canceled"
     ) && has_selected_result
+}
+
+pub fn rank_replacement_candidates(candidates: &mut [ReplacementCandidate]) {
+    candidates.sort_by(|left, right| {
+        candidate_score(right)
+            .partial_cmp(&candidate_score(left))
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| left.id.cmp(&right.id))
+    });
+}
+
+fn candidate_score(candidate: &ReplacementCandidate) -> f64 {
+    candidate
+        .score_data
+        .get("score")
+        .and_then(serde_json::Value::as_f64)
+        .unwrap_or(0.0)
 }

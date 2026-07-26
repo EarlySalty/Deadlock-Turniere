@@ -2,22 +2,25 @@ use std::collections::{BTreeSet, HashMap};
 
 use chrono::{DateTime, Utc};
 use serde::Serialize;
+use serde_json::Value;
 
 use crate::decision::{is_scrim_history_entry, validate_match_request_batch};
 use crate::dto::{
-    AnnouncementPublicationRequest, CreateMatchRequest, CreateTeamRequest, LobbyCodeRequest,
-    MatchIdPatchRequest, MatchIdsRequest, ParticipantPatchRequest, PatchValue, ResultFetchRequest,
-    RosterSuggestResponse, RosterSuggestionCandidate, SelfServiceParticipant, SignupRequest,
+    ActionReceipt, AnnouncementPublicationRequest, CreateMatchRequest, CreateTeamRequest,
+    LobbyCodeRequest, MatchIdPatchRequest, MatchIdsRequest, MatchRequestPatch,
+    ParticipantPatchRequest, PatchValue, ReminderRequest, ReplacementRequestCreate,
+    ReplacementRequestPatch, ResultFetchRequest, RosterSuggestResponse,
+    RosterSuggestionCandidate, SelfServiceParticipant, SignupRequest, StatusPublicationRequest,
     SuggestTeamRequest, TeamPatchRequest, WeeklyAvailability,
 };
 use crate::model::{
     wire_id, AnnouncementPreview, AvailabilitySlot, AvailabilityStatus, LobbyStateMutation,
     MatchMutation, MatchRequestBatchInput, ScrimAction, ScrimDay, ScrimMatch, ScrimReadModel,
-    ScrimSlot, ValidatedMatchRequestBatch,
+    ReplacementCandidate, ScrimSlot, ValidatedMatchRequestBatch,
 };
 use crate::repository::{
-    DiscordRoleSyncPlan, ParticipantMutation, PgScrimReadRepository, RosterPoolCandidate,
-    ScrimReadRepository, SignupMutation, SubstituteMutation, TeamMutation,
+    DiscordRoleSyncPlan, MutationDispatch, ParticipantMutation, PgScrimReadRepository,
+    RosterPoolCandidate, ScrimReadRepository, SignupMutation, SubstituteMutation, TeamMutation,
 };
 use crate::{ScrimError, ScrimResult};
 
@@ -166,6 +169,27 @@ impl ScrimService<PgScrimReadRepository> {
             .await
     }
 
+    pub async fn patch_match_request(
+        &self,
+        idempotency_key: &str,
+        request_id: &str,
+        payload: &Value,
+        match_request_id: i32,
+        request: &MatchRequestPatch,
+        actor: (&str, &str),
+    ) -> ScrimResult<ActionReceipt> {
+        self.repository
+            .patch_match_request(
+                idempotency_key,
+                request_id,
+                payload,
+                match_request_id,
+                request,
+                actor,
+            )
+            .await
+    }
+
     pub async fn create_match(
         &self,
         idempotency_key: &str,
@@ -236,6 +260,27 @@ impl ScrimService<PgScrimReadRepository> {
             .await
     }
 
+    pub async fn create_match_request_reminders(
+        &self,
+        idempotency_key: &str,
+        request_id: &str,
+        payload: &Value,
+        match_request_id: i32,
+        request: &ReminderRequest,
+        actor: (&str, &str),
+    ) -> ScrimResult<MutationDispatch> {
+        self.repository
+            .create_match_request_reminders(
+                idempotency_key,
+                request_id,
+                payload,
+                match_request_id,
+                request,
+                actor,
+            )
+            .await
+    }
+
     pub async fn participant_resync_plan(
         &self,
         participant_id: i32,
@@ -301,6 +346,27 @@ impl ScrimService<PgScrimReadRepository> {
             .await
     }
 
+    pub async fn create_status_publication(
+        &self,
+        idempotency_key: &str,
+        request_id: &str,
+        payload: &Value,
+        match_request_id: i32,
+        request: &StatusPublicationRequest,
+        actor: (&str, &str),
+    ) -> ScrimResult<MutationDispatch> {
+        self.repository
+            .create_status_publication(
+                idempotency_key,
+                request_id,
+                payload,
+                match_request_id,
+                request,
+                actor,
+            )
+            .await
+    }
+
     pub async fn add_match_ids(
         &self,
         idempotency_key: &str,
@@ -331,6 +397,34 @@ impl ScrimService<PgScrimReadRepository> {
                 &match_ids,
                 actor_user_id,
                 actor_display_name,
+            )
+            .await
+    }
+
+    pub async fn replacement_candidates(
+        &self,
+        need_id: i64,
+    ) -> ScrimResult<Vec<ReplacementCandidate>> {
+        self.repository.replacement_candidates(need_id).await
+    }
+
+    pub async fn create_replacement_request(
+        &self,
+        idempotency_key: &str,
+        request_id: &str,
+        payload: &Value,
+        need_id: i64,
+        request: &ReplacementRequestCreate,
+        actor: (&str, &str),
+    ) -> ScrimResult<MutationDispatch> {
+        self.repository
+            .create_replacement_request(
+                idempotency_key,
+                request_id,
+                payload,
+                need_id,
+                request,
+                actor,
             )
             .await
     }
@@ -399,6 +493,27 @@ impl ScrimService<PgScrimReadRepository> {
                 actor_user_id,
                 actor_display_name,
                 &selection_reason,
+            )
+            .await
+    }
+
+    pub async fn patch_replacement_request(
+        &self,
+        idempotency_key: &str,
+        request_id: &str,
+        payload: &Value,
+        replacement_request_id: i64,
+        request: &ReplacementRequestPatch,
+        actor: (&str, &str),
+    ) -> ScrimResult<ActionReceipt> {
+        self.repository
+            .patch_replacement_request(
+                idempotency_key,
+                request_id,
+                payload,
+                replacement_request_id,
+                request,
+                actor,
             )
             .await
     }
