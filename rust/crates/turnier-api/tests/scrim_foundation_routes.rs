@@ -31,6 +31,9 @@ fn app_with_pool(pool: PgPool) -> Router {
     let mut config = Config::from_env();
     config.turnier_internal_api_token = "internal-token".to_string();
     config.discord_bot_token = String::new();
+    config.discord_master_broker_token = String::new();
+    config.scrim_signup_role_id = None;
+    config.scrim_reserve_role_id = None;
     config.steam_bridge_db_path = String::new();
     config.backend_allowed_hosts = "localhost".to_string();
     config.discord_mod_role_ids = "99".to_string();
@@ -636,6 +639,166 @@ async fn every_canonical_mutation_requires_request_and_idempotency_headers() {
         assert_eq!(status, StatusCode::BAD_REQUEST, "{method} {route}");
         assert_eq!(response["detail"], "X-Request-Id fehlt", "{method} {route}");
     }
+}
+
+#[tokio::test]
+async fn self_service_mutations_keep_the_internal_boundary_checks() {
+    let headers = TestHeaders {
+        token: Some("internal-token"),
+        request_id: Some("request:self-service"),
+        idempotency_key: Some("scrim:self-service"),
+        actor_id: Some("123456789"),
+        actor_name: Some("Player"),
+    };
+    for (method, route, body) in [
+        (
+            Method::POST,
+            "/internal/turnier/v1/scrims/signup",
+            json!({}),
+        ),
+        (
+            Method::PUT,
+            "/internal/turnier/v1/scrims/me/availability",
+            json!({}),
+        ),
+    ] {
+        let (status, _) = send(
+            &app(),
+            IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2)),
+            headers,
+            method.clone(),
+            route,
+            Some(body.clone()),
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+
+        let (status, _) = send(
+            &app(),
+            IpAddr::V4(Ipv4Addr::LOCALHOST),
+            TestHeaders {
+                token: Some("wrong-token"),
+                ..headers
+            },
+            method,
+            route,
+            Some(body),
+        )
+        .await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+    }
+}
+
+#[cfg(feature = "testing")]
+#[tokio::test]
+async fn self_service_routes_create_update_and_only_change_availability() {
+    let db = turnier_db::test_pool().await.expect("central test pool");
+    let app = app_with_pool(db.pool().clone());
+    let signup_route = "/internal/turnier/v1/scrims/signup";
+    let headers = TestHeaders {
+        token: Some("internal-token"),
+        request_id: Some("request:signup"),
+        idempotency_key: Some("scrim:signup"),
+        actor_id: Some("950001"),
+        actor_name: Some("Signup Player"),
+    };
+    let unknown = json!({"status":"unknown","from":null,"to":null});
+    let slots = json!({
+        "mon": unknown,
+        "tue": unknown,
+        "wed": unknown,
+        "thu": unknown,
+        "fri": unknown,
+        "sat": {"status":"available","from":1200,"to":1320},
+        "sun": unknown
+    });
+
+    let (status, created) = send(
+        &app,
+        IpAddr::V4(Ipv4Addr::LOCALHOST),
+        headers,
+        Method::POST,
+        signup_route,
+        Some(json!({
+            "rank":"Oracle",
+            "roles":"Flex",
+            "availability":"ignored by structured slots",
+            "availability_slots":slots
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(created["id"].is_number());
+    assert_eq!(created["display_name"], "Signup Player");
+    assert_eq!(created["availability_confirmed"], true);
+    assert_eq!(created["availability_slots"]["sat"]["from"], 1200);
+    assert_eq!(created["status"], "new");
+    assert_eq!(created["source"], "web_form");
+
+    let update_headers = TestHeaders {
+        request_id: Some("request:signup-update"),
+        idempotency_key: Some("scrim:signup-update"),
+        actor_name: Some("Renamed Player"),
+        ..headers
+    };
+    let (status, updated) = send(
+        &app,
+        IpAddr::V4(Ipv4Addr::LOCALHOST),
+        update_headers,
+        Method::POST,
+        signup_route,
+        Some(json!({
+            "rank":"Phantom",
+            "roles":"Duo",
+            "availability":"new free text",
+            "availability_slots":null
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(updated["id"], created["id"]);
+    assert_eq!(updated["display_name"], "Renamed Player");
+    assert_eq!(updated["availability"], "new free text");
+    assert_eq!(
+        updated["availability_slots"]["sat"]["from"], 1200,
+        "structured availability survives a text-only signup update"
+    );
+    let count: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM scrim.participants WHERE discord_id=950001")
+            .fetch_one(db.pool())
+            .await
+            .expect("participant count");
+    assert_eq!(count, 1);
+
+    let availability_headers = TestHeaders {
+        request_id: Some("request:availability"),
+        idempotency_key: Some("scrim:availability"),
+        ..update_headers
+    };
+    let new_slots = json!({
+        "mon": unknown,
+        "tue": unknown,
+        "wed": unknown,
+        "thu": unknown,
+        "fri": {"status":"available","from":1140,"to":1260},
+        "sat": unknown,
+        "sun": unknown
+    });
+    let (status, availability) = send(
+        &app,
+        IpAddr::V4(Ipv4Addr::LOCALHOST),
+        availability_headers,
+        Method::PUT,
+        "/internal/turnier/v1/scrims/me/availability",
+        Some(new_slots),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(availability["rank"], "Phantom");
+    assert_eq!(availability["roles"], "Duo");
+    assert_eq!(availability["availability_slots"]["fri"]["from"], 1140);
+    assert_eq!(availability["status"], "new");
+    assert_eq!(availability["source"], "web_form");
 }
 
 #[cfg(feature = "testing")]
