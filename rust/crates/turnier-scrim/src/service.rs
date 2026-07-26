@@ -268,7 +268,7 @@ impl ScrimService<PgScrimReadRepository> {
         match_request_id: i32,
         request: &ReminderRequest,
         actor: (&str, &str),
-    ) -> ScrimResult<MutationDispatch> {
+    ) -> ScrimResult<ActionReceipt> {
         self.repository
             .create_match_request_reminders(
                 idempotency_key,

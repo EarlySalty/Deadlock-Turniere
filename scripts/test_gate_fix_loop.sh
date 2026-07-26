@@ -27,3 +27,34 @@ if [[ $status -ne 1 ]]; then
   printf 'expected verify exit 1 for test runner exit 97, got %s\n' "$status" >&2
   exit 1
 fi
+
+fake_bin="$tmp_dir/fake-bin"
+git_log="$tmp_dir/git.log"
+mkdir -p "$fake_bin"
+printf '%s\n' \
+  '#!/usr/bin/env bash' \
+  'printf "%s\n" "$*" >>"$GIT_LOG"' \
+  'case "$1 $2 $3" in' \
+  '  "rev-parse --verify origin/main") exit 0 ;;' \
+  '  "status --porcelain ") printf " M tracked-file\n"; exit 0 ;;' \
+  '  "log --oneline -1") printf "deadbee Platzhalter\n"; exit 0 ;;' \
+  'esac' \
+  'exit 0' >"$fake_bin/git"
+printf '%s\n' \
+  '#!/usr/bin/env bash' \
+  'printf "ALLOW: Platzhalter\n"' >"$fake_bin/python3"
+printf '%s\n' \
+  '#!/usr/bin/env bash' \
+  'exit 0' >"$fake_bin/cargo"
+chmod +x "$fake_bin/git" "$fake_bin/python3" "$fake_bin/cargo"
+
+mkdir -p "$tmp_dir/allow-repo/rust"
+GIT_LOG="$git_log" PATH="$fake_bin:$PATH" REPO="$tmp_dir/allow-repo" \
+  LOG_DIR="$tmp_dir/allow-log" MAX_ROUNDS=1 \
+  bash "$repo_root/scripts/gate_fix_loop.sh"
+
+if grep -Eq '^(add|commit|push)( |$)' "$git_log"; then
+  printf 'gate loop must leave commit and push to the caller\n' >&2
+  cat "$git_log" >&2
+  exit 1
+fi

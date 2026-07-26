@@ -2043,6 +2043,19 @@ async fn match_request_patch_reminder_and_publication_persist_and_validate() {
         reminder,
         (1, vec![101], vec![1001], None, "members".to_string())
     );
+    let reminder_command_result: Value = sqlx::query_scalar(
+        "SELECT result_payload \
+           FROM scrim.command_receipts \
+          WHERE command_scope='match_request_reminders' \
+            AND idempotency_key='match_request_reminder:92'",
+    )
+    .fetch_one(db.pool())
+    .await
+    .expect("reminder command result");
+    assert!(
+        reminder_command_result.get("discord").is_none(),
+        "approved reminders must be dispatched only by the reminder worker"
+    );
 
     let (status, body) = send(
         &app,

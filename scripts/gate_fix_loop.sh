@@ -57,23 +57,13 @@ for round in $(seq 1 "$MAX_ROUNDS"); do
 
   if [[ "$verdict" == ALLOW:* ]]; then
     say "Kritiker laesst durch nach $round Runde(n)."
-    # Vor dem Push beide Bedingungen erfuellen, die auch der Push-Hook stellt:
-    # gruener Testlauf und ein ALLOW des Kritikers. Erst dann rausschieben.
+    # Vor dem manuellen Push beide Bedingungen erfuellen, die auch der Push-Hook stellt.
     if ! verify; then
       say "Kritiker waere zufrieden, aber die Verifikation ist rot -- kein Push."
       exit 6
     fi
-    [[ -n "$(git status --porcelain)" ]] && { git add -A; git commit -q -m "chore: Restaenderungen vor dem Push"; }
-    # HEAD:main, nicht "main" — die Arbeit liegt auf einem Feature-Branch, der lokale
-    # main-Zeiger kennt sie nicht. "git push origin main" haette leer gepusht.
-    say "Push nach main"
-    if git push origin HEAD:main >"$LOG_DIR/push.log" 2>&1; then
-      say "gepusht: $(git log --oneline -1)"
-      exit 0
-    fi
-    say "Push fehlgeschlagen -- siehe $LOG_DIR/push.log"
-    tail -5 "$LOG_DIR/push.log"
-    exit 8
+    say "Platzhalter"
+    exit 0
   fi
   if [[ "$verdict" != BLOCK:* ]]; then
     say "unklare Antwort des Kritikers -- Abbruch zur Sichtung"; exit 2

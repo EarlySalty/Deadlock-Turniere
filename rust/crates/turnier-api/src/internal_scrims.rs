@@ -887,7 +887,7 @@ async fn create_match_request_reminders(
     let service = service(&state);
     service.authorize_operator(actor.discord_id).await?;
     let payload = json_with_target("request_id", id, &body)?;
-    let dispatch = service
+    let receipt = service
         .create_match_request_reminders(
             mutation.idempotency_key,
             mutation.request_id,
@@ -897,14 +897,7 @@ async fn create_match_request_reminders(
             (actor.discord_id, actor.display_name),
         )
         .await?;
-    dispatch_discord(
-        &state,
-        "match_request_reminders",
-        mutation.idempotency_key,
-        &dispatch,
-    )
-    .await;
-    Ok((StatusCode::OK, Json(dispatch.receipt)))
+    Ok((StatusCode::OK, Json(receipt)))
 }
 
 async fn create_match_request_status_publication(

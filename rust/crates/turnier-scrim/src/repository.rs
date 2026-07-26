@@ -1421,8 +1421,8 @@ impl PgScrimReadRepository {
         request_id: i32,
         request: &ReminderRequest,
         actor: (&str, &str),
-    ) -> ScrimResult<MutationDispatch> {
-        let content = validated_message(request.message.as_deref())?;
+    ) -> ScrimResult<ActionReceipt> {
+        validated_message(request.message.as_deref())?;
         let mut tx = self.pool.begin().await?;
         lock_runtime_control(&mut tx).await?;
         require_turniere_runtime(&mut tx).await?;
@@ -1431,11 +1431,9 @@ impl PgScrimReadRepository {
                 .await?
             {
                 CommandStart::New(id) => id,
-                // Replay liefert die Discord-Zustellungen mit: ist der erste Versuch
-                // nach dem Commit gescheitert, holt ein erneuter Aufruf ihn nach.
-                CommandStart::Replay(dispatch) => {
+                CommandStart::Replay(receipt) => {
                     tx.commit().await?;
-                    return Ok(dispatch);
+                    return Ok(receipt);
                 }
             };
         let row = sqlx::query(
@@ -1457,7 +1455,7 @@ impl PgScrimReadRepository {
             Some(row.try_get::<i32, _>("team_a_id")?),
             row.try_get::<Option<i32>, _>("team_b_id")?,
         ];
-        let mut discord = Vec::new();
+        let mut reminder_count = 0_usize;
         for team_id in team_ids.into_iter().flatten() {
             let team = sqlx::query(
                 "SELECT discord_role_id, discord_channel_id FROM scrim.teams WHERE id=$1",
@@ -1518,14 +1516,14 @@ impl PgScrimReadRepository {
                     )
                 })?)
             };
-            let reminder_id: i64 = sqlx::query_scalar(
+            sqlx::query(
                 "INSERT INTO scrim.match_request_reminders(\
                      request_id, team_id, template, target_kind, target_participant_ids, \
                      target_discord_user_ids, target_role_id, missing_count, \
                      approved_by_user_id, approved_by_display_name, status, \
                      discord_channel_id, source_message_id\
                  ) VALUES ($1, $2, 'antwort_fehlt', $3, $4, $5, $6, $7, $8, $9, \
-                           'approved', $10, $11) RETURNING id",
+                           'approved', $10, $11)",
             )
             .bind(request_id)
             .bind(team_id)
@@ -1542,31 +1540,11 @@ impl PgScrimReadRepository {
             .bind(actor.1)
             .bind(channel_id)
             .bind(source.1)
-            .fetch_one(&mut *tx)
+            .execute(&mut *tx)
             .await?;
-            if all_have_discord {
-                discord.extend(
-                    target_discord_ids
-                        .into_iter()
-                        .map(|user_id| DiscordDispatch {
-                            kind: "match_request_reminder".to_string(),
-                            record_id: reminder_id,
-                            user_id: Some(user_id),
-                            channel_id: None,
-                            content: content.clone(),
-                        }),
-                );
-            } else {
-                discord.push(DiscordDispatch {
-                    kind: "match_request_reminder".to_string(),
-                    record_id: reminder_id,
-                    user_id: None,
-                    channel_id: Some(source.0),
-                    content: content.clone(),
-                });
-            }
+            reminder_count += 1;
         }
-        if discord.is_empty() {
+        if reminder_count == 0 {
             return Err(ScrimError::Conflict(
                 "Niemand im Team hat einen verknüpften Discord-Account.".to_string(),
             ));
@@ -1578,16 +1556,13 @@ impl PgScrimReadRepository {
             actor.0,
             api_request_id,
             idempotency_key,
-            json!({"dispatch_count": discord.len()}),
+            json!({"reminder_count": reminder_count}),
         )
         .await?;
         let receipt = placeholder_receipt();
-        // Den vollstaendigen Dispatch ablegen, nicht nur die Quittung: sonst geht bei einem
-        // Replay verloren, welche Discord-Zustellungen noch offen sind.
-        let dispatch = MutationDispatch { receipt, discord };
-        complete_command(&mut tx, receipt_id, &dispatch).await?;
+        complete_command(&mut tx, receipt_id, &receipt).await?;
         tx.commit().await?;
-        Ok(dispatch)
+        Ok(receipt)
     }
 
     pub async fn create_status_publication(
