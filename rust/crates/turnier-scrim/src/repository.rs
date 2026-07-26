@@ -372,13 +372,41 @@ impl PgScrimReadRepository {
             };
 
         let row = sqlx::query(
+            "SELECT tm.participant_id::bigint AS participant_id \
+               FROM scrim.match_requests mr \
+               LEFT JOIN scrim.participants p ON p.discord_id = $3 \
+               LEFT JOIN scrim.team_members tm ON tm.participant_id = p.id AND tm.team_id = $2 \
+              WHERE mr.id = $1 \
+                AND (mr.team_a_id = $2 OR mr.team_b_id = $2)",
+        )
+        .bind(request_id)
+        .bind(team_id)
+        .bind(actor_id)
+        .fetch_optional(&mut *tx)
+        .await?
+        .ok_or_else(|| {
+            ScrimError::InvalidResponse("Diese Terminantwort ist ungültig.".to_string())
+        })?;
+        let participant_id = row
+            .try_get::<Option<i64>, _>("participant_id")?
+            .ok_or(ScrimError::ParticipantUnauthorized)?;
+        let participant_id_i32 = i32::try_from(participant_id).map_err(|_| {
+            ScrimError::InvalidResponse("participant_id is out of range".to_string())
+        })?;
+        sqlx::query("SELECT pg_advisory_xact_lock($1, $2)")
+            .bind(request_id)
+            .bind(participant_id_i32)
+            .execute(&mut *tx)
+            .await?;
+        let row = sqlx::query(
             "SELECT mr.status, mr.slot_options, mr.team_query_message_ids, \
                     tm.participant_id::bigint AS participant_id \
                FROM scrim.match_requests mr \
                LEFT JOIN scrim.participants p ON p.discord_id = $3 \
                LEFT JOIN scrim.team_members tm ON tm.participant_id = p.id AND tm.team_id = $2 \
               WHERE mr.id = $1 \
-                AND (mr.team_a_id = $2 OR mr.team_b_id = $2)",
+                AND (mr.team_a_id = $2 OR mr.team_b_id = $2) \
+              FOR UPDATE OF mr",
         )
         .bind(request_id)
         .bind(team_id)
@@ -394,8 +422,7 @@ impl PgScrimReadRepository {
                 "Diese Abstimmung ist nicht mehr offen.".to_string(),
             ));
         }
-        let participant_id = row
-            .try_get::<Option<i64>, _>("participant_id")?
+        row.try_get::<Option<i64>, _>("participant_id")?
             .ok_or(ScrimError::ParticipantUnauthorized)?;
         if slot_index >= 0 {
             let slot_options = row.try_get::<Value, _>("slot_options")?;
@@ -424,29 +451,6 @@ impl PgScrimReadRepository {
                 "Diese Antwort passt nicht zu dieser Terminabfrage.".to_string(),
             ));
         }
-
-        sqlx::query("SELECT pg_advisory_xact_lock($1, $2)")
-            .bind(request_id)
-            .bind(i32::try_from(participant_id).map_err(|_| {
-                ScrimError::InvalidResponse("participant_id is out of range".to_string())
-            })?)
-            .execute(&mut *tx)
-            .await?;
-        let current_status = sqlx::query_scalar::<_, String>(
-            "SELECT status FROM scrim.match_requests WHERE id = $1 FOR UPDATE",
-        )
-        .bind(request_id)
-        .fetch_one(&mut *tx)
-        .await?;
-        if !matches!(current_status.as_str(), "open" | "post_failed") {
-            return Err(ScrimError::Conflict(
-                "Diese Abstimmung ist nicht mehr offen.".to_string(),
-            ));
-        }
-
-        let participant_id_i32 = i32::try_from(participant_id).map_err(|_| {
-            ScrimError::InvalidResponse("participant_id is out of range".to_string())
-        })?;
         if slot_index == -1 {
             sqlx::query(
                 "DELETE FROM scrim.match_request_responses \

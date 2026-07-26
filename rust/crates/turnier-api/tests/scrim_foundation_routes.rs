@@ -1245,6 +1245,82 @@ async fn participant_interaction_persists_only_for_own_team_and_original_message
 
 #[cfg(feature = "testing")]
 #[tokio::test]
+async fn participant_interaction_revalidates_slots_after_advisory_lock() {
+    let db = turnier_db::test_pool().await.expect("central test pool");
+    enable_turniere_runtime(db.pool()).await;
+    seed_teams(db.pool(), &[1, 2]).await;
+    seed_interaction_fixture(db.pool()).await;
+    let app = app_with_pool(db.pool().clone());
+
+    let mut lock_tx = db.pool().begin().await.expect("advisory lock tx");
+    sqlx::query("SELECT pg_advisory_xact_lock($1, $2)")
+        .bind(31_i32)
+        .bind(880_i32)
+        .execute(&mut *lock_tx)
+        .await
+        .expect("hold response lock");
+
+    let pending = tokio::spawn(async move {
+        send(
+            &app,
+            IpAddr::V4(Ipv4Addr::LOCALHOST),
+            TestHeaders {
+                token: Some("internal-token"),
+                request_id: Some("interaction:race"),
+                idempotency_key: Some("scrimreq:v1:interaction:44"),
+                ..TestHeaders::default()
+            },
+            Method::POST,
+            "/internal/turnier/v1/scrims/interactions/match-request-response",
+            Some(interaction()),
+        )
+        .await
+    });
+
+    tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        loop {
+            let waiting: bool = sqlx::query_scalar(
+                "SELECT EXISTS (\
+                    SELECT 1 FROM pg_locks \
+                     WHERE locktype = 'advisory' \
+                       AND classid = $1::oid AND objid = $2::oid \
+                       AND objsubid = 2 AND NOT granted\
+                 )",
+            )
+            .bind(31_i32)
+            .bind(880_i32)
+            .fetch_one(db.pool())
+            .await
+            .expect("inspect advisory locks");
+            if waiting {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("interaction reached response lock");
+
+    sqlx::query("UPDATE scrim.match_requests SET slot_options = '[]'::jsonb WHERE id = 31")
+        .execute(db.pool())
+        .await
+        .expect("replace slot options");
+    lock_tx.commit().await.expect("release response lock");
+
+    let (status, body) = pending.await.expect("interaction task");
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(body["detail"], "slot is out of range");
+    let saved: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM scrim.match_request_responses WHERE request_id = 31",
+    )
+    .fetch_one(db.pool())
+    .await
+    .expect("response count");
+    assert_eq!(saved, 0);
+}
+
+#[cfg(feature = "testing")]
+#[tokio::test]
 async fn unimplemented_steam_facing_mutations_return_disabled_unverified_capability() {
     let db = turnier_db::test_pool().await.expect("central test pool");
     seed_coach(db.pool(), 123456789).await;
