@@ -97,8 +97,14 @@ impl PgScrimReadRepository {
         .await?;
         let participant_id = if let Some(participant_id) = participant_id {
             sqlx::query(
+                // rank_source/rank_verified beziehen sich auf den ALTEN rank-Wert: in Postgres
+                // lesen alle SET-Ausdruecke die Zeile vor dem Update. Ein selbst gemeldeter Rang
+                // darf nie als verifiziert stehen bleiben; bleibt der Rang gleich, bleibt eine
+                // bestehende Bestaetigung erhalten.
                 "UPDATE scrim.participants \
                     SET display_name=$2, rank=$3, roles=$4, availability=$5, \
+                        rank_source=CASE WHEN rank IS DISTINCT FROM $3 THEN 'self' ELSE rank_source END, \
+                        rank_verified=CASE WHEN rank IS DISTINCT FROM $3 THEN false ELSE rank_verified END, \
                         availability_slots=COALESCE($6::jsonb, availability_slots), \
                         updated_at=now() \
                   WHERE id=$1",
@@ -122,8 +128,11 @@ impl PgScrimReadRepository {
         .await?
         {
             sqlx::query(
+                // Siehe oben: selbst gemeldeter Rang verliert eine bestehende Bestaetigung.
                 "UPDATE scrim.participants \
                     SET discord_id=$2, rank=$3, roles=$4, availability=$5, \
+                        rank_source=CASE WHEN rank IS DISTINCT FROM $3 THEN 'self' ELSE rank_source END, \
+                        rank_verified=CASE WHEN rank IS DISTINCT FROM $3 THEN false ELSE rank_verified END, \
                         availability_slots=COALESCE($6::jsonb, availability_slots), \
                         updated_at=now() \
                   WHERE id=$1",

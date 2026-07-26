@@ -226,3 +226,94 @@ async fn signup_waits_for_the_live_discord_reaction_advisory_lock() {
         .expect("signup task")
         .expect("signup after lock release");
 }
+
+/// Ein per Self-Service gemeldeter Rang darf nie als verifiziert gelten.
+///
+/// Sonst kann ein Spieler einen von der Orga bestaetigten Rang ueberschreiben und der
+/// neue, selbst gemeldete Wert traegt weiter das Verifiziert-Kennzeichen. Solange der
+/// Rang unveraendert bleibt, bleibt eine bestehende Verifizierung erhalten.
+#[tokio::test]
+async fn signup_never_leaves_a_self_reported_rank_marked_as_verified() {
+    let db = turnier_db::test_pool().await.expect("central test pool");
+    let service = ScrimService::new(PgScrimReadRepository::new(db.pool().clone()));
+
+    let created = service
+        .signup(
+            "910042",
+            "Verified Player",
+            SignupRequest {
+                rank: Some("Oracle".to_string()),
+                roles: None,
+                availability: None,
+                availability_slots: None,
+            },
+            None,
+            None,
+        )
+        .await
+        .expect("create participant");
+
+    // Die Orga bestaetigt den Rang.
+    sqlx::query(
+        "UPDATE scrim.participants SET rank_source='admin', rank_verified=true WHERE id=$1",
+    )
+    .bind(created.participant.id)
+    .execute(db.pool())
+    .await
+    .expect("mark rank verified");
+
+    // Gleicher Rang erneut gemeldet: die Bestaetigung bleibt bestehen.
+    service
+        .signup(
+            "910042",
+            "Verified Player",
+            SignupRequest {
+                rank: Some("Oracle".to_string()),
+                roles: Some("Flex".to_string()),
+                availability: None,
+                availability_slots: None,
+            },
+            None,
+            None,
+        )
+        .await
+        .expect("resignup with same rank");
+
+    let (source, verified): (String, bool) =
+        sqlx::query_as("SELECT rank_source, rank_verified FROM scrim.participants WHERE id=$1")
+            .bind(created.participant.id)
+            .fetch_one(db.pool())
+            .await
+            .expect("read rank flags");
+    assert_eq!(
+        source, "admin",
+        "unveraenderter Rang behaelt seine Herkunft"
+    );
+    assert!(verified, "unveraenderter Rang bleibt verifiziert");
+
+    // Anderer Rang per Self-Service: Verifizierung faellt weg.
+    service
+        .signup(
+            "910042",
+            "Verified Player",
+            SignupRequest {
+                rank: Some("Phantom".to_string()),
+                roles: None,
+                availability: None,
+                availability_slots: None,
+            },
+            None,
+            None,
+        )
+        .await
+        .expect("resignup with changed rank");
+
+    let (source, verified): (String, bool) =
+        sqlx::query_as("SELECT rank_source, rank_verified FROM scrim.participants WHERE id=$1")
+            .bind(created.participant.id)
+            .fetch_one(db.pool())
+            .await
+            .expect("read rank flags");
+    assert_eq!(source, "self", "geaenderter Rang ist selbst gemeldet");
+    assert!(!verified, "geaenderter Rang darf nicht verifiziert bleiben");
+}
