@@ -3995,10 +3995,11 @@ fn is_allowed_lagebild_evidence_url(value: &str) -> bool {
 mod tests {
     use std::collections::BTreeSet;
 
+    #[cfg(feature = "testing")]
+    use super::{begin_command, complete_command, CommandStart, PgScrimReadRepository};
     use super::{
-        begin_command, blocks_lobby_code_write, complete_command, is_allowed_lagebild_evidence_url,
-        repairing_role_plan, role_resync, CommandStart, DiscordDispatch, MutationDispatch,
-        PgScrimReadRepository, RoleOperation, RoleSnapshot,
+        blocks_lobby_code_write, is_allowed_lagebild_evidence_url, repairing_role_plan,
+        role_resync, DiscordDispatch, MutationDispatch, RoleOperation, RoleSnapshot,
     };
 
     /// Nach einem fehlgeschlagenen Discord-Aufruf traegt die Datenbank schon den Zielzustand.

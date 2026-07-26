@@ -36,13 +36,11 @@ verify() {
     say "clippy rot -- siehe $LOG_DIR/clippy.log"; return 1; }
 
   say "Tests"
-  "$TEST_DB" cargo test --manifest-path "$REPO/rust/Cargo.toml" \
-      --workspace --features testing --no-fail-fast >"$LOG_DIR/test.log" 2>&1
-  # Nur der bekannte Altfehler darf rot sein.
-  local unexpected
-  unexpected=$(grep -E "^test .* FAILED" "$LOG_DIR/test.log" | grep -v "$KNOWN_RED" || true)
-  if [[ -n "$unexpected" ]]; then
-    say "neue Testfehler:"; echo "$unexpected"; return 1
+  if ! "$TEST_DB" cargo test --manifest-path "$REPO/rust/Cargo.toml" \
+      --workspace --features testing --no-fail-fast -- --skip "$KNOWN_RED" \
+      >"$LOG_DIR/test.log" 2>&1; then
+    say "Platzhalter: $LOG_DIR/test.log"
+    return 1
   fi
   return 0
 }
