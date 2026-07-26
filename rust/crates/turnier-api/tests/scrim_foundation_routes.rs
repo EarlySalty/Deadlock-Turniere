@@ -552,7 +552,7 @@ async fn every_canonical_mutation_requires_request_and_idempotency_headers() {
         (
             Method::POST,
             "/internal/turnier/v1/scrims/teams/1/substitute",
-            json!({"participant_id":"1","window":{"day":"fri","from":1200,"to":1320}}),
+            json!({"participant_id":1,"window":{"day":"fri","from":1200,"to":1320}}),
         ),
         (
             Method::POST,
@@ -1484,6 +1484,444 @@ async fn participant_interaction_revalidates_slots_after_advisory_lock() {
 
 #[cfg(feature = "testing")]
 #[tokio::test]
+async fn roster_operator_routes_apply_legacy_contract_and_database_effects() {
+    let db = turnier_db::test_pool().await.expect("central test pool");
+    seed_coach(db.pool(), 123456789).await;
+    seed_roster_fixture(db.pool()).await;
+    let app = app_with_pool(db.pool().clone());
+    let headers = coach_headers("roster:create", "123456789");
+
+    let (status, created) = send(
+        &app,
+        IpAddr::V4(Ipv4Addr::LOCALHOST),
+        headers,
+        Method::POST,
+        "/internal/turnier/v1/scrims/teams",
+        Some(json!({
+            "name":"Alpha",
+            "coach_discord_id":"123456789",
+            "default_from":1200,
+            "default_to":1320
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(created["id"].is_number());
+    assert_eq!(created["name"], "Alpha");
+    assert!(created.get("discord_sync").is_some());
+    let team_id = created["id"].as_i64().expect("numeric team id") as i32;
+
+    let (status, patched_team) = send(
+        &app,
+        IpAddr::V4(Ipv4Addr::LOCALHOST),
+        coach_headers("roster:patch-team", "123456789"),
+        Method::PATCH,
+        &format!("/internal/turnier/v1/scrims/teams/{team_id}"),
+        Some(json!({"name":"Bravo","default_from":1260,"default_to":1380})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(patched_team["id"], team_id);
+    assert_eq!(patched_team["name"], "Bravo");
+
+    let (status, patched_coach) = send(
+        &app,
+        IpAddr::V4(Ipv4Addr::LOCALHOST),
+        coach_headers("roster:patch-coach", "123456789"),
+        Method::PATCH,
+        &format!("/internal/turnier/v1/scrims/teams/{team_id}"),
+        Some(json!({"coach":"Alias"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(patched_coach["coach"], "Alias");
+
+    let (status, cleared_coach) = send(
+        &app,
+        IpAddr::V4(Ipv4Addr::LOCALHOST),
+        coach_headers("roster:clear-coach", "123456789"),
+        Method::PATCH,
+        &format!("/internal/turnier/v1/scrims/teams/{team_id}"),
+        Some(json!({"coach":null})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(cleared_coach["coach"].is_null());
+
+    let (status, participant) = send(
+        &app,
+        IpAddr::V4(Ipv4Addr::LOCALHOST),
+        coach_headers("roster:patch-participant", "123456789"),
+        Method::PATCH,
+        "/internal/turnier/v1/scrims/participants/501",
+        Some(json!({
+            "status":"assigned",
+            "team_id":team_id,
+            "is_captain":true,
+            "notes":"contract"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(participant["id"].is_number());
+    assert_eq!(participant["id"], 501);
+    assert_eq!(participant["team"]["id"], team_id);
+    assert!(participant.get("discord_sync").is_some());
+
+    let (status, announcement) = send(
+        &app,
+        IpAddr::V4(Ipv4Addr::LOCALHOST),
+        coach_headers("roster:announce", "123456789"),
+        Method::POST,
+        &format!("/internal/turnier/v1/scrims/teams/{team_id}/announce"),
+        Some(json!({})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(announcement["ok"].is_boolean());
+    assert!(announcement.get("message_id").is_some());
+
+    let (status, suggestion) = send(
+        &app,
+        IpAddr::V4(Ipv4Addr::LOCALHOST),
+        coach_headers("roster:suggest", "123456789"),
+        Method::POST,
+        &format!("/internal/turnier/v1/scrims/teams/{team_id}/suggest"),
+        Some(json!({
+            "window":{"day":"fri","from":1200,"to":1320},
+            "size":6,
+            "pool":"players"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(suggestion["team"]["id"], team_id);
+    assert_eq!(suggestion["requested_size"], 6);
+    assert!(suggestion["candidates"][0]["participant_id"].is_number());
+
+    let (status, substitute) = send(
+        &app,
+        IpAddr::V4(Ipv4Addr::LOCALHOST),
+        coach_headers("roster:substitute", "123456789"),
+        Method::POST,
+        &format!("/internal/turnier/v1/scrims/teams/{team_id}/substitute"),
+        Some(json!({
+            "participant_id":502,
+            "window":{"day":"fri","from":1200,"to":1320}
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(substitute["participant"]["id"], 502);
+    assert!(substitute.get("discord_sync").is_some());
+    assert!(substitute.get("dm").is_some());
+
+    let (status, resync) = send(
+        &app,
+        IpAddr::V4(Ipv4Addr::LOCALHOST),
+        coach_headers("roster:resync", "123456789"),
+        Method::POST,
+        "/internal/turnier/v1/scrims/participants/502/resync-discord",
+        Some(json!({})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(resync.get("discord_sync").is_some());
+
+    let team: (String, Option<i32>, Option<i32>) =
+        sqlx::query_as("SELECT name, default_from, default_to FROM scrim.teams WHERE id=$1")
+            .bind(team_id)
+            .fetch_one(db.pool())
+            .await
+            .expect("mutated team");
+    assert_eq!(team, ("Bravo".to_string(), Some(1260), Some(1380)));
+    let assigned: (String, Option<String>, bool) = sqlx::query_as(
+        "SELECT p.status, p.notes, tm.is_captain \
+         FROM scrim.participants p \
+         JOIN scrim.team_members tm ON tm.participant_id=p.id \
+         WHERE p.id=501 AND tm.team_id=$1",
+    )
+    .bind(team_id)
+    .fetch_one(db.pool())
+    .await
+    .expect("assigned participant");
+    assert_eq!(
+        assigned,
+        ("assigned".to_string(), Some("contract".to_string()), true)
+    );
+    let substitute_until: Option<chrono::DateTime<chrono::Utc>> = sqlx::query_scalar(
+        "SELECT substitute_until FROM scrim.team_members \
+         WHERE team_id=$1 AND participant_id=502",
+    )
+    .bind(team_id)
+    .fetch_one(db.pool())
+    .await
+    .expect("substitute membership");
+    assert!(substitute_until.is_some());
+
+    let team_count_before_replay: i64 = sqlx::query_scalar("SELECT count(*) FROM scrim.teams")
+        .fetch_one(db.pool())
+        .await
+        .expect("team count before replay");
+    let (status, replayed_create) = send(
+        &app,
+        IpAddr::V4(Ipv4Addr::LOCALHOST),
+        headers,
+        Method::POST,
+        "/internal/turnier/v1/scrims/teams",
+        Some(json!({
+            "name":"Alpha",
+            "coach_discord_id":"123456789",
+            "default_from":1200,
+            "default_to":1320
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(replayed_create["id"], team_id);
+    let team_count_after_replay: i64 = sqlx::query_scalar("SELECT count(*) FROM scrim.teams")
+        .fetch_one(db.pool())
+        .await
+        .expect("team count after replay");
+    assert_eq!(team_count_after_replay, team_count_before_replay);
+
+    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    let (status, replayed_substitute) = send(
+        &app,
+        IpAddr::V4(Ipv4Addr::LOCALHOST),
+        coach_headers("roster:substitute", "123456789"),
+        Method::POST,
+        &format!("/internal/turnier/v1/scrims/teams/{team_id}/substitute"),
+        Some(json!({
+            "participant_id":502,
+            "window":{"day":"fri","from":1200,"to":1320}
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(replayed_substitute["participant"]["id"], 502);
+    let replayed_until: Option<chrono::DateTime<chrono::Utc>> = sqlx::query_scalar(
+        "SELECT substitute_until FROM scrim.team_members \
+         WHERE team_id=$1 AND participant_id=502",
+    )
+    .bind(team_id)
+    .fetch_one(db.pool())
+    .await
+    .expect("replayed substitute membership");
+    assert_eq!(replayed_until, substitute_until);
+}
+
+#[cfg(feature = "testing")]
+#[tokio::test]
+async fn roster_operator_routes_validate_each_contract() {
+    let db = turnier_db::test_pool().await.expect("central test pool");
+    seed_coach(db.pool(), 123456789).await;
+    seed_roster_fixture(db.pool()).await;
+    let app = app_with_pool(db.pool().clone());
+    let cases = [
+        (
+            Method::POST,
+            "/internal/turnier/v1/scrims/teams",
+            json!({"name":""}),
+            StatusCode::BAD_REQUEST,
+        ),
+        (
+            Method::PATCH,
+            "/internal/turnier/v1/scrims/teams/10",
+            json!({"name":""}),
+            StatusCode::BAD_REQUEST,
+        ),
+        (
+            Method::PATCH,
+            "/internal/turnier/v1/scrims/participants/501",
+            json!({"team_id":"not-an-id"}),
+            StatusCode::UNPROCESSABLE_ENTITY,
+        ),
+        (
+            Method::POST,
+            "/internal/turnier/v1/scrims/teams/10/announce",
+            json!({"note":"x".repeat(501)}),
+            StatusCode::BAD_REQUEST,
+        ),
+        (
+            Method::POST,
+            "/internal/turnier/v1/scrims/teams/10/suggest",
+            json!({"window":{"day":"fri","from":1320,"to":1200}}),
+            StatusCode::BAD_REQUEST,
+        ),
+        (
+            Method::POST,
+            "/internal/turnier/v1/scrims/teams/10/substitute",
+            json!({"participant_id":501,"window":{"day":"fri","from":1200,"to":1320}}),
+            StatusCode::BAD_REQUEST,
+        ),
+        (
+            Method::POST,
+            "/internal/turnier/v1/scrims/participants/not-an-id/resync-discord",
+            json!({}),
+            StatusCode::BAD_REQUEST,
+        ),
+    ];
+    for (index, (method, route, body, expected)) in cases.into_iter().enumerate() {
+        let key = format!("roster:validation:{index}");
+        let (status, _) = send(
+            &app,
+            IpAddr::V4(Ipv4Addr::LOCALHOST),
+            coach_headers(&key, "123456789"),
+            method,
+            route,
+            Some(body),
+        )
+        .await;
+        assert_eq!(status, expected, "{route}");
+    }
+}
+
+#[cfg(feature = "testing")]
+#[tokio::test]
+async fn roster_team_patch_revalidates_the_window_after_locking() {
+    let db = turnier_db::test_pool().await.expect("central test pool");
+    seed_coach(db.pool(), 123456789).await;
+    seed_roster_fixture(db.pool()).await;
+    sqlx::query("UPDATE scrim.teams SET default_from=1200, default_to=1380 WHERE id=10")
+        .execute(db.pool())
+        .await
+        .expect("initial team window");
+    let app = app_with_pool(db.pool().clone());
+
+    let mut blocker = db.pool().begin().await.expect("blocker transaction");
+    sqlx::query("SELECT pg_advisory_xact_lock($1)")
+        .bind(0x4451_0008_0004_0001_i64)
+        .execute(&mut *blocker)
+        .await
+        .expect("block roster mutations");
+
+    let first_app = app.clone();
+    let first = tokio::spawn(async move {
+        send(
+            &first_app,
+            IpAddr::V4(Ipv4Addr::LOCALHOST),
+            coach_headers("roster:race:from", "123456789"),
+            Method::PATCH,
+            "/internal/turnier/v1/scrims/teams/10",
+            Some(json!({"default_from":1350})),
+        )
+        .await
+        .0
+    });
+    let second_app = app.clone();
+    let second = tokio::spawn(async move {
+        send(
+            &second_app,
+            IpAddr::V4(Ipv4Addr::LOCALHOST),
+            coach_headers("roster:race:to", "123456789"),
+            Method::PATCH,
+            "/internal/turnier/v1/scrims/teams/10",
+            Some(json!({"default_to":1300})),
+        )
+        .await
+        .0
+    });
+
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    blocker.rollback().await.expect("release roster mutations");
+    let statuses = [
+        first.await.expect("first patch"),
+        second.await.expect("second patch"),
+    ];
+    assert_eq!(
+        statuses
+            .iter()
+            .filter(|status| **status == StatusCode::OK)
+            .count(),
+        1
+    );
+    assert_eq!(
+        statuses
+            .iter()
+            .filter(|status| **status == StatusCode::BAD_REQUEST)
+            .count(),
+        1
+    );
+    let (from, to): (Option<i32>, Option<i32>) =
+        sqlx::query_as("SELECT default_from, default_to FROM scrim.teams WHERE id=10")
+            .fetch_one(db.pool())
+            .await
+            .expect("final team window");
+    assert!(from.is_some_and(|from| to.is_some_and(|to| from < to)));
+}
+
+#[cfg(feature = "testing")]
+#[tokio::test]
+async fn roster_operator_routes_keep_boundary_and_operator_authorization() {
+    let db = turnier_db::test_pool().await.expect("central test pool");
+    seed_roster_fixture(db.pool()).await;
+    let app = app_with_pool(db.pool().clone());
+    let cases = [
+        (
+            Method::POST,
+            "/internal/turnier/v1/scrims/teams",
+            json!({"name":"X"}),
+        ),
+        (
+            Method::PATCH,
+            "/internal/turnier/v1/scrims/teams/10",
+            json!({}),
+        ),
+        (
+            Method::PATCH,
+            "/internal/turnier/v1/scrims/participants/501",
+            json!({}),
+        ),
+        (
+            Method::POST,
+            "/internal/turnier/v1/scrims/teams/10/announce",
+            json!({}),
+        ),
+        (
+            Method::POST,
+            "/internal/turnier/v1/scrims/teams/10/suggest",
+            json!({}),
+        ),
+        (
+            Method::POST,
+            "/internal/turnier/v1/scrims/teams/10/substitute",
+            json!({"participant_id":502,"window":{"day":"fri","from":1200,"to":1320}}),
+        ),
+        (
+            Method::POST,
+            "/internal/turnier/v1/scrims/participants/501/resync-discord",
+            json!({}),
+        ),
+    ];
+    for (index, (method, route, body)) in cases.into_iter().enumerate() {
+        let key = format!("roster:auth:{index}");
+        let (status, _) = send(
+            &app,
+            IpAddr::V4(Ipv4Addr::LOCALHOST),
+            coach_headers(&key, "987654321"),
+            method.clone(),
+            route,
+            Some(body.clone()),
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{route}");
+
+        let (status, _) = send(
+            &app,
+            IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2)),
+            coach_headers(&key, "987654321"),
+            method,
+            route,
+            Some(body),
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{route}");
+    }
+}
+
+#[cfg(feature = "testing")]
+#[tokio::test]
 async fn unimplemented_steam_facing_mutations_return_disabled_unverified_capability() {
     let db = turnier_db::test_pool().await.expect("central test pool");
     seed_coach(db.pool(), 123456789).await;
@@ -1580,6 +2018,31 @@ async fn seed_teams(pool: &PgPool, ids: &[i32]) {
             .await
             .expect("team seed");
     }
+}
+
+#[cfg(feature = "testing")]
+async fn seed_roster_fixture(pool: &PgPool) {
+    sqlx::raw_sql(
+        r#"
+        INSERT INTO scrim.teams(id, name, created_at)
+        VALUES (10, 'Existing Team', now());
+        INSERT INTO scrim.participants(
+            id, discord_id, display_name, rank_source, rank_verified, availability_slots,
+            status, source, created_at, updated_at
+        )
+        VALUES
+            (501, 9501, 'Free Player', 'self', false, NULL, 'new', 'test', now(), now()),
+            (502, 9502, 'Reserve Player', 'self', false, NULL, 'reserve', 'test', now(), now()),
+            (
+                503, 9503, 'Suggested Player', 'self', false,
+                '{"mon":{"status":"unknown","from":null,"to":null},"tue":{"status":"unknown","from":null,"to":null},"wed":{"status":"unknown","from":null,"to":null},"thu":{"status":"unknown","from":null,"to":null},"fri":{"status":"available","from":1200,"to":1320},"sat":{"status":"unknown","from":null,"to":null},"sun":{"status":"unknown","from":null,"to":null}}'::jsonb,
+                'new', 'test', now(), now()
+            );
+        "#,
+    )
+    .execute(pool)
+    .await
+    .expect("roster fixture");
 }
 
 #[cfg(feature = "testing")]
