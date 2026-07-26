@@ -13,8 +13,8 @@ use chrono::{DateTime, Utc};
 use turnier_scrim::decision::validate_match_request_batch;
 use turnier_scrim::dto::{
     ActionReceipt, AnnounceTeamRequest, AnnounceTeamResponse, AnnouncementPublicationRequest,
-    CapabilityReceipt, CreateMatchRequest, CreateTeamRequest, DiscordResyncResponse,
-    DiscordSyncStatus, LobbyCodeRequest, MatchIdPatchRequest, MatchIdsRequest, MatchRequestAction,
+    CreateMatchRequest, CreateTeamRequest, DiscordResyncResponse, DiscordSyncStatus,
+    LobbyCodeRequest, MatchIdPatchRequest, MatchIdsRequest, MatchRequestAction,
     MatchRequestDefaults, MatchRequestPatch, MatchRequestResponseRequest, ParticipantPatchRequest,
     ParticipantPatchResponse, PlanningCreateRequest, ReleaseMatchRequest, ReminderRequest,
     ReplacementRequestCreate, ReplacementRequestPatch, ResultFetchRequest, SelfServiceParticipant,
@@ -42,8 +42,6 @@ const REQUEST_ID_HEADER: &str = "X-Request-Id";
 const IDEMPOTENCY_KEY_HEADER: &str = "Idempotency-Key";
 const ACTOR_DISCORD_ID_HEADER: &str = "X-Actor-Discord-Id";
 const ACTOR_DISPLAY_NAME_HEADER: &str = "X-Actor-Display-Name";
-#[allow(dead_code)]
-const CAPABILITY_DISABLED: &str = "Scrim-Funktion ist während des Cutovers noch deaktiviert.";
 
 pub fn router() -> Router<AppState> {
     Router::new()
@@ -1449,58 +1447,6 @@ fn positive_config_id(value: Option<i64>) -> Option<u64> {
         .filter(|value| *value > 0)
 }
 
-#[allow(dead_code)]
-async fn disabled_operator_mutation(
-    State(state): State<AppState>,
-    ConnectInfo(peer): ConnectInfo<SocketAddr>,
-    headers: HeaderMap,
-) -> WebResult<(StatusCode, Json<CapabilityReceipt>)> {
-    require_internal_boundary(peer, &headers, &state)?;
-    require_mutation_headers(&headers)?;
-    let actor = require_bff_actor(&headers)?;
-    service(&state).authorize_operator(actor.discord_id).await?;
-    Ok(disabled_capability())
-}
-
-#[allow(dead_code)]
-async fn disabled_operator_path_mutation(
-    State(state): State<AppState>,
-    ConnectInfo(peer): ConnectInfo<SocketAddr>,
-    Path(_id): Path<String>,
-    headers: HeaderMap,
-) -> WebResult<(StatusCode, Json<CapabilityReceipt>)> {
-    require_internal_boundary(peer, &headers, &state)?;
-    require_mutation_headers(&headers)?;
-    let actor = require_bff_actor(&headers)?;
-    service(&state).authorize_operator(actor.discord_id).await?;
-    Ok(disabled_capability())
-}
-
-#[allow(dead_code)]
-async fn disabled_operator_two_path_mutation(
-    State(state): State<AppState>,
-    ConnectInfo(peer): ConnectInfo<SocketAddr>,
-    Path((_id, _ref_id)): Path<(String, String)>,
-    headers: HeaderMap,
-) -> WebResult<(StatusCode, Json<CapabilityReceipt>)> {
-    require_internal_boundary(peer, &headers, &state)?;
-    require_mutation_headers(&headers)?;
-    let actor = require_bff_actor(&headers)?;
-    service(&state).authorize_operator(actor.discord_id).await?;
-    Ok(disabled_capability())
-}
-
-#[allow(dead_code)]
-async fn disabled_operator_read(
-    State(state): State<AppState>,
-    ConnectInfo(peer): ConnectInfo<SocketAddr>,
-    Path(_id): Path<String>,
-    headers: HeaderMap,
-) -> WebResult<(StatusCode, Json<CapabilityReceipt>)> {
-    require_operator(&state, peer, &headers).await?;
-    Ok(disabled_capability())
-}
-
 async fn match_request_response(
     State(state): State<AppState>,
     ConnectInfo(peer): ConnectInfo<SocketAddr>,
@@ -1844,18 +1790,6 @@ fn parse_db_i64(value: &str, name: &str) -> WebResult<i64> {
         .ok()
         .filter(|id| *id > 0)
         .ok_or_else(|| WebError::bad_request(format!("{name} ist zu groß")))
-}
-
-#[allow(dead_code)]
-fn disabled_capability() -> (StatusCode, Json<CapabilityReceipt>) {
-    (
-        StatusCode::NOT_IMPLEMENTED,
-        Json(CapabilityReceipt {
-            available: false,
-            verified: false,
-            message: CAPABILITY_DISABLED.to_string(),
-        }),
-    )
 }
 
 fn planning_template(key: Option<&str>) -> WebResult<MatchRequestTemplate> {

@@ -1922,26 +1922,6 @@ async fn roster_operator_routes_keep_boundary_and_operator_authorization() {
 
 #[cfg(feature = "testing")]
 #[tokio::test]
-async fn unrelated_steam_facing_mutations_return_disabled_unverified_capability() {
-    let db = turnier_db::test_pool().await.expect("central test pool");
-    seed_coach(db.pool(), 123456789).await;
-    let app = app_with_pool(db.pool().clone());
-    let (status, body) = send(
-        &app,
-        IpAddr::V4(Ipv4Addr::LOCALHOST),
-        coach_headers("steam:match_ids", "123456789"),
-        Method::POST,
-        "/internal/turnier/v1/scrims/matches/1/match-ids",
-        Some(json!({})),
-    )
-    .await;
-    assert_eq!(status, StatusCode::NOT_IMPLEMENTED);
-    assert_eq!(body["available"], false);
-    assert_eq!(body["verified"], false);
-}
-
-#[cfg(feature = "testing")]
-#[tokio::test]
 async fn operator_request_routes_keep_boundary_and_operator_authorization() {
     let db = turnier_db::test_pool().await.expect("central test pool");
     let app = app_with_pool(db.pool().clone());
@@ -2640,44 +2620,6 @@ async fn match_block_and_action_operator_routes_reject_invalid_input_and_inactiv
         .await;
         assert_eq!(status, StatusCode::FORBIDDEN, "{route}");
     }
-}
-
-#[cfg(feature = "testing")]
-#[tokio::test]
-async fn remaining_unimplemented_mutations_return_disabled_unverified_capability() {
-    let db = turnier_db::test_pool().await.expect("central test pool");
-    seed_coach(db.pool(), 123456789).await;
-    let app = app_with_pool(db.pool().clone());
-    let (status, body) = send(
-        &app,
-        IpAddr::V4(Ipv4Addr::LOCALHOST),
-        coach_headers("request_patch:invalid_body", "123456789"),
-        Method::PATCH,
-        "/internal/turnier/v1/scrims/match-requests/1",
-        Some(json!({"unknown":"ignored","slot_index":"not validated here"})),
-    )
-    .await;
-    assert_eq!(status, StatusCode::NOT_IMPLEMENTED);
-    assert_eq!(body["available"], false);
-    assert_eq!(body["verified"], false);
-
-    let (status, body) = send(
-        &app,
-        IpAddr::V4(Ipv4Addr::LOCALHOST),
-        TestHeaders {
-            token: Some("internal-token"),
-            actor_id: Some("123456789"),
-            actor_name: Some("Coach"),
-            ..TestHeaders::default()
-        },
-        Method::GET,
-        "/internal/turnier/v1/scrims/replacement-needs/1/candidates",
-        None,
-    )
-    .await;
-    assert_eq!(status, StatusCode::NOT_IMPLEMENTED);
-    assert_eq!(body["available"], false);
-    assert_eq!(body["verified"], false);
 }
 
 #[cfg(feature = "testing")]
