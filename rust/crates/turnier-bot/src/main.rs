@@ -8,7 +8,7 @@
 use std::sync::Arc;
 
 use anyhow::Context;
-use turnier_api::{build_router, AppState};
+use turnier_api::{build_router, internal_scrims::spawn_substitute_sweep_worker, AppState};
 use turnier_config::Config;
 use turnier_discord::{BrokerClient, DiscordNotifier};
 use turnier_scheduler::{start_scheduler, Scheduler};
@@ -60,7 +60,7 @@ async fn main() -> anyhow::Result<()> {
         scheduler_notifier(&config, &pool),
         &config,
     )?;
-    let app = build_router(state);
+    let app = build_router(state.clone());
 
     if check_only {
         tracing::info!("--check: AppState + Scheduler + Router gebaut, kein Servieren");
@@ -70,6 +70,7 @@ async fn main() -> anyhow::Result<()> {
     // Scheduler-Loop (Phasenübergänge + Reminder) als Hintergrund-Task.
     let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
     let scheduler_handle = tokio::spawn(start_scheduler(scheduler, shutdown_rx));
+    spawn_substitute_sweep_worker(state);
 
     let addr = format!("{}:{}", config.backend_host, config.backend_port);
     let listener = tokio::net::TcpListener::bind(&addr).await?;

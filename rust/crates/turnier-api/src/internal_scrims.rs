@@ -3,6 +3,7 @@
 use std::cmp::Ordering;
 use std::collections::BTreeSet;
 use std::net::SocketAddr;
+use std::time::Duration;
 
 use axum::extract::{ConnectInfo, Path, State};
 use axum::http::{HeaderMap, StatusCode};
@@ -182,6 +183,31 @@ pub fn router() -> Router<AppState> {
             "/internal/turnier/v1/scrims/interactions/match-request-response",
             post(match_request_response),
         )
+}
+
+pub fn spawn_substitute_sweep_worker(state: AppState) {
+    tokio::spawn(async move {
+        let interval = Duration::from_secs(state.config.scrim_substitute_sweep_interval_seconds);
+        loop {
+            let plans = match PgScrimReadRepository::new(state.pool.clone())
+                .sweep_expired_substitutes(
+                    positive_config_id(state.config.scrim_reserve_role_id),
+                    positive_config_id(state.config.scrim_signup_role_id),
+                )
+                .await
+            {
+                Ok(plans) => plans,
+                Err(error) => {
+                    tracing::warn!(%error, "Scrim-Aushilfe-Ablauf konnte nicht geprueft werden");
+                    Vec::new()
+                }
+            };
+            let count = plans.len();
+            sync_discord_roles(&state, plans).await;
+            tracing::info!(count, "Scrim-Aushilfe-Ablauf geprueft");
+            tokio::time::sleep(interval).await;
+        }
+    });
 }
 
 async fn read_command_center(
@@ -1236,6 +1262,7 @@ async fn sync_discord_roles(
                 ok = false;
                 tracing::warn!(
                     subject = %plan.subject,
+                    participant_id = %plan.subject,
                     user_id = discord_user_id,
                     role_id = action.role_id,
                     operation,

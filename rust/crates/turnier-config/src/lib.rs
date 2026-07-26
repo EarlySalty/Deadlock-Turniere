@@ -44,6 +44,7 @@ pub struct Config {
     pub scrim_signup_role_id: Option<i64>,
     pub scrim_reserve_role_id: Option<i64>,
     pub scrim_announce_channel_id: i64,
+    pub scrim_substitute_sweep_interval_seconds: u64,
 
     // --- JWT (im Port effektiv ungenutzt: Sessions sind opake Tokens) ---
     pub jwt_secret: String,
@@ -171,6 +172,10 @@ impl Config {
                 "SCRIM_ANNOUNCE_CHANNEL_ID",
                 1_520_842_755_037_855_975,
             ),
+            scrim_substitute_sweep_interval_seconds: positive_seconds(
+                get_int("SCRIM_SUBSTITUTE_SWEEP_INTERVAL_SECONDS", 600),
+                600,
+            ),
             jwt_secret: get_string("JWT_SECRET", ""),
             avatar_dir: get_string("AVATAR_DIR", "data/avatars"),
             steam_bridge_db_path: get_string(
@@ -282,6 +287,13 @@ fn optional_positive_int(key: &str, default: i64) -> Option<i64> {
     }
 }
 
+fn positive_seconds(value: i64, default: u64) -> u64 {
+    u64::try_from(value)
+        .ok()
+        .filter(|value| *value > 0)
+        .unwrap_or(default)
+}
+
 /// Extrahiert den normalisierten Hostnamen aus einer URL oder einem Host:Port-String.
 fn hostname_of(value: &str) -> Option<String> {
     let candidate = value.trim();
@@ -328,5 +340,12 @@ mod tests {
     fn csv_splitting_trims_and_drops_empty() {
         let out: Vec<String> = split_csv(" a, b ,, c ").collect();
         assert_eq!(out, vec!["a", "b", "c"]);
+    }
+
+    #[test]
+    fn positive_seconds_rejects_non_positive_values() {
+        assert_eq!(positive_seconds(10, 600), 10);
+        assert_eq!(positive_seconds(0, 600), 600);
+        assert_eq!(positive_seconds(-1, 600), 600);
     }
 }

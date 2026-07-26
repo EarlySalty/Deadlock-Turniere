@@ -2397,6 +2397,7 @@ dependencies = [
  "sqlx",
  "thiserror",
  "tokio",
+ "tracing",
  "turnier-db",
 ]
 

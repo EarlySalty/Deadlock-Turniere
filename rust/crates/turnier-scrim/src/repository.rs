@@ -1107,6 +1107,74 @@ impl PgScrimReadRepository {
         Ok(role_resync(&snapshot, &managed))
     }
 
+    pub async fn sweep_expired_substitutes(
+        &self,
+        reserve_role_id: Option<u64>,
+        signup_role_id: Option<u64>,
+    ) -> ScrimResult<Vec<DiscordRoleSyncPlan>> {
+        let rows = sqlx::query(
+            "SELECT team_id, participant_id FROM scrim.team_members \
+             WHERE substitute_until IS NOT NULL AND substitute_until <= now() \
+             ORDER BY substitute_until ASC, team_id ASC, participant_id ASC",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        let mut plans = Vec::with_capacity(rows.len());
+        for row in rows {
+            let team_id = row.try_get("team_id")?;
+            let participant_id = row.try_get("participant_id")?;
+            match self
+                .expire_substitute(team_id, participant_id, reserve_role_id, signup_role_id)
+                .await
+            {
+                Ok(Some(plan)) => plans.push(plan),
+                Ok(None) => {}
+                Err(error) => tracing::warn!(
+                    %error,
+                    team_id,
+                    participant_id,
+                    "Scrim-Aushilfe konnte nicht abgeraeumt werden"
+                ),
+            }
+        }
+        Ok(plans)
+    }
+
+    async fn expire_substitute(
+        &self,
+        team_id: i32,
+        participant_id: i32,
+        reserve_role_id: Option<u64>,
+        signup_role_id: Option<u64>,
+    ) -> ScrimResult<Option<DiscordRoleSyncPlan>> {
+        let mut tx = self.pool.begin().await?;
+        sqlx::query("SELECT pg_advisory_xact_lock($1)")
+            .bind(SELF_SERVICE_ADVISORY_LOCK)
+            .execute(&mut *tx)
+            .await?;
+        let before =
+            participant_role_snapshot(&mut tx, participant_id, reserve_role_id, signup_role_id)
+                .await?;
+        let result = sqlx::query(
+            "DELETE FROM scrim.team_members \
+             WHERE team_id=$1 AND participant_id=$2 \
+               AND substitute_until IS NOT NULL AND substitute_until <= now()",
+        )
+        .bind(team_id)
+        .bind(participant_id)
+        .execute(&mut *tx)
+        .await?;
+        if result.rows_affected() == 0 {
+            return Ok(None);
+        }
+        let after =
+            participant_role_snapshot(&mut tx, participant_id, reserve_role_id, signup_role_id)
+                .await?;
+        let plan = role_diff(&before, &after);
+        tx.commit().await?;
+        Ok(Some(plan))
+    }
+
     pub async fn roster_suggestion_pool(
         &self,
         team_id: i32,
