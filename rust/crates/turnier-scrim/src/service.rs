@@ -9,14 +9,14 @@ use crate::dto::{
     ActionReceipt, AnnouncementPublicationRequest, CreateMatchRequest, CreateTeamRequest,
     LobbyCodeRequest, MatchIdPatchRequest, MatchIdsRequest, MatchRequestPatch,
     ParticipantPatchRequest, PatchValue, ReminderRequest, ReplacementRequestCreate,
-    ReplacementRequestPatch, ResultFetchRequest, RosterSuggestResponse,
-    RosterSuggestionCandidate, SelfServiceParticipant, SignupRequest, StatusPublicationRequest,
-    SuggestTeamRequest, TeamPatchRequest, WeeklyAvailability,
+    ReplacementRequestPatch, ResultFetchRequest, RosterSuggestResponse, RosterSuggestionCandidate,
+    SelfServiceParticipant, SignupRequest, StatusPublicationRequest, SuggestTeamRequest,
+    TeamPatchRequest, WeeklyAvailability,
 };
 use crate::model::{
     wire_id, AnnouncementPreview, AvailabilitySlot, AvailabilityStatus, LobbyStateMutation,
-    MatchMutation, MatchRequestBatchInput, ScrimAction, ScrimDay, ScrimMatch, ScrimReadModel,
-    ReplacementCandidate, ScrimSlot, ValidatedMatchRequestBatch,
+    MatchMutation, MatchRequestBatchInput, ReplacementCandidate, ScrimAction, ScrimDay, ScrimMatch,
+    ScrimReadModel, ScrimSlot, ValidatedMatchRequestBatch,
 };
 use crate::repository::{
     DiscordRoleSyncPlan, MutationDispatch, ParticipantMutation, PgScrimReadRepository,

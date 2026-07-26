@@ -1,8 +1,8 @@
 use serde_json::json;
 use turnier_scrim::dto::{
     ActionReceipt, AnnouncementPublicationRequest, CreateMatchRequest, LobbyCodeRequest,
-    MatchIdPatchRequest, MatchIdsRequest, MatchRequestAction, MatchRequestResponseRequest,
-    MatchRequestPatch, PatchValue, PlanningCreateRequest, ReplacementRequestAction,
+    MatchIdPatchRequest, MatchIdsRequest, MatchRequestAction, MatchRequestPatch,
+    MatchRequestResponseRequest, PatchValue, PlanningCreateRequest, ReplacementRequestAction,
     ReplacementRequestPatch, ResultFetchRequest, TeamPatchRequest,
     MATCH_REQUEST_RESPONSE_SCHEMA_VERSION,
 };

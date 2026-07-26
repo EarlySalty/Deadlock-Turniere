@@ -20,9 +20,9 @@ use crate::dto::{
 use crate::model::{
     AnnouncementPreview, AvailabilitySlot, AvailabilityStatus, Coach, LagebildEvidenceRef,
     LagebildSnapshotRef, LobbyStateMutation, MatchMutation, MatchRequest, MatchRequestBatch,
-    MatchRequestResponse, MatchRequestTemplate, Participant, ResponseChoice, RosterMember,
-    ReplacementCandidate, ScrimAction, ScrimMatch, ScrimReadModel, ScrimSlot, SelectedMatchResult,
-    Team, TeamMember, TeamRef, ValidatedMatchRequestBatch, WeeklyAvailability,
+    MatchRequestResponse, MatchRequestTemplate, Participant, ReplacementCandidate, ResponseChoice,
+    RosterMember, ScrimAction, ScrimMatch, ScrimReadModel, ScrimSlot, SelectedMatchResult, Team,
+    TeamMember, TeamRef, ValidatedMatchRequestBatch, WeeklyAvailability,
 };
 use crate::{ScrimError, ScrimResult};
 
