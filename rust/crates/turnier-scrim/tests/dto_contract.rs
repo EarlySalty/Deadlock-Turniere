@@ -1,7 +1,8 @@
 use serde_json::json;
 use turnier_scrim::dto::{
-    ActionReceipt, MatchRequestAction, MatchRequestResponseRequest, PatchValue,
-    PlanningCreateRequest, TeamPatchRequest, MATCH_REQUEST_RESPONSE_SCHEMA_VERSION,
+    ActionReceipt, MatchRequestAction, MatchRequestPatch, MatchRequestResponseRequest, PatchValue,
+    PlanningCreateRequest, ReplacementRequestAction, ReplacementRequestPatch, TeamPatchRequest,
+    MATCH_REQUEST_RESPONSE_SCHEMA_VERSION,
 };
 
 #[test]
@@ -144,4 +145,26 @@ fn nullable_patch_fields_distinguish_omitted_null_and_value() {
     assert!(matches!(patch.name, PatchValue::Omitted));
     assert!(matches!(patch.coach, PatchValue::Null));
     assert!(matches!(patch.coach_discord_id, PatchValue::Value(value) if value == "123"));
+}
+
+#[test]
+fn operator_patch_contracts_match_bff_and_discord_relay() {
+    let patch: MatchRequestPatch = serde_json::from_value(json!({
+        "status": "cancelled",
+        "note": null,
+    }))
+    .expect("BFF match-request patch");
+    assert!(matches!(patch.status, PatchValue::Value(value) if value == "cancelled"));
+    assert!(matches!(patch.note, PatchValue::Null));
+
+    let patch: ReplacementRequestPatch =
+        serde_json::from_value(json!({"action": "accept"})).expect("Discord relay patch");
+    assert_eq!(patch.action, ReplacementRequestAction::Accept);
+    assert_eq!(
+        serde_json::to_value(patch).expect("serialize replacement patch"),
+        json!({"action": "accept"})
+    );
+    assert!(
+        serde_json::from_value::<ReplacementRequestPatch>(json!({"status": "accepted"})).is_err()
+    );
 }

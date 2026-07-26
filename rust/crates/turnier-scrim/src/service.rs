@@ -2,14 +2,21 @@ use std::collections::BTreeSet;
 
 use chrono::{DateTime, Utc};
 use serde::Serialize;
+use serde_json::Value;
 
 use crate::decision::{is_scrim_history_entry, validate_match_request_batch};
-use crate::dto::{SelfServiceParticipant, SignupRequest, WeeklyAvailability};
-use crate::model::{
-    AvailabilitySlot, AvailabilityStatus, MatchRequestBatchInput, ScrimMatch, ScrimReadModel,
-    ValidatedMatchRequestBatch,
+use crate::dto::{
+    ActionReceipt, MatchRequestPatch, ReminderRequest, ReplacementRequestCreate,
+    ReplacementRequestPatch, SelfServiceParticipant, SignupRequest, StatusPublicationRequest,
+    WeeklyAvailability,
 };
-use crate::repository::{PgScrimReadRepository, ScrimReadRepository, SignupMutation};
+use crate::model::{
+    AvailabilitySlot, AvailabilityStatus, MatchRequestBatchInput, ReplacementCandidate, ScrimMatch,
+    ScrimReadModel, ValidatedMatchRequestBatch,
+};
+use crate::repository::{
+    MutationDispatch, PgScrimReadRepository, ScrimReadRepository, SignupMutation,
+};
 use crate::{ScrimError, ScrimResult};
 
 pub struct ScrimService<R> {
@@ -83,6 +90,118 @@ impl<R: ScrimReadRepository> ScrimService<R> {
 }
 
 impl ScrimService<PgScrimReadRepository> {
+    pub async fn patch_match_request(
+        &self,
+        idempotency_key: &str,
+        request_id: &str,
+        payload: &Value,
+        match_request_id: i32,
+        request: &MatchRequestPatch,
+        actor: (&str, &str),
+    ) -> ScrimResult<ActionReceipt> {
+        self.repository
+            .patch_match_request(
+                idempotency_key,
+                request_id,
+                payload,
+                match_request_id,
+                request,
+                actor,
+            )
+            .await
+    }
+
+    pub async fn create_match_request_reminders(
+        &self,
+        idempotency_key: &str,
+        request_id: &str,
+        payload: &Value,
+        match_request_id: i32,
+        request: &ReminderRequest,
+        actor: (&str, &str),
+    ) -> ScrimResult<MutationDispatch> {
+        self.repository
+            .create_match_request_reminders(
+                idempotency_key,
+                request_id,
+                payload,
+                match_request_id,
+                request,
+                actor,
+            )
+            .await
+    }
+
+    pub async fn create_status_publication(
+        &self,
+        idempotency_key: &str,
+        request_id: &str,
+        payload: &Value,
+        match_request_id: i32,
+        request: &StatusPublicationRequest,
+        actor: (&str, &str),
+    ) -> ScrimResult<MutationDispatch> {
+        self.repository
+            .create_status_publication(
+                idempotency_key,
+                request_id,
+                payload,
+                match_request_id,
+                request,
+                actor,
+            )
+            .await
+    }
+
+    pub async fn replacement_candidates(
+        &self,
+        need_id: i64,
+    ) -> ScrimResult<Vec<ReplacementCandidate>> {
+        self.repository.replacement_candidates(need_id).await
+    }
+
+    pub async fn create_replacement_request(
+        &self,
+        idempotency_key: &str,
+        request_id: &str,
+        payload: &Value,
+        need_id: i64,
+        request: &ReplacementRequestCreate,
+        actor: (&str, &str),
+    ) -> ScrimResult<MutationDispatch> {
+        self.repository
+            .create_replacement_request(
+                idempotency_key,
+                request_id,
+                payload,
+                need_id,
+                request,
+                actor,
+            )
+            .await
+    }
+
+    pub async fn patch_replacement_request(
+        &self,
+        idempotency_key: &str,
+        request_id: &str,
+        payload: &Value,
+        replacement_request_id: i64,
+        request: &ReplacementRequestPatch,
+        actor: (&str, &str),
+    ) -> ScrimResult<ActionReceipt> {
+        self.repository
+            .patch_replacement_request(
+                idempotency_key,
+                request_id,
+                payload,
+                replacement_request_id,
+                request,
+                actor,
+            )
+            .await
+    }
+
     pub async fn signup(
         &self,
         discord_id: &str,

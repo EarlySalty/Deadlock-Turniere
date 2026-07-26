@@ -9,16 +9,18 @@ use sqlx::{Postgres, Row, Transaction};
 
 use turnier_db::Pool;
 
-use crate::decision::derive_match_request_facts;
+use crate::decision::{derive_match_request_facts, rank_replacement_candidates};
 use crate::dto::{
-    ActionReceipt, MatchRequestAction, MatchRequestResponseRequest, ReleaseMatchRequest,
-    SelfServiceParticipant, SignupRequest, WeeklyAvailability as SelfServiceAvailability,
+    ActionReceipt, MatchRequestAction, MatchRequestPatch, MatchRequestResponseRequest, PatchValue,
+    ReleaseMatchRequest, ReminderRequest, ReplacementRequestAction, ReplacementRequestCreate,
+    ReplacementRequestPatch, SelfServiceParticipant, SignupRequest, StatusPublicationRequest,
+    WeeklyAvailability as SelfServiceAvailability,
 };
 use crate::model::{
     AvailabilitySlot, AvailabilityStatus, Coach, LagebildEvidenceRef, LagebildSnapshotRef,
     MatchRequest, MatchRequestBatch, MatchRequestResponse, MatchRequestTemplate, Participant,
-    ResponseChoice, RosterMember, ScrimMatch, ScrimReadModel, ScrimSlot, SelectedMatchResult, Team,
-    TeamMember, TeamRef, ValidatedMatchRequestBatch, WeeklyAvailability,
+    ReplacementCandidate, ResponseChoice, RosterMember, ScrimMatch, ScrimReadModel, ScrimSlot,
+    SelectedMatchResult, Team, TeamMember, TeamRef, ValidatedMatchRequestBatch, WeeklyAvailability,
 };
 use crate::{ScrimError, ScrimResult};
 
@@ -51,6 +53,20 @@ pub struct SignupMutation {
     pub participant: SelfServiceParticipant,
     pub discord_user_id: Option<u64>,
     pub role_ids: BTreeSet<u64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DiscordDispatch {
+    pub record_id: i64,
+    pub user_id: Option<i64>,
+    pub channel_id: Option<i64>,
+    pub content: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MutationDispatch {
+    pub receipt: ActionReceipt,
+    pub discord: Vec<DiscordDispatch>,
 }
 
 impl PgScrimReadRepository {
@@ -236,6 +252,633 @@ impl PgScrimReadRepository {
         Ok(participant)
     }
 
+    pub async fn patch_match_request(
+        &self,
+        idempotency_key: &str,
+        api_request_id: &str,
+        payload: &Value,
+        request_id: i32,
+        request: &MatchRequestPatch,
+        actor: (&str, &str),
+    ) -> ScrimResult<ActionReceipt> {
+        let status = match &request.status {
+            PatchValue::Omitted => None,
+            PatchValue::Null => {
+                return Err(ScrimError::InvalidProposal("Platzhalter".to_string()));
+            }
+            PatchValue::Value(status)
+                if matches!(
+                    status.as_str(),
+                    "draft" | "posting" | "open" | "post_failed" | "closed" | "cancelled"
+                ) =>
+            {
+                Some(status.as_str())
+            }
+            PatchValue::Value(_) => {
+                return Err(ScrimError::InvalidProposal("Platzhalter".to_string()));
+            }
+        };
+        let note = match &request.note {
+            PatchValue::Omitted => None,
+            PatchValue::Null => Some(None),
+            PatchValue::Value(note) if note.chars().count() <= 1_000 => Some(Some(note.as_str())),
+            PatchValue::Value(_) => {
+                return Err(ScrimError::InvalidProposal("Platzhalter".to_string()));
+            }
+        };
+        if status.is_none() && note.is_none() {
+            return Err(ScrimError::InvalidProposal("Platzhalter".to_string()));
+        }
+
+        let mut tx = self.pool.begin().await?;
+        lock_runtime_control(&mut tx).await?;
+        require_turniere_runtime(&mut tx).await?;
+        let receipt_id =
+            match begin_command(&mut tx, "match_request_patch", idempotency_key, payload).await? {
+                CommandStart::New(id) => id,
+                CommandStart::Replay(receipt) => {
+                    tx.commit().await?;
+                    return Ok(receipt);
+                }
+            };
+        let exists = sqlx::query_scalar::<_, i32>(
+            "SELECT id FROM scrim.match_requests WHERE id=$1 FOR UPDATE",
+        )
+        .bind(request_id)
+        .fetch_optional(&mut *tx)
+        .await?;
+        if exists.is_none() {
+            return Err(ScrimError::NotFound("Platzhalter".to_string()));
+        }
+        sqlx::query(
+            "UPDATE scrim.match_requests \
+                SET status=COALESCE($2, status), \
+                    override_reason=CASE WHEN $3 THEN $4 ELSE override_reason END, \
+                    updated_at=now() \
+              WHERE id=$1",
+        )
+        .bind(request_id)
+        .bind(status)
+        .bind(note.is_some())
+        .bind(note.flatten())
+        .execute(&mut *tx)
+        .await?;
+        insert_audit_event(
+            &mut tx,
+            "match_request_patched",
+            ("match_request", i64::from(request_id)),
+            actor.0,
+            api_request_id,
+            idempotency_key,
+            json!({"status": status, "note_changed": note.is_some()}),
+        )
+        .await?;
+        let receipt = placeholder_receipt();
+        complete_command(&mut tx, receipt_id, &receipt).await?;
+        tx.commit().await?;
+        Ok(receipt)
+    }
+
+    pub async fn create_match_request_reminders(
+        &self,
+        idempotency_key: &str,
+        api_request_id: &str,
+        payload: &Value,
+        request_id: i32,
+        request: &ReminderRequest,
+        actor: (&str, &str),
+    ) -> ScrimResult<MutationDispatch> {
+        let content = validated_message(request.message.as_deref())?;
+        let mut tx = self.pool.begin().await?;
+        lock_runtime_control(&mut tx).await?;
+        require_turniere_runtime(&mut tx).await?;
+        let receipt_id =
+            match begin_command(&mut tx, "match_request_reminders", idempotency_key, payload)
+                .await?
+            {
+                CommandStart::New(id) => id,
+                CommandStart::Replay(receipt) => {
+                    tx.commit().await?;
+                    return Ok(MutationDispatch {
+                        receipt,
+                        discord: Vec::new(),
+                    });
+                }
+            };
+        let row = sqlx::query(
+            "SELECT team_a_id, team_b_id, status, team_query_message_ids \
+               FROM scrim.match_requests WHERE id=$1 FOR UPDATE",
+        )
+        .bind(request_id)
+        .fetch_optional(&mut *tx)
+        .await?
+        .ok_or_else(|| ScrimError::NotFound("Platzhalter".to_string()))?;
+        let status = row.try_get::<String, _>("status")?;
+        if !matches!(status.as_str(), "open" | "post_failed") {
+            return Err(ScrimError::Conflict("Platzhalter".to_string()));
+        }
+        let message_ids = row.try_get::<Value, _>("team_query_message_ids")?;
+        let team_ids = [
+            Some(row.try_get::<i32, _>("team_a_id")?),
+            row.try_get::<Option<i32>, _>("team_b_id")?,
+        ];
+        let mut discord = Vec::new();
+        for team_id in team_ids.into_iter().flatten() {
+            let team = sqlx::query(
+                "SELECT discord_role_id, discord_channel_id FROM scrim.teams WHERE id=$1",
+            )
+            .bind(team_id)
+            .fetch_one(&mut *tx)
+            .await?;
+            let source = team_query_message(&message_ids, team_id)?;
+            let members = sqlx::query(
+                "SELECT p.id, p.discord_id \
+                   FROM scrim.team_members tm \
+                   JOIN scrim.participants p ON p.id=tm.participant_id \
+                  WHERE tm.team_id=$1 \
+                    AND NOT EXISTS(\
+                        SELECT 1 FROM scrim.match_request_responses r \
+                         WHERE r.request_id=$2 AND r.team_id=$1 AND r.participant_id=p.id\
+                    ) \
+                  ORDER BY tm.is_bench ASC, p.display_name ASC, p.id ASC",
+            )
+            .bind(team_id)
+            .bind(request_id)
+            .fetch_all(&mut *tx)
+            .await?;
+            if members.is_empty() {
+                continue;
+            }
+            let participant_ids = members
+                .iter()
+                .map(|member| member.try_get::<i32, _>("id"))
+                .collect::<Result<Vec<_>, _>>()?;
+            let discord_ids = members
+                .iter()
+                .map(|member| member.try_get::<Option<i64>, _>("discord_id"))
+                .collect::<Result<Vec<_>, _>>()?;
+            let all_have_discord = discord_ids.iter().all(Option::is_some);
+            let target_discord_ids = if all_have_discord {
+                discord_ids.iter().copied().flatten().collect::<Vec<_>>()
+            } else {
+                Vec::new()
+            };
+            let channel_id = team
+                .try_get::<Option<i64>, _>("discord_channel_id")?
+                .ok_or_else(|| ScrimError::InvalidStoredData("Platzhalter".to_string()))?;
+            if source.0 != channel_id {
+                return Err(ScrimError::InvalidStoredData("Platzhalter".to_string()));
+            }
+            let role_id = team.try_get::<Option<i64>, _>("discord_role_id")?;
+            let target_role_id = if all_have_discord {
+                None
+            } else {
+                Some(
+                    role_id
+                        .ok_or_else(|| ScrimError::InvalidStoredData("Platzhalter".to_string()))?,
+                )
+            };
+            let reminder_id: i64 = sqlx::query_scalar(
+                "INSERT INTO scrim.match_request_reminders(\
+                     request_id, team_id, template, target_kind, target_participant_ids, \
+                     target_discord_user_ids, target_role_id, missing_count, \
+                     approved_by_user_id, approved_by_display_name, status, \
+                     discord_channel_id, source_message_id\
+                 ) VALUES ($1, $2, 'antwort_fehlt', $3, $4, $5, $6, $7, $8, $9, \
+                           'approved', $10, $11) RETURNING id",
+            )
+            .bind(request_id)
+            .bind(team_id)
+            .bind(if all_have_discord { "members" } else { "team" })
+            .bind(&participant_ids)
+            .bind(&target_discord_ids)
+            .bind(target_role_id)
+            .bind(
+                i32::try_from(participant_ids.len())
+                    .map_err(|_| ScrimError::InvalidStoredData("Platzhalter".to_string()))?,
+            )
+            .bind(actor.0)
+            .bind(actor.1)
+            .bind(channel_id)
+            .bind(source.1)
+            .fetch_one(&mut *tx)
+            .await?;
+            if all_have_discord {
+                discord.extend(
+                    target_discord_ids
+                        .into_iter()
+                        .map(|user_id| DiscordDispatch {
+                            record_id: reminder_id,
+                            user_id: Some(user_id),
+                            channel_id: None,
+                            content: content.clone(),
+                        }),
+                );
+            } else {
+                discord.push(DiscordDispatch {
+                    record_id: reminder_id,
+                    user_id: None,
+                    channel_id: Some(source.0),
+                    content: content.clone(),
+                });
+            }
+        }
+        if discord.is_empty() {
+            return Err(ScrimError::Conflict("Platzhalter".to_string()));
+        }
+        insert_audit_event(
+            &mut tx,
+            "match_request_reminders_approved",
+            ("match_request", i64::from(request_id)),
+            actor.0,
+            api_request_id,
+            idempotency_key,
+            json!({"dispatch_count": discord.len()}),
+        )
+        .await?;
+        let receipt = placeholder_receipt();
+        complete_command(&mut tx, receipt_id, &receipt).await?;
+        tx.commit().await?;
+        Ok(MutationDispatch { receipt, discord })
+    }
+
+    pub async fn create_status_publication(
+        &self,
+        idempotency_key: &str,
+        api_request_id: &str,
+        payload: &Value,
+        request_id: i32,
+        request: &StatusPublicationRequest,
+        actor: (&str, &str),
+    ) -> ScrimResult<MutationDispatch> {
+        let content = validated_message(request.message.as_deref())?;
+        let requested_channel = request
+            .channel_id
+            .as_deref()
+            .map(crate::model::wire_id::parse_i64)
+            .transpose()
+            .map_err(ScrimError::InvalidProposal)?;
+        let mut tx = self.pool.begin().await?;
+        lock_runtime_control(&mut tx).await?;
+        require_turniere_runtime(&mut tx).await?;
+        let receipt_id = match begin_command(
+            &mut tx,
+            "match_request_status_publication",
+            idempotency_key,
+            payload,
+        )
+        .await?
+        {
+            CommandStart::New(id) => id,
+            CommandStart::Replay(receipt) => {
+                tx.commit().await?;
+                return Ok(MutationDispatch {
+                    receipt,
+                    discord: Vec::new(),
+                });
+            }
+        };
+        let row = sqlx::query(
+            "SELECT team_a_id, team_b_id FROM scrim.match_requests WHERE id=$1 FOR UPDATE",
+        )
+        .bind(request_id)
+        .fetch_optional(&mut *tx)
+        .await?
+        .ok_or_else(|| ScrimError::NotFound("Platzhalter".to_string()))?;
+        let publication_payload = serde_json::to_value(request)
+            .map_err(|_| ScrimError::InvalidProposal("Platzhalter".to_string()))?;
+        let publication_id: i64 = sqlx::query_scalar(
+            "INSERT INTO scrim.status_publication_approvals(\
+                 target_kind, target_id, status_kind, payload, payload_hash, decision, \
+                 decided_by_user_id, decided_by_display_name, decided_at\
+             ) VALUES (\
+                 'match_request', $1, 'match_status', $2::jsonb, \
+                 scrim.status_publication_effect_hash('match_request', $1, 'match_status', $2::jsonb), \
+                 'approved', $3, $4, now()\
+             ) RETURNING id",
+        )
+        .bind(request_id.to_string())
+        .bind(publication_payload)
+        .bind(actor.0)
+        .bind(actor.1)
+        .fetch_one(&mut *tx)
+        .await?;
+        let channels = if let Some(channel_id) = requested_channel {
+            vec![channel_id]
+        } else {
+            let team_ids = [
+                Some(row.try_get::<i32, _>("team_a_id")?),
+                row.try_get::<Option<i32>, _>("team_b_id")?,
+            ]
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>();
+            sqlx::query_scalar::<_, Option<i64>>(
+                "SELECT discord_channel_id FROM scrim.teams \
+                  WHERE id=ANY($1) ORDER BY id",
+            )
+            .bind(team_ids)
+            .fetch_all(&mut *tx)
+            .await?
+            .into_iter()
+            .flatten()
+            .collect()
+        };
+        if channels.is_empty() {
+            return Err(ScrimError::InvalidStoredData("Platzhalter".to_string()));
+        }
+        let discord = channels
+            .into_iter()
+            .map(|channel_id| DiscordDispatch {
+                record_id: publication_id,
+                user_id: None,
+                channel_id: Some(channel_id),
+                content: content.clone(),
+            })
+            .collect::<Vec<_>>();
+        insert_audit_event(
+            &mut tx,
+            "match_request_status_publication_approved",
+            ("match_request", i64::from(request_id)),
+            actor.0,
+            api_request_id,
+            idempotency_key,
+            json!({"publication_id": publication_id.to_string()}),
+        )
+        .await?;
+        let receipt = placeholder_receipt();
+        complete_command(&mut tx, receipt_id, &receipt).await?;
+        tx.commit().await?;
+        Ok(MutationDispatch { receipt, discord })
+    }
+
+    pub async fn replacement_candidates(
+        &self,
+        need_id: i64,
+    ) -> ScrimResult<Vec<ReplacementCandidate>> {
+        let status = sqlx::query_scalar::<_, String>(
+            "SELECT status FROM scrim.replacement_needs WHERE id=$1",
+        )
+        .bind(need_id)
+        .fetch_optional(&self.pool)
+        .await?
+        .ok_or_else(|| ScrimError::NotFound("Platzhalter".to_string()))?;
+        if !matches!(status.as_str(), "open" | "contacting") {
+            return Err(ScrimError::Conflict("Platzhalter".to_string()));
+        }
+        let rows = sqlx::query(
+            "SELECT c.id, c.need_id, c.participant_id, c.discord_user_id, \
+                    p.display_name, p.rank, p.roles, p.availability, \
+                    c.candidate_data, c.score_data, c.status \
+               FROM scrim.replacement_candidates c \
+               LEFT JOIN scrim.participants p ON p.id=c.participant_id \
+              WHERE c.need_id=$1 \
+                AND c.status NOT IN ('expired', 'rejected')",
+        )
+        .bind(need_id)
+        .fetch_all(&self.pool)
+        .await?;
+        let mut candidates = rows
+            .into_iter()
+            .map(|row| {
+                Ok(ReplacementCandidate {
+                    id: row.try_get("id")?,
+                    need_id: row.try_get("need_id")?,
+                    participant_id: row.try_get("participant_id")?,
+                    discord_user_id: row.try_get("discord_user_id")?,
+                    display_name: row.try_get("display_name")?,
+                    rank: row.try_get("rank")?,
+                    roles: row.try_get("roles")?,
+                    availability: row.try_get("availability")?,
+                    candidate_data: row.try_get("candidate_data")?,
+                    score_data: row.try_get("score_data")?,
+                    status: row.try_get("status")?,
+                })
+            })
+            .collect::<ScrimResult<Vec<_>>>()?;
+        rank_replacement_candidates(&mut candidates);
+        Ok(candidates)
+    }
+
+    pub async fn create_replacement_request(
+        &self,
+        idempotency_key: &str,
+        api_request_id: &str,
+        payload: &Value,
+        need_id: i64,
+        request: &ReplacementRequestCreate,
+        actor: (&str, &str),
+    ) -> ScrimResult<MutationDispatch> {
+        let participant_id = crate::model::wire_id::parse_i32(&request.participant_id)
+            .map_err(ScrimError::InvalidProposal)?;
+        if request
+            .reason
+            .as_ref()
+            .is_some_and(|reason| reason.chars().count() > 1_000)
+        {
+            return Err(ScrimError::InvalidProposal("Platzhalter".to_string()));
+        }
+        let mut tx = self.pool.begin().await?;
+        lock_runtime_control(&mut tx).await?;
+        require_turniere_runtime(&mut tx).await?;
+        let receipt_id = match begin_command(
+            &mut tx,
+            "replacement_request_create",
+            idempotency_key,
+            payload,
+        )
+        .await?
+        {
+            CommandStart::New(id) => id,
+            CommandStart::Replay(receipt) => {
+                tx.commit().await?;
+                return Ok(MutationDispatch {
+                    receipt,
+                    discord: Vec::new(),
+                });
+            }
+        };
+        let need = sqlx::query(
+            "SELECT match_id, team_id, status FROM scrim.replacement_needs \
+              WHERE id=$1 FOR UPDATE",
+        )
+        .bind(need_id)
+        .fetch_optional(&mut *tx)
+        .await?
+        .ok_or_else(|| ScrimError::NotFound("Platzhalter".to_string()))?;
+        if !matches!(
+            need.try_get::<String, _>("status")?.as_str(),
+            "open" | "contacting"
+        ) {
+            return Err(ScrimError::Conflict("Platzhalter".to_string()));
+        }
+        validate_optional_id(request.match_id.as_deref(), need.try_get("match_id")?)?;
+        validate_optional_id(request.team_id.as_deref(), need.try_get("team_id")?)?;
+        let candidate = sqlx::query(
+            "SELECT id, discord_user_id FROM scrim.replacement_candidates \
+              WHERE need_id=$1 AND participant_id=$2 \
+                AND status IN ('candidate', 'shortlisted') \
+              FOR UPDATE",
+        )
+        .bind(need_id)
+        .bind(participant_id)
+        .fetch_optional(&mut *tx)
+        .await?
+        .ok_or_else(|| ScrimError::InvalidProposal("Platzhalter".to_string()))?;
+        let candidate_id = candidate.try_get::<i64, _>("id")?;
+        let discord_user_id = candidate.try_get::<Option<i64>, _>("discord_user_id")?;
+        let request_payload = serde_json::to_value(request)
+            .map_err(|_| ScrimError::InvalidProposal("Platzhalter".to_string()))?;
+        let replacement_request_id: i64 = sqlx::query_scalar(
+            "INSERT INTO scrim.replacement_requests(\
+                 need_id, candidate_id, participant_id, discord_user_id, status, request_payload, \
+                 requested_by_user_id, requested_by_display_name\
+             ) VALUES ($1, $2, $3, $4, 'pending', $5::jsonb, $6, $7) RETURNING id",
+        )
+        .bind(need_id)
+        .bind(candidate_id)
+        .bind(participant_id)
+        .bind(discord_user_id)
+        .bind(request_payload)
+        .bind(actor.0)
+        .bind(actor.1)
+        .fetch_one(&mut *tx)
+        .await?;
+        sqlx::query(
+            "UPDATE scrim.replacement_candidates SET status='requested', updated_at=now() \
+              WHERE id=$1",
+        )
+        .bind(candidate_id)
+        .execute(&mut *tx)
+        .await?;
+        sqlx::query(
+            "UPDATE scrim.replacement_needs SET status='contacting', updated_at=now() WHERE id=$1",
+        )
+        .bind(need_id)
+        .execute(&mut *tx)
+        .await?;
+        insert_audit_event(
+            &mut tx,
+            "replacement_request_created",
+            ("replacement_request", replacement_request_id),
+            actor.0,
+            api_request_id,
+            idempotency_key,
+            json!({"need_id": need_id.to_string(), "participant_id": participant_id.to_string()}),
+        )
+        .await?;
+        let receipt = placeholder_receipt();
+        complete_command(&mut tx, receipt_id, &receipt).await?;
+        tx.commit().await?;
+        let discord = discord_user_id
+            .map(|user_id| DiscordDispatch {
+                record_id: replacement_request_id,
+                user_id: Some(user_id),
+                channel_id: None,
+                content: "Platzhalter".to_string(),
+            })
+            .into_iter()
+            .collect();
+        Ok(MutationDispatch { receipt, discord })
+    }
+
+    pub async fn patch_replacement_request(
+        &self,
+        idempotency_key: &str,
+        api_request_id: &str,
+        payload: &Value,
+        replacement_request_id: i64,
+        request: &ReplacementRequestPatch,
+        actor: (&str, &str),
+    ) -> ScrimResult<ActionReceipt> {
+        let mut tx = self.pool.begin().await?;
+        lock_runtime_control(&mut tx).await?;
+        require_turniere_runtime(&mut tx).await?;
+        let receipt_id = match begin_command(
+            &mut tx,
+            "replacement_request_patch",
+            idempotency_key,
+            payload,
+        )
+        .await?
+        {
+            CommandStart::New(id) => id,
+            CommandStart::Replay(receipt) => {
+                tx.commit().await?;
+                return Ok(receipt);
+            }
+        };
+        let row = sqlx::query(
+            "SELECT need_id, candidate_id, status FROM scrim.replacement_requests \
+              WHERE id=$1 FOR UPDATE",
+        )
+        .bind(replacement_request_id)
+        .fetch_optional(&mut *tx)
+        .await?
+        .ok_or_else(|| ScrimError::NotFound("Platzhalter".to_string()))?;
+        if !matches!(
+            row.try_get::<String, _>("status")?.as_str(),
+            "pending" | "sent" | "uncertain"
+        ) {
+            return Err(ScrimError::Conflict("Platzhalter".to_string()));
+        }
+        let need_id = row.try_get::<i64, _>("need_id")?;
+        let candidate_id = row.try_get::<Option<i64>, _>("candidate_id")?;
+        let (request_status, candidate_status) = match request.action {
+            ReplacementRequestAction::Accept => ("accepted", "selected"),
+            ReplacementRequestAction::Decline => ("declined", "declined"),
+        };
+        sqlx::query(
+            "UPDATE scrim.replacement_requests \
+                SET status=$2, responded_at=now(), updated_at=now() WHERE id=$1",
+        )
+        .bind(replacement_request_id)
+        .bind(request_status)
+        .execute(&mut *tx)
+        .await?;
+        if let Some(candidate_id) = candidate_id {
+            sqlx::query(
+                "UPDATE scrim.replacement_candidates SET status=$2, updated_at=now() WHERE id=$1",
+            )
+            .bind(candidate_id)
+            .bind(candidate_status)
+            .execute(&mut *tx)
+            .await?;
+        }
+        if request.action == ReplacementRequestAction::Accept {
+            sqlx::query(
+                "UPDATE scrim.replacement_needs \
+                    SET status='filled', closed_at=now(), updated_at=now() WHERE id=$1",
+            )
+            .bind(need_id)
+            .execute(&mut *tx)
+            .await?;
+            sqlx::query(
+                "UPDATE scrim.replacement_requests \
+                    SET status='cancelled', updated_at=now() \
+                  WHERE need_id=$1 AND id<>$2 AND status IN ('pending', 'sent', 'uncertain')",
+            )
+            .bind(need_id)
+            .bind(replacement_request_id)
+            .execute(&mut *tx)
+            .await?;
+        }
+        insert_audit_event(
+            &mut tx,
+            "replacement_request_responded",
+            ("replacement_request", replacement_request_id),
+            actor.0,
+            api_request_id,
+            idempotency_key,
+            json!({"action": request.action}),
+        )
+        .await?;
+        let receipt = placeholder_receipt();
+        complete_command(&mut tx, receipt_id, &receipt).await?;
+        tx.commit().await?;
+        Ok(receipt)
+    }
+
     pub async fn create_match_request_batch(
         &self,
         idempotency_key: &str,
@@ -327,7 +970,7 @@ impl PgScrimReadRepository {
             insert_audit_event(
                 &mut tx,
                 "match_request_batch_created",
-                *entity_id,
+                ("match_request", i64::from(*entity_id)),
                 actor_user_id,
                 request_id,
                 idempotency_key,
@@ -482,7 +1125,7 @@ impl PgScrimReadRepository {
         insert_audit_event(
             &mut tx,
             "match_request_released",
-            request_id,
+            ("match_request", i64::from(request_id)),
             actor.0,
             api_request_id,
             idempotency_key,
@@ -685,7 +1328,7 @@ impl PgScrimReadRepository {
         insert_audit_event(
             &mut tx,
             "match_request_response_recorded",
-            request_id,
+            ("match_request", i64::from(request_id)),
             &actor_user_id,
             api_request_id,
             idempotency_key,
@@ -1463,7 +2106,7 @@ async fn complete_command(
 async fn insert_audit_event(
     tx: &mut Transaction<'_, Postgres>,
     event_type: &str,
-    entity_id: i32,
+    entity: (&str, i64),
     actor_user_id: &str,
     request_id: &str,
     correlation_id: &str,
@@ -1479,8 +2122,8 @@ async fn insert_audit_event(
          )",
     )
     .bind(event_type)
-    .bind("match_request")
-    .bind(entity_id.to_string())
+    .bind(entity.0)
+    .bind(entity.1.to_string())
     .bind(actor_user_id)
     .bind(request_id)
     .bind(correlation_id)
@@ -1488,6 +2131,54 @@ async fn insert_audit_event(
     .execute(&mut **tx)
     .await?;
     Ok(())
+}
+
+fn placeholder_receipt() -> ActionReceipt {
+    ActionReceipt {
+        accepted: true,
+        message: "Platzhalter".to_string(),
+    }
+}
+
+fn validated_message(message: Option<&str>) -> ScrimResult<String> {
+    match message.map(str::trim).filter(|message| !message.is_empty()) {
+        Some(message) if message.chars().count() <= 2_000 => Ok(message.to_string()),
+        Some(_) => Err(ScrimError::InvalidProposal("Platzhalter".to_string())),
+        None => Ok("Platzhalter".to_string()),
+    }
+}
+
+fn team_query_message(message_ids: &Value, team_id: i32) -> ScrimResult<(i64, i64)> {
+    let entry = message_ids
+        .get(team_id.to_string())
+        .ok_or_else(|| ScrimError::InvalidStoredData("Platzhalter".to_string()))?;
+    let parse = |name| {
+        entry
+            .get(name)
+            .and_then(|value| {
+                value.as_i64().or_else(|| {
+                    value
+                        .as_str()
+                        .and_then(|value| value.parse::<i64>().ok())
+                        .filter(|value| *value > 0)
+                })
+            })
+            .ok_or_else(|| ScrimError::InvalidStoredData("Platzhalter".to_string()))
+    };
+    Ok((parse("channel_id")?, parse("message_id")?))
+}
+
+fn validate_optional_id(provided: Option<&str>, actual: Option<i32>) -> ScrimResult<()> {
+    let Some(provided) = provided else {
+        return Ok(());
+    };
+    let provided =
+        crate::model::wire_id::parse_i32(provided).map_err(ScrimError::InvalidProposal)?;
+    if Some(provided) == actual {
+        Ok(())
+    } else {
+        Err(ScrimError::InvalidProposal("Platzhalter".to_string()))
+    }
 }
 
 fn payload_hash<T: Serialize>(payload: &T) -> ScrimResult<Vec<u8>> {

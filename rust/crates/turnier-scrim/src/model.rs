@@ -420,6 +420,31 @@ pub struct ReplacementNeed {
     pub is_bench: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ReplacementCandidate {
+    #[serde(serialize_with = "wire_id::i64", deserialize_with = "wire_id::de_i64")]
+    pub id: i64,
+    #[serde(serialize_with = "wire_id::i64", deserialize_with = "wire_id::de_i64")]
+    pub need_id: i64,
+    #[serde(
+        serialize_with = "wire_id::opt_i32",
+        deserialize_with = "wire_id::de_opt_i32"
+    )]
+    pub participant_id: Option<i32>,
+    #[serde(
+        serialize_with = "wire_id::opt_i64",
+        deserialize_with = "wire_id::de_opt_i64"
+    )]
+    pub discord_user_id: Option<i64>,
+    pub display_name: Option<String>,
+    pub rank: Option<String>,
+    pub roles: Option<String>,
+    pub availability: Option<String>,
+    pub candidate_data: serde_json::Value,
+    pub score_data: serde_json::Value,
+    pub status: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MatchRequestFacts {
     pub slots: Vec<SlotFacts>,
