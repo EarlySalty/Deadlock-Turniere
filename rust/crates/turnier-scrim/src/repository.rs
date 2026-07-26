@@ -2,6 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
+use serde::de::DeserializeOwned;
 use serde::Serialize;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -11,14 +12,16 @@ use turnier_db::Pool;
 
 use crate::decision::derive_match_request_facts;
 use crate::dto::{
-    ActionReceipt, MatchRequestAction, MatchRequestResponseRequest, ReleaseMatchRequest,
-    SelfServiceParticipant, SignupRequest, WeeklyAvailability as SelfServiceAvailability,
+    ActionReceipt, AnnouncementPublicationRequest, MatchRequestAction, MatchRequestResponseRequest,
+    ReleaseMatchRequest, SelfServiceParticipant, SignupRequest,
+    WeeklyAvailability as SelfServiceAvailability,
 };
 use crate::model::{
-    AvailabilitySlot, AvailabilityStatus, Coach, LagebildEvidenceRef, LagebildSnapshotRef,
-    MatchRequest, MatchRequestBatch, MatchRequestResponse, MatchRequestTemplate, Participant,
-    ResponseChoice, RosterMember, ScrimMatch, ScrimReadModel, ScrimSlot, SelectedMatchResult, Team,
-    TeamMember, TeamRef, ValidatedMatchRequestBatch, WeeklyAvailability,
+    AnnouncementPreview, AvailabilitySlot, AvailabilityStatus, Coach, LagebildEvidenceRef,
+    LagebildSnapshotRef, LobbyStateMutation, MatchMutation, MatchRequest, MatchRequestBatch,
+    MatchRequestResponse, MatchRequestTemplate, Participant, ResponseChoice, RosterMember,
+    ScrimAction, ScrimMatch, ScrimReadModel, ScrimSlot, SelectedMatchResult, Team, TeamMember,
+    TeamRef, ValidatedMatchRequestBatch, WeeklyAvailability,
 };
 use crate::{ScrimError, ScrimResult};
 
@@ -60,6 +63,457 @@ impl PgScrimReadRepository {
 
     pub async fn runtime_control(&self) -> ScrimResult<RuntimeControl> {
         load_runtime_control(&self.pool).await
+    }
+
+    pub async fn create_match(
+        &self,
+        idempotency_key: &str,
+        team_a_id: i32,
+        team_b_id: i32,
+        scheduled_at: Option<DateTime<Utc>>,
+        coach_spectator_discord_id: Option<i64>,
+    ) -> ScrimResult<MatchMutation> {
+        let mut tx = self.pool.begin().await?;
+        lock_runtime_control(&mut tx).await?;
+        require_turniere_runtime(&mut tx).await?;
+        let payload = json!({
+            "team_a_id": team_a_id.to_string(),
+            "team_b_id": team_b_id.to_string(),
+            "scheduled_at": scheduled_at,
+            "coach_spectator_discord_id": coach_spectator_discord_id.map(|id| id.to_string()),
+        });
+        let receipt_id =
+            match begin_command(&mut tx, "match_create", idempotency_key, &payload).await? {
+                CommandStart::New(id) => id,
+                CommandStart::Replay(response) => return Ok(response),
+            };
+        lock_id_generation(&mut tx).await?;
+        let team_ids = BTreeSet::from([team_a_id, team_b_id]);
+        if existing_team_ids_tx(&mut tx, &team_ids).await? != team_ids {
+            return Err(ScrimError::InvalidProposal(
+                "At least one team was not found".to_string(),
+            ));
+        }
+        let id = next_id(&mut tx, "scrim.matches").await?;
+        sqlx::query(
+            "INSERT INTO scrim.matches(\
+                 id, team_a_id, team_b_id, scheduled_at, status, lobby_state, \
+                 coach_spectator_discord_id, created_at, updated_at\
+             ) VALUES ($1, $2, $3, $4, 'scheduled', 'draft', $5, now(), now())",
+        )
+        .bind(id)
+        .bind(team_a_id)
+        .bind(team_b_id)
+        .bind(scheduled_at)
+        .bind(coach_spectator_discord_id)
+        .execute(&mut *tx)
+        .await?;
+        let response = MatchMutation {
+            scrim_match: load_match_tx(&mut tx, id).await?,
+        };
+        complete_command(&mut tx, receipt_id, &response).await?;
+        tx.commit().await?;
+        Ok(response)
+    }
+
+    pub async fn set_lobby_code(
+        &self,
+        idempotency_key: &str,
+        match_id: i32,
+        code: &str,
+        actor_user_id: &str,
+        actor_display_name: &str,
+    ) -> ScrimResult<MatchMutation> {
+        let mut tx = self.pool.begin().await?;
+        lock_runtime_control(&mut tx).await?;
+        require_turniere_runtime(&mut tx).await?;
+        let payload = json!({"match_id": match_id.to_string(), "lobby_code": code});
+        let receipt_id =
+            match begin_command(&mut tx, "match_lobby_code", idempotency_key, &payload).await? {
+                CommandStart::New(id) => id,
+                CommandStart::Replay(response) => return Ok(response),
+            };
+        let row =
+            sqlx::query("SELECT lobby_state, join_code FROM scrim.matches WHERE id=$1 FOR UPDATE")
+                .bind(match_id)
+                .fetch_optional(&mut *tx)
+                .await?
+                .ok_or_else(|| ScrimError::NotFound("Match not found".to_string()))?;
+        let lobby_state = row.try_get::<Option<String>, _>("lobby_state")?;
+        if lobby_state.as_deref().is_some_and(is_bot_owned_lobby_state) {
+            return Err(ScrimError::Conflict(format!(
+                "Lobby state is controlled by bot: {}",
+                lobby_state.unwrap_or_default()
+            )));
+        }
+        let previous_code = row.try_get::<Option<String>, _>("join_code")?;
+        let corrections = previous_code
+            .as_deref()
+            .filter(|previous| *previous != code)
+            .map(|previous| {
+                json!([{
+                    "from": previous,
+                    "to": code,
+                    "source_user_id": actor_user_id,
+                    "source_display_name": actor_display_name,
+                    "at": Utc::now().timestamp(),
+                }])
+            })
+            .unwrap_or_else(|| json!([]));
+        sqlx::query(
+            "UPDATE scrim.matches \
+                SET join_code=$2, lobby_state='lobby_open', lobby_code_source_user_id=$3, \
+                    lobby_code_source_display_name=$4, lobby_code_updated_at=now(), \
+                    lobby_code_corrections=COALESCE(lobby_code_corrections, '[]'::jsonb) || $5::jsonb, \
+                    updated_at=now() \
+              WHERE id=$1",
+        )
+        .bind(match_id)
+        .bind(code)
+        .bind(actor_user_id)
+        .bind(actor_display_name)
+        .bind(corrections)
+        .execute(&mut *tx)
+        .await?;
+        let response = MatchMutation {
+            scrim_match: load_match_tx(&mut tx, match_id).await?,
+        };
+        complete_command(&mut tx, receipt_id, &response).await?;
+        tx.commit().await?;
+        Ok(response)
+    }
+
+    pub async fn add_match_ids(
+        &self,
+        idempotency_key: &str,
+        match_id: i32,
+        steam_match_ids: &[i64],
+        actor_user_id: &str,
+        actor_display_name: &str,
+    ) -> ScrimResult<MatchMutation> {
+        let mut tx = self.pool.begin().await?;
+        lock_runtime_control(&mut tx).await?;
+        require_turniere_runtime(&mut tx).await?;
+        let payload = json!({
+            "match_id": match_id.to_string(),
+            "match_ids": steam_match_ids.iter().map(ToString::to_string).collect::<Vec<_>>(),
+        });
+        let receipt_id =
+            match begin_command(&mut tx, "match_ids_add", idempotency_key, &payload).await? {
+                CommandStart::New(id) => id,
+                CommandStart::Replay(response) => return Ok(response),
+            };
+        if sqlx::query_scalar::<_, i32>("SELECT id FROM scrim.matches WHERE id=$1 FOR UPDATE")
+            .bind(match_id)
+            .fetch_optional(&mut *tx)
+            .await?
+            .is_none()
+        {
+            return Err(ScrimError::NotFound("Match not found".to_string()));
+        }
+        for steam_match_id in steam_match_ids {
+            let inserted = sqlx::query_scalar::<_, i64>(
+                "INSERT INTO scrim.match_result_refs(\
+                     match_id, steam_match_id, source_user_id, source_display_name, \
+                     fetch_status, entered_at, updated_at\
+                 ) VALUES ($1, $2, $3, $4, 'pending', now(), now()) \
+                 ON CONFLICT(steam_match_id) DO NOTHING RETURNING id",
+            )
+            .bind(match_id)
+            .bind(steam_match_id)
+            .bind(actor_user_id)
+            .bind(actor_display_name)
+            .fetch_optional(&mut *tx)
+            .await?;
+            if inserted.is_none() {
+                return Err(ScrimError::Conflict("Match ID already exists".to_string()));
+            }
+        }
+        sqlx::query(
+            "UPDATE scrim.matches SET lobby_state='result_requested', updated_at=now() WHERE id=$1",
+        )
+        .bind(match_id)
+        .execute(&mut *tx)
+        .await?;
+        let response = MatchMutation {
+            scrim_match: load_match_tx(&mut tx, match_id).await?,
+        };
+        complete_command(&mut tx, receipt_id, &response).await?;
+        tx.commit().await?;
+        Ok(response)
+    }
+
+    pub async fn request_result_fetch(
+        &self,
+        idempotency_key: &str,
+        match_id: i32,
+        result_ref_id: Option<i64>,
+    ) -> ScrimResult<LobbyStateMutation> {
+        let mut tx = self.pool.begin().await?;
+        lock_runtime_control(&mut tx).await?;
+        require_turniere_runtime(&mut tx).await?;
+        let payload = json!({
+            "match_id": match_id.to_string(),
+            "result_ref_id": result_ref_id.map(|id| id.to_string()),
+        });
+        let receipt_id =
+            match begin_command(&mut tx, "match_result_fetch", idempotency_key, &payload).await? {
+                CommandStart::New(id) => id,
+                CommandStart::Replay(response) => return Ok(response),
+            };
+        let lobby_state = sqlx::query_scalar::<_, Option<String>>(
+            "SELECT lobby_state FROM scrim.matches WHERE id=$1 FOR UPDATE",
+        )
+        .bind(match_id)
+        .fetch_optional(&mut *tx)
+        .await?
+        .ok_or_else(|| ScrimError::NotFound("Match not found".to_string()))?;
+        if lobby_state
+            .as_deref()
+            .is_some_and(|state| state_blocks_lobby_request(state, "result_requested"))
+        {
+            return Err(ScrimError::Conflict(format!(
+                "Lobby state is controlled by bot: {}",
+                lobby_state.unwrap_or_default()
+            )));
+        }
+        if let Some(result_ref_id) = result_ref_id {
+            let updated = sqlx::query(
+                "UPDATE scrim.match_result_refs \
+                    SET fetch_status='pending', last_error=NULL, updated_at=now() \
+                  WHERE id=$1 AND match_id=$2",
+            )
+            .bind(result_ref_id)
+            .bind(match_id)
+            .execute(&mut *tx)
+            .await?;
+            if updated.rows_affected() == 0 {
+                return Err(ScrimError::NotFound(
+                    "Result reference not found".to_string(),
+                ));
+            }
+        }
+        sqlx::query(
+            "UPDATE scrim.matches SET lobby_state='result_requested', updated_at=now() WHERE id=$1",
+        )
+        .bind(match_id)
+        .execute(&mut *tx)
+        .await?;
+        let response = LobbyStateMutation {
+            match_id,
+            lobby_state: "result_requested".to_string(),
+        };
+        complete_command(&mut tx, receipt_id, &response).await?;
+        tx.commit().await?;
+        Ok(response)
+    }
+
+    pub async fn select_result_ref(
+        &self,
+        idempotency_key: &str,
+        match_id: i32,
+        result_ref_id: i64,
+        actor_user_id: &str,
+        actor_display_name: &str,
+        selection_reason: &str,
+    ) -> ScrimResult<MatchMutation> {
+        let mut tx = self.pool.begin().await?;
+        lock_runtime_control(&mut tx).await?;
+        require_turniere_runtime(&mut tx).await?;
+        let payload = json!({
+            "match_id": match_id.to_string(),
+            "result_ref_id": result_ref_id.to_string(),
+            "selection_reason": selection_reason,
+        });
+        let receipt_id =
+            match begin_command(&mut tx, "match_result_select", idempotency_key, &payload).await? {
+                CommandStart::New(id) => id,
+                CommandStart::Replay(response) => return Ok(response),
+            };
+        let selectable = sqlx::query_scalar::<_, bool>(
+            "SELECT EXISTS(\
+                 SELECT 1 FROM scrim.match_result_refs \
+                  WHERE id=$1 AND match_id=$2 AND fetch_status='fetched' \
+                    AND validation_status='valid' AND winner_team_id IS NOT NULL \
+                    AND voided_at IS NULL AND superseded_by_ref_id IS NULL\
+             )",
+        )
+        .bind(result_ref_id)
+        .bind(match_id)
+        .fetch_one(&mut *tx)
+        .await?;
+        if !selectable {
+            return Err(ScrimError::InvalidProposal(
+                "Result reference is not selectable".to_string(),
+            ));
+        }
+        sqlx::query(
+            "INSERT INTO scrim.match_result_selections(\
+                 match_id, result_ref_id, selected_by_user_id, selected_by_display_name, \
+                 selection_reason, selected_at\
+             ) VALUES ($1, $2, $3, $4, $5, now()) \
+             ON CONFLICT(match_id) DO UPDATE SET \
+                 result_ref_id=EXCLUDED.result_ref_id, \
+                 selected_by_user_id=EXCLUDED.selected_by_user_id, \
+                 selected_by_display_name=EXCLUDED.selected_by_display_name, \
+                 selection_reason=EXCLUDED.selection_reason, selected_at=now()",
+        )
+        .bind(match_id)
+        .bind(result_ref_id)
+        .bind(actor_user_id)
+        .bind(actor_display_name)
+        .bind(selection_reason)
+        .execute(&mut *tx)
+        .await?;
+        let response = MatchMutation {
+            scrim_match: load_match_tx(&mut tx, match_id).await?,
+        };
+        complete_command(&mut tx, receipt_id, &response).await?;
+        tx.commit().await?;
+        Ok(response)
+    }
+
+    pub async fn announcement_preview(&self, block_id: &str) -> ScrimResult<AnnouncementPreview> {
+        let block_key = announcement_block_key(block_id);
+        let row = sqlx::query(
+            "SELECT id, title, body, payload->>'channel_id' AS channel_id, status, published_at \
+               FROM scrim.announcement_drafts \
+              WHERE scope='block' AND block_key=$1 \
+              ORDER BY created_at DESC, id DESC LIMIT 1",
+        )
+        .bind(block_key)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(match row {
+            Some(row) => announcement_from_row(block_id, &row)?,
+            None => AnnouncementPreview {
+                id: None,
+                block_id: block_id.to_string(),
+                title: "Platzhalter".to_string(),
+                message: "Platzhalter".to_string(),
+                channel_id: None,
+                status: "preview".to_string(),
+                published_at: None,
+            },
+        })
+    }
+
+    pub async fn create_announcement_publication(
+        &self,
+        block_id: &str,
+        idempotency_key: &str,
+        actor_user_id: &str,
+        actor_display_name: &str,
+        request: &AnnouncementPublicationRequest,
+    ) -> ScrimResult<AnnouncementPreview> {
+        let title = request.title.as_deref().unwrap_or("Platzhalter");
+        let payload = json!({"channel_id": request.channel_id});
+        let block_key = announcement_block_key(block_id);
+        let mut tx = self.pool.begin().await?;
+        lock_runtime_control(&mut tx).await?;
+        require_turniere_runtime(&mut tx).await?;
+        if let Some(row) = sqlx::query(
+            "SELECT id, block_key, title, body, payload->>'channel_id' AS channel_id, \
+                    status, published_at \
+               FROM scrim.announcement_drafts \
+              WHERE idempotency_key=$1 AND idempotency_generation=0 \
+              FOR UPDATE",
+        )
+        .bind(idempotency_key)
+        .fetch_optional(&mut *tx)
+        .await?
+        {
+            let existing_block = row.try_get::<Option<String>, _>("block_key")?;
+            let existing_title = row.try_get::<String, _>("title")?;
+            let existing_body = row.try_get::<String, _>("body")?;
+            let existing_channel = row.try_get::<Option<String>, _>("channel_id")?;
+            if existing_block.as_deref() != Some(block_key.as_str())
+                || existing_title != title
+                || existing_body != request.message
+                || existing_channel != request.channel_id
+            {
+                return Err(ScrimError::IdempotencyConflict);
+            }
+            return announcement_from_row(block_id, &row);
+        }
+        let id = sqlx::query_scalar::<_, i64>(
+            "INSERT INTO scrim.announcement_drafts(\
+                 scope, block_key, title, body, payload, payload_hash, status, \
+                 idempotency_key, created_by_user_id, created_by_display_name, \
+                 approved_by_user_id, approved_by_display_name, approved_at\
+             ) VALUES (\
+                 'block', $1, $2, $3, $4::jsonb, \
+                 scrim.announcement_effect_hash('block', $1, $2, $3, $4::jsonb), \
+                 'approved', $5, $6, $7, $6, $7, now()\
+             ) RETURNING id",
+        )
+        .bind(block_key)
+        .bind(title)
+        .bind(&request.message)
+        .bind(&payload)
+        .bind(idempotency_key)
+        .bind(actor_user_id)
+        .bind(actor_display_name)
+        .fetch_one(&mut *tx)
+        .await?;
+        sqlx::query(
+            "INSERT INTO scrim.announcement_approvals(\
+                 draft_id, decision, decided_by_user_id, decided_by_display_name, decision_data\
+             ) VALUES ($1, 'approved', $2, $3, '{}'::jsonb)",
+        )
+        .bind(id)
+        .bind(actor_user_id)
+        .bind(actor_display_name)
+        .execute(&mut *tx)
+        .await?;
+        tx.commit().await?;
+        self.announcement_preview(block_id).await
+    }
+
+    pub async fn mark_announcement_published(
+        &self,
+        announcement_id: i64,
+        remote_message_id: Option<&str>,
+    ) -> ScrimResult<()> {
+        sqlx::query(
+            "UPDATE scrim.announcement_drafts \
+                SET status='published', published_at=now(), remote_system='discord', \
+                    remote_message_id=$2, updated_at=now() \
+              WHERE id=$1 AND status='approved'",
+        )
+        .bind(announcement_id)
+        .bind(remote_message_id)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    pub async fn action(&self, id: i64) -> ScrimResult<ScrimAction> {
+        let row = sqlx::query(
+            "SELECT id, command_scope, state, attempts, next_attempt_at, remote_system, \
+                    remote_message_id, remote_task_id, result_payload, last_error_code, \
+                    received_at, updated_at, completed_at \
+               FROM scrim.command_receipts WHERE id=$1",
+        )
+        .bind(id)
+        .fetch_optional(&self.pool)
+        .await?
+        .ok_or_else(|| ScrimError::NotFound("Action not found".to_string()))?;
+        Ok(ScrimAction {
+            id: row.try_get("id")?,
+            command_scope: row.try_get("command_scope")?,
+            state: row.try_get("state")?,
+            attempts: row.try_get("attempts")?,
+            next_attempt_at: row.try_get("next_attempt_at")?,
+            remote_system: row.try_get("remote_system")?,
+            remote_message_id: row.try_get("remote_message_id")?,
+            remote_task_id: row.try_get("remote_task_id")?,
+            result: row.try_get("result_payload")?,
+            last_error_code: row.try_get("last_error_code")?,
+            received_at: row.try_get("received_at")?,
+            updated_at: row.try_get("updated_at")?,
+            completed_at: row.try_get("completed_at")?,
+        })
     }
 
     pub async fn signup(
@@ -719,9 +1173,9 @@ pub struct RuntimeControl {
     pub epoch: i64,
 }
 
-enum CommandStart {
+enum CommandStart<T> {
     New(i64),
-    Replay(ActionReceipt),
+    Replay(T),
 }
 
 #[async_trait]
@@ -1138,6 +1592,91 @@ async fn load_matches(pool: &Pool) -> ScrimResult<Vec<ScrimMatch>> {
         .collect()
 }
 
+async fn load_match_tx(tx: &mut Transaction<'_, Postgres>, id: i32) -> ScrimResult<ScrimMatch> {
+    let row = sqlx::query(
+        "SELECT m.id, m.team_a_id, ta.name AS team_a_name, m.team_b_id, \
+                tb.name AS team_b_name, m.when_text, m.scheduled_at, m.status, \
+                m.lobby_state, m.party_id, m.join_code, m.lobby_code_source_user_id, \
+                m.lobby_code_source_display_name, m.lobby_code_updated_at, \
+                m.coach_spectator_discord_id, m.created_at, m.updated_at, \
+                selected.result_ref_id, selected.steam_match_id AS selected_steam_match_id, \
+                selected.winner_team_id AS selected_winner_team_id, selected.source, \
+                selected.selected_at, selected.selected_by_user_id \
+           FROM scrim.matches m \
+           LEFT JOIN scrim.teams ta ON ta.id = m.team_a_id \
+           LEFT JOIN scrim.teams tb ON tb.id = m.team_b_id \
+           LEFT JOIN scrim.selected_match_results selected ON selected.match_id = m.id \
+          WHERE m.id=$1",
+    )
+    .bind(id)
+    .fetch_optional(&mut **tx)
+    .await?
+    .ok_or_else(|| ScrimError::NotFound("Match not found".to_string()))?;
+    Ok(ScrimMatch {
+        id: row.try_get("id")?,
+        team_a: team_ref(row.try_get("team_a_id")?, row.try_get("team_a_name")?),
+        team_b: team_ref(row.try_get("team_b_id")?, row.try_get("team_b_name")?),
+        when_text: row.try_get("when_text")?,
+        scheduled_at: row.try_get("scheduled_at")?,
+        status: row.try_get("status")?,
+        lobby_state: row.try_get("lobby_state")?,
+        party_id: row.try_get("party_id")?,
+        join_code: row.try_get("join_code")?,
+        lobby_code_source_user_id: row.try_get("lobby_code_source_user_id")?,
+        lobby_code_source_display_name: row.try_get("lobby_code_source_display_name")?,
+        lobby_code_updated_at: row.try_get("lobby_code_updated_at")?,
+        coach_spectator_discord_id: snowflake(row.try_get("coach_spectator_discord_id")?),
+        created_at: row.try_get("created_at")?,
+        updated_at: row.try_get("updated_at")?,
+        selected_result: selected_result(&row)?,
+    })
+}
+
+fn announcement_from_row(
+    block_id: &str,
+    row: &sqlx::postgres::PgRow,
+) -> ScrimResult<AnnouncementPreview> {
+    Ok(AnnouncementPreview {
+        id: Some(row.try_get("id")?),
+        block_id: block_id.to_string(),
+        title: row.try_get("title")?,
+        message: row.try_get("body")?,
+        channel_id: row.try_get("channel_id")?,
+        status: row.try_get("status")?,
+        published_at: row.try_get("published_at")?,
+    })
+}
+
+fn announcement_block_key(block_id: &str) -> String {
+    if block_id.contains(':') {
+        block_id.to_string()
+    } else {
+        format!("block:{block_id}")
+    }
+}
+
+fn state_blocks_lobby_request(current: &str, requested_state: &str) -> bool {
+    !(requested_state == "result_requested"
+        && matches!(current, "in_progress" | "result_failed" | "finished"))
+        && is_bot_owned_lobby_state(current)
+}
+
+fn is_bot_owned_lobby_state(state: &str) -> bool {
+    matches!(
+        state,
+        "start_requested"
+            | "lobby_open"
+            | "starting"
+            | "lobby_posting"
+            | "result_requested"
+            | "start_failed"
+            | "in_progress"
+            | "finished"
+            | "result_fetching"
+            | "result_failed"
+    )
+}
+
 async fn load_match_request_batches(pool: &Pool) -> ScrimResult<Vec<MatchRequestBatch>> {
     let batch_deadlines = sqlx::query("SELECT id, deadline_at FROM scrim.match_request_batches")
         .fetch_all(pool)
@@ -1379,12 +1918,12 @@ fn runtime_control_from_row(row: &sqlx::postgres::PgRow) -> ScrimResult<RuntimeC
     })
 }
 
-async fn begin_command(
+async fn begin_command<T: DeserializeOwned>(
     tx: &mut Transaction<'_, Postgres>,
     scope: &str,
     idempotency_key: &str,
     payload: &Value,
-) -> ScrimResult<CommandStart> {
+) -> ScrimResult<CommandStart<T>> {
     let hash = payload_hash(payload)?;
     let inserted = sqlx::query_scalar::<_, i64>(
         "INSERT INTO scrim.command_receipts(\
@@ -1439,10 +1978,10 @@ async fn begin_command(
     }
 }
 
-async fn complete_command(
+async fn complete_command<T: Serialize>(
     tx: &mut Transaction<'_, Postgres>,
     receipt_id: i64,
-    receipt: &ActionReceipt,
+    receipt: &T,
 ) -> ScrimResult<()> {
     let result_payload = serde_json::to_value(receipt).map_err(|error| {
         ScrimError::InvalidStoredData(format!("receipt serialization failed: {error}"))
@@ -1537,6 +2076,7 @@ async fn next_id(tx: &mut Transaction<'_, Postgres>, table: &str) -> ScrimResult
         "scrim.match_requests" => {
             "SELECT (COALESCE(MAX(id), 0) + 1)::int4 FROM scrim.match_requests"
         }
+        "scrim.matches" => "SELECT (COALESCE(MAX(id), 0) + 1)::int4 FROM scrim.matches",
         _ => {
             return Err(ScrimError::InvalidStoredData(
                 "unknown ID table".to_string(),

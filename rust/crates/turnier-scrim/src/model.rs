@@ -365,6 +365,52 @@ pub struct ScrimMatch {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MatchMutation {
+    #[serde(rename = "match")]
+    pub scrim_match: ScrimMatch,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LobbyStateMutation {
+    #[serde(serialize_with = "wire_id::i32", deserialize_with = "wire_id::de_i32")]
+    pub match_id: i32,
+    pub lobby_state: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AnnouncementPreview {
+    #[serde(
+        serialize_with = "wire_id::opt_i64",
+        deserialize_with = "wire_id::de_opt_i64"
+    )]
+    pub id: Option<i64>,
+    pub block_id: String,
+    pub title: String,
+    pub message: String,
+    pub channel_id: Option<String>,
+    pub status: String,
+    pub published_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ScrimAction {
+    #[serde(serialize_with = "wire_id::i64", deserialize_with = "wire_id::de_i64")]
+    pub id: i64,
+    pub command_scope: String,
+    pub state: String,
+    pub attempts: i32,
+    pub next_attempt_at: Option<DateTime<Utc>>,
+    pub remote_system: Option<String>,
+    pub remote_message_id: Option<String>,
+    pub remote_task_id: Option<String>,
+    pub result: Option<serde_json::Value>,
+    pub last_error_code: Option<String>,
+    pub received_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+    pub completed_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct LagebildEvidenceRef {
     #[serde(serialize_with = "wire_id::i64", deserialize_with = "wire_id::de_i64")]
     pub id: i64,

@@ -118,9 +118,11 @@ pub struct PlanningPairing {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CreateMatchRequest {
-    pub team_a_id: String,
+    pub team_a_id: Option<String>,
     pub team_b_id: Option<String>,
+    pub match_request_id: Option<String>,
     pub scheduled_at: Option<DateTime<Utc>>,
+    pub note: Option<String>,
     pub coach_spectator_discord_id: Option<String>,
 }
 
