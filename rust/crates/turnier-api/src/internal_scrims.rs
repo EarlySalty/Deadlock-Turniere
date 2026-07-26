@@ -845,7 +845,13 @@ async fn create_match_request_reminders(
             (actor.discord_id, actor.display_name),
         )
         .await?;
-    dispatch_discord(&state, &dispatch).await;
+    dispatch_discord(
+        &state,
+        "match_request_reminders",
+        mutation.idempotency_key,
+        &dispatch,
+    )
+    .await;
     Ok((StatusCode::OK, Json(dispatch.receipt)))
 }
 
@@ -873,7 +879,13 @@ async fn create_match_request_status_publication(
             (actor.discord_id, actor.display_name),
         )
         .await?;
-    dispatch_discord(&state, &dispatch).await;
+    dispatch_discord(
+        &state,
+        "match_request_status_publication",
+        mutation.idempotency_key,
+        &dispatch,
+    )
+    .await;
     Ok((StatusCode::OK, Json(dispatch.receipt)))
 }
 
@@ -912,7 +924,13 @@ async fn create_replacement_request(
             (actor.discord_id, actor.display_name),
         )
         .await?;
-    dispatch_discord(&state, &dispatch).await;
+    dispatch_discord(
+        &state,
+        "replacement_request_create",
+        mutation.idempotency_key,
+        &dispatch,
+    )
+    .await;
     Ok((StatusCode::OK, Json(dispatch.receipt)))
 }
 
@@ -1545,7 +1563,13 @@ async fn sync_signup_roles(state: &AppState, signup: &SignupMutation) {
     }
 }
 
-async fn dispatch_discord(state: &AppState, dispatch: &MutationDispatch) {
+async fn dispatch_discord(
+    state: &AppState,
+    scope: &str,
+    idempotency_key: &str,
+    dispatch: &MutationDispatch,
+) {
+    let mut delivered = Vec::new();
     for target in &dispatch.discord {
         let result = if let Some(user_id) = target.user_id {
             state
@@ -1580,15 +1604,29 @@ async fn dispatch_discord(state: &AppState, dispatch: &MutationDispatch) {
             );
             continue;
         };
-        if let Err(error) = result {
-            tracing::warn!(
-                record_id = target.record_id,
-                user_id = target.user_id,
-                channel_id = target.channel_id,
-                %error,
-                "Scrim-Discord-Versand fail-open"
-            );
+        match result {
+            Ok(_) => delivered.push(target.clone()),
+            Err(error) => {
+                tracing::warn!(
+                    record_id = target.record_id,
+                    user_id = target.user_id,
+                    channel_id = target.channel_id,
+                    %error,
+                    "Scrim-Discord-Versand fail-open"
+                );
+            }
         }
+    }
+    if let Err(error) = PgScrimReadRepository::new(state.pool.clone())
+        .mark_dispatches_delivered(scope, idempotency_key, &delivered)
+        .await
+    {
+        tracing::warn!(
+            scope,
+            idempotency_key,
+            %error,
+            "Zugestellte Scrim-Discord-Nachrichten konnten nicht vermerkt werden"
+        );
     }
 }
 

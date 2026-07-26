@@ -122,9 +122,8 @@ pub struct DiscordDispatch {
     pub content: String,
 }
 
-/// Wird vollstaendig im Command-Receipt abgelegt, damit ein Replay auch die offenen
-/// Discord-Zustellungen erneut liefert. Der Broker dedupliziert ueber den
-/// Idempotenzschluessel, ein zweiter Versuch kann also nichts doppelt zustellen.
+/// Wird im Command-Receipt abgelegt und nach jeder erfolgreichen Zustellung gekuerzt,
+/// damit ein Replay nur noch offene Discord-Ziele liefert.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MutationDispatch {
     pub receipt: ActionReceipt,
@@ -1799,6 +1798,82 @@ impl PgScrimReadRepository {
         complete_command(&mut tx, receipt_id, &dispatch).await?;
         tx.commit().await?;
         Ok(dispatch)
+    }
+
+    pub async fn mark_dispatches_delivered(
+        &self,
+        scope: &str,
+        idempotency_key: &str,
+        delivered: &[DiscordDispatch],
+    ) -> ScrimResult<()> {
+        if delivered.is_empty() {
+            return Ok(());
+        }
+
+        let mut tx = self.pool.begin().await?;
+        let row = sqlx::query(
+            "SELECT id, result_payload \
+               FROM scrim.command_receipts \
+              WHERE command_scope = $1 \
+                AND idempotency_key = $2 \
+                AND idempotency_generation = 0 \
+                AND state = 'completed' \
+              FOR UPDATE",
+        )
+        .bind(scope)
+        .bind(idempotency_key)
+        .fetch_optional(&mut *tx)
+        .await?
+        .ok_or_else(|| {
+            ScrimError::InvalidStoredData(
+                "completed command receipt for delivered dispatches is missing".to_string(),
+            )
+        })?;
+        let receipt_id = row.try_get::<i64, _>("id")?;
+        let result_payload = row
+            .try_get::<Option<Value>, _>("result_payload")?
+            .ok_or_else(|| {
+                ScrimError::InvalidStoredData(
+                    "completed command receipt has no result_payload".to_string(),
+                )
+            })?;
+        let mut dispatch: MutationDispatch =
+            serde_json::from_value(result_payload).map_err(|error| {
+                ScrimError::InvalidStoredData(format!("invalid command receipt result: {error}"))
+            })?;
+        let delivered = delivered
+            .iter()
+            .map(|target| {
+                (
+                    target.kind.as_str(),
+                    target.record_id,
+                    target.user_id,
+                    target.channel_id,
+                )
+            })
+            .collect::<BTreeSet<_>>();
+        dispatch.discord.retain(|target| {
+            !delivered.contains(&(
+                target.kind.as_str(),
+                target.record_id,
+                target.user_id,
+                target.channel_id,
+            ))
+        });
+        let result_payload = serde_json::to_value(dispatch).map_err(|error| {
+            ScrimError::InvalidStoredData(format!("receipt serialization failed: {error}"))
+        })?;
+        sqlx::query(
+            "UPDATE scrim.command_receipts \
+                SET result_payload = $2::jsonb, updated_at = now() \
+              WHERE id = $1",
+        )
+        .bind(receipt_id)
+        .bind(result_payload)
+        .execute(&mut *tx)
+        .await?;
+        tx.commit().await?;
+        Ok(())
     }
 
     pub async fn patch_replacement_request(
@@ -3921,8 +3996,9 @@ mod tests {
     use std::collections::BTreeSet;
 
     use super::{
-        blocks_lobby_code_write, is_allowed_lagebild_evidence_url, repairing_role_plan,
-        role_resync, DiscordDispatch, MutationDispatch, RoleOperation, RoleSnapshot,
+        begin_command, blocks_lobby_code_write, complete_command, is_allowed_lagebild_evidence_url,
+        repairing_role_plan, role_resync, CommandStart, DiscordDispatch, MutationDispatch,
+        PgScrimReadRepository, RoleOperation, RoleSnapshot,
     };
 
     /// Nach einem fehlgeschlagenen Discord-Aufruf traegt die Datenbank schon den Zielzustand.
@@ -4007,6 +4083,168 @@ mod tests {
             !replayed.discord.is_empty(),
             "Replay muss die offene Zustellung mitbringen"
         );
+    }
+
+    #[cfg(feature = "testing")]
+    async fn store_dispatch(
+        pool: &sqlx::PgPool,
+        scope: &str,
+        idempotency_key: &str,
+        payload: &serde_json::Value,
+        dispatch: &MutationDispatch,
+    ) {
+        let mut tx = pool.begin().await.expect("Transaktion");
+        let receipt_id =
+            match begin_command::<MutationDispatch>(&mut tx, scope, idempotency_key, payload)
+                .await
+                .expect("Command beginnen")
+            {
+                CommandStart::New(id) => id,
+                CommandStart::Replay(_) => panic!("neuer Schluessel darf kein Replay sein"),
+            };
+        complete_command(&mut tx, receipt_id, dispatch)
+            .await
+            .expect("Command abschliessen");
+        tx.commit().await.expect("Dispatch speichern");
+    }
+
+    #[cfg(feature = "testing")]
+    async fn replay_dispatch(
+        pool: &sqlx::PgPool,
+        scope: &str,
+        idempotency_key: &str,
+        payload: &serde_json::Value,
+    ) -> MutationDispatch {
+        let mut tx = pool.begin().await.expect("Transaktion");
+        let replay =
+            match begin_command::<MutationDispatch>(&mut tx, scope, idempotency_key, payload)
+                .await
+                .expect("Command wiederholen")
+            {
+                CommandStart::Replay(dispatch) => dispatch,
+                CommandStart::New(_) => panic!("gespeicherter Schluessel muss Replay sein"),
+            };
+        tx.commit().await.expect("Replay abschliessen");
+        replay
+    }
+
+    #[cfg(feature = "testing")]
+    fn test_dispatch(targets: Vec<DiscordDispatch>) -> MutationDispatch {
+        MutationDispatch {
+            receipt: ActionReceipt {
+                accepted: true,
+                message: "Platzhalter".to_string(),
+            },
+            discord: targets,
+        }
+    }
+
+    #[cfg(feature = "testing")]
+    fn dm(record_id: i64, user_id: i64) -> DiscordDispatch {
+        DiscordDispatch {
+            kind: "replacement_request".to_string(),
+            record_id,
+            user_id: Some(user_id),
+            channel_id: None,
+            content: "Platzhalter".to_string(),
+        }
+    }
+
+    #[cfg(feature = "testing")]
+    #[tokio::test]
+    async fn delivered_dispatch_is_absent_from_the_next_replay() {
+        let db = turnier_db::test_pool()
+            .await
+            .expect("zentrale Testdatenbank");
+        let repository = PgScrimReadRepository::new(db.pool().clone());
+        let scope = "dispatch_delivery_success";
+        let key = "dispatch:success";
+        let payload = serde_json::json!({"test": "success"});
+        let delivered = dm(1, 101);
+        store_dispatch(
+            db.pool(),
+            scope,
+            key,
+            &payload,
+            &test_dispatch(vec![delivered.clone()]),
+        )
+        .await;
+
+        repository
+            .mark_dispatches_delivered(scope, key, std::slice::from_ref(&delivered))
+            .await
+            .expect("Zustellung vermerken");
+
+        let replay = replay_dispatch(db.pool(), scope, key, &payload).await;
+        assert!(replay.discord.is_empty());
+    }
+
+    #[cfg(feature = "testing")]
+    #[tokio::test]
+    async fn unreported_failed_dispatch_stays_pending_for_the_next_replay() {
+        let db = turnier_db::test_pool()
+            .await
+            .expect("zentrale Testdatenbank");
+        let repository = PgScrimReadRepository::new(db.pool().clone());
+        let scope = "dispatch_delivery_failure";
+        let key = "dispatch:failure";
+        let payload = serde_json::json!({"test": "failure"});
+        let failed = dm(2, 102);
+        store_dispatch(
+            db.pool(),
+            scope,
+            key,
+            &payload,
+            &test_dispatch(vec![failed.clone()]),
+        )
+        .await;
+
+        repository
+            .mark_dispatches_delivered(scope, key, &[])
+            .await
+            .expect("leere Erfolgsliste verarbeiten");
+
+        let replay = replay_dispatch(db.pool(), scope, key, &payload).await;
+        assert_eq!(replay.discord, vec![failed]);
+    }
+
+    #[cfg(feature = "testing")]
+    #[tokio::test]
+    async fn only_failed_dispatch_stays_pending_when_other_targets_were_delivered() {
+        let db = turnier_db::test_pool()
+            .await
+            .expect("zentrale Testdatenbank");
+        let repository = PgScrimReadRepository::new(db.pool().clone());
+        let scope = "dispatch_delivery_partial";
+        let key = "dispatch:partial";
+        let payload = serde_json::json!({"test": "partial"});
+        let first = dm(3, 103);
+        let failed = dm(3, 104);
+        let channel = DiscordDispatch {
+            kind: "replacement_request".to_string(),
+            record_id: 3,
+            user_id: None,
+            channel_id: Some(105),
+            content: "Platzhalter".to_string(),
+        };
+        store_dispatch(
+            db.pool(),
+            scope,
+            key,
+            &payload,
+            &test_dispatch(vec![first.clone(), failed.clone(), channel.clone()]),
+        )
+        .await;
+        let mut same_identity_with_different_content = first;
+        same_identity_with_different_content.content = "PLATZHALTER: anderer Inhalt".to_string();
+
+        repository
+            .mark_dispatches_delivered(scope, key, &[same_identity_with_different_content, channel])
+            .await
+            .expect("Teilzustellung vermerken");
+
+        let replay = replay_dispatch(db.pool(), scope, key, &payload).await;
+        assert_eq!(replay.discord, vec![failed]);
     }
 
     /// Ein falsch eingetippter Lobbycode muss korrigierbar bleiben.
