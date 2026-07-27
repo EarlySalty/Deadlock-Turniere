@@ -80,6 +80,26 @@ async fn record_and_fail_broker(
     StatusCode::SERVICE_UNAVAILABLE
 }
 
+#[cfg(feature = "testing")]
+async fn accept_broker(Json(_payload): Json<Value>) -> Json<Value> {
+    Json(json!({}))
+}
+
+#[cfg(feature = "testing")]
+async fn accept_broker_and_clear_receipt_result(
+    State(pool): State<PgPool>,
+    Json(_payload): Json<Value>,
+) -> Json<Value> {
+    sqlx::query(
+        "UPDATE scrim.command_receipts SET result_payload=NULL \
+          WHERE command_scope='replacement_request_create'",
+    )
+    .execute(&pool)
+    .await
+    .expect("clear command receipt result");
+    Json(json!({}))
+}
+
 #[derive(Clone, Copy, Default)]
 struct TestHeaders<'a> {
     token: Option<&'a str>,
@@ -2166,7 +2186,15 @@ async fn replacement_candidates_are_ranked_and_requests_persist_and_transition()
     seed_coach(db.pool(), 123456789).await;
     seed_teams(db.pool(), &[1]).await;
     let need_id = seed_replacement_fixture(db.pool()).await;
-    let app = app_with_pool(db.pool().clone());
+    let broker = Router::new().route("/internal/master/v1/discord/send-dm", post(accept_broker));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("broker listener");
+    let broker_url = format!("http://{}", listener.local_addr().expect("broker address"));
+    let broker_task = tokio::spawn(async move {
+        axum::serve(listener, broker).await.expect("broker server");
+    });
+    let app = app_with_pool_and_broker(db.pool().clone(), Some(&broker_url));
 
     let route = format!("/internal/turnier/v1/scrims/replacement-needs/{need_id}/candidates");
     let (status, body) = send(
@@ -2261,6 +2289,184 @@ async fn replacement_candidates_are_ranked_and_requests_persist_and_transition()
     )
     .await;
     assert_eq!(status, StatusCode::CONFLICT);
+
+    broker_task.abort();
+}
+
+#[cfg(feature = "testing")]
+#[tokio::test]
+async fn replacement_request_without_discord_target_keeps_need_open() {
+    let db = turnier_db::test_pool().await.expect("central test pool");
+    enable_turniere_runtime(db.pool()).await;
+    seed_coach(db.pool(), 123456789).await;
+    seed_teams(db.pool(), &[1]).await;
+    let need_id = seed_replacement_fixture(db.pool()).await;
+    sqlx::query(
+        "UPDATE scrim.replacement_candidates SET discord_user_id=NULL \
+          WHERE need_id=$1 AND participant_id=302",
+    )
+    .bind(need_id)
+    .execute(db.pool())
+    .await
+    .expect("candidate without Discord target");
+    let app = app_with_pool(db.pool().clone());
+
+    let (status, _) = send(
+        &app,
+        IpAddr::V4(Ipv4Addr::LOCALHOST),
+        coach_headers("replacement_request:no_target", "123456789"),
+        Method::POST,
+        &format!("/internal/turnier/v1/scrims/replacement-needs/{need_id}/requests"),
+        Some(json!({"participant_id":"302","reason":"Platzhalter"})),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    let request_count: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM scrim.replacement_requests WHERE need_id=$1")
+            .bind(need_id)
+            .fetch_one(db.pool())
+            .await
+            .expect("replacement request count");
+    assert_eq!(request_count, 0);
+    let states: (String, String) = sqlx::query_as(
+        "SELECT n.status, c.status \
+           FROM scrim.replacement_needs n \
+           JOIN scrim.replacement_candidates c ON c.need_id=n.id \
+          WHERE n.id=$1 AND c.participant_id=302",
+    )
+    .bind(need_id)
+    .fetch_one(db.pool())
+    .await
+    .expect("replacement states");
+    assert_eq!(states, ("open".to_string(), "candidate".to_string()));
+}
+
+#[cfg(feature = "testing")]
+#[tokio::test]
+async fn replacement_dispatch_failure_is_retryable_without_rolling_back_state() {
+    let db = turnier_db::test_pool().await.expect("central test pool");
+    enable_turniere_runtime(db.pool()).await;
+    seed_coach(db.pool(), 123456789).await;
+    seed_teams(db.pool(), &[1]).await;
+    let need_id = seed_replacement_fixture(db.pool()).await;
+    let requests = Arc::new(Mutex::new(Vec::new()));
+    let broker = Router::new()
+        .route(
+            "/internal/master/v1/discord/send-dm",
+            post(record_and_fail_broker),
+        )
+        .with_state(requests.clone());
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("broker listener");
+    let broker_url = format!("http://{}", listener.local_addr().expect("broker address"));
+    let broker_task = tokio::spawn(async move {
+        axum::serve(listener, broker).await.expect("broker server");
+    });
+    let app = app_with_pool_and_broker(db.pool().clone(), Some(&broker_url));
+    let route = format!("/internal/turnier/v1/scrims/replacement-needs/{need_id}/requests");
+
+    for _ in 0..2 {
+        let (status, _) = send(
+            &app,
+            IpAddr::V4(Ipv4Addr::LOCALHOST),
+            coach_headers("replacement_request:broker_failure", "123456789"),
+            Method::POST,
+            &route,
+            Some(json!({"participant_id":"302","reason":"Platzhalter"})),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_GATEWAY);
+    }
+
+    let states: (i64, String, String, String, i64) = sqlx::query_as(
+        "SELECT r.id, r.status, n.status, c.status, COUNT(*) OVER () \
+           FROM scrim.replacement_requests r \
+           JOIN scrim.replacement_needs n ON n.id=r.need_id \
+           JOIN scrim.replacement_candidates c ON c.id=r.candidate_id \
+          WHERE r.need_id=$1 AND r.participant_id=302",
+    )
+    .bind(need_id)
+    .fetch_one(db.pool())
+    .await
+    .expect("persisted replacement request");
+    assert_eq!(
+        states,
+        (
+            states.0,
+            "pending".to_string(),
+            "contacting".to_string(),
+            "requested".to_string(),
+            1,
+        )
+    );
+    let payloads = requests.lock().expect("broker requests");
+    assert_eq!(payloads.len(), 2);
+    assert_eq!(payloads[0], payloads[1]);
+    assert_eq!(
+        payloads[0]["idempotency_key"],
+        format!("scrim_dispatch:replacement_request:{}:user:3002", states.0)
+    );
+
+    broker_task.abort();
+}
+
+#[cfg(feature = "testing")]
+#[tokio::test]
+async fn replacement_delivery_tracking_failure_is_not_reported_as_success() {
+    let db = turnier_db::test_pool().await.expect("central test pool");
+    enable_turniere_runtime(db.pool()).await;
+    seed_coach(db.pool(), 123456789).await;
+    seed_teams(db.pool(), &[1]).await;
+    let need_id = seed_replacement_fixture(db.pool()).await;
+    let broker = Router::new()
+        .route(
+            "/internal/master/v1/discord/send-dm",
+            post(accept_broker_and_clear_receipt_result),
+        )
+        .with_state(db.pool().clone());
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("broker listener");
+    let broker_url = format!("http://{}", listener.local_addr().expect("broker address"));
+    let broker_task = tokio::spawn(async move {
+        axum::serve(listener, broker).await.expect("broker server");
+    });
+    let app = app_with_pool_and_broker(db.pool().clone(), Some(&broker_url));
+
+    let (status, _) = send(
+        &app,
+        IpAddr::V4(Ipv4Addr::LOCALHOST),
+        coach_headers("replacement_request:receipt_failure", "123456789"),
+        Method::POST,
+        &format!("/internal/turnier/v1/scrims/replacement-needs/{need_id}/requests"),
+        Some(json!({"participant_id":"302","reason":"Platzhalter"})),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::BAD_GATEWAY);
+    let states: (String, String, String) = sqlx::query_as(
+        "SELECT r.status, n.status, c.status \
+           FROM scrim.replacement_requests r \
+           JOIN scrim.replacement_needs n ON n.id=r.need_id \
+           JOIN scrim.replacement_candidates c ON c.id=r.candidate_id \
+          WHERE r.need_id=$1 AND r.participant_id=302",
+    )
+    .bind(need_id)
+    .fetch_one(db.pool())
+    .await
+    .expect("persisted replacement state");
+    assert_eq!(
+        states,
+        (
+            "pending".to_string(),
+            "contacting".to_string(),
+            "requested".to_string(),
+        )
+    );
+
+    broker_task.abort();
 }
 
 #[cfg(feature = "testing")]

@@ -969,13 +969,16 @@ async fn create_replacement_request(
             (actor.discord_id, actor.display_name),
         )
         .await?;
-    dispatch_discord(
+    let delivered = dispatch_discord(
         &state,
         "replacement_request_create",
         mutation.idempotency_key,
         &dispatch,
     )
     .await;
+    if !delivered {
+        return Err(WebError::new(StatusCode::BAD_GATEWAY, "Platzhalter"));
+    }
     Ok((StatusCode::OK, Json(dispatch.receipt)))
 }
 
@@ -1627,8 +1630,9 @@ async fn dispatch_discord(
     scope: &str,
     idempotency_key: &str,
     dispatch: &MutationDispatch,
-) {
+) -> bool {
     let mut delivered = Vec::new();
+    let mut failed = false;
     for target in &dispatch.discord {
         let result = if let Some(user_id) = target.user_id {
             state
@@ -1657,7 +1661,10 @@ async fn dispatch_discord(
                 )
                 .await
         } else {
+            failed = true;
             tracing::warn!(
+                scope,
+                idempotency_key,
                 record_id = target.record_id,
                 "Scrim-Discord-Versand ohne Ziel fail-open"
             );
@@ -1666,7 +1673,10 @@ async fn dispatch_discord(
         match result {
             Ok(_) => delivered.push(target.clone()),
             Err(error) => {
+                failed = true;
                 tracing::warn!(
+                    scope,
+                    idempotency_key,
                     record_id = target.record_id,
                     user_id = target.user_id,
                     channel_id = target.channel_id,
@@ -1680,6 +1690,7 @@ async fn dispatch_discord(
         .mark_dispatches_delivered(scope, idempotency_key, &delivered)
         .await
     {
+        failed = true;
         tracing::warn!(
             scope,
             idempotency_key,
@@ -1687,6 +1698,7 @@ async fn dispatch_discord(
             "Zugestellte Scrim-Discord-Nachrichten konnten nicht vermerkt werden"
         );
     }
+    !failed
 }
 
 fn positive_config_id(value: Option<i64>) -> Option<u64> {

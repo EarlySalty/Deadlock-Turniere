@@ -1814,7 +1814,9 @@ impl PgScrimReadRepository {
             )
         })?;
         let candidate_id = candidate.try_get::<i64, _>("id")?;
-        let discord_user_id = candidate.try_get::<Option<i64>, _>("discord_user_id")?;
+        let discord_user_id = candidate
+            .try_get::<Option<i64>, _>("discord_user_id")?
+            .ok_or_else(|| ScrimError::InvalidProposal("Platzhalter".to_string()))?;
         let request_payload = serde_json::to_value(request).map_err(|_| {
             ScrimError::InvalidProposal("Die Anfrage ließ sich nicht verarbeiten.".to_string())
         })?;
@@ -1857,16 +1859,13 @@ impl PgScrimReadRepository {
         )
         .await?;
         let receipt = placeholder_receipt();
-        let discord = discord_user_id
-            .map(|user_id| DiscordDispatch {
-                kind: "replacement_request".to_string(),
-                record_id: replacement_request_id,
-                user_id: Some(user_id),
-                channel_id: None,
-                content: "Hey! 👋 Für ein Scrim wird noch jemand gesucht — du stehst als möglicher Ersatz auf der Liste. Wenn du Zeit und Lust hast, meld dich kurz im Team-Kanal. Danke dir! 🎮".to_string(),
-            })
-            .into_iter()
-            .collect();
+        let discord = vec![DiscordDispatch {
+            kind: "replacement_request".to_string(),
+            record_id: replacement_request_id,
+            user_id: Some(discord_user_id),
+            channel_id: None,
+            content: "Hey! 👋 Für ein Scrim wird noch jemand gesucht — du stehst als möglicher Ersatz auf der Liste. Wenn du Zeit und Lust hast, meld dich kurz im Team-Kanal. Danke dir! 🎮".to_string(),
+        }];
         // Den vollstaendigen Dispatch ablegen, nicht nur die Quittung: sonst geht bei einem
         // Replay verloren, welche Discord-Zustellungen noch offen sind.
         let dispatch = MutationDispatch { receipt, discord };
