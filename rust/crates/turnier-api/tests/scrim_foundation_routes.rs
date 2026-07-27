@@ -117,6 +117,15 @@ async fn record_and_accept_broker(
 }
 
 #[cfg(feature = "testing")]
+async fn record_and_accept_message(
+    State(requests): State<Arc<Mutex<Vec<Value>>>>,
+    Json(payload): Json<Value>,
+) -> Json<Value> {
+    requests.lock().expect("broker requests").push(payload);
+    Json(json!({"result":{"message_id":"912345678901234568"}}))
+}
+
+#[cfg(feature = "testing")]
 async fn accept_broker_once_per_idempotency_key(
     State(requests): State<Arc<Mutex<HashMap<String, Value>>>>,
     Json(payload): Json<Value>,
@@ -161,27 +170,6 @@ async fn fail_once_then_send_message(
     requests.push(payload);
     if first_request {
         Err(StatusCode::SERVICE_UNAVAILABLE)
-    } else {
-        Ok(Json(json!({"result":{"message_id":"912345678901234568"}})))
-    }
-}
-
-#[cfg(feature = "testing")]
-async fn fail_once_then_reject_idempotency_conflicts(
-    State(requests): State<Arc<Mutex<Vec<Value>>>>,
-    Json(payload): Json<Value>,
-) -> Result<Json<Value>, StatusCode> {
-    let mut requests = requests.lock().expect("broker requests");
-    let first_request = requests.is_empty();
-    let conflict = requests.iter().skip(1).any(|request| {
-        request["idempotency_key"] == payload["idempotency_key"]
-            && request["content"] != payload["content"]
-    });
-    requests.push(payload);
-    if first_request {
-        Err(StatusCode::SERVICE_UNAVAILABLE)
-    } else if conflict {
-        Err(StatusCode::CONFLICT)
     } else {
         Ok(Json(json!({"result":{"message_id":"912345678901234568"}})))
     }
@@ -2885,7 +2873,7 @@ async fn turniere_runtime_consumes_result_fetches_and_scrim_reminders() {
     let broker = Router::new()
         .route(
             "/internal/master/v1/discord/send-message",
-            post(fail_once_then_reject_idempotency_conflicts),
+            post(record_and_accept_message),
         )
         .with_state(requests.clone());
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
@@ -3129,15 +3117,15 @@ async fn turniere_runtime_consumes_result_fetches_and_scrim_reminders() {
         .expect("turniere operational consumer failed final result");
     steam_task.await.expect("steam worker");
 
-    let result: (String, Option<i32>, Value) = sqlx::query_as(
+    let result: (String, Option<i32>, Option<Value>) = sqlx::query_as(
         "SELECT lobby_state, winner_team_id, result_json FROM scrim.matches WHERE id=94",
     )
     .fetch_one(db.pool())
     .await
     .expect("consumed result");
     assert_eq!(result.0, "finished");
-    assert_eq!(result.1, Some(2));
-    assert_eq!(result.2["duration_s"], 1800);
+    assert_eq!(result.1, None);
+    assert_eq!(result.2, None);
     let result_refs: Vec<(String, Option<i32>)> = sqlx::query_as(
         "SELECT fetch_status, winner_team_id \
            FROM scrim.match_result_refs WHERE match_id=94 ORDER BY steam_match_id",
@@ -3182,7 +3170,7 @@ async fn turniere_runtime_consumes_result_fetches_and_scrim_reminders() {
         .iter()
         .any(|payload| payload == &persisted_reminder_payload));
     assert!(!payloads.iter().any(|payload| payload == &uncertain_payload));
-    assert!(payloads.iter().any(|payload| {
+    assert!(!payloads.iter().any(|payload| {
         payload["content"]
             .as_str()
             .is_some_and(|content| content.contains("Scrim beendet. Das Ergebnis ist eingetragen."))
@@ -3195,13 +3183,153 @@ async fn turniere_runtime_consumes_result_fetches_and_scrim_reminders() {
                 .filter(|key| key.starts_with("scrim-result:"))
         })
         .collect::<Vec<_>>();
+    assert!(result_idempotency_keys.is_empty());
+
+    broker_task.abort();
+}
+
+#[cfg(feature = "testing")]
+#[tokio::test]
+async fn selected_result_is_the_only_discord_winner_and_dispatch_failure_keeps_selection() {
+    let db = turnier_db::test_pool().await.expect("central test pool");
+    enable_turniere_runtime(db.pool()).await;
+    seed_coach(db.pool(), 123456789).await;
+    seed_teams(db.pool(), &[1, 2]).await;
+    sqlx::query("UPDATE scrim.teams SET discord_channel_id = 700000 + id WHERE id IN (1, 2)")
+        .execute(db.pool())
+        .await
+        .expect("team channel ids");
+    sqlx::raw_sql(
+        r#"
+        INSERT INTO scrim.matches(id, team_a_id, team_b_id, status, lobby_state, created_at)
+        VALUES (95, 1, 2, 'scheduled', 'finished', now());
+        INSERT INTO scrim.match_result_refs(
+            match_id, steam_match_id, source_user_id, source_display_name,
+            fetch_status, winner_team_id, normalized_result_json,
+            validation_status, fetched_at, entered_at, updated_at
+        ) VALUES
+            (
+                95, 9007199254741001, '123456789', 'Coach', 'fetched', 1,
+                '{"winner_team_id":1}'::jsonb, 'valid', now(), now(), now()
+            ),
+            (
+                95, 9007199254741002, '123456789', 'Coach', 'fetched', 2,
+                '{"winner_team_id":2}'::jsonb, 'valid', now(), now(), now()
+            );
+        "#,
+    )
+    .execute(db.pool())
+    .await
+    .expect("conflicting result refs");
+    let replacement_ref_id: i64 = sqlx::query_scalar(
+        "SELECT id FROM scrim.match_result_refs WHERE match_id=95 AND winner_team_id=1",
+    )
+    .fetch_one(db.pool())
+    .await
+    .expect("replacement result ref");
+    let selected_ref_id: i64 = sqlx::query_scalar(
+        "SELECT id FROM scrim.match_result_refs WHERE match_id=95 AND winner_team_id=2",
+    )
+    .fetch_one(db.pool())
+    .await
+    .expect("selected result ref");
+
+    let requests = Arc::new(Mutex::new(Vec::new()));
+    let broker = Router::new()
+        .route(
+            "/internal/master/v1/discord/send-message",
+            post(record_and_fail_broker),
+        )
+        .with_state(requests.clone());
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("broker listener");
+    let broker_url = format!("http://{}", listener.local_addr().expect("broker address"));
+    let broker_task = tokio::spawn(async move {
+        axum::serve(listener, broker).await.expect("broker server");
+    });
+    let app = app_with_pool_and_broker(db.pool().clone(), Some(&broker_url));
+
+    let route = format!("/internal/turnier/v1/scrims/matches/95/result-refs/{selected_ref_id}");
+    let (status, selected) = send(
+        &app,
+        IpAddr::V4(Ipv4Addr::LOCALHOST),
+        coach_headers("match:select:canonical", "123456789"),
+        Method::PATCH,
+        &route,
+        Some(json!({"message":"Steam-Ergebnis geprüft"})),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK);
     assert_eq!(
-        result_idempotency_keys.len(),
-        result_idempotency_keys
-            .iter()
-            .collect::<std::collections::HashSet<_>>()
-            .len()
+        selected["match"]["selected_result"]["result_ref_id"],
+        selected_ref_id.to_string()
     );
+    assert_eq!(selected["match"]["selected_result"]["winner_team_id"], "2");
+    let persisted_ref_id: i64 = sqlx::query_scalar(
+        "SELECT result_ref_id FROM scrim.match_result_selections WHERE match_id=95",
+    )
+    .fetch_one(db.pool())
+    .await
+    .expect("persisted selection");
+    assert_eq!(persisted_ref_id, selected_ref_id);
+
+    let payloads = requests.lock().expect("broker requests");
+    assert_eq!(payloads.len(), 2);
+    for (payload, channel_id) in payloads.iter().zip([700001, 700002]) {
+        assert_eq!(payload["channel_id"], channel_id);
+        assert_eq!(
+            payload["content"],
+            "Scrim beendet. Das Ergebnis ist eingetragen. Sieger: Route Team 2."
+        );
+        assert_eq!(
+            payload["idempotency_key"],
+            format!("scrim-selected-result:95:{selected_ref_id}:{channel_id}")
+        );
+    }
+    drop(payloads);
+
+    let replacement_route =
+        format!("/internal/turnier/v1/scrims/matches/95/result-refs/{replacement_ref_id}");
+    let (status, replacement) = send(
+        &app,
+        IpAddr::V4(Ipv4Addr::LOCALHOST),
+        coach_headers("match:select:replacement", "123456789"),
+        Method::PATCH,
+        &replacement_route,
+        Some(json!({"message":"Korrekturauswahl geprüft"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        replacement["match"]["selected_result"]["winner_team_id"],
+        "1"
+    );
+
+    let (status, replayed) = send(
+        &app,
+        IpAddr::V4(Ipv4Addr::LOCALHOST),
+        coach_headers("match:select:canonical", "123456789"),
+        Method::PATCH,
+        &route,
+        Some(json!({"message":"Steam-Ergebnis geprüft"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(replayed, selected);
+    let persisted_ref_id: i64 = sqlx::query_scalar(
+        "SELECT result_ref_id FROM scrim.match_result_selections WHERE match_id=95",
+    )
+    .fetch_one(db.pool())
+    .await
+    .expect("persisted replacement selection");
+    assert_eq!(persisted_ref_id, replacement_ref_id);
+    let payloads = requests.lock().expect("broker requests");
+    assert_eq!(payloads.len(), 4);
+    assert!(payloads.iter().skip(2).all(|payload| {
+        payload["content"] == "Scrim beendet. Das Ergebnis ist eingetragen. Sieger: Route Team 1."
+    }));
 
     broker_task.abort();
 }

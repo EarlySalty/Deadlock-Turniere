@@ -69,9 +69,6 @@ struct ResultFetchClaim {
     match_id: i32,
     team_a_id: i32,
     team_b_id: i32,
-    team_a_name: String,
-    team_b_name: String,
-    team_channels: Vec<i64>,
     party_id: Option<String>,
     steam_match_id: Option<i64>,
     result_ref_id: Option<i64>,
@@ -357,13 +354,8 @@ async fn lock_and_require_turniere_runtime(
 async fn claim_result_fetch(pool: &sqlx::PgPool) -> Result<Option<ResultFetchClaim>, sqlx::Error> {
     let mut tx = pool.begin().await?;
     let row = sqlx::query(
-        "SELECT m.id, m.team_a_id, m.team_b_id, m.party_id, m.steam_match_id, \
-                ta.name AS team_a_name, tb.name AS team_b_name, \
-                ta.discord_channel_id AS team_a_channel_id, \
-                tb.discord_channel_id AS team_b_channel_id \
+        "SELECT m.id, m.team_a_id, m.team_b_id, m.party_id, m.steam_match_id \
            FROM scrim.matches m \
-           JOIN scrim.teams ta ON ta.id=m.team_a_id \
-           JOIN scrim.teams tb ON tb.id=m.team_b_id \
           WHERE m.lobby_state='result_requested' \
              OR (m.lobby_state IN ('result_failed', 'result_fetching') \
                  AND m.updated_at <= now() - interval '15 minutes') \
@@ -423,23 +415,10 @@ async fn claim_result_fetch(pool: &sqlx::PgPool) -> Result<Option<ResultFetchCla
     .await?;
     tx.commit().await?;
 
-    let team_channels = [
-        row.try_get::<Option<i64>, _>("team_a_channel_id")?,
-        row.try_get::<Option<i64>, _>("team_b_channel_id")?,
-    ]
-    .into_iter()
-    .flatten()
-    .filter(|channel_id| *channel_id > 0)
-    .collect::<BTreeSet<_>>()
-    .into_iter()
-    .collect();
     Ok(Some(ResultFetchClaim {
         match_id,
         team_a_id: row.try_get("team_a_id")?,
         team_b_id: row.try_get("team_b_id")?,
-        team_a_name: row.try_get("team_a_name")?,
-        team_b_name: row.try_get("team_b_name")?,
-        team_channels,
         party_id: row.try_get("party_id")?,
         steam_match_id: result_ref_steam_match_id.or(row.try_get("steam_match_id")?),
         result_ref_id,
@@ -587,61 +566,15 @@ async fn process_result_fetch(
     .await?;
     sqlx::query(
         "UPDATE scrim.matches \
-            SET steam_match_id=COALESCE(steam_match_id, $2), winner_team_id=$3, \
-                result_json=$4, lobby_state=$5, updated_at=now() \
+            SET steam_match_id=COALESCE(steam_match_id, $2), lobby_state=$3, updated_at=now() \
           WHERE id=$1",
     )
     .bind(claim.match_id)
     .bind(steam_match_id)
-    .bind(winner_team_id)
-    .bind(&result)
     .bind(next_state)
     .execute(&mut *tx)
     .await?;
     tx.commit().await?;
-
-    let content = winner_team_id.map_or_else(
-        || {
-            format!(
-                "Scrim beendet. Das Ergebnis ist eingetragen (Match {}).",
-                claim.match_id
-            )
-        },
-        |winner_team_id| {
-            let winner = if winner_team_id == claim.team_a_id {
-                &claim.team_a_name
-            } else {
-                &claim.team_b_name
-            };
-            format!("Scrim beendet. Das Ergebnis ist eingetragen. Sieger: {winner}.")
-        },
-    );
-    for channel_id in claim.team_channels {
-        if let Err(error) = state
-            .notifier
-            .broker()
-            .post_internal::<serde_json::Value, _>(
-                "/internal/master/v1/discord/send-message",
-                &serde_json::json!({
-                    "channel_id": channel_id,
-                    "content": content,
-                    "idempotency_key": format!(
-                        "scrim-result:{}:{}:{channel_id}",
-                        claim.match_id,
-                        claim.result_ref_id.unwrap_or_default()
-                    ),
-                }),
-            )
-            .await
-        {
-            tracing::warn!(
-                match_id = claim.match_id,
-                channel_id,
-                %error,
-                "Scrim-Ergebnis ist gespeichert, aber die Discord-Nachricht ging nicht raus"
-            );
-        }
-    }
     Ok(())
 }
 
@@ -1528,18 +1461,105 @@ async fn select_result_ref(
     let actor = require_bff_actor(&headers)?;
     let service = service(&state);
     service.authorize_operator(actor.discord_id).await?;
-    Ok(Json(
-        service
-            .select_result_ref(
-                mutation.idempotency_key,
-                id,
-                ref_id,
-                actor.discord_id,
-                actor.display_name,
-                body,
+    let selected = service
+        .select_result_ref(
+            mutation.idempotency_key,
+            id,
+            ref_id,
+            actor.discord_id,
+            actor.display_name,
+            body,
+        )
+        .await?;
+    notify_selected_result(&state, &selected).await;
+    Ok(Json(selected))
+}
+
+async fn notify_selected_result(state: &AppState, mutation: &MatchMutation) {
+    let scrim_match = &mutation.scrim_match;
+    let Some(selected) = scrim_match.selected_result.as_ref() else {
+        tracing::warn!(
+            match_id = scrim_match.id,
+            "Scrim-Ergebnisauswahl wurde gespeichert, enthält aber kein ausgewähltes Ergebnis"
+        );
+        return;
+    };
+    let winner = [scrim_match.team_a.as_ref(), scrim_match.team_b.as_ref()]
+        .into_iter()
+        .flatten()
+        .find(|team| Some(team.id) == selected.winner_team_id);
+    let Some(winner) = winner else {
+        tracing::warn!(
+            match_id = scrim_match.id,
+            result_ref_id = selected.result_ref_id,
+            winner_team_id = selected.winner_team_id,
+            "Scrim-Ergebnisauswahl wurde gespeichert, aber der Sieger gehört nicht zum Match"
+        );
+        return;
+    };
+    let channels = match sqlx::query_as::<_, (Option<i64>, Option<i64>)>(
+        "SELECT ta.discord_channel_id AS team_a_channel_id, \
+                tb.discord_channel_id AS team_b_channel_id \
+           FROM scrim.matches m \
+           JOIN scrim.match_result_selections selection \
+             ON selection.match_id=m.id AND selection.result_ref_id=$2 \
+           LEFT JOIN scrim.teams ta ON ta.id=m.team_a_id \
+           LEFT JOIN scrim.teams tb ON tb.id=m.team_b_id \
+          WHERE m.id=$1",
+    )
+    .bind(scrim_match.id)
+    .bind(selected.result_ref_id)
+    .fetch_optional(&state.pool)
+    .await
+    {
+        Ok(Some(channels)) => channels,
+        Ok(None) => return,
+        Err(error) => {
+            tracing::warn!(
+                match_id = scrim_match.id,
+                result_ref_id = selected.result_ref_id,
+                %error,
+                "Scrim-Ergebnisauswahl wurde gespeichert, aber die Teamkanäle konnten nicht geladen werden"
+            );
+            return;
+        }
+    };
+    let channels = [channels.0, channels.1]
+        .into_iter()
+        .flatten()
+        .filter(|channel_id| *channel_id > 0)
+        .collect::<BTreeSet<_>>();
+    let content = format!(
+        "Scrim beendet. Das Ergebnis ist eingetragen. Sieger: {}.",
+        winner.name
+    );
+    for channel_id in channels {
+        if let Err(error) = state
+            .notifier
+            .broker()
+            .post_internal::<serde_json::Value, _>(
+                "/internal/master/v1/discord/send-message",
+                &serde_json::json!({
+                    "channel_id": channel_id,
+                    "content": content,
+                    "idempotency_key": format!(
+                        "scrim-selected-result:{}:{}:{channel_id}",
+                        scrim_match.id, selected.result_ref_id
+                    ),
+                }),
             )
-            .await?,
-    ))
+            .await
+        {
+            tracing::warn!(
+                match_id = scrim_match.id,
+                result_ref_id = selected.result_ref_id,
+                winner_team_id = selected.winner_team_id,
+                channel_id,
+                %error,
+                "Scrim-Ergebnisauswahl ist gespeichert, aber die Discord-Nachricht ging nicht raus"
+            );
+        }
+    }
 }
 
 async fn read_announcement_preview(
