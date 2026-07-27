@@ -3039,7 +3039,8 @@ async fn turniere_runtime_consumes_result_fetches_and_scrim_reminders() {
                 now(), now() - interval '16 minutes'
             ),
             (94, 9007199254740995, '123456789', 'Coach', 'pending', now(), now()),
-            (94, 9007199254740996, '123456789', 'Coach', 'pending', now(), now());
+            (94, 9007199254740996, '123456789', 'Coach', 'pending', now(), now()),
+            (94, 9007199254740997, '123456789', 'Coach', 'pending', now(), now());
         "#,
     )
     .execute(db.pool())
@@ -3048,7 +3049,12 @@ async fn turniere_runtime_consumes_result_fetches_and_scrim_reminders() {
 
     let steam_worker_pool = steam_pool.clone();
     let steam_task = tokio::spawn(async move {
-        for outcome in [Some(0), Some(1), None] {
+        for outcome in [
+            Some((0, Some("9007199254740990"), None)),
+            Some((0, Some("9007199254740996"), Some("9007199254740991"))),
+            Some((1, None, Some("9007199254740997"))),
+            None,
+        ] {
             loop {
                 if let Some(id) = sqlx::query_scalar::<_, i64>(
                     "SELECT id FROM steam_tasks WHERE status='PENDING'",
@@ -3057,7 +3063,7 @@ async fn turniere_runtime_consumes_result_fetches_and_scrim_reminders() {
                 .await
                 .expect("pending steam task")
                 {
-                    if let Some(winning_team) = outcome {
+                    if let Some((winning_team, returned_match_id, deadlock_match_id)) = outcome {
                         sqlx::query(
                             "UPDATE steam_tasks \
                                 SET status='DONE', result=$2, updated_at=1, finished_at=1 \
@@ -3067,7 +3073,8 @@ async fn turniere_runtime_consumes_result_fetches_and_scrim_reminders() {
                         .bind(
                             json!({
                                 "success": true,
-                                "match_id": format!("900719925474099{winning_team}"),
+                                "match_id": returned_match_id,
+                                "deadlock_match_id": deadlock_match_id,
                                 "winning_team": winning_team,
                                 "duration_s": 1800
                             })
@@ -3098,20 +3105,25 @@ async fn turniere_runtime_consumes_result_fetches_and_scrim_reminders() {
     turnier_api::internal_scrims::process_scrim_operational_once(&state)
         .await
         .expect("turniere operational consumer");
-    let after_first_fetch: (String, i64) = sqlx::query_as(
+    let after_first_fetch: (String, i64, i64) = sqlx::query_as(
         "SELECT lobby_state, \
                 (SELECT COUNT(*) FROM scrim.match_result_refs \
-                  WHERE match_id=94 AND fetch_status='fetched') \
+                  WHERE match_id=94 AND fetch_status='fetched'), \
+                (SELECT COUNT(*) FROM scrim.match_result_refs \
+                  WHERE match_id=94 AND fetch_status='failed') \
            FROM scrim.matches WHERE id=94",
     )
     .fetch_one(db.pool())
     .await
     .expect("first consumed result");
-    assert_eq!(after_first_fetch, ("result_requested".to_string(), 1));
+    assert_eq!(after_first_fetch, ("result_requested".to_string(), 0, 1));
 
     turnier_api::internal_scrims::process_scrim_operational_once(&state)
         .await
-        .expect("turniere operational consumer second result");
+        .expect("turniere operational consumer conflicting result");
+    turnier_api::internal_scrims::process_scrim_operational_once(&state)
+        .await
+        .expect("turniere operational consumer fallback result");
     turnier_api::internal_scrims::process_scrim_operational_once(&state)
         .await
         .expect("turniere operational consumer failed final result");
@@ -3137,10 +3149,41 @@ async fn turniere_runtime_consumes_result_fetches_and_scrim_reminders() {
         result_refs,
         vec![
             ("failed".to_string(), None),
-            ("fetched".to_string(), Some(1)),
+            ("failed".to_string(), None),
+            ("failed".to_string(), None),
             ("fetched".to_string(), Some(2)),
         ]
     );
+    let mismatched_result: (Option<String>, Option<Value>) = sqlx::query_as(
+        "SELECT last_error, raw_result_json \
+           FROM scrim.match_result_refs \
+          WHERE match_id=94 AND steam_match_id=9007199254740995",
+    )
+    .fetch_one(db.pool())
+    .await
+    .expect("mismatched result ref");
+    assert_eq!(
+        mismatched_result.0.as_deref(),
+        Some(
+            "Steam-Ergebnis gehört zu Match 9007199254740990, erwartet wurde Match 9007199254740995."
+        )
+    );
+    assert_eq!(mismatched_result.1, None);
+    let conflicting_result: (Option<String>, Option<Value>) = sqlx::query_as(
+        "SELECT last_error, raw_result_json \
+           FROM scrim.match_result_refs \
+          WHERE match_id=94 AND steam_match_id=9007199254740996",
+    )
+    .fetch_one(db.pool())
+    .await
+    .expect("conflicting result ref");
+    assert_eq!(
+        conflicting_result.0.as_deref(),
+        Some(
+            "Steam-Ergebnis gehört zu Match 9007199254740991, erwartet wurde Match 9007199254740996."
+        )
+    );
+    assert_eq!(conflicting_result.1, None);
 
     let reminder_status: String =
         sqlx::query_scalar("SELECT status FROM scrim.match_request_reminders WHERE id=$1")

@@ -432,11 +432,39 @@ async fn process_result_fetch(
     let result = state
         .match_manager
         .fetch_scrim_match_result(claim.steam_match_id, claim.party_id.as_deref())
-        .await;
-    let result = match result {
+        .await
+        .map_err(|error| error.to_string())
+        .and_then(|result| {
+            let parse_match_id = |key| match result.get(key) {
+                None | Some(serde_json::Value::Null) => Ok(None),
+                Some(value) => json_i64(value).map(Some).ok_or_else(|| {
+                    format!("Steam-Ergebnis enthält in {key} keine gültige Match-ID.")
+                }),
+            };
+            let match_id = parse_match_id("match_id")?;
+            let deadlock_match_id = parse_match_id("deadlock_match_id")?;
+            let returned_match_id = match_id.or(deadlock_match_id);
+            if let Some(expected) = claim.steam_match_id {
+                if let Some(actual) = [match_id, deadlock_match_id]
+                    .into_iter()
+                    .flatten()
+                    .find(|actual| *actual != expected)
+                {
+                    return Err(format!(
+                        "Steam-Ergebnis gehört zu Match {actual}, erwartet wurde Match {expected}."
+                    ));
+                }
+                if returned_match_id.is_none() {
+                    return Err(format!(
+                        "Steam-Ergebnis enthält keine Match-ID, erwartet wurde Match {expected}."
+                    ));
+                }
+            }
+            Ok((result, returned_match_id))
+        });
+    let (result, returned_match_id) = match result {
         Ok(result) => result,
         Err(error) => {
-            let error = error.to_string();
             let mut tx = state.pool.begin().await?;
             if let Some(result_ref_id) = claim.result_ref_id {
                 sqlx::query(
@@ -486,11 +514,7 @@ async fn process_result_fetch(
         }
     };
 
-    let steam_match_id = result
-        .get("match_id")
-        .or_else(|| result.get("deadlock_match_id"))
-        .and_then(json_i64)
-        .or(claim.steam_match_id);
+    let steam_match_id = returned_match_id.or(claim.steam_match_id);
     let winner_team_id = match result.get("winning_team").and_then(json_i64) {
         Some(0) => Some(claim.team_a_id),
         Some(1) => Some(claim.team_b_id),
