@@ -4362,10 +4362,13 @@ async fn match_block_and_action_operator_routes_persist_the_canonical_flow() {
     .execute(db.pool())
     .await
     .expect("team channel ids");
-    let broker = Router::new().route(
-        "/internal/master/v1/discord/send-message",
-        post(accept_broker),
-    );
+    let requests = Arc::new(Mutex::new(Vec::new()));
+    let broker = Router::new()
+        .route(
+            "/internal/master/v1/discord/send-message",
+            post(record_and_accept_message),
+        )
+        .with_state(requests);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
         .expect("broker listener");
