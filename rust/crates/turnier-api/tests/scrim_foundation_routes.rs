@@ -2039,7 +2039,18 @@ async fn match_request_patch_reminder_and_publication_persist_and_validate() {
     seed_coach(db.pool(), 123456789).await;
     seed_teams(db.pool(), &[1, 2]).await;
     seed_operator_request_fixture(db.pool()).await;
-    let app = app_with_pool(db.pool().clone());
+    let broker = Router::new().route(
+        "/internal/master/v1/discord/send-message",
+        post(accept_broker),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("broker listener");
+    let broker_url = format!("http://{}", listener.local_addr().expect("broker address"));
+    let broker_task = tokio::spawn(async move {
+        axum::serve(listener, broker).await.expect("broker server");
+    });
+    let app = app_with_pool_and_broker(db.pool().clone(), Some(&broker_url));
 
     let (status, body) = send(
         &app,
@@ -2156,7 +2167,7 @@ async fn match_request_patch_reminder_and_publication_persist_and_validate() {
     )
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
-    let (status, _) = send(
+    let (status, body) = send(
         &app,
         IpAddr::V4(Ipv4Addr::LOCALHOST),
         coach_headers("match_request_reminder:invalid", "123456789"),
@@ -2166,6 +2177,7 @@ async fn match_request_patch_reminder_and_publication_persist_and_validate() {
     )
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(body["detail"], "Invalid reminder template");
     let (status, _) = send(
         &app,
         IpAddr::V4(Ipv4Addr::LOCALHOST),
@@ -2176,6 +2188,61 @@ async fn match_request_patch_reminder_and_publication_persist_and_validate() {
     )
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
+
+    broker_task.abort();
+}
+
+#[cfg(feature = "testing")]
+#[tokio::test]
+async fn status_publication_dispatch_failure_is_retryable_without_rolling_back_state() {
+    let db = turnier_db::test_pool().await.expect("central test pool");
+    enable_turniere_runtime(db.pool()).await;
+    seed_coach(db.pool(), 123456789).await;
+    seed_teams(db.pool(), &[1, 2]).await;
+    seed_operator_request_fixture(db.pool()).await;
+    let requests = Arc::new(Mutex::new(Vec::new()));
+    let broker = Router::new()
+        .route(
+            "/internal/master/v1/discord/send-message",
+            post(record_and_fail_broker),
+        )
+        .with_state(requests.clone());
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("broker listener");
+    let broker_url = format!("http://{}", listener.local_addr().expect("broker address"));
+    let broker_task = tokio::spawn(async move {
+        axum::serve(listener, broker).await.expect("broker server");
+    });
+    let app = app_with_pool_and_broker(db.pool().clone(), Some(&broker_url));
+
+    for _ in 0..2 {
+        let (status, body) = send(
+            &app,
+            IpAddr::V4(Ipv4Addr::LOCALHOST),
+            coach_headers("status_publication:broker_failure", "123456789"),
+            Method::POST,
+            "/internal/turnier/v1/scrims/match-requests/93/status-publications",
+            Some(json!({"channel_id":"7001","message":"Test status"})),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_GATEWAY);
+        assert_eq!(body["detail"], "Discord-Sync fehlgeschlagen.");
+    }
+
+    let approval_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM scrim.status_publication_approvals \
+          WHERE target_kind='match_request' AND target_id='93'",
+    )
+    .fetch_one(db.pool())
+    .await
+    .expect("persisted status publication");
+    assert_eq!(approval_count, 1);
+    let payloads = requests.lock().expect("broker requests");
+    assert_eq!(payloads.len(), 2);
+    assert_eq!(payloads[0], payloads[1]);
+
+    broker_task.abort();
 }
 
 #[cfg(feature = "testing")]
@@ -2311,7 +2378,7 @@ async fn replacement_request_without_discord_target_keeps_need_open() {
     .expect("candidate without Discord target");
     let app = app_with_pool(db.pool().clone());
 
-    let (status, _) = send(
+    let (status, body) = send(
         &app,
         IpAddr::V4(Ipv4Addr::LOCALHOST),
         coach_headers("replacement_request:no_target", "123456789"),
@@ -2322,6 +2389,7 @@ async fn replacement_request_without_discord_target_keeps_need_open() {
     .await;
 
     assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(body["detail"], "No linked Discord account; DM not sent.");
     let request_count: i64 =
         sqlx::query_scalar("SELECT COUNT(*) FROM scrim.replacement_requests WHERE need_id=$1")
             .bind(need_id)
@@ -2368,7 +2436,7 @@ async fn replacement_dispatch_failure_is_retryable_without_rolling_back_state() 
     let route = format!("/internal/turnier/v1/scrims/replacement-needs/{need_id}/requests");
 
     for _ in 0..2 {
-        let (status, _) = send(
+        let (status, body) = send(
             &app,
             IpAddr::V4(Ipv4Addr::LOCALHOST),
             coach_headers("replacement_request:broker_failure", "123456789"),
@@ -2378,6 +2446,7 @@ async fn replacement_dispatch_failure_is_retryable_without_rolling_back_state() 
         )
         .await;
         assert_eq!(status, StatusCode::BAD_GATEWAY);
+        assert_eq!(body["detail"], "Discord-Sync fehlgeschlagen.");
     }
 
     let states: (i64, String, String, String, i64) = sqlx::query_as(

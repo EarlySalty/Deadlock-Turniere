@@ -924,13 +924,16 @@ async fn create_match_request_status_publication(
             (actor.discord_id, actor.display_name),
         )
         .await?;
-    dispatch_discord(
+    let delivered = dispatch_discord(
         &state,
         "match_request_status_publication",
         mutation.idempotency_key,
         &dispatch,
     )
     .await;
+    if !delivered {
+        return Err(WebError::new(StatusCode::BAD_GATEWAY, DISCORD_SYNC_FAILED));
+    }
     Ok((StatusCode::OK, Json(dispatch.receipt)))
 }
 
@@ -977,7 +980,7 @@ async fn create_replacement_request(
     )
     .await;
     if !delivered {
-        return Err(WebError::new(StatusCode::BAD_GATEWAY, "Platzhalter"));
+        return Err(WebError::new(StatusCode::BAD_GATEWAY, DISCORD_SYNC_FAILED));
     }
     Ok((StatusCode::OK, Json(dispatch.receipt)))
 }

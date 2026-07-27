@@ -102,6 +102,50 @@ async fn signup_creates_and_then_updates_one_participant_per_discord_id() {
 }
 
 #[tokio::test]
+async fn signup_does_not_restore_managed_roles_for_inactive_participants() {
+    let db = turnier_db::test_pool().await.expect("central test pool");
+    sqlx::raw_sql(
+        r#"
+        INSERT INTO scrim.teams(id, name, discord_role_id, created_at)
+        VALUES (950001, 'Inactive Team', 950003, now());
+        INSERT INTO scrim.participants(
+            id, discord_id, display_name, rank_source, rank_verified, status, source,
+            created_at, updated_at
+        )
+        VALUES (950001, 950002, 'Inactive Player', 'self', false, 'inactive', 'test', now(), now());
+        INSERT INTO scrim.team_members(team_id, participant_id, role, is_captain, is_bench)
+        VALUES (950001, 950001, 'player', false, false);
+        "#,
+    )
+    .execute(db.pool())
+    .await
+    .expect("inactive participant fixture");
+    let service = ScrimService::new(PgScrimReadRepository::new(db.pool().clone()));
+
+    let signup = service
+        .signup(
+            "950002",
+            "Inactive Player",
+            SignupRequest {
+                rank: None,
+                roles: None,
+                availability: None,
+                availability_slots: None,
+            },
+            Some(9_500),
+            Some(9_501),
+        )
+        .await
+        .expect("repeat signup");
+
+    assert_eq!(signup.participant.status, "inactive");
+    assert!(
+        signup.role_ids.is_empty(),
+        "inactive participants must not regain signup, reserve, or team roles"
+    );
+}
+
+#[tokio::test]
 async fn availability_update_changes_only_availability_fields() {
     let db = turnier_db::test_pool().await.expect("central test pool");
     sqlx::query(

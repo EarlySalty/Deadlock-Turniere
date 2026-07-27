@@ -752,12 +752,16 @@ impl PgScrimReadRepository {
         .bind(participant_id)
         .fetch_all(&mut *tx)
         .await?;
-        let role_ids = managed_role_ids(
-            &participant.status,
-            signup_role_id,
-            reserve_role_id,
-            team_role_ids,
-        );
+        let role_ids = if participant.status.trim().eq_ignore_ascii_case("inactive") {
+            BTreeSet::new()
+        } else {
+            managed_role_ids(
+                &participant.status,
+                signup_role_id,
+                reserve_role_id,
+                team_role_ids,
+            )
+        };
         tx.commit().await?;
         Ok(SignupMutation {
             participant,
@@ -1424,7 +1428,11 @@ impl PgScrimReadRepository {
     ) -> ScrimResult<ActionReceipt> {
         let template = match request.template.as_deref().unwrap_or("antwort_fehlt") {
             template @ ("antwort_fehlt" | "frist_bald" | "bestaetigung_offen") => template,
-            _ => return Err(ScrimError::InvalidProposal("Platzhalter".to_string())),
+            _ => {
+                return Err(ScrimError::InvalidProposal(
+                    "Invalid reminder template".to_string(),
+                ));
+            }
         };
         let mut tx = self.pool.begin().await?;
         lock_runtime_control(&mut tx).await?;
@@ -1816,7 +1824,9 @@ impl PgScrimReadRepository {
         let candidate_id = candidate.try_get::<i64, _>("id")?;
         let discord_user_id = candidate
             .try_get::<Option<i64>, _>("discord_user_id")?
-            .ok_or_else(|| ScrimError::InvalidProposal("Platzhalter".to_string()))?;
+            .ok_or_else(|| {
+                ScrimError::InvalidProposal("No linked Discord account; DM not sent.".to_string())
+            })?;
         let request_payload = serde_json::to_value(request).map_err(|_| {
             ScrimError::InvalidProposal("Die Anfrage ließ sich nicht verarbeiten.".to_string())
         })?;
