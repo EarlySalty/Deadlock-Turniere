@@ -2985,7 +2985,7 @@ async fn replacement_candidates_are_ranked_and_requests_persist_and_transition()
 
 #[cfg(feature = "testing")]
 #[tokio::test]
-async fn accepted_replacement_retries_the_team_role_after_a_broker_failure() {
+async fn accepted_replacement_retries_the_team_role_after_a_retryable_broker_failure() {
     let db = turnier_db::test_pool().await.expect("central test pool");
     enable_turniere_runtime(db.pool()).await;
     seed_coach(db.pool(), 123456789).await;
@@ -3029,7 +3029,7 @@ async fn accepted_replacement_retries_the_team_role_after_a_broker_failure() {
     .await
     .expect("replacement request");
 
-    for attempt in 0..2 {
+    for expected_status in [StatusCode::BAD_GATEWAY, StatusCode::OK] {
         let (status, _) = send(
             &app,
             IpAddr::V4(Ipv4Addr::LOCALHOST),
@@ -3045,8 +3045,16 @@ async fn accepted_replacement_retries_the_team_role_after_a_broker_failure() {
             Some(json!({"action":"accept"})),
         )
         .await;
-        assert_eq!(status, StatusCode::OK);
-        if attempt == 0 {
+        assert_eq!(status, expected_status);
+        if status == StatusCode::BAD_GATEWAY {
+            let assignment: Option<(i32, bool, bool)> = sqlx::query_as(
+                "SELECT team_id, is_bench, substitute_until IS NOT NULL \
+                   FROM scrim.team_members WHERE participant_id=302",
+            )
+            .fetch_optional(db.pool())
+            .await
+            .expect("substitute assignment after Discord failure");
+            assert_eq!(assignment, Some((1, true, true)));
             let stripped = sqlx::query(
                 "UPDATE scrim.command_receipts \
                     SET result_payload=result_payload - 'sync_plans' \
@@ -3060,14 +3068,6 @@ async fn accepted_replacement_retries_the_team_role_after_a_broker_failure() {
         }
     }
 
-    let assignment: Option<(i32, bool, bool)> = sqlx::query_as(
-        "SELECT team_id, is_bench, substitute_until IS NOT NULL \
-           FROM scrim.team_members WHERE participant_id=302",
-    )
-    .fetch_optional(db.pool())
-    .await
-    .expect("substitute assignment");
-    assert_eq!(assignment, Some((1, true, true)));
     assert_eq!(
         requests.lock().expect("broker requests").as_slice(),
         &[

@@ -1148,8 +1148,11 @@ async fn patch_replacement_request(
         .sync_plans
         .iter()
         .any(|plan| !plan.actions.is_empty())
+        && !sync_discord_roles(&state, response.sync_plans, request_key)
+            .await
+            .ok
     {
-        sync_discord_roles(&state, response.sync_plans, request_key).await;
+        return Err(WebError::new(StatusCode::BAD_GATEWAY, DISCORD_SYNC_FAILED));
     }
     Ok((StatusCode::OK, Json(response.receipt)))
 }
