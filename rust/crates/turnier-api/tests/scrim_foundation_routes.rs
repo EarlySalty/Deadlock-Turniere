@@ -1873,8 +1873,8 @@ async fn maximal_valid_request_key_retries_team_role_creation_with_broker_safe_k
         axum::serve(listener, broker).await.expect("broker server");
     });
     let app = app_with_pool_and_broker(db.pool().clone(), Some(&broker_url));
-    let request_key = format!("{}:{}", "a".repeat(32), "b".repeat(96));
-    assert_eq!(request_key.chars().count(), 129);
+    let request_key = format!("{}:{}", "a".repeat(32), "b".repeat(95));
+    assert_eq!(request_key.chars().count(), 128);
     let headers = coach_headers(&request_key, "123456789");
     let body = json!({
         "name":"Role Failure",
@@ -2054,7 +2054,7 @@ async fn announce_reports_reaction_failure_without_losing_posted_message() {
     assert_eq!(requests[0]["message_id"], "12345");
     assert_eq!(requests[0]["emoji"], "✅");
     // Der Schluessel leitet sich aus Kanal und Nachricht ab, nicht aus dem Aufrufer-Key:
-    // der darf 129 Zeichen lang sein, der Broker nimmt 128.
+    // der darf 128 Zeichen lang sein, der Broker nimmt ebenfalls 128.
     let reaction_key = requests[0]["idempotency_key"]
         .as_str()
         .expect("reaction idempotency key");
@@ -2066,6 +2066,66 @@ async fn announce_reports_reaction_failure_without_losing_posted_message() {
         )
     );
     assert!(reaction_key.chars().count() <= 128);
+
+    broker_task.abort();
+}
+
+#[cfg(feature = "testing")]
+#[tokio::test]
+async fn substitute_dm_hashes_the_request_idempotency_key_for_the_broker() {
+    let db = turnier_db::test_pool().await.expect("central test pool");
+    enable_turniere_runtime(db.pool()).await;
+    seed_coach(db.pool(), 123456789).await;
+    seed_roster_fixture(db.pool()).await;
+
+    let failed_requests = Arc::new(Mutex::new(Vec::new()));
+    let broker = Router::new()
+        .route(
+            "/internal/master/v1/discord/send-dm",
+            post(record_and_fail_broker),
+        )
+        .with_state(failed_requests.clone());
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("broker listener");
+    let broker_url = format!("http://{}", listener.local_addr().expect("broker address"));
+    let broker_task = tokio::spawn(async move {
+        axum::serve(listener, broker).await.expect("broker server");
+    });
+    let app = app_with_pool_and_broker(db.pool().clone(), Some(&broker_url));
+    let request_key = "roster:substitute:dm-idempotency";
+    let user_id = 9502_u64;
+
+    let (status, substitute) = send(
+        &app,
+        IpAddr::V4(Ipv4Addr::LOCALHOST),
+        coach_headers(request_key, "123456789"),
+        Method::POST,
+        "/internal/turnier/v1/scrims/teams/10/substitute",
+        Some(json!({
+            "participant_id": 502,
+            "window": {"day": "fri", "from": 1200, "to": 1320}
+        })),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(substitute["dm"]["ok"], false);
+    let requests = failed_requests.lock().expect("broker requests");
+    assert_eq!(requests.len(), 1);
+    assert_eq!(requests[0]["user_id"], user_id);
+    let dm_key = requests[0]["idempotency_key"]
+        .as_str()
+        .expect("DM idempotency key");
+    assert_eq!(
+        dm_key,
+        format!(
+            "scrim-dm-{:x}",
+            Sha256::digest(format!("{request_key}\0{user_id}").as_bytes())
+        )
+    );
+    assert!(dm_key.chars().count() <= 128);
+    assert!(dm_key.starts_with("scrim-dm-"));
 
     broker_task.abort();
 }
@@ -2148,8 +2208,8 @@ async fn maximal_valid_request_key_retries_team_coach_role_removal_from_saved_pa
         axum::serve(listener, broker).await.expect("broker server");
     });
     let app = app_with_pool_and_broker(db.pool().clone(), Some(&broker_url));
-    let request_key = format!("{}:{}", "a".repeat(32), "b".repeat(96));
-    assert_eq!(request_key.chars().count(), 129);
+    let request_key = format!("{}:{}", "a".repeat(32), "b".repeat(95));
+    assert_eq!(request_key.chars().count(), 128);
     let headers = coach_headers(&request_key, "123456789");
     let body = json!({"coach_discord_id":"987654321"});
 
@@ -2611,6 +2671,50 @@ async fn roster_operator_routes_validate_each_contract() {
         .await;
         assert_eq!(status, expected, "{route}");
     }
+}
+
+#[cfg(feature = "testing")]
+#[tokio::test]
+async fn mutation_idempotency_key_accepts_128_bytes_and_rejects_129() {
+    let db = turnier_db::test_pool().await.expect("central test pool");
+    enable_turniere_runtime(db.pool()).await;
+    seed_coach(db.pool(), 123456789).await;
+    seed_roster_fixture(db.pool()).await;
+    let app = app_with_pool(db.pool().clone());
+    let valid_key = format!("{}:{}", "a".repeat(32), "b".repeat(95));
+    let too_long_key = format!("{}:{}", "a".repeat(32), "b".repeat(96));
+    assert_eq!(valid_key.len(), 128);
+    assert_eq!(too_long_key.len(), 129);
+
+    let (status, _) = send(
+        &app,
+        IpAddr::V4(Ipv4Addr::LOCALHOST),
+        coach_headers(&valid_key, "123456789"),
+        Method::POST,
+        "/internal/turnier/v1/scrims/teams/10/suggest",
+        Some(json!({
+            "window": {"day": "fri", "from": 1200, "to": 1320},
+            "size": 1,
+            "pool": "players"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, _) = send(
+        &app,
+        IpAddr::V4(Ipv4Addr::LOCALHOST),
+        coach_headers(&too_long_key, "123456789"),
+        Method::POST,
+        "/internal/turnier/v1/scrims/teams/10/suggest",
+        Some(json!({
+            "window": {"day": "fri", "from": 1200, "to": 1320},
+            "size": 1,
+            "pool": "players"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
 }
 
 #[cfg(feature = "testing")]
