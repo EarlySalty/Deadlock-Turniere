@@ -28,6 +28,33 @@ const VALID_LEAVE_STATUSES: [&str; 2] = ["lobby_created", "in_progress"];
 impl MatchManager {
     // --- Öffentliche Lobby-API (Bracket + Group) ------------------------
 
+    /// Holt ein Scrim-Ergebnis über dieselbe Steam-Bridge wie Turnier-Matches.
+    pub async fn fetch_scrim_match_result(
+        &self,
+        steam_match_id: Option<i64>,
+        party_id: Option<&str>,
+    ) -> SteamTaskResult<Value> {
+        let mut payload = serde_json::Map::new();
+        if let Some(steam_match_id) = steam_match_id {
+            payload.insert("match_id".to_string(), json!(steam_match_id));
+        }
+        if let Some(party_id) = party_id.map(str::trim).filter(|value| !value.is_empty()) {
+            payload.insert("party_id".to_string(), json!(party_id));
+        }
+        if payload.is_empty() {
+            return Err(SteamTaskError::state(
+                "Scrim-Ergebnis braucht eine Match-ID oder Party-ID",
+            ));
+        }
+        self.run_steam_task(
+            "Scrim-Ergebnis abrufen",
+            "GC_GET_MATCH_RESULT",
+            &Value::Object(payload),
+            45.0,
+        )
+        .await
+    }
+
     /// Erstellt eine Steam-Custom-Lobby für ein Bracket-Match.
     /// Entspricht `create_lobby`.
     pub async fn create_lobby(&self, tournament_id: i64, match_id: i64) -> SteamTaskResult<Value> {

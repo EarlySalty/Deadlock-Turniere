@@ -18,6 +18,8 @@ use axum::routing::post;
 use axum::Json;
 use axum::Router;
 use serde_json::{json, Value};
+#[cfg(feature = "testing")]
+use sha2::{Digest, Sha256};
 use sqlx::postgres::PgPoolOptions;
 use sqlx::PgPool;
 #[cfg(feature = "testing")]
@@ -28,6 +30,8 @@ use turnier_api::{build_router, AppState};
 use turnier_config::Config;
 use turnier_discord::{BrokerClient, DiscordNotifier};
 use turnier_match::MatchManager;
+#[cfg(feature = "testing")]
+use turnier_match::SteamBridge;
 use turnier_steam::SteamRankResolver;
 
 fn app() -> Router {
@@ -50,6 +54,18 @@ fn app_with_pool_broker_and_signup_role(
     broker_base_url: Option<&str>,
     signup_role_id: Option<i64>,
 ) -> Router {
+    build_router(state_with_pool_broker_and_signup_role(
+        pool,
+        broker_base_url,
+        signup_role_id,
+    ))
+}
+
+fn state_with_pool_broker_and_signup_role(
+    pool: PgPool,
+    broker_base_url: Option<&str>,
+    signup_role_id: Option<i64>,
+) -> AppState {
     let mut config = Config::from_env();
     config.turnier_internal_api_token = "internal-token".to_string();
     config.discord_bot_token = String::new();
@@ -70,7 +86,7 @@ fn app_with_pool_broker_and_signup_role(
     let match_manager = Arc::new(MatchManager::new(pool.clone(), None, None, &config));
     let notifier = Arc::new(DiscordNotifier::new(broker, pool.clone(), &config));
     let rank_resolver = Arc::new(SteamRankResolver::from_pool(pool.clone(), None, None));
-    let state = AppState {
+    AppState {
         pool,
         config,
         role_sets,
@@ -79,8 +95,7 @@ fn app_with_pool_broker_and_signup_role(
         rank_resolver,
         notifier,
         draft_lobby_creations: Arc::new(Mutex::new(HashMap::new())),
-    };
-    build_router(state)
+    }
 }
 
 #[cfg(feature = "testing")]
@@ -146,6 +161,27 @@ async fn fail_once_then_send_message(
     requests.push(payload);
     if first_request {
         Err(StatusCode::SERVICE_UNAVAILABLE)
+    } else {
+        Ok(Json(json!({"result":{"message_id":"912345678901234568"}})))
+    }
+}
+
+#[cfg(feature = "testing")]
+async fn fail_once_then_reject_idempotency_conflicts(
+    State(requests): State<Arc<Mutex<Vec<Value>>>>,
+    Json(payload): Json<Value>,
+) -> Result<Json<Value>, StatusCode> {
+    let mut requests = requests.lock().expect("broker requests");
+    let first_request = requests.is_empty();
+    let conflict = requests.iter().skip(1).any(|request| {
+        request["idempotency_key"] == payload["idempotency_key"]
+            && request["content"] != payload["content"]
+    });
+    requests.push(payload);
+    if first_request {
+        Err(StatusCode::SERVICE_UNAVAILABLE)
+    } else if conflict {
+        Err(StatusCode::CONFLICT)
     } else {
         Ok(Json(json!({"result":{"message_id":"912345678901234568"}})))
     }
@@ -2832,6 +2868,340 @@ async fn match_request_patch_reminder_and_publication_persist_and_validate() {
     )
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
+
+    broker_task.abort();
+}
+
+#[cfg(feature = "testing")]
+#[tokio::test]
+async fn turniere_runtime_consumes_result_fetches_and_scrim_reminders() {
+    let db = turnier_db::test_pool().await.expect("central test pool");
+    enable_turniere_runtime(db.pool()).await;
+    seed_coach(db.pool(), 123456789).await;
+    seed_teams(db.pool(), &[1, 2]).await;
+    seed_operator_request_fixture(db.pool()).await;
+
+    let requests = Arc::new(Mutex::new(Vec::new()));
+    let broker = Router::new()
+        .route(
+            "/internal/master/v1/discord/send-message",
+            post(fail_once_then_reject_idempotency_conflicts),
+        )
+        .with_state(requests.clone());
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("broker listener");
+    let broker_url = format!("http://{}", listener.local_addr().expect("broker address"));
+    let broker_task = tokio::spawn(async move {
+        axum::serve(listener, broker).await.expect("broker server");
+    });
+
+    let steam_pool = sqlx::sqlite::SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect("sqlite::memory:")
+        .await
+        .expect("steam bridge");
+    sqlx::query(
+        "CREATE TABLE steam_tasks (\
+             id INTEGER PRIMARY KEY AUTOINCREMENT, type TEXT, payload TEXT, status TEXT, \
+             result TEXT, error TEXT, created_at INTEGER, updated_at INTEGER, \
+             started_at INTEGER, finished_at INTEGER, attempts INTEGER DEFAULT 0\
+         )",
+    )
+    .execute(&steam_pool)
+    .await
+    .expect("steam task schema");
+
+    let mut state =
+        state_with_pool_broker_and_signup_role(db.pool().clone(), Some(&broker_url), None);
+    state.match_manager = Arc::new(MatchManager::new(
+        db.pool().clone(),
+        None,
+        Some(SteamBridge::from_pool(steam_pool.clone())),
+        &state.config,
+    ));
+    let app = build_router(state.clone());
+
+    let (status, _) = send(
+        &app,
+        IpAddr::V4(Ipv4Addr::LOCALHOST),
+        coach_headers("runtime:reminder:92", "123456789"),
+        Method::POST,
+        "/internal/turnier/v1/scrims/match-requests/92/reminders",
+        Some(json!({"template":"frist_bald"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    sqlx::query(
+        "UPDATE scrim.match_request_reminders \
+            SET status='posting', updated_at=now() - interval '16 minutes' \
+          WHERE request_id=92",
+    )
+    .execute(db.pool())
+    .await
+    .expect("abandoned reminder claim");
+    let reminder_id: i64 =
+        sqlx::query_scalar("SELECT id FROM scrim.match_request_reminders WHERE request_id=92")
+            .fetch_one(db.pool())
+            .await
+            .expect("reminder id");
+    let persisted_reminder_payload = json!({
+        "channel_id": 201,
+        "content": "Bereits versendeter Reminder mit unverändertem Inhalt.",
+        "idempotency_key": format!("scrim-reminder:{reminder_id}")
+    });
+    let payload_hash = Sha256::digest(
+        serde_json::to_vec(&persisted_reminder_payload).expect("reminder payload JSON"),
+    )
+    .to_vec();
+    let effect_id: i64 = sqlx::query_scalar(
+        "INSERT INTO scrim.outbox_effects(\
+             effect_type, idempotency_key, payload_hash, payload, state, remote_system, \
+             lease_owner, lease_until, attempts\
+         ) VALUES (\
+             'discord_scrim_effect', $1, $2, $3, 'leased', 'discord', \
+             'turnier_bot:scrim_reminder', now() - interval '15 minutes', 1\
+         ) \
+         RETURNING id",
+    )
+    .bind(format!("scrim_reminder:{reminder_id}"))
+    .bind(payload_hash)
+    .bind(&persisted_reminder_payload)
+    .fetch_one(db.pool())
+    .await
+    .expect("persisted reminder effect");
+    sqlx::query(
+        "INSERT INTO scrim.match_request_reminder_effects(reminder_id, outbox_effect_id) \
+         VALUES ($1, $2)",
+    )
+    .bind(reminder_id)
+    .bind(effect_id)
+    .execute(db.pool())
+    .await
+    .expect("reminder effect link");
+    sqlx::query(
+        "INSERT INTO scrim.match_request_responses(\
+             request_id, team_id, participant_id, discord_user_id, slot_index, \
+             response, source, responded_at, updated_at\
+         ) VALUES (92, 1, 101, '1001', 0, 'available', 'button', now(), now())",
+    )
+    .execute(db.pool())
+    .await
+    .expect("late reminder response");
+    let uncertain_reminder_id: i64 = sqlx::query_scalar(
+        "INSERT INTO scrim.match_request_reminders(\
+             request_id, team_id, template, target_kind, target_participant_ids, \
+             target_discord_user_ids, missing_count, approved_by_user_id, \
+             approved_by_display_name, status, discord_channel_id, source_message_id, \
+             updated_at\
+         ) VALUES (\
+             92, 1, 'frist_bald', 'members', ARRAY[101], ARRAY[1001]::BIGINT[], 1, \
+             '123456789', 'Coach', 'failed', 201, 20001, now() - interval '16 minutes'\
+         ) RETURNING id",
+    )
+    .fetch_one(db.pool())
+    .await
+    .expect("legacy uncertain reminder");
+    let uncertain_payload = json!({
+        "schema_version": "discord-scrim-effect:v1",
+        "message_kind": "match_request_reminder",
+        "operation": "post",
+        "channel_id": "201",
+        "body": {"content": "Unklare Legacy-Zustellung"}
+    });
+    let uncertain_hash =
+        Sha256::digest(serde_json::to_vec(&uncertain_payload).expect("uncertain payload JSON"))
+            .to_vec();
+    let uncertain_effect_id: i64 = sqlx::query_scalar(
+        "INSERT INTO scrim.outbox_effects(\
+             effect_type, idempotency_key, payload_hash, payload, state, remote_system\
+         ) VALUES ('discord_scrim_effect', $1, $2, $3, 'uncertain', 'discord') \
+         RETURNING id",
+    )
+    .bind(format!("scrim_reminder_uncertain:{uncertain_reminder_id}"))
+    .bind(uncertain_hash)
+    .bind(&uncertain_payload)
+    .fetch_one(db.pool())
+    .await
+    .expect("legacy uncertain reminder effect");
+    sqlx::query(
+        "INSERT INTO scrim.match_request_reminder_effects(reminder_id, outbox_effect_id) \
+         VALUES ($1, $2)",
+    )
+    .bind(uncertain_reminder_id)
+    .bind(uncertain_effect_id)
+    .execute(db.pool())
+    .await
+    .expect("legacy uncertain reminder link");
+
+    sqlx::raw_sql(
+        r#"
+        INSERT INTO scrim.matches(
+            id, team_a_id, team_b_id, status, lobby_state, steam_match_id, created_at, updated_at
+        ) VALUES (
+            94, 1, 2, 'scheduled', 'result_fetching', 9007199254740994,
+            now(), now() - interval '16 minutes'
+        );
+        INSERT INTO scrim.match_result_refs(
+            match_id, steam_match_id, source_user_id, source_display_name,
+            fetch_status, entered_at, updated_at
+        ) VALUES
+            (
+                94, 9007199254740994, '123456789', 'Coach', 'fetching',
+                now(), now() - interval '16 minutes'
+            ),
+            (94, 9007199254740995, '123456789', 'Coach', 'pending', now(), now()),
+            (94, 9007199254740996, '123456789', 'Coach', 'pending', now(), now());
+        "#,
+    )
+    .execute(db.pool())
+    .await
+    .expect("result fetch seed");
+
+    let steam_worker_pool = steam_pool.clone();
+    let steam_task = tokio::spawn(async move {
+        for outcome in [Some(0), Some(1), None] {
+            loop {
+                if let Some(id) = sqlx::query_scalar::<_, i64>(
+                    "SELECT id FROM steam_tasks WHERE status='PENDING'",
+                )
+                .fetch_optional(&steam_worker_pool)
+                .await
+                .expect("pending steam task")
+                {
+                    if let Some(winning_team) = outcome {
+                        sqlx::query(
+                            "UPDATE steam_tasks \
+                                SET status='DONE', result=$2, updated_at=1, finished_at=1 \
+                              WHERE id=$1",
+                        )
+                        .bind(id)
+                        .bind(
+                            json!({
+                                "success": true,
+                                "match_id": format!("900719925474099{winning_team}"),
+                                "winning_team": winning_team,
+                                "duration_s": 1800
+                            })
+                            .to_string(),
+                        )
+                        .execute(&steam_worker_pool)
+                        .await
+                        .expect("complete steam task");
+                    } else {
+                        sqlx::query(
+                            "UPDATE steam_tasks \
+                                SET status='FAILED', error='Steam nicht erreichbar', \
+                                    updated_at=1, finished_at=1 \
+                              WHERE id=$1",
+                        )
+                        .bind(id)
+                        .execute(&steam_worker_pool)
+                        .await
+                        .expect("fail steam task");
+                    }
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        }
+    });
+
+    turnier_api::internal_scrims::process_scrim_operational_once(&state)
+        .await
+        .expect("turniere operational consumer");
+    let after_first_fetch: (String, i64) = sqlx::query_as(
+        "SELECT lobby_state, \
+                (SELECT COUNT(*) FROM scrim.match_result_refs \
+                  WHERE match_id=94 AND fetch_status='fetched') \
+           FROM scrim.matches WHERE id=94",
+    )
+    .fetch_one(db.pool())
+    .await
+    .expect("first consumed result");
+    assert_eq!(after_first_fetch, ("result_requested".to_string(), 1));
+
+    turnier_api::internal_scrims::process_scrim_operational_once(&state)
+        .await
+        .expect("turniere operational consumer second result");
+    turnier_api::internal_scrims::process_scrim_operational_once(&state)
+        .await
+        .expect("turniere operational consumer failed final result");
+    steam_task.await.expect("steam worker");
+
+    let result: (String, Option<i32>, Value) = sqlx::query_as(
+        "SELECT lobby_state, winner_team_id, result_json FROM scrim.matches WHERE id=94",
+    )
+    .fetch_one(db.pool())
+    .await
+    .expect("consumed result");
+    assert_eq!(result.0, "finished");
+    assert_eq!(result.1, Some(2));
+    assert_eq!(result.2["duration_s"], 1800);
+    let result_refs: Vec<(String, Option<i32>)> = sqlx::query_as(
+        "SELECT fetch_status, winner_team_id \
+           FROM scrim.match_result_refs WHERE match_id=94 ORDER BY steam_match_id",
+    )
+    .fetch_all(db.pool())
+    .await
+    .expect("consumed result refs");
+    assert_eq!(
+        result_refs,
+        vec![
+            ("failed".to_string(), None),
+            ("fetched".to_string(), Some(1)),
+            ("fetched".to_string(), Some(2)),
+        ]
+    );
+
+    let reminder_status: String =
+        sqlx::query_scalar("SELECT status FROM scrim.match_request_reminders WHERE id=$1")
+            .bind(reminder_id)
+            .fetch_one(db.pool())
+            .await
+            .expect("consumed reminder");
+    assert_eq!(reminder_status, "posted");
+    let uncertain_status: String =
+        sqlx::query_scalar("SELECT status FROM scrim.match_request_reminders WHERE id=$1")
+            .bind(uncertain_reminder_id)
+            .fetch_one(db.pool())
+            .await
+            .expect("uncertain reminder status");
+    assert_eq!(uncertain_status, "uncertain");
+    let confirmed_receipts: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM scrim.effect_receipts \
+          WHERE outbox_effect_id=$1 AND status='confirmed'",
+    )
+    .bind(effect_id)
+    .fetch_one(db.pool())
+    .await
+    .expect("reminder delivery receipt");
+    assert_eq!(confirmed_receipts, 1);
+    let payloads = requests.lock().expect("broker requests");
+    assert!(payloads
+        .iter()
+        .any(|payload| payload == &persisted_reminder_payload));
+    assert!(!payloads.iter().any(|payload| payload == &uncertain_payload));
+    assert!(payloads.iter().any(|payload| {
+        payload["content"]
+            .as_str()
+            .is_some_and(|content| content.contains("Scrim beendet. Das Ergebnis ist eingetragen."))
+    }));
+    let result_idempotency_keys = payloads
+        .iter()
+        .filter_map(|payload| {
+            payload["idempotency_key"]
+                .as_str()
+                .filter(|key| key.starts_with("scrim-result:"))
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        result_idempotency_keys.len(),
+        result_idempotency_keys
+            .iter()
+            .collect::<std::collections::HashSet<_>>()
+            .len()
+    );
 
     broker_task.abort();
 }

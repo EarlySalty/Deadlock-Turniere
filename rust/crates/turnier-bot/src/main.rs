@@ -8,7 +8,11 @@
 use std::sync::Arc;
 
 use anyhow::Context;
-use turnier_api::{build_router, internal_scrims::spawn_substitute_sweep_worker, AppState};
+use turnier_api::{
+    build_router,
+    internal_scrims::{spawn_scrim_operational_worker, spawn_substitute_sweep_worker},
+    AppState,
+};
 use turnier_config::Config;
 use turnier_discord::{BrokerClient, DiscordNotifier};
 use turnier_scheduler::{start_scheduler, Scheduler};
@@ -70,7 +74,8 @@ async fn main() -> anyhow::Result<()> {
     // Scheduler-Loop (Phasenübergänge + Reminder) als Hintergrund-Task.
     let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
     let scheduler_handle = tokio::spawn(start_scheduler(scheduler, shutdown_rx));
-    spawn_substitute_sweep_worker(state);
+    spawn_substitute_sweep_worker(state.clone());
+    spawn_scrim_operational_worker(state);
 
     let addr = format!("{}:{}", config.backend_host, config.backend_port);
     let listener = tokio::net::TcpListener::bind(&addr).await?;

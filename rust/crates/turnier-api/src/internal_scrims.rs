@@ -11,6 +11,7 @@ use axum::routing::{get, patch, post, put};
 use axum::{Json, Router};
 use chrono::{DateTime, Utc};
 use sha2::{Digest, Sha256};
+use sqlx::Row;
 
 use turnier_scrim::decision::validate_match_request_batch;
 use turnier_scrim::dto::{
@@ -60,6 +61,29 @@ const DM_SUCCESS: &str = "DM sent.";
 const DM_FAILED: &str = "DM delivery failed.";
 const LOBBY_CODE_DISCORD_TIMEOUT: Duration = Duration::from_secs(25);
 const SUBSTITUTE_DISCORD_SYNC_TIMEOUT: Duration = Duration::from_secs(20);
+const SCRIM_OPERATIONAL_POLL_INTERVAL: Duration = Duration::from_secs(15);
+const SCRIM_RUNTIME_LOCK_A: i32 = 724_060_001;
+const SCRIM_RUNTIME_LOCK_B: i32 = 724_060_002;
+
+struct ResultFetchClaim {
+    match_id: i32,
+    team_a_id: i32,
+    team_b_id: i32,
+    team_a_name: String,
+    team_b_name: String,
+    team_channels: Vec<i64>,
+    party_id: Option<String>,
+    steam_match_id: Option<i64>,
+    result_ref_id: Option<i64>,
+}
+
+struct ReminderClaim {
+    reminder_id: i64,
+    effect_id: i64,
+    request_id: i32,
+    team_id: i32,
+    payload: serde_json::Value,
+}
 
 pub fn router() -> Router<AppState> {
     Router::new()
@@ -270,6 +294,797 @@ pub fn spawn_substitute_sweep_worker(state: AppState) {
             tokio::time::sleep(interval).await;
         }
     });
+}
+
+pub fn spawn_scrim_operational_worker(state: AppState) {
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(SCRIM_OPERATIONAL_POLL_INTERVAL);
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        loop {
+            interval.tick().await;
+            if let Err(error) = process_scrim_operational_once(&state).await {
+                tracing::warn!(%error, "Scrim-Result/Reminder-Worker fehlgeschlagen");
+            }
+        }
+    });
+}
+
+pub async fn process_scrim_operational_once(state: &AppState) -> Result<(), sqlx::Error> {
+    let Some(runtime_guard) = begin_turniere_operational_tick(&state.pool).await? else {
+        return Ok(());
+    };
+    if let Some(claim) = claim_result_fetch(&state.pool).await? {
+        process_result_fetch(state, claim).await?;
+    }
+    if let Some(claim) = claim_reminder(&state.pool).await? {
+        process_reminder(state, claim).await?;
+    }
+    runtime_guard.commit().await?;
+    Ok(())
+}
+
+async fn begin_turniere_operational_tick(
+    pool: &sqlx::PgPool,
+) -> Result<Option<sqlx::Transaction<'_, sqlx::Postgres>>, sqlx::Error> {
+    let mut tx = pool.begin().await?;
+    if !lock_and_require_turniere_runtime(&mut tx).await? {
+        tx.rollback().await?;
+        return Ok(None);
+    }
+    Ok(Some(tx))
+}
+
+async fn lock_and_require_turniere_runtime(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+) -> Result<bool, sqlx::Error> {
+    sqlx::query("SELECT pg_advisory_xact_lock($1, $2)")
+        .bind(SCRIM_RUNTIME_LOCK_A)
+        .bind(SCRIM_RUNTIME_LOCK_B)
+        .execute(&mut **tx)
+        .await?;
+    sqlx::query_scalar(
+        "SELECT EXISTS(\
+             SELECT 1 FROM scrim.runtime_control \
+              WHERE control_key='scrim_runtime' \
+                AND mode IN ('draining', 'turniere') \
+                AND operational_writer='turniere'\
+         )",
+    )
+    .fetch_one(&mut **tx)
+    .await
+}
+
+async fn claim_result_fetch(pool: &sqlx::PgPool) -> Result<Option<ResultFetchClaim>, sqlx::Error> {
+    let mut tx = pool.begin().await?;
+    let row = sqlx::query(
+        "SELECT m.id, m.team_a_id, m.team_b_id, m.party_id, m.steam_match_id, \
+                ta.name AS team_a_name, tb.name AS team_b_name, \
+                ta.discord_channel_id AS team_a_channel_id, \
+                tb.discord_channel_id AS team_b_channel_id \
+           FROM scrim.matches m \
+           JOIN scrim.teams ta ON ta.id=m.team_a_id \
+           JOIN scrim.teams tb ON tb.id=m.team_b_id \
+          WHERE m.lobby_state='result_requested' \
+             OR (m.lobby_state IN ('result_failed', 'result_fetching') \
+                 AND m.updated_at <= now() - interval '15 minutes') \
+             OR EXISTS(\
+                    SELECT 1 FROM scrim.match_result_refs stale_ref \
+                     WHERE stale_ref.match_id=m.id \
+                       AND stale_ref.fetch_status='fetching' \
+                       AND stale_ref.updated_at <= now() - interval '15 minutes'\
+                ) \
+          ORDER BY m.updated_at, m.id \
+          LIMIT 1 FOR UPDATE OF m SKIP LOCKED",
+    )
+    .fetch_optional(&mut *tx)
+    .await?;
+    let Some(row) = row else {
+        tx.commit().await?;
+        return Ok(None);
+    };
+    let match_id = row.try_get::<i32, _>("id")?;
+    let result_ref = sqlx::query(
+        "SELECT id, steam_match_id \
+           FROM scrim.match_result_refs \
+          WHERE match_id=$1 \
+            AND (fetch_status='pending' \
+                 OR (fetch_status IN ('failed', 'fetching') \
+                     AND updated_at <= now() - interval '15 minutes')) \
+          ORDER BY CASE fetch_status WHEN 'pending' THEN 0 WHEN 'failed' THEN 1 ELSE 2 END, \
+                   entered_at, id \
+          LIMIT 1 FOR UPDATE SKIP LOCKED",
+    )
+    .bind(match_id)
+    .fetch_optional(&mut *tx)
+    .await?;
+    let result_ref_id = result_ref
+        .as_ref()
+        .map(|result_ref| result_ref.try_get::<i64, _>("id"))
+        .transpose()?;
+    let result_ref_steam_match_id = result_ref
+        .as_ref()
+        .map(|result_ref| result_ref.try_get::<i64, _>("steam_match_id"))
+        .transpose()?;
+    if let Some(result_ref_id) = result_ref_id {
+        sqlx::query(
+            "UPDATE scrim.match_result_refs \
+                SET fetch_status='fetching', last_error=NULL, updated_at=now() \
+              WHERE id=$1",
+        )
+        .bind(result_ref_id)
+        .execute(&mut *tx)
+        .await?;
+    }
+    sqlx::query(
+        "UPDATE scrim.matches SET lobby_state='result_fetching', updated_at=now() WHERE id=$1",
+    )
+    .bind(match_id)
+    .execute(&mut *tx)
+    .await?;
+    tx.commit().await?;
+
+    let team_channels = [
+        row.try_get::<Option<i64>, _>("team_a_channel_id")?,
+        row.try_get::<Option<i64>, _>("team_b_channel_id")?,
+    ]
+    .into_iter()
+    .flatten()
+    .filter(|channel_id| *channel_id > 0)
+    .collect::<BTreeSet<_>>()
+    .into_iter()
+    .collect();
+    Ok(Some(ResultFetchClaim {
+        match_id,
+        team_a_id: row.try_get("team_a_id")?,
+        team_b_id: row.try_get("team_b_id")?,
+        team_a_name: row.try_get("team_a_name")?,
+        team_b_name: row.try_get("team_b_name")?,
+        team_channels,
+        party_id: row.try_get("party_id")?,
+        steam_match_id: result_ref_steam_match_id.or(row.try_get("steam_match_id")?),
+        result_ref_id,
+    }))
+}
+
+async fn process_result_fetch(
+    state: &AppState,
+    claim: ResultFetchClaim,
+) -> Result<(), sqlx::Error> {
+    let result = state
+        .match_manager
+        .fetch_scrim_match_result(claim.steam_match_id, claim.party_id.as_deref())
+        .await;
+    let result = match result {
+        Ok(result) => result,
+        Err(error) => {
+            let error = error.to_string();
+            let mut tx = state.pool.begin().await?;
+            if let Some(result_ref_id) = claim.result_ref_id {
+                sqlx::query(
+                    "UPDATE scrim.match_result_refs \
+                        SET fetch_status='failed', last_error=$2, updated_at=now() WHERE id=$1",
+                )
+                .bind(result_ref_id)
+                .bind(&error)
+                .execute(&mut *tx)
+                .await?;
+            }
+            let next_state: String = sqlx::query_scalar(
+                "SELECT CASE \
+                     WHEN EXISTS(SELECT 1 FROM scrim.match_result_refs \
+                                  WHERE match_id=$1 AND fetch_status='pending') \
+                         THEN 'result_requested' \
+                     WHEN EXISTS(SELECT 1 FROM scrim.match_result_refs \
+                                  WHERE match_id=$1 AND fetch_status='fetching') \
+                         THEN 'result_fetching' \
+                     WHEN result_json IS NOT NULL \
+                       OR EXISTS(SELECT 1 FROM scrim.match_result_refs \
+                                  WHERE match_id=$1 AND fetch_status='fetched') \
+                         THEN 'finished' \
+                     ELSE 'result_failed' \
+                   END \
+                   FROM scrim.matches WHERE id=$1",
+            )
+            .bind(claim.match_id)
+            .fetch_one(&mut *tx)
+            .await?;
+            sqlx::query(
+                "UPDATE scrim.matches \
+                    SET lobby_state=$2, updated_at=now() WHERE id=$1",
+            )
+            .bind(claim.match_id)
+            .bind(next_state)
+            .execute(&mut *tx)
+            .await?;
+            tx.commit().await?;
+            tracing::warn!(
+                match_id = claim.match_id,
+                result_ref_id = claim.result_ref_id,
+                %error,
+                "Scrim-Ergebnisabruf fehlgeschlagen; Datenbankstand bleibt für einen neuen Versuch erhalten"
+            );
+            return Ok(());
+        }
+    };
+
+    let steam_match_id = result
+        .get("match_id")
+        .or_else(|| result.get("deadlock_match_id"))
+        .and_then(json_i64)
+        .or(claim.steam_match_id);
+    let winner_team_id = match result.get("winning_team").and_then(json_i64) {
+        Some(0) => Some(claim.team_a_id),
+        Some(1) => Some(claim.team_b_id),
+        Some(other) => {
+            tracing::warn!(
+                match_id = claim.match_id,
+                winning_team = other,
+                "Scrim-Ergebnis enthält kein gültiges Team; Ergebnis wird ohne Sieger gespeichert"
+            );
+            None
+        }
+        None => None,
+    };
+    let mut normalized = serde_json::Map::new();
+    if let Some(steam_match_id) = steam_match_id {
+        normalized.insert(
+            "steam_match_id".to_string(),
+            serde_json::json!(steam_match_id),
+        );
+    }
+    if let Some(winner_team_id) = winner_team_id {
+        normalized.insert(
+            "winner_team_id".to_string(),
+            serde_json::json!(winner_team_id),
+        );
+    }
+    for key in [
+        "winner",
+        "winning_team",
+        "match_time",
+        "duration",
+        "duration_s",
+        "teams",
+        "players",
+        "lineups",
+        "substitutes",
+        "stats",
+    ] {
+        if let Some(value) = result.get(key) {
+            normalized.insert(key.to_string(), value.clone());
+        }
+    }
+
+    let mut tx = state.pool.begin().await?;
+    if let Some(result_ref_id) = claim.result_ref_id {
+        sqlx::query(
+            "UPDATE scrim.match_result_refs \
+                SET fetch_status='fetched', fetched_at=now(), last_error=NULL, \
+                    winner_team_id=$2, raw_result_json=$3, normalized_result_json=$4, \
+                    updated_at=now() \
+              WHERE id=$1",
+        )
+        .bind(result_ref_id)
+        .bind(winner_team_id)
+        .bind(&result)
+        .bind(serde_json::Value::Object(normalized))
+        .execute(&mut *tx)
+        .await?;
+    }
+    let next_state: String = sqlx::query_scalar(
+        "SELECT CASE \
+             WHEN EXISTS(SELECT 1 FROM scrim.match_result_refs \
+                          WHERE match_id=$1 AND fetch_status='pending') \
+                 THEN 'result_requested' \
+             WHEN EXISTS(SELECT 1 FROM scrim.match_result_refs \
+                          WHERE match_id=$1 AND fetch_status='fetching') \
+                 THEN 'result_fetching' \
+             ELSE 'finished' \
+           END",
+    )
+    .bind(claim.match_id)
+    .fetch_one(&mut *tx)
+    .await?;
+    sqlx::query(
+        "UPDATE scrim.matches \
+            SET steam_match_id=COALESCE(steam_match_id, $2), winner_team_id=$3, \
+                result_json=$4, lobby_state=$5, updated_at=now() \
+          WHERE id=$1",
+    )
+    .bind(claim.match_id)
+    .bind(steam_match_id)
+    .bind(winner_team_id)
+    .bind(&result)
+    .bind(next_state)
+    .execute(&mut *tx)
+    .await?;
+    tx.commit().await?;
+
+    let content = winner_team_id.map_or_else(
+        || {
+            format!(
+                "Scrim beendet. Das Ergebnis ist eingetragen (Match {}).",
+                claim.match_id
+            )
+        },
+        |winner_team_id| {
+            let winner = if winner_team_id == claim.team_a_id {
+                &claim.team_a_name
+            } else {
+                &claim.team_b_name
+            };
+            format!("Scrim beendet. Das Ergebnis ist eingetragen. Sieger: {winner}.")
+        },
+    );
+    for channel_id in claim.team_channels {
+        if let Err(error) = state
+            .notifier
+            .broker()
+            .post_internal::<serde_json::Value, _>(
+                "/internal/master/v1/discord/send-message",
+                &serde_json::json!({
+                    "channel_id": channel_id,
+                    "content": content,
+                    "idempotency_key": format!(
+                        "scrim-result:{}:{}:{channel_id}",
+                        claim.match_id,
+                        claim.result_ref_id.unwrap_or_default()
+                    ),
+                }),
+            )
+            .await
+        {
+            tracing::warn!(
+                match_id = claim.match_id,
+                channel_id,
+                %error,
+                "Scrim-Ergebnis ist gespeichert, aber die Discord-Nachricht ging nicht raus"
+            );
+        }
+    }
+    Ok(())
+}
+
+fn json_i64(value: &serde_json::Value) -> Option<i64> {
+    value
+        .as_i64()
+        .or_else(|| value.as_str()?.trim().parse().ok())
+}
+
+async fn claim_reminder(pool: &sqlx::PgPool) -> Result<Option<ReminderClaim>, sqlx::Error> {
+    let mut tx = pool.begin().await?;
+    let row = sqlx::query(
+        "SELECT r.id, r.request_id, r.team_id, r.template, r.target_participant_ids, \
+                r.target_role_id, r.discord_channel_id, mr.status AS request_status, \
+                t.name AS team_name, effect.id AS effect_id, effect.state AS effect_state, \
+                effect.payload AS effect_payload \
+           FROM scrim.match_request_reminders r \
+           JOIN scrim.match_requests mr ON mr.id=r.request_id \
+           JOIN scrim.teams t ON t.id=r.team_id \
+           LEFT JOIN scrim.match_request_reminder_effects link ON link.reminder_id=r.id \
+           LEFT JOIN scrim.outbox_effects effect ON effect.id=link.outbox_effect_id \
+          WHERE (r.status='approved' \
+                 OR (r.status IN ('failed', 'posting') \
+                     AND r.updated_at <= now() - interval '15 minutes')) \
+            AND r.scheduled_for <= now() \
+          ORDER BY r.scheduled_for, r.id \
+          LIMIT 1 FOR UPDATE OF r, mr SKIP LOCKED",
+    )
+    .fetch_optional(&mut *tx)
+    .await?;
+    let Some(row) = row else {
+        tx.commit().await?;
+        return Ok(None);
+    };
+    let reminder_id = row.try_get::<i64, _>("id")?;
+    let request_id = row.try_get::<i32, _>("request_id")?;
+    let team_id = row.try_get::<i32, _>("team_id")?;
+    if let (Some(effect_id), Some(effect_state), Some(payload)) = (
+        row.try_get::<Option<i64>, _>("effect_id")?,
+        row.try_get::<Option<String>, _>("effect_state")?,
+        row.try_get::<Option<serde_json::Value>, _>("effect_payload")?,
+    ) {
+        if effect_state == "delivered" {
+            sqlx::query(
+                "UPDATE scrim.match_request_reminders \
+                    SET status='posted', last_error=NULL, \
+                        posted_at=COALESCE(posted_at, now()), updated_at=now() \
+                  WHERE id=$1",
+            )
+            .bind(reminder_id)
+            .execute(&mut *tx)
+            .await?;
+            sqlx::query(
+                "UPDATE scrim.match_request_reminder_effects \
+                    SET reconciled_at=COALESCE(reconciled_at, now()) \
+                  WHERE reminder_id=$1 AND outbox_effect_id=$2",
+            )
+            .bind(reminder_id)
+            .bind(effect_id)
+            .execute(&mut *tx)
+            .await?;
+            tx.commit().await?;
+            return Ok(None);
+        }
+        if matches!(effect_state.as_str(), "uncertain" | "dead")
+            || payload.get("idempotency_key").is_none()
+        {
+            if !matches!(effect_state.as_str(), "uncertain" | "dead") {
+                sqlx::query(
+                    "UPDATE scrim.outbox_effects \
+                        SET state='uncertain', lease_owner=NULL, lease_until=NULL, \
+                            last_error_code='err_discord_effect_uncertain', updated_at=now() \
+                      WHERE id=$1 AND state IN ('pending', 'leased', 'retry')",
+                )
+                .bind(effect_id)
+                .execute(&mut *tx)
+                .await?;
+            }
+            sqlx::query(
+                "UPDATE scrim.match_request_reminders \
+                    SET status='uncertain', \
+                        last_error='Discord-Zustellung ist unklar; prüfe den Zielkanal, bevor du erneut sendest.', \
+                        updated_at=now() WHERE id=$1",
+            )
+            .bind(reminder_id)
+            .execute(&mut *tx)
+            .await?;
+            tx.commit().await?;
+            tracing::warn!(
+                reminder_id,
+                effect_id,
+                request_id,
+                team_id,
+                effect_state,
+                "Scrim-Reminder wird wegen unklarer Discord-Zustellung nicht automatisch erneut gesendet"
+            );
+            return Ok(None);
+        }
+        if effect_state == "cancelled" {
+            sqlx::query(
+                "UPDATE scrim.match_request_reminders \
+                    SET status='cancelled', updated_at=now() WHERE id=$1",
+            )
+            .bind(reminder_id)
+            .execute(&mut *tx)
+            .await?;
+            tx.commit().await?;
+            return Ok(None);
+        }
+        sqlx::query(
+            "UPDATE scrim.outbox_effects \
+                SET state='leased', lease_owner='turnier_bot:scrim_reminder', \
+                    lease_until=now() + interval '1 minute', attempts=attempts + 1, \
+                    next_attempt_at=NULL, updated_at=now() \
+              WHERE id=$1",
+        )
+        .bind(effect_id)
+        .execute(&mut *tx)
+        .await?;
+        sqlx::query(
+            "UPDATE scrim.match_request_reminders \
+                SET status='posting', updated_at=now() WHERE id=$1",
+        )
+        .bind(reminder_id)
+        .execute(&mut *tx)
+        .await?;
+        tx.commit().await?;
+        return Ok(Some(ReminderClaim {
+            reminder_id,
+            effect_id,
+            request_id,
+            team_id,
+            payload,
+        }));
+    }
+    let request_status = row.try_get::<String, _>("request_status")?;
+    if !matches!(request_status.as_str(), "open" | "post_failed") {
+        sqlx::query(
+            "UPDATE scrim.match_request_reminders \
+                SET status='cancelled', missing_count=0, \
+                    target_discord_user_ids='{}', last_error='Terminabfrage geschlossen', \
+                    updated_at=now() WHERE id=$1",
+        )
+        .bind(reminder_id)
+        .execute(&mut *tx)
+        .await?;
+        tx.commit().await?;
+        return Ok(None);
+    }
+    let participant_ids = row.try_get::<Vec<i32>, _>("target_participant_ids")?;
+    let missing = sqlx::query(
+        "SELECT p.id, p.discord_id \
+           FROM scrim.participants p \
+          WHERE p.id=ANY($1) \
+            AND NOT EXISTS(\
+                SELECT 1 FROM scrim.match_request_responses response \
+                 WHERE response.request_id=$2 AND response.team_id=$3 \
+                   AND response.participant_id=p.id\
+            ) \
+          ORDER BY array_position($1, p.id), p.id",
+    )
+    .bind(&participant_ids)
+    .bind(request_id)
+    .bind(team_id)
+    .fetch_all(&mut *tx)
+    .await?;
+    if missing.is_empty() {
+        sqlx::query(
+            "UPDATE scrim.match_request_reminders \
+                SET status='cancelled', missing_count=0, \
+                    target_discord_user_ids='{}', last_error='Keine offenen Antworten mehr', \
+                    updated_at=now() WHERE id=$1",
+        )
+        .bind(reminder_id)
+        .execute(&mut *tx)
+        .await?;
+        tx.commit().await?;
+        return Ok(None);
+    }
+    let target_participant_ids = missing
+        .iter()
+        .map(|participant| participant.try_get::<i32, _>("id"))
+        .collect::<Result<Vec<_>, _>>()?;
+    let discord_ids = missing
+        .iter()
+        .map(|participant| participant.try_get::<Option<i64>, _>("discord_id"))
+        .collect::<Result<Vec<_>, _>>()?;
+    let all_have_discord = discord_ids.iter().all(Option::is_some);
+    let target_user_ids = if all_have_discord {
+        discord_ids.into_iter().flatten().collect()
+    } else {
+        Vec::new()
+    };
+    let target_role_id = row.try_get::<Option<i64>, _>("target_role_id")?;
+    if !all_have_discord && target_role_id.is_none() {
+        sqlx::query(
+            "UPDATE scrim.match_request_reminders \
+                SET status='failed', target_kind='team', target_participant_ids=$2, \
+                    target_discord_user_ids='{}', missing_count=$3, \
+                    last_error='Keine pingbare Teamrolle hinterlegt', updated_at=now() \
+              WHERE id=$1",
+        )
+        .bind(reminder_id)
+        .bind(&target_participant_ids)
+        .bind(i32::try_from(target_participant_ids.len()).unwrap_or(i32::MAX))
+        .execute(&mut *tx)
+        .await?;
+        tx.commit().await?;
+        tracing::warn!(
+            reminder_id,
+            request_id,
+            team_id,
+            "Scrim-Reminder ohne pingbares Ziel nicht gepostet"
+        );
+        return Ok(None);
+    }
+    let target = if target_user_ids.is_empty() {
+        target_role_id.map_or_else(|| "euch".to_string(), |id| format!("<@&{id}>"))
+    } else {
+        target_user_ids
+            .iter()
+            .map(|id| format!("<@{id}>"))
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    let team_name = row.try_get::<String, _>("team_name")?;
+    let template = row.try_get::<String, _>("template")?;
+    let content = match template.as_str() {
+        "antwort_fehlt" => format!(
+            "Erinnerung für {team_name}: Es fehlen noch Antworten von {target}.\nBitte stimmt in der Terminabfrage oben ab."
+        ),
+        "frist_bald" => format!(
+            "Erinnerung für {team_name}: Die Frist läuft bald ab und es fehlen noch Antworten von {target}.\nBitte stimmt in der Terminabfrage oben ab, damit der Termin stehen kann."
+        ),
+        "bestaetigung_offen" => format!(
+            "Erinnerung für {team_name}: Es fehlen noch Bestätigungen von {target}.\nBitte gebt oben kurz Bescheid, ob ihr beim Match dabei seid."
+        ),
+        _ => {
+            let error = format!("Unbekannte Scrim-Reminder-Vorlage: {template}");
+            sqlx::query(
+                "UPDATE scrim.match_request_reminders \
+                    SET status='failed', last_error=$2, updated_at=now() WHERE id=$1",
+            )
+            .bind(reminder_id)
+            .bind(&error)
+            .execute(&mut *tx)
+            .await?;
+            tx.commit().await?;
+            tracing::warn!(
+                reminder_id,
+                request_id,
+                team_id,
+                %error,
+                "Scrim-Reminder konnte nicht erstellt werden"
+            );
+            return Ok(None);
+        }
+    };
+    let payload = serde_json::json!({
+        "channel_id": row.try_get::<i64, _>("discord_channel_id")?,
+        "content": content,
+        "idempotency_key": format!("scrim-reminder:{reminder_id}"),
+    });
+    let payload_hash = Sha256::digest(
+        serde_json::to_vec(&payload).map_err(|error| sqlx::Error::Protocol(error.to_string()))?,
+    )
+    .to_vec();
+    let effect_id: i64 = sqlx::query_scalar(
+        "INSERT INTO scrim.outbox_effects(\
+             effect_type, idempotency_key, payload_hash, payload, state, \
+             lease_owner, lease_until, attempts, remote_system\
+         ) VALUES (\
+             'discord_scrim_effect', $1, $2, $3, 'leased', \
+             'turnier_bot:scrim_reminder', now() + interval '1 minute', 1, 'discord'\
+         ) RETURNING id",
+    )
+    .bind(format!("scrim_reminder:{reminder_id}"))
+    .bind(payload_hash)
+    .bind(&payload)
+    .fetch_one(&mut *tx)
+    .await?;
+    sqlx::query(
+        "INSERT INTO scrim.match_request_reminder_effects(reminder_id, outbox_effect_id) \
+         VALUES ($1, $2)",
+    )
+    .bind(reminder_id)
+    .bind(effect_id)
+    .execute(&mut *tx)
+    .await?;
+    sqlx::query(
+        "UPDATE scrim.match_request_reminders \
+            SET status='posting', target_kind=$2, target_participant_ids=$3, \
+                target_discord_user_ids=$4, missing_count=$5, updated_at=now() \
+          WHERE id=$1",
+    )
+    .bind(reminder_id)
+    .bind(if all_have_discord { "members" } else { "team" })
+    .bind(&target_participant_ids)
+    .bind(&target_user_ids)
+    .bind(i32::try_from(target_participant_ids.len()).unwrap_or(i32::MAX))
+    .execute(&mut *tx)
+    .await?;
+    tx.commit().await?;
+    Ok(Some(ReminderClaim {
+        reminder_id,
+        effect_id,
+        request_id,
+        team_id,
+        payload,
+    }))
+}
+
+async fn process_reminder(state: &AppState, claim: ReminderClaim) -> Result<(), sqlx::Error> {
+    let result = state
+        .notifier
+        .broker()
+        .post_internal::<serde_json::Value, _>(
+            "/internal/master/v1/discord/send-message",
+            &claim.payload,
+        )
+        .await;
+    match result {
+        Ok(response) => {
+            let channel_id = claim.payload.get("channel_id").and_then(json_i64);
+            let discord_message_id = response.pointer("/result/message_id").and_then(json_i64);
+            let (Some(channel_id), Some(discord_message_id)) = (channel_id, discord_message_id)
+            else {
+                let error =
+                    "Discord hat den Scrim-Reminder ohne Channel- oder Message-ID bestätigt";
+                let mut tx = state.pool.begin().await?;
+                sqlx::query(
+                    "UPDATE scrim.match_request_reminders \
+                        SET status='uncertain', last_error=$2, updated_at=now() WHERE id=$1",
+                )
+                .bind(claim.reminder_id)
+                .bind(error)
+                .execute(&mut *tx)
+                .await?;
+                sqlx::query(
+                    "UPDATE scrim.outbox_effects \
+                        SET state='uncertain', lease_owner=NULL, lease_until=NULL, \
+                            last_error_code='err_discord_effect_uncertain', updated_at=now() \
+                      WHERE id=$1",
+                )
+                .bind(claim.effect_id)
+                .execute(&mut *tx)
+                .await?;
+                tx.commit().await?;
+                tracing::warn!(
+                    reminder_id = claim.reminder_id,
+                    effect_id = claim.effect_id,
+                    request_id = claim.request_id,
+                    team_id = claim.team_id,
+                    "Discord-Zustellung des Scrim-Reminders konnte nicht eindeutig bestätigt werden"
+                );
+                return Ok(());
+            };
+            let remote_message_id = format!("discord:{channel_id}:{discord_message_id}");
+            let payload_hash = Sha256::digest(
+                serde_json::to_vec(&claim.payload)
+                    .map_err(|error| sqlx::Error::Protocol(error.to_string()))?,
+            )
+            .to_vec();
+            let mut tx = state.pool.begin().await?;
+            sqlx::query(
+                "UPDATE scrim.match_request_reminders \
+                    SET status='posted', discord_message_id=COALESCE($2, discord_message_id), \
+                        last_error=NULL, posted_at=now(), updated_at=now() \
+                  WHERE id=$1",
+            )
+            .bind(claim.reminder_id)
+            .bind(Some(discord_message_id))
+            .execute(&mut *tx)
+            .await?;
+            sqlx::query(
+                "UPDATE scrim.outbox_effects \
+                    SET state='delivered', lease_owner=NULL, lease_until=NULL, \
+                        next_attempt_at=NULL, remote_message_id=$2, last_error_code=NULL, \
+                        delivered_at=now(), updated_at=now() \
+                  WHERE id=$1",
+            )
+            .bind(claim.effect_id)
+            .bind(&remote_message_id)
+            .execute(&mut *tx)
+            .await?;
+            sqlx::query(
+                "UPDATE scrim.match_request_reminder_effects \
+                    SET reconciled_at=now() WHERE reminder_id=$1 AND outbox_effect_id=$2",
+            )
+            .bind(claim.reminder_id)
+            .bind(claim.effect_id)
+            .execute(&mut *tx)
+            .await?;
+            sqlx::query(
+                "INSERT INTO scrim.effect_receipts(\
+                     outbox_effect_id, remote_system, remote_message_id, payload_hash, \
+                     receipt_payload, status, observed_at\
+                 ) VALUES ($1, 'discord', $2, $3, $4, 'confirmed', now()) \
+                 ON CONFLICT (remote_system, remote_message_id) \
+                     WHERE remote_message_id IS NOT NULL DO NOTHING",
+            )
+            .bind(claim.effect_id)
+            .bind(&remote_message_id)
+            .bind(payload_hash)
+            .bind(serde_json::json!({
+                "channel_id": channel_id.to_string(),
+                "message_id": discord_message_id.to_string(),
+            }))
+            .execute(&mut *tx)
+            .await?;
+            tx.commit().await?;
+        }
+        Err(error) => {
+            let mut tx = state.pool.begin().await?;
+            sqlx::query(
+                "UPDATE scrim.match_request_reminders \
+                    SET status='failed', last_error=$2, updated_at=now() WHERE id=$1",
+            )
+            .bind(claim.reminder_id)
+            .bind(error.to_string())
+            .execute(&mut *tx)
+            .await?;
+            sqlx::query(
+                "UPDATE scrim.outbox_effects \
+                    SET state='retry', lease_owner=NULL, lease_until=NULL, \
+                        next_attempt_at=now() + interval '15 minutes', \
+                        last_error_code='err_discord_send', updated_at=now() \
+                  WHERE id=$1",
+            )
+            .bind(claim.effect_id)
+            .execute(&mut *tx)
+            .await?;
+            tx.commit().await?;
+            tracing::warn!(
+                reminder_id = claim.reminder_id,
+                request_id = claim.request_id,
+                team_id = claim.team_id,
+                %error,
+                "Scrim-Reminder blieb gespeichert, aber die Discord-Nachricht ging nicht raus"
+            );
+        }
+    }
+    Ok(())
 }
 
 async fn read_command_center(
