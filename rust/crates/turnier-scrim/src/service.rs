@@ -444,35 +444,6 @@ impl ScrimService<PgScrimReadRepository> {
             .as_deref()
             .map(parse_i64_id)
             .transpose()?;
-        if let Some(winner_team_id) = request
-            .winner_team_id
-            .as_deref()
-            .map(parse_id)
-            .transpose()?
-        {
-            let is_match_team = self
-                .read_model()
-                .await?
-                .matches
-                .into_iter()
-                .find(|item| item.id == match_id)
-                .is_some_and(|item| {
-                    item.team_a
-                        .as_ref()
-                        .is_some_and(|team| team.id == winner_team_id)
-                        || item
-                            .team_b
-                            .as_ref()
-                            .is_some_and(|team| team.id == winner_team_id)
-                });
-            if !is_match_team {
-                return Err(ScrimError::InvalidProposal(
-                    "winner_team_id does not belong to the match".to_string(),
-                ));
-            }
-        }
-        validate_optional_text(request.score.as_deref(), "score", 100)?;
-        validate_optional_text(request.notes.as_deref(), "notes", 1_000)?;
         self.repository
             .request_result_fetch(idempotency_key, match_id, result_ref_id)
             .await

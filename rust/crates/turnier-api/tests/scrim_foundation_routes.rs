@@ -2891,6 +2891,22 @@ async fn match_block_and_action_operator_routes_persist_the_canonical_flow() {
     .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(replayed, fetch);
+    for unsupported_result_data in [
+        json!({"winner_team_id": "810101"}),
+        json!({"score": "2:0"}),
+        json!({"notes": "manuell erfasst"}),
+    ] {
+        let (status, _) = send(
+            &app,
+            IpAddr::V4(Ipv4Addr::LOCALHOST),
+            coach_headers("match:fetch", "123456789"),
+            Method::POST,
+            &route,
+            Some(unsupported_result_data),
+        )
+        .await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    }
 
     for (index, row) in refs.iter().enumerate() {
         let ref_id = row.get::<i64, _>("id");

@@ -446,9 +446,6 @@ pub struct MatchIdsRequest {
 #[serde(deny_unknown_fields)]
 pub struct ResultFetchRequest {
     pub match_id_ref: Option<String>,
-    pub winner_team_id: Option<String>,
-    pub score: Option<String>,
-    pub notes: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
