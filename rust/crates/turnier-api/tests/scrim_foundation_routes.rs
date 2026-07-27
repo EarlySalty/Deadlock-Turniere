@@ -94,6 +94,21 @@ async fn record_and_accept_broker(
 }
 
 #[cfg(feature = "testing")]
+async fn fail_once_then_create_role(
+    State(requests): State<Arc<Mutex<Vec<Value>>>>,
+    Json(payload): Json<Value>,
+) -> Result<Json<Value>, StatusCode> {
+    let mut requests = requests.lock().expect("broker requests");
+    let first_request = requests.is_empty();
+    requests.push(payload);
+    if first_request {
+        Err(StatusCode::SERVICE_UNAVAILABLE)
+    } else {
+        Ok(Json(json!({"result":{"role_id":"912345678901234567"}})))
+    }
+}
+
+#[cfg(feature = "testing")]
 async fn record_and_fail_second_channel(
     State(requests): State<Arc<Mutex<Vec<Value>>>>,
     Json(payload): Json<Value>,
@@ -1585,6 +1600,152 @@ async fn participant_interaction_revalidates_slots_after_advisory_lock() {
     .await
     .expect("response count");
     assert_eq!(saved, 0);
+}
+
+#[cfg(feature = "testing")]
+#[tokio::test]
+async fn team_creation_reports_role_creation_failure_without_rolling_back_team() {
+    let db = turnier_db::test_pool().await.expect("central test pool");
+    enable_turniere_runtime(db.pool()).await;
+    seed_coach(db.pool(), 123456789).await;
+
+    let requests = Arc::new(Mutex::new(Vec::new()));
+    let broker = Router::new()
+        .route(
+            "/internal/master/v1/discord/role/create",
+            post(fail_once_then_create_role),
+        )
+        .with_state(requests.clone());
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("broker listener");
+    let broker_url = format!("http://{}", listener.local_addr().expect("broker address"));
+    let broker_task = tokio::spawn(async move {
+        axum::serve(listener, broker).await.expect("broker server");
+    });
+    let app = app_with_pool_and_broker(db.pool().clone(), Some(&broker_url));
+    let headers = coach_headers("roster:create:role-failure", "123456789");
+    let body = json!({
+        "name":"Role Failure",
+        "default_from":1200,
+        "default_to":1320
+    });
+
+    let (status, created) = send(
+        &app,
+        IpAddr::V4(Ipv4Addr::LOCALHOST),
+        headers,
+        Method::POST,
+        "/internal/turnier/v1/scrims/teams",
+        Some(body.clone()),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        created["discord_sync"]["detail"],
+        "Team gespeichert, aber die Discord-Rolle konnte nicht erstellt werden. Löse denselben Vorgang noch einmal aus, damit die Rolle nachgereicht wird."
+    );
+    assert_eq!(created["discord_sync"]["ok"], false);
+    let team_id = created["id"].as_i64().expect("numeric team id") as i32;
+    let saved_role_id: Option<i64> =
+        sqlx::query_scalar("SELECT discord_role_id FROM scrim.teams WHERE id=$1")
+            .bind(team_id)
+            .fetch_one(db.pool())
+            .await
+            .expect("committed team");
+    assert_eq!(saved_role_id, None);
+    {
+        let requests = requests.lock().expect("broker requests");
+        assert_eq!(requests.len(), 1);
+        assert_eq!(requests[0]["idempotency_key"], "roster:create:role-failure");
+    }
+
+    let (retry_status, retried) = send(
+        &app,
+        IpAddr::V4(Ipv4Addr::LOCALHOST),
+        headers,
+        Method::POST,
+        "/internal/turnier/v1/scrims/teams",
+        Some(body.clone()),
+    )
+    .await;
+    assert_eq!(retry_status, StatusCode::OK);
+    assert_eq!(retried["id"], created["id"]);
+    assert_eq!(retried["discord_sync"]["ok"], true);
+    let saved_role_id: Option<i64> =
+        sqlx::query_scalar("SELECT discord_role_id FROM scrim.teams WHERE id=$1")
+            .bind(team_id)
+            .fetch_one(db.pool())
+            .await
+            .expect("retried team");
+    assert_eq!(saved_role_id, Some(912345678901234567));
+    {
+        let requests = requests.lock().expect("broker requests");
+        assert_eq!(requests.len(), 2);
+        assert!(requests
+            .iter()
+            .all(|request| request["idempotency_key"] == "roster:create:role-failure"));
+    }
+
+    let (replay_status, replayed) = send(
+        &app,
+        IpAddr::V4(Ipv4Addr::LOCALHOST),
+        headers,
+        Method::POST,
+        "/internal/turnier/v1/scrims/teams",
+        Some(body),
+    )
+    .await;
+    assert_eq!(replay_status, StatusCode::OK);
+    assert_eq!(replayed["id"], created["id"]);
+    assert_eq!(requests.lock().expect("broker requests").len(), 2);
+
+    broker_task.abort();
+}
+
+#[cfg(feature = "testing")]
+#[tokio::test]
+async fn team_creation_rejects_zero_discord_role_id_without_rolling_back_team() {
+    let db = turnier_db::test_pool().await.expect("central test pool");
+    enable_turniere_runtime(db.pool()).await;
+    seed_coach(db.pool(), 123456789).await;
+
+    let broker = Router::new().route(
+        "/internal/master/v1/discord/role/create",
+        post(|| async { Json(json!({"result":{"role_id":"0"}})) }),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("broker listener");
+    let broker_url = format!("http://{}", listener.local_addr().expect("broker address"));
+    let broker_task = tokio::spawn(async move {
+        axum::serve(listener, broker).await.expect("broker server");
+    });
+    let app = app_with_pool_and_broker(db.pool().clone(), Some(&broker_url));
+
+    let (status, created) = send(
+        &app,
+        IpAddr::V4(Ipv4Addr::LOCALHOST),
+        coach_headers("roster:create:zero-role", "123456789"),
+        Method::POST,
+        "/internal/turnier/v1/scrims/teams",
+        Some(json!({"name":"Zero Role"})),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(created["discord_sync"]["ok"], false);
+    let team_id = created["id"].as_i64().expect("numeric team id") as i32;
+    let saved_role_id: Option<i64> =
+        sqlx::query_scalar("SELECT discord_role_id FROM scrim.teams WHERE id=$1")
+            .bind(team_id)
+            .fetch_one(db.pool())
+            .await
+            .expect("committed team");
+    assert_eq!(saved_role_id, None);
+
+    broker_task.abort();
 }
 
 #[cfg(feature = "testing")]

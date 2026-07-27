@@ -52,6 +52,8 @@ const DISCORD_SYNC_SUCCESS: &str = "Discord-Rollen aktualisiert.";
 /// Der Text muss das sagen, sonst versucht jemand die ganze Aktion neu statt nur den Versand.
 const DISCORD_SYNC_FAILED: &str =
     "Gespeichert, aber die Discord-Nachricht ging nicht raus. Löse denselben Vorgang noch einmal aus, dann wird sie nachgereicht.";
+const DISCORD_ROLE_CREATION_FAILED: &str =
+    "Team gespeichert, aber die Discord-Rolle konnte nicht erstellt werden. Löse denselben Vorgang noch einmal aus, damit die Rolle nachgereicht wird.";
 const DM_NO_ACCOUNT: &str = "No linked Discord account; DM not sent.";
 const DM_SUCCESS: &str = "DM sent.";
 const DM_FAILED: &str = "DM delivery failed.";
@@ -1151,11 +1153,7 @@ async fn create_team(
     // laeuft ueber eine Zwischenspeicherung mit Ablaufzeit, taugt also nicht als
     // Dauerschutz — sonst legte ein spaeter Wiederholungsversuch eine zweite Rolle an
     // und ueberschriebe die hinterlegte ID.
-    let existing_role_id = service
-        .roster_team(team.id)
-        .await
-        .ok()
-        .and_then(|current| current.discord_role_id);
+    let existing_role_id = service.roster_team(team.id).await?.discord_role_id;
     let discord_role_id = match existing_role_id {
         Some(role_id) => Some(role_id),
         None => create_team_discord_role(&state, &team, mutation.idempotency_key).await,
@@ -1164,7 +1162,14 @@ async fn create_team(
     let mutation = service
         .finish_team_creation(team.id, discord_role_id)
         .await?;
-    let discord_sync = sync_discord_roles(&state, mutation.sync_plans, request_key).await;
+    let discord_sync = if discord_role_id.is_some() {
+        sync_discord_roles(&state, mutation.sync_plans, request_key).await
+    } else {
+        DiscordSyncStatus {
+            ok: false,
+            detail: DISCORD_ROLE_CREATION_FAILED.to_string(),
+        }
+    };
     Ok(Json(TeamMutationResponse {
         team: mutation.team,
         discord_sync,
@@ -1335,7 +1340,11 @@ async fn create_team_discord_role(
     idempotency_key: &str,
 ) -> Option<i64> {
     let Some(guild_id) = positive_config_id(Some(state.config.scrim_guild_id)) else {
-        tracing::warn!(team_id = team.id, "Scrim-Team-Rolle ohne gueltige Guild-ID");
+        tracing::warn!(
+            team_id = team.id,
+            team_name = %team.name,
+            "Scrim-Team-Rolle konnte ohne gültige Guild-ID nicht erstellt werden; Team bleibt gespeichert"
+        );
         return None;
     };
     let response = state
@@ -1364,18 +1373,21 @@ async fn create_team_discord_role(
                     .or_else(|| value.as_str().and_then(|value| value.trim().parse().ok()))
             })
             .and_then(|role_id| i64::try_from(role_id).ok())
+            .filter(|role_id| *role_id > 0)
             .or_else(|| {
                 tracing::warn!(
                     team_id = team.id,
-                    "Scrim-Team-Rollen-Antwort war ungueltig; DB-Mutation bleibt bestehen"
+                    team_name = %team.name,
+                    "Scrim-Team-Rollen-Antwort war ungültig; Team bleibt gespeichert"
                 );
                 None
             }),
         Err(error) => {
             tracing::warn!(
                 team_id = team.id,
+                team_name = %team.name,
                 %error,
-                "Scrim-Team-Rolle konnte nicht erstellt werden; DB-Mutation bleibt bestehen"
+                "Scrim-Team-Rolle konnte nicht erstellt werden; Team bleibt gespeichert"
             );
             None
         }
