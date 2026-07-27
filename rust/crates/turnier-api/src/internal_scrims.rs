@@ -48,7 +48,10 @@ const ACTOR_DISPLAY_NAME_HEADER: &str = "X-Actor-Display-Name";
 const DISCORD_SYNC_NOOP: &str = "Keine Discord-Änderung nötig.";
 const DISCORD_SYNC_NOT_CONFIGURED: &str = "Discord-Sync ist nicht konfiguriert.";
 const DISCORD_SYNC_SUCCESS: &str = "Discord-Rollen aktualisiert.";
-const DISCORD_SYNC_FAILED: &str = "Discord-Sync fehlgeschlagen.";
+/// Die Datenbankänderung steht bereits, nur die Discord-Zustellung ist gescheitert.
+/// Der Text muss das sagen, sonst versucht jemand die ganze Aktion neu statt nur den Versand.
+const DISCORD_SYNC_FAILED: &str =
+    "Gespeichert, aber die Discord-Nachricht ging nicht raus. Löse denselben Vorgang noch einmal aus, dann wird sie nachgereicht.";
 const DM_NO_ACCOUNT: &str = "No linked Discord account; DM not sent.";
 const DM_SUCCESS: &str = "DM sent.";
 const DM_FAILED: &str = "DM delivery failed.";

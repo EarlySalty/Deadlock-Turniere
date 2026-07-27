@@ -2327,7 +2327,10 @@ async fn status_publication_dispatch_failure_is_retryable_without_rolling_back_s
         )
         .await;
         assert_eq!(status, StatusCode::BAD_GATEWAY);
-        assert_eq!(body["detail"], "Discord-Sync fehlgeschlagen.");
+        assert_eq!(
+            body["detail"],
+            "Gespeichert, aber die Discord-Nachricht ging nicht raus. Löse denselben Vorgang noch einmal aus, dann wird sie nachgereicht."
+        );
     }
 
     let approval_count: i64 = sqlx::query_scalar(
@@ -2546,7 +2549,10 @@ async fn replacement_dispatch_failure_is_retryable_without_rolling_back_state() 
         )
         .await;
         assert_eq!(status, StatusCode::BAD_GATEWAY);
-        assert_eq!(body["detail"], "Discord-Sync fehlgeschlagen.");
+        assert_eq!(
+            body["detail"],
+            "Gespeichert, aber die Discord-Nachricht ging nicht raus. Löse denselben Vorgang noch einmal aus, dann wird sie nachgereicht."
+        );
     }
 
     let states: (i64, String, String, String, i64) = sqlx::query_as(
