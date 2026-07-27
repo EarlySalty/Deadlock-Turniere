@@ -102,6 +102,26 @@ async fn record_and_accept_broker(
 }
 
 #[cfg(feature = "testing")]
+async fn accept_broker_once_per_idempotency_key(
+    State(requests): State<Arc<Mutex<HashMap<String, Value>>>>,
+    Json(payload): Json<Value>,
+) -> Result<Json<Value>, StatusCode> {
+    let idempotency_key = payload["idempotency_key"]
+        .as_str()
+        .expect("broker idempotency key")
+        .to_owned();
+    if idempotency_key.chars().count() > 128 {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+    requests
+        .lock()
+        .expect("broker requests")
+        .entry(idempotency_key)
+        .or_insert(payload);
+    Ok(Json(json!({})))
+}
+
+#[cfg(feature = "testing")]
 async fn fail_once_then_create_role(
     State(requests): State<Arc<Mutex<Vec<Value>>>>,
     Json(payload): Json<Value>,
@@ -2965,6 +2985,61 @@ async fn replacement_candidates_are_ranked_and_requests_persist_and_transition()
 
 #[cfg(feature = "testing")]
 #[tokio::test]
+async fn merge_critic_replacement_accept_assigns_the_substitute_to_the_team() {
+    let db = turnier_db::test_pool().await.expect("central test pool");
+    enable_turniere_runtime(db.pool()).await;
+    seed_coach(db.pool(), 123456789).await;
+    seed_teams(db.pool(), &[1]).await;
+    let need_id = seed_replacement_fixture(db.pool()).await;
+    let app = app_with_pool(db.pool().clone());
+
+    let (status, _) = send(
+        &app,
+        IpAddr::V4(Ipv4Addr::LOCALHOST),
+        coach_headers("replacement_request:assign:create", "123456789"),
+        Method::POST,
+        &format!("/internal/turnier/v1/scrims/replacement-needs/{need_id}/requests"),
+        Some(json!({"participant_id":"302","reason":"Support wird gebraucht"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let request_id: i64 = sqlx::query_scalar(
+        "SELECT id FROM scrim.replacement_requests WHERE need_id=$1 AND participant_id=302",
+    )
+    .bind(need_id)
+    .fetch_one(db.pool())
+    .await
+    .expect("replacement request");
+
+    let (status, _) = send(
+        &app,
+        IpAddr::V4(Ipv4Addr::LOCALHOST),
+        TestHeaders {
+            token: Some("internal-token"),
+            request_id: Some("scrimrepl:v1:interaction:assign"),
+            idempotency_key: Some("scrimrepl:v1:interaction:assign"),
+            actor_id: Some("3002"),
+            actor_name: Some("Best"),
+        },
+        Method::PATCH,
+        &format!("/internal/turnier/v1/scrims/replacement-requests/{request_id}"),
+        Some(json!({"action":"accept"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let assignment: Option<(i32, bool, bool)> = sqlx::query_as(
+        "SELECT team_id, is_bench, substitute_until IS NOT NULL \
+           FROM scrim.team_members WHERE participant_id=302",
+    )
+    .fetch_optional(db.pool())
+    .await
+    .expect("substitute assignment");
+    assert_eq!(assignment, Some((1, true, true)));
+}
+
+#[cfg(feature = "testing")]
+#[tokio::test]
 async fn replacement_request_without_discord_target_keeps_need_open() {
     let db = turnier_db::test_pool().await.expect("central test pool");
     enable_turniere_runtime(db.pool()).await;
@@ -3400,6 +3475,37 @@ async fn announcement_delivery_failure_is_reported_and_retried_from_saved_draft(
 
 #[cfg(feature = "testing")]
 #[tokio::test]
+async fn merge_critic_announcement_rejects_content_above_discords_limit() {
+    let db = turnier_db::test_pool().await.expect("central test pool");
+    enable_turniere_runtime(db.pool()).await;
+    seed_coach(db.pool(), 123456789).await;
+    let app = app_with_pool(db.pool().clone());
+
+    let (status, _) = send(
+        &app,
+        IpAddr::V4(Ipv4Addr::LOCALHOST),
+        coach_headers("announcement:discord-limit", "123456789"),
+        Method::POST,
+        "/internal/turnier/v1/scrims/blocks/discord-limit/announcement-publications",
+        Some(json!({
+            "channel_id":"9007199254740301",
+            "message":"x".repeat(2_001)
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+
+    let stored: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM scrim.announcement_drafts WHERE block_key='block:discord-limit'",
+    )
+    .fetch_one(db.pool())
+    .await
+    .expect("announcement count");
+    assert_eq!(stored, 0);
+}
+
+#[cfg(feature = "testing")]
+#[tokio::test]
 async fn successful_lobby_code_delivery_is_not_replayed() {
     let db = turnier_db::test_pool().await.expect("central test pool");
     enable_turniere_runtime(db.pool()).await;
@@ -3726,6 +3832,86 @@ async fn failed_lobby_code_delivery_retries_without_sending_stale_codes() {
         2
     );
     assert_eq!(payloads.len(), 6);
+
+    broker_task.abort();
+}
+
+#[cfg(feature = "testing")]
+#[tokio::test]
+async fn merge_critic_lobby_code_a_b_a_uses_a_fresh_broker_operation() {
+    let db = turnier_db::test_pool().await.expect("central test pool");
+    enable_turniere_runtime(db.pool()).await;
+    seed_coach(db.pool(), 123456789).await;
+    seed_teams(db.pool(), &[810101, 810102]).await;
+    sqlx::query(
+        "UPDATE scrim.teams SET discord_channel_id = 700000 + id WHERE id IN (810101, 810102)",
+    )
+    .execute(db.pool())
+    .await
+    .expect("team channel ids");
+
+    let requests = Arc::new(Mutex::new(HashMap::new()));
+    let broker = Router::new()
+        .route(
+            "/internal/master/v1/discord/send-message",
+            post(accept_broker_once_per_idempotency_key),
+        )
+        .with_state(requests.clone());
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("broker listener");
+    let broker_url = format!("http://{}", listener.local_addr().expect("broker address"));
+    let broker_task = tokio::spawn(async move {
+        axum::serve(listener, broker).await.expect("broker server");
+    });
+    let app = app_with_pool_and_broker(db.pool().clone(), Some(&broker_url));
+
+    let (status, created) = send(
+        &app,
+        IpAddr::V4(Ipv4Addr::LOCALHOST),
+        coach_headers("match:create:lobby-a-b-a", "123456789"),
+        Method::POST,
+        "/internal/turnier/v1/scrims/matches",
+        Some(json!({"team_a_id":"810101","team_b_id":"810102"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let match_id = created["match"]["id"].as_str().expect("wire match id");
+    let route = format!("/internal/turnier/v1/scrims/matches/{match_id}/lobby-code");
+
+    for (idempotency_key, lobby_code) in [
+        ("match:lobby:a-b-a:first-a".to_string(), "a1b2c"),
+        (format!("match_lobby_a_b_a:{}", "b".repeat(96)), "b2c3d"),
+        ("match:lobby:a-b-a:second-a".to_string(), "a1b2c"),
+    ] {
+        let (status, _) = send(
+            &app,
+            IpAddr::V4(Ipv4Addr::LOCALHOST),
+            coach_headers(&idempotency_key, "123456789"),
+            Method::PUT,
+            &route,
+            Some(json!({"lobby_code":lobby_code})),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+    }
+
+    let requests = requests.lock().expect("broker requests");
+    assert_eq!(
+        requests
+            .values()
+            .filter(|payload| payload["content"] == "Lobby Code: A1B2C")
+            .count(),
+        4
+    );
+    assert_eq!(
+        requests
+            .values()
+            .filter(|payload| payload["content"] == "Lobby Code: B2C3D")
+            .count(),
+        2
+    );
+    assert_eq!(requests.len(), 6);
 
     broker_task.abort();
 }

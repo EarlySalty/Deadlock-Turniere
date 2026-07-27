@@ -508,7 +508,7 @@ impl ScrimService<PgScrimReadRepository> {
         request: AnnouncementPublicationRequest,
     ) -> ScrimResult<AnnouncementPreview> {
         validate_block_id(block_id)?;
-        validate_required_text(&request.message, "message", 4_000)?;
+        validate_required_text(&request.message, "message", 2_000)?;
         validate_optional_text(request.title.as_deref(), "title", 200)?;
         let channel_id = request.channel_id.as_deref().ok_or_else(|| {
             ScrimError::InvalidProposal("channel_id is required for publication".to_string())

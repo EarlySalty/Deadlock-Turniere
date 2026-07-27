@@ -10,6 +10,7 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::routing::{get, patch, post, put};
 use axum::{Json, Router};
 use chrono::{DateTime, Utc};
+use sha2::{Digest, Sha256};
 
 use turnier_scrim::decision::validate_match_request_batch;
 use turnier_scrim::dto::{
@@ -862,7 +863,11 @@ async fn distribute_lobby_code_to_channel(
     code: &str,
     request_idempotency_key: &str,
 ) -> bool {
-    let idempotency_key = format!("scrim-lobby-code-{match_id}-{channel_id}-{code}");
+    let operation = format!("{match_id}\0{channel_id}\0{code}\0{request_idempotency_key}");
+    let idempotency_key = format!(
+        "scrim-lobby-code-{:x}",
+        Sha256::digest(operation.as_bytes())
+    );
     match tokio::time::timeout(
         LOBBY_CODE_DISCORD_TIMEOUT,
         state

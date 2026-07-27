@@ -2156,8 +2156,11 @@ impl PgScrimReadRepository {
         lock_runtime_control(&mut tx).await?;
         require_turniere_runtime(&mut tx).await?;
         let row = sqlx::query(
-            "SELECT need_id, candidate_id, discord_user_id, status \
-               FROM scrim.replacement_requests WHERE id=$1 FOR UPDATE",
+            "SELECT request.need_id, request.candidate_id, request.participant_id, \
+                    request.discord_user_id, request.status, need.team_id \
+               FROM scrim.replacement_requests request \
+               JOIN scrim.replacement_needs need ON need.id=request.need_id \
+              WHERE request.id=$1 FOR UPDATE OF request, need",
         )
         .bind(replacement_request_id)
         .fetch_optional(&mut *tx)
@@ -2212,6 +2215,26 @@ impl PgScrimReadRepository {
             .await?;
         }
         if request.action == ReplacementRequestAction::Accept {
+            let participant_id = row.try_get::<Option<i32>, _>("participant_id")?;
+            if let (Some(team_id), Some(participant_id)) =
+                (row.try_get::<Option<i32>, _>("team_id")?, participant_id)
+            {
+                sqlx::query(
+                    "INSERT INTO scrim.team_members(\
+                         team_id, participant_id, is_bench, is_captain, substitute_until\
+                     ) VALUES($1, $2, TRUE, FALSE, now() + interval '24 hours') \
+                     ON CONFLICT (team_id, participant_id) DO UPDATE SET \
+                         is_bench=TRUE, substitute_until=now() + interval '24 hours'",
+                )
+                .bind(team_id)
+                .bind(participant_id)
+                .execute(&mut *tx)
+                .await?;
+            } else {
+                return Err(ScrimError::InvalidStoredData(
+                    "Für die angenommene Ersatzanfrage fehlt eine Teamzuordnung.".to_string(),
+                ));
+            }
             sqlx::query(
                 "UPDATE scrim.replacement_needs \
                     SET status='filled', closed_at=now(), updated_at=now() WHERE id=$1",
