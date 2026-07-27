@@ -1480,7 +1480,7 @@ async fn post_team_announcement(
                 .to_string(),
         };
     };
-    if let Err(error) = state
+    let detail = match state
         .notifier
         .broker()
         .post_internal::<serde_json::Value, _>(
@@ -1494,16 +1494,22 @@ async fn post_team_announcement(
         )
         .await
     {
-        tracing::warn!(
-            team_id = team.id,
-            %error,
-            "Scrim-Ankuendigungsreaktion konnte nicht gesetzt werden"
-        );
-    }
+        Ok(_) => "Ankündigung ist gepostet.".to_string(),
+        Err(error) => {
+            tracing::warn!(
+                team_id = team.id,
+                channel_id,
+                message_id,
+                %error,
+                "Scrim-Ankuendigungsreaktion konnte nicht gesetzt werden"
+            );
+            "Platzhalter".to_string()
+        }
+    };
     AnnounceTeamResponse {
         message_id: Some(message_id),
         ok: true,
-        detail: "Ankündigung ist gepostet.".to_string(),
+        detail,
     }
 }
 

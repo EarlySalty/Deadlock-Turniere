@@ -1551,6 +1551,61 @@ async fn participant_interaction_revalidates_slots_after_advisory_lock() {
 
 #[cfg(feature = "testing")]
 #[tokio::test]
+async fn announce_reports_reaction_failure_without_losing_posted_message() {
+    let db = turnier_db::test_pool().await.expect("central test pool");
+    enable_turniere_runtime(db.pool()).await;
+    seed_coach(db.pool(), 123456789).await;
+    seed_roster_fixture(db.pool()).await;
+
+    let failed_requests = Arc::new(Mutex::new(Vec::new()));
+    let broker = Router::new()
+        .route(
+            "/internal/master/v1/discord/send-rich-message",
+            post(|| async { Json(json!({"result":{"message_id":"12345"}})) }),
+        )
+        .route(
+            "/internal/master/v1/discord/add-reaction",
+            post(record_and_fail_broker),
+        )
+        .with_state(failed_requests.clone());
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("broker listener");
+    let broker_url = format!("http://{}", listener.local_addr().expect("broker address"));
+    let broker_task = tokio::spawn(async move {
+        axum::serve(listener, broker).await.expect("broker server");
+    });
+    let app = app_with_pool_and_broker(db.pool().clone(), Some(&broker_url));
+
+    let (status, announcement) = send(
+        &app,
+        IpAddr::V4(Ipv4Addr::LOCALHOST),
+        coach_headers("roster:announce:reaction-failure", "123456789"),
+        Method::POST,
+        "/internal/turnier/v1/scrims/teams/10/announce",
+        Some(json!({})),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(announcement["message_id"], "12345");
+    assert_eq!(announcement["ok"], true);
+    assert_eq!(announcement["detail"], "Platzhalter");
+    let requests = failed_requests.lock().expect("broker requests");
+    assert_eq!(requests.len(), 1);
+    assert!(requests[0]["channel_id"].as_i64().is_some_and(|id| id > 0));
+    assert_eq!(requests[0]["message_id"], "12345");
+    assert_eq!(requests[0]["emoji"], "✅");
+    assert_eq!(
+        requests[0]["idempotency_key"],
+        "roster:announce:reaction-failure:reaction"
+    );
+
+    broker_task.abort();
+}
+
+#[cfg(feature = "testing")]
+#[tokio::test]
 async fn roster_operator_routes_apply_legacy_contract_and_database_effects() {
     let db = turnier_db::test_pool().await.expect("central test pool");
     enable_turniere_runtime(db.pool()).await;
