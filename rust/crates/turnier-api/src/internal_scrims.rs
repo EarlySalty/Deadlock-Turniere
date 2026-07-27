@@ -2654,15 +2654,17 @@ async fn sync_discord_roles(
             let broker = state.notifier.broker().clone();
             let subject = plan.subject.clone();
             let role_id = action.role_id;
+            let operation_identity = format!("{operation_key}\0{subject}\0{role_id}\0{operation}");
+            let idempotency_key = format!(
+                "scrim-role-{:x}",
+                Sha256::digest(operation_identity.as_bytes())
+            );
             let payload = serde_json::json!({
                 "guild_id": guild_id,
                 "user_id": discord_user_id,
                 "role_id": role_id,
                 "reason": format!("scrim {subject} {operation} role {role_id}"),
-                "idempotency_key": format!(
-                    "scrim-{operation_key}-{}-{}-{operation}",
-                    subject, role_id
-                ),
+                "idempotency_key": idempotency_key,
             });
             tasks.spawn(async move {
                 match broker

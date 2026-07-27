@@ -103,6 +103,12 @@ async fn record_and_fail_broker(
     State(requests): State<Arc<Mutex<Vec<Value>>>>,
     Json(payload): Json<Value>,
 ) -> StatusCode {
+    let idempotency_key = payload["idempotency_key"]
+        .as_str()
+        .expect("broker idempotency key");
+    if idempotency_key.chars().count() > 128 {
+        return StatusCode::BAD_REQUEST;
+    }
     requests.lock().expect("broker requests").push(payload);
     StatusCode::SERVICE_UNAVAILABLE
 }
@@ -2069,7 +2075,7 @@ async fn participant_discord_resync_is_blocked_until_turniere_owns_runtime() {
 
 #[cfg(feature = "testing")]
 #[tokio::test]
-async fn team_coach_role_removal_is_retried_from_the_saved_patch() {
+async fn maximal_valid_request_key_retries_team_coach_role_removal_from_saved_patch() {
     let db = turnier_db::test_pool().await.expect("central test pool");
     enable_turniere_runtime(db.pool()).await;
     seed_coach(db.pool(), 123456789).await;
@@ -2103,7 +2109,9 @@ async fn team_coach_role_removal_is_retried_from_the_saved_patch() {
         axum::serve(listener, broker).await.expect("broker server");
     });
     let app = app_with_pool_and_broker(db.pool().clone(), Some(&broker_url));
-    let headers = coach_headers("roster:patch-team:coach-retry", "123456789");
+    let request_key = format!("{}:{}", "a".repeat(32), "b".repeat(96));
+    assert_eq!(request_key.chars().count(), 129);
+    let headers = coach_headers(&request_key, "123456789");
     let body = json!({"coach_discord_id":"987654321"});
 
     let (first_status, first) = send(
@@ -2146,9 +2154,15 @@ async fn team_coach_role_removal_is_retried_from_the_saved_patch() {
         request["user_id"] == 123456789
             && request["role_id"] == 8010
             && request["reason"] == "scrim coach-123456789 remove role 8010"
-            && request["idempotency_key"]
-                == "scrim-roster:patch-team:coach-retry-coach-123456789-8010-remove"
     }));
+    let first_key = failed_removals[0]["idempotency_key"]
+        .as_str()
+        .expect("first idempotency key");
+    let retry_key = failed_removals[1]["idempotency_key"]
+        .as_str()
+        .expect("retry idempotency key");
+    assert_eq!(first_key, retry_key);
+    assert!(first_key.chars().count() <= 128);
 
     broker_task.abort();
 }
@@ -4420,27 +4434,22 @@ async fn accepted_replacement_retries_the_team_role_after_a_retryable_broker_fai
         }
     }
 
-    assert_eq!(
-        requests.lock().expect("broker requests").as_slice(),
-        &[
-            json!({
-                "guild_id": 1289721245281292288_u64,
-                "user_id": 3002,
-                "role_id": 8101,
-                "reason": "scrim 302 add role 8101",
-                "idempotency_key":
-                    "scrim-scrimrepl:v1:interaction:assign-302-8101-add"
-            }),
-            json!({
-                "guild_id": 1289721245281292288_u64,
-                "user_id": 3002,
-                "role_id": 8101,
-                "reason": "scrim 302 add role 8101",
-                "idempotency_key":
-                    "scrim-scrimrepl:v1:interaction:assign-302-8101-add"
-            })
-        ]
-    );
+    let requests = requests.lock().expect("broker requests");
+    assert_eq!(requests.len(), 2);
+    assert!(requests.iter().all(|request| {
+        request["guild_id"] == 1289721245281292288_u64
+            && request["user_id"] == 3002
+            && request["role_id"] == 8101
+            && request["reason"] == "scrim 302 add role 8101"
+    }));
+    let first_key = requests[0]["idempotency_key"]
+        .as_str()
+        .expect("first idempotency key");
+    let retry_key = requests[1]["idempotency_key"]
+        .as_str()
+        .expect("retry idempotency key");
+    assert_eq!(first_key, retry_key);
+    assert!(first_key.chars().count() <= 128);
     broker_task.abort();
 }
 
