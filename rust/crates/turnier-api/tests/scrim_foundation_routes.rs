@@ -2888,7 +2888,7 @@ async fn match_block_and_action_operator_routes_persist_the_canonical_flow() {
 
 #[cfg(feature = "testing")]
 #[tokio::test]
-async fn lobby_code_delivery_uses_the_existing_message_and_is_fail_open() {
+async fn lobby_code_delivery_is_fail_open_and_old_replays_do_not_send_stale_codes() {
     let db = turnier_db::test_pool().await.expect("central test pool");
     enable_turniere_runtime(db.pool()).await;
     seed_coach(db.pool(), 123456789).await;
@@ -2939,22 +2939,49 @@ async fn lobby_code_delivery_uses_the_existing_message_and_is_fail_open() {
     .await;
 
     assert_eq!(status, StatusCode::OK);
+    let (status, _) = send(
+        &app,
+        IpAddr::V4(Ipv4Addr::LOCALHOST),
+        coach_headers("match:lobby:correction", "123456789"),
+        Method::PUT,
+        &route,
+        Some(json!({"lobby_code":"b2c3d"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, _) = send(
+        &app,
+        IpAddr::V4(Ipv4Addr::LOCALHOST),
+        coach_headers("match:lobby:delivery", "123456789"),
+        Method::PUT,
+        &route,
+        Some(json!({"lobby_code":"a1b2c"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
     let persisted: String = sqlx::query_scalar("SELECT join_code FROM scrim.matches WHERE id=$1")
         .bind(match_id.parse::<i32>().expect("database match id"))
         .fetch_one(db.pool())
         .await
         .expect("persisted lobby code");
-    assert_eq!(persisted, "A1B2C");
-    let mut payloads = requests.lock().expect("broker requests").clone();
-    payloads.sort_by_key(|payload| {
-        payload["channel_id"]
-            .as_str()
-            .unwrap_or_default()
-            .to_string()
-    });
-    assert_eq!(payloads.len(), 2);
-    assert_eq!(payloads[0]["content"], "Lobby Code: A1B2C");
-    assert_eq!(payloads[1]["content"], "Lobby Code: A1B2C");
+    assert_eq!(persisted, "B2C3D");
+    let payloads = requests.lock().expect("broker requests");
+    assert_eq!(
+        payloads
+            .iter()
+            .filter(|payload| payload["content"] == "Lobby Code: A1B2C")
+            .count(),
+        2
+    );
+    assert_eq!(
+        payloads
+            .iter()
+            .filter(|payload| payload["content"] == "Lobby Code: B2C3D")
+            .count(),
+        2
+    );
+    assert_eq!(payloads.len(), 4);
 
     broker_task.abort();
 }

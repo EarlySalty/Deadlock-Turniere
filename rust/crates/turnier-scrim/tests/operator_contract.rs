@@ -38,7 +38,7 @@ async fn match_operator_mutations_keep_the_dashboard_database_contract() {
     let match_id = created.scrim_match.id;
     assert_eq!(created.scrim_match.lobby_state.as_deref(), Some("draft"));
 
-    let lobby = service
+    let (lobby, should_distribute) = service
         .set_lobby_code(
             "match:lobby",
             match_id,
@@ -50,6 +50,7 @@ async fn match_operator_mutations_keep_the_dashboard_database_contract() {
         )
         .await
         .expect("set lobby code");
+    assert!(should_distribute);
     assert_eq!(lobby.scrim_match.join_code.as_deref(), Some("A1B2C"));
 
     service

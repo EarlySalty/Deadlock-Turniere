@@ -594,7 +594,7 @@ async fn set_lobby_code(
     let actor = require_bff_actor(&headers)?;
     let service = service(&state);
     service.authorize_operator(actor.discord_id).await?;
-    let mutation = service
+    let (mutation, should_distribute) = service
         .set_lobby_code(
             mutation_headers.idempotency_key,
             id,
@@ -603,7 +603,9 @@ async fn set_lobby_code(
             body,
         )
         .await?;
-    distribute_lobby_code(&state, &mutation).await;
+    if should_distribute {
+        distribute_lobby_code(&state, &mutation).await;
+    }
     Ok(Json(mutation))
 }
 

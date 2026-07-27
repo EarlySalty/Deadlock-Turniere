@@ -243,7 +243,7 @@ impl PgScrimReadRepository {
         code: &str,
         actor_user_id: &str,
         actor_display_name: &str,
-    ) -> ScrimResult<MatchMutation> {
+    ) -> ScrimResult<(MatchMutation, bool)> {
         let mut tx = self.pool.begin().await?;
         lock_runtime_control(&mut tx).await?;
         require_turniere_runtime(&mut tx).await?;
@@ -251,7 +251,7 @@ impl PgScrimReadRepository {
         let receipt_id =
             match begin_command(&mut tx, "match_lobby_code", idempotency_key, &payload).await? {
                 CommandStart::New(id) => id,
-                CommandStart::Replay(response) => return Ok(response),
+                CommandStart::Replay(response) => return Ok((response, false)),
             };
         let row =
             sqlx::query("SELECT lobby_state, join_code FROM scrim.matches WHERE id=$1 FOR UPDATE")
@@ -300,7 +300,7 @@ impl PgScrimReadRepository {
         };
         complete_command(&mut tx, receipt_id, &response).await?;
         tx.commit().await?;
-        Ok(response)
+        Ok((response, true))
     }
 
     pub async fn add_match_ids(

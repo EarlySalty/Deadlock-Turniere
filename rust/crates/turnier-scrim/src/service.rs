@@ -332,7 +332,7 @@ impl ScrimService<PgScrimReadRepository> {
         actor_user_id: &str,
         actor_display_name: &str,
         request: LobbyCodeRequest,
-    ) -> ScrimResult<MatchMutation> {
+    ) -> ScrimResult<(MatchMutation, bool)> {
         let code = request.lobby_code.trim();
         if code.chars().count() != 5 || !code.chars().all(|ch| ch.is_ascii_alphanumeric()) {
             return Err(ScrimError::InvalidProposal(
