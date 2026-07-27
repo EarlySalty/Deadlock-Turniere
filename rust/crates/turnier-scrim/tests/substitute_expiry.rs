@@ -10,6 +10,18 @@ const COACH_ROLE_ID: i64 = 7_002;
 const DISCORD_USER_ID: i64 = 8_001;
 const SELF_SERVICE_ADVISORY_LOCK: i64 = 0x4451_0008_0004_0001;
 
+async fn enable_turniere_runtime(pool: &turnier_db::Pool) {
+    let applied: bool = sqlx::query_scalar(
+        "SELECT applied FROM scrim.transition_runtime_control(\
+             0, 'draining', 'turniere', '8001', 'Test', 'test:runtime', 'test:runtime', '{}'::jsonb\
+         )",
+    )
+    .fetch_one(pool)
+    .await
+    .expect("enable turniere runtime");
+    assert!(applied);
+}
+
 async fn seed_substitute(
     pool: &turnier_db::Pool,
     participant_id: i32,
@@ -58,8 +70,27 @@ async fn membership_exists(pool: &turnier_db::Pool, participant_id: i32) -> bool
 }
 
 #[tokio::test]
+async fn expiry_sweep_is_blocked_until_turniere_owns_runtime() {
+    let db = turnier_db::test_pool().await.expect("central test pool");
+    seed_substitute(db.pool(), 12, Some("2000-01-01T00:00:00Z")).await;
+    let repository = PgScrimReadRepository::new(db.pool().clone());
+
+    let error = repository
+        .sweep_expired_substitutes()
+        .await
+        .expect_err("runtime owner must block expiry sweep");
+
+    assert!(matches!(
+        error,
+        turnier_scrim::ScrimError::RuntimeNotWritable { .. }
+    ));
+    assert!(membership_exists(db.pool(), 12).await);
+}
+
+#[tokio::test]
 async fn expired_substitute_is_removed_and_team_role_is_removed() {
     let db = turnier_db::test_pool().await.expect("central test pool");
+    enable_turniere_runtime(db.pool()).await;
     seed_substitute(db.pool(), 1, Some("2000-01-01T00:00:00Z")).await;
     let repository = PgScrimReadRepository::new(db.pool().clone());
 
@@ -82,6 +113,7 @@ async fn expired_substitute_is_removed_and_team_role_is_removed() {
 #[tokio::test]
 async fn future_substitute_is_left_untouched() {
     let db = turnier_db::test_pool().await.expect("central test pool");
+    enable_turniere_runtime(db.pool()).await;
     seed_substitute(db.pool(), 2, Some("2099-01-01T00:00:00Z")).await;
     let repository = PgScrimReadRepository::new(db.pool().clone());
 
@@ -94,6 +126,7 @@ async fn future_substitute_is_left_untouched() {
 #[tokio::test]
 async fn permanent_team_member_is_never_removed() {
     let db = turnier_db::test_pool().await.expect("central test pool");
+    enable_turniere_runtime(db.pool()).await;
     seed_substitute(db.pool(), 3, None).await;
     let repository = PgScrimReadRepository::new(db.pool().clone());
 
@@ -181,6 +214,7 @@ async fn participant_resync_preserves_other_membership_for_same_discord_id() {
 #[tokio::test]
 async fn failed_expiry_sync_remains_pending_after_membership_delete() {
     let db = turnier_db::test_pool().await.expect("central test pool");
+    enable_turniere_runtime(db.pool()).await;
     seed_substitute(db.pool(), 5, Some("2000-01-01T00:00:00Z")).await;
     let repository = PgScrimReadRepository::new(db.pool().clone());
 
@@ -214,6 +248,7 @@ async fn failed_expiry_sync_remains_pending_after_membership_delete() {
 #[tokio::test]
 async fn expiry_retry_uses_current_membership_state() {
     let db = turnier_db::test_pool().await.expect("central test pool");
+    enable_turniere_runtime(db.pool()).await;
     seed_substitute(db.pool(), 6, Some("2000-01-01T00:00:00Z")).await;
     let repository = PgScrimReadRepository::new(db.pool().clone());
 
@@ -250,6 +285,7 @@ async fn expiry_retry_uses_current_membership_state() {
 #[tokio::test]
 async fn delivery_refreshes_role_state_before_discord() {
     let db = turnier_db::test_pool().await.expect("central test pool");
+    enable_turniere_runtime(db.pool()).await;
     seed_substitute(db.pool(), 9, Some("2000-01-01T00:00:00Z")).await;
     let repository = PgScrimReadRepository::new(db.pool().clone());
     let plans = repository
@@ -284,6 +320,7 @@ async fn delivery_refreshes_role_state_before_discord() {
 #[tokio::test]
 async fn delivery_ack_does_not_close_newer_receipt() {
     let db = turnier_db::test_pool().await.expect("central test pool");
+    enable_turniere_runtime(db.pool()).await;
     seed_substitute(db.pool(), 10, Some("2000-01-01T00:00:00Z")).await;
     let repository = PgScrimReadRepository::new(db.pool().clone());
     let first_plans = repository
@@ -321,6 +358,7 @@ async fn delivery_ack_does_not_close_newer_receipt() {
 #[tokio::test]
 async fn delivery_holds_role_mutation_lock_until_discord_result_is_recorded() {
     let db = turnier_db::test_pool().await.expect("central test pool");
+    enable_turniere_runtime(db.pool()).await;
     seed_substitute(db.pool(), 11, Some("2000-01-01T00:00:00Z")).await;
     let repository = PgScrimReadRepository::new(db.pool().clone());
     let plans = repository.sweep_expired_substitutes().await.expect("sweep");

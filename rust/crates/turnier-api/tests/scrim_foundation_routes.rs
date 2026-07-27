@@ -864,6 +864,31 @@ async fn runtime_control_blocks_real_mutations_until_turniere_owns_runtime() {
     assert!(body["detail"]
         .as_str()
         .is_some_and(|detail| detail.contains("Runtime")));
+
+    let (status, body) = send(
+        &app,
+        IpAddr::V4(Ipv4Addr::LOCALHOST),
+        coach_headers("roster:runtime", "123456789"),
+        Method::POST,
+        "/internal/turnier/v1/scrims/teams",
+        Some(json!({
+            "name":"Blocked Team",
+            "coach_discord_id":"123456789",
+            "default_from":1200,
+            "default_to":1320
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert!(body["detail"]
+        .as_str()
+        .is_some_and(|detail| detail.contains("Runtime")));
+    let blocked_team_count: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM scrim.teams WHERE name='Blocked Team'")
+            .fetch_one(db.pool())
+            .await
+            .expect("blocked team count");
+    assert_eq!(blocked_team_count, 0);
 }
 
 #[cfg(feature = "testing")]
@@ -1528,6 +1553,7 @@ async fn participant_interaction_revalidates_slots_after_advisory_lock() {
 #[tokio::test]
 async fn roster_operator_routes_apply_legacy_contract_and_database_effects() {
     let db = turnier_db::test_pool().await.expect("central test pool");
+    enable_turniere_runtime(db.pool()).await;
     seed_coach(db.pool(), 123456789).await;
     seed_roster_fixture(db.pool()).await;
     let app = app_with_pool(db.pool().clone());
@@ -1600,6 +1626,8 @@ async fn roster_operator_routes_apply_legacy_contract_and_database_effects() {
             "status":"assigned",
             "team_id":team_id,
             "is_captain":true,
+            "rank":"Phantom",
+            "roles":"Duo",
             "notes":"contract"
         })),
     )
@@ -1609,6 +1637,24 @@ async fn roster_operator_routes_apply_legacy_contract_and_database_effects() {
     assert_eq!(participant["id"], 501);
     assert_eq!(participant["team"]["id"], team_id);
     assert!(participant.get("discord_sync").is_some());
+
+    let (status, cleared_participant) = send(
+        &app,
+        IpAddr::V4(Ipv4Addr::LOCALHOST),
+        coach_headers("roster:clear-participant-text", "123456789"),
+        Method::PATCH,
+        "/internal/turnier/v1/scrims/participants/501",
+        Some(json!({
+            "rank":null,
+            "roles":null,
+            "notes":null
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(cleared_participant["rank"].is_null());
+    assert!(cleared_participant["roles"].is_null());
+    assert!(cleared_participant["notes"].is_null());
 
     let (status, announcement) = send(
         &app,
@@ -1677,8 +1723,8 @@ async fn roster_operator_routes_apply_legacy_contract_and_database_effects() {
             .await
             .expect("mutated team");
     assert_eq!(team, ("Bravo".to_string(), Some(1260), Some(1380)));
-    let assigned: (String, Option<String>, bool) = sqlx::query_as(
-        "SELECT p.status, p.notes, tm.is_captain \
+    let assigned: (String, Option<String>, Option<String>, Option<String>, bool) = sqlx::query_as(
+        "SELECT p.status, p.rank, p.roles, p.notes, tm.is_captain \
          FROM scrim.participants p \
          JOIN scrim.team_members tm ON tm.participant_id=p.id \
          WHERE p.id=501 AND tm.team_id=$1",
@@ -1687,10 +1733,7 @@ async fn roster_operator_routes_apply_legacy_contract_and_database_effects() {
     .fetch_one(db.pool())
     .await
     .expect("assigned participant");
-    assert_eq!(
-        assigned,
-        ("assigned".to_string(), Some("contract".to_string()), true)
-    );
+    assert_eq!(assigned, ("assigned".to_string(), None, None, None, true));
     let substitute_until: Option<chrono::DateTime<chrono::Utc>> = sqlx::query_scalar(
         "SELECT substitute_until FROM scrim.team_members \
          WHERE team_id=$1 AND participant_id=502",
@@ -1757,6 +1800,7 @@ async fn roster_operator_routes_apply_legacy_contract_and_database_effects() {
 #[tokio::test]
 async fn roster_operator_routes_validate_each_contract() {
     let db = turnier_db::test_pool().await.expect("central test pool");
+    enable_turniere_runtime(db.pool()).await;
     seed_coach(db.pool(), 123456789).await;
     seed_roster_fixture(db.pool()).await;
     let app = app_with_pool(db.pool().clone());
@@ -1823,6 +1867,7 @@ async fn roster_operator_routes_validate_each_contract() {
 #[tokio::test]
 async fn roster_team_patch_revalidates_the_window_after_locking() {
     let db = turnier_db::test_pool().await.expect("central test pool");
+    enable_turniere_runtime(db.pool()).await;
     seed_coach(db.pool(), 123456789).await;
     seed_roster_fixture(db.pool()).await;
     sqlx::query("UPDATE scrim.teams SET default_from=1200, default_to=1380 WHERE id=10")

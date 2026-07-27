@@ -825,6 +825,8 @@ impl PgScrimReadRepository {
             .map(parse_positive_i64)
             .transpose()?;
         let mut tx = self.pool.begin().await?;
+        lock_runtime_control(&mut tx).await?;
+        require_turniere_runtime(&mut tx).await?;
         sqlx::query("SELECT pg_advisory_xact_lock($1)")
             .bind(SELF_SERVICE_ADVISORY_LOCK)
             .execute(&mut *tx)
@@ -875,6 +877,8 @@ impl PgScrimReadRepository {
         discord_role_id: Option<i64>,
     ) -> ScrimResult<TeamMutation> {
         let mut tx = self.pool.begin().await?;
+        lock_runtime_control(&mut tx).await?;
+        require_turniere_runtime(&mut tx).await?;
         sqlx::query("SELECT pg_advisory_xact_lock($1)")
             .bind(SELF_SERVICE_ADVISORY_LOCK)
             .execute(&mut *tx)
@@ -906,6 +910,8 @@ impl PgScrimReadRepository {
         request: TeamPatchRequest,
     ) -> ScrimResult<TeamMutation> {
         let mut tx = self.pool.begin().await?;
+        lock_runtime_control(&mut tx).await?;
+        require_turniere_runtime(&mut tx).await?;
         sqlx::query("SELECT pg_advisory_xact_lock($1)")
             .bind(SELF_SERVICE_ADVISORY_LOCK)
             .execute(&mut *tx)
@@ -974,6 +980,8 @@ impl PgScrimReadRepository {
         signup_role_id: Option<u64>,
     ) -> ScrimResult<ParticipantMutation> {
         let mut tx = self.pool.begin().await?;
+        lock_runtime_control(&mut tx).await?;
+        require_turniere_runtime(&mut tx).await?;
         sqlx::query("SELECT pg_advisory_xact_lock($1)")
             .bind(SELF_SERVICE_ADVISORY_LOCK)
             .execute(&mut *tx)
@@ -987,14 +995,18 @@ impl PgScrimReadRepository {
         if rank.is_some() || roles.is_some() || notes.is_some() {
             sqlx::query(
                 "UPDATE scrim.participants \
-                 SET rank=COALESCE($2, rank), roles=COALESCE($3, roles), \
-                     notes=COALESCE($4, notes), updated_at=now() \
+                 SET rank=CASE WHEN $2 THEN $3 ELSE rank END, \
+                     roles=CASE WHEN $4 THEN $5 ELSE roles END, \
+                     notes=CASE WHEN $6 THEN $7 ELSE notes END, updated_at=now() \
                  WHERE id=$1",
             )
             .bind(participant_id)
-            .bind(rank)
-            .bind(roles)
-            .bind(notes)
+            .bind(rank.is_some())
+            .bind(rank.flatten())
+            .bind(roles.is_some())
+            .bind(roles.flatten())
+            .bind(notes.is_some())
+            .bind(notes.flatten())
             .execute(&mut *tx)
             .await?;
         }
@@ -1082,6 +1094,8 @@ impl PgScrimReadRepository {
         signup_role_id: Option<u64>,
     ) -> ScrimResult<SubstituteMutation> {
         let mut tx = self.pool.begin().await?;
+        lock_runtime_control(&mut tx).await?;
+        require_turniere_runtime(&mut tx).await?;
         sqlx::query("SELECT pg_advisory_xact_lock($1)")
             .bind(SELF_SERVICE_ADVISORY_LOCK)
             .execute(&mut *tx)
@@ -1152,13 +1166,17 @@ impl PgScrimReadRepository {
     }
 
     pub async fn sweep_expired_substitutes(&self) -> ScrimResult<Vec<ExpiredSubstituteRoleSync>> {
+        let mut tx = self.pool.begin().await?;
+        lock_runtime_control(&mut tx).await?;
+        require_turniere_runtime(&mut tx).await?;
         let rows = sqlx::query(
             "SELECT team_id, participant_id FROM scrim.team_members \
              WHERE substitute_until IS NOT NULL AND substitute_until <= now() \
              ORDER BY substitute_until ASC, team_id ASC, participant_id ASC",
         )
-        .fetch_all(&self.pool)
+        .fetch_all(&mut *tx)
         .await?;
+        tx.commit().await?;
         for row in rows {
             let team_id = row.try_get("team_id")?;
             let participant_id = row.try_get("participant_id")?;
@@ -1181,6 +1199,8 @@ impl PgScrimReadRepository {
         signup_role_id: Option<u64>,
     ) -> ScrimResult<Option<ExpiredSubstituteRoleSyncDelivery>> {
         let mut tx = self.pool.begin().await?;
+        lock_runtime_control(&mut tx).await?;
+        require_turniere_runtime(&mut tx).await?;
         sqlx::query("SELECT pg_advisory_xact_lock($1)")
             .bind(SELF_SERVICE_ADVISORY_LOCK)
             .execute(&mut *tx)
@@ -1221,6 +1241,8 @@ impl PgScrimReadRepository {
 
     async fn expire_substitute(&self, team_id: i32, participant_id: i32) -> ScrimResult<()> {
         let mut tx = self.pool.begin().await?;
+        lock_runtime_control(&mut tx).await?;
+        require_turniere_runtime(&mut tx).await?;
         sqlx::query("SELECT pg_advisory_xact_lock($1)")
             .bind(SELF_SERVICE_ADVISORY_LOCK)
             .execute(&mut *tx)
@@ -3032,10 +3054,11 @@ fn patch_option<T>(value: PatchValue<T>, current: Option<T>) -> Option<T> {
     }
 }
 
-fn patch_text_value(value: PatchValue<String>) -> Option<String> {
+fn patch_text_value(value: PatchValue<String>) -> Option<Option<String>> {
     match value {
-        PatchValue::Value(value) => Some(value),
-        PatchValue::Omitted | PatchValue::Null => None,
+        PatchValue::Omitted => None,
+        PatchValue::Null => Some(None),
+        PatchValue::Value(value) => Some(Some(value)),
     }
 }
 
