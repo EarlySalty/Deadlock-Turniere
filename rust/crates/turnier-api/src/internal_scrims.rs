@@ -2855,7 +2855,7 @@ async fn post_team_announcement(
                 "channel_id": channel_id,
                 "message_id": message_id,
                 "emoji": "✅",
-                // Nicht an den Aufrufer-Key anhaengen: der darf 129 Zeichen lang sein,
+                // Nicht an den Aufrufer-Key anhaengen: der darf 128 Zeichen lang sein,
                 // der Broker nimmt 128. Kanal und Nachricht identifizieren die Reaktion
                 // ohnehin eindeutig und bleiben kurz.
                 "idempotency_key": format!("scrim-reaction-{channel_id}-{message_id}"),
@@ -2945,7 +2945,7 @@ async fn send_substitute_dm(
                 "content": substitute_dm_content(team_name, &window),
                 "team_name": team_name,
                 "window": window,
-                // Gehasht statt angehaengt: der Aufrufer-Key darf 129 Zeichen lang sein,
+                // Gehasht statt angehaengt: der Aufrufer-Key darf 128 Zeichen lang sein,
                 // der Broker nimmt 128. Der Hash haelt die Laenge konstant bei 75 Zeichen.
                 "idempotency_key": format!(
                     "scrim-dm-{:x}",
@@ -3422,7 +3422,8 @@ fn require_domain_ref(value: &str, name: &str) -> WebResult<()> {
             .is_some_and(|byte| byte.is_ascii_alphanumeric())
         && rest_bytes
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'.' | b':' | b'-'));
-    if prefix_valid && rest_valid {
+    // Die Gesamtgrenze entspricht der maximalen Schlüssellänge des Discord-Brokers.
+    if value.len() <= 128 && prefix_valid && rest_valid {
         Ok(())
     } else {
         Err(WebError::bad_request(format!("{name} ist ungültig")))
