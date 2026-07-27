@@ -1590,7 +1590,10 @@ async fn announce_reports_reaction_failure_without_losing_posted_message() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(announcement["message_id"], "12345");
     assert_eq!(announcement["ok"], true);
-    assert_eq!(announcement["detail"], "Platzhalter");
+    assert_eq!(
+        announcement["detail"],
+        "Der Aufruf steht im Scrim-Kanal, aber der ✅-Haken konnte nicht gesetzt werden. Setz ihn bitte einmal selbst darunter."
+    );
     let requests = failed_requests.lock().expect("broker requests");
     assert_eq!(requests.len(), 1);
     assert!(requests[0]["channel_id"].as_i64().is_some_and(|id| id > 0));
@@ -1601,6 +1604,48 @@ async fn announce_reports_reaction_failure_without_losing_posted_message() {
         "roster:announce:reaction-failure:reaction"
     );
 
+    broker_task.abort();
+}
+
+#[cfg(feature = "testing")]
+#[tokio::test]
+async fn participant_discord_resync_is_blocked_until_turniere_owns_runtime() {
+    let db = turnier_db::test_pool().await.expect("central test pool");
+    seed_coach(db.pool(), 123456789).await;
+    seed_roster_fixture(db.pool()).await;
+
+    let requests = Arc::new(Mutex::new(Vec::new()));
+    let broker = Router::new()
+        .route(
+            "/internal/master/v1/discord/member/add-role",
+            post(record_and_fail_broker),
+        )
+        .route(
+            "/internal/master/v1/discord/member/remove-role",
+            post(record_and_fail_broker),
+        )
+        .with_state(requests.clone());
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("broker listener");
+    let broker_url = format!("http://{}", listener.local_addr().expect("broker address"));
+    let broker_task = tokio::spawn(async move {
+        axum::serve(listener, broker).await.expect("broker server");
+    });
+    let app = app_with_pool_and_broker(db.pool().clone(), Some(&broker_url));
+
+    let (status, _) = send(
+        &app,
+        IpAddr::V4(Ipv4Addr::LOCALHOST),
+        coach_headers("roster:resync:legacy-runtime", "123456789"),
+        Method::POST,
+        "/internal/turnier/v1/scrims/participants/501/resync-discord",
+        Some(json!({})),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert!(requests.lock().expect("broker requests").is_empty());
     broker_task.abort();
 }
 

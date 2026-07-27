@@ -1158,11 +1158,15 @@ impl PgScrimReadRepository {
         signup_role_id: Option<u64>,
     ) -> ScrimResult<DiscordRoleSyncPlan> {
         let mut tx = self.pool.begin().await?;
+        lock_runtime_control(&mut tx).await?;
+        require_turniere_runtime(&mut tx).await?;
         let snapshot =
             participant_role_snapshot(&mut tx, participant_id, reserve_role_id, signup_role_id)
                 .await?;
         let managed = all_managed_role_ids(&mut tx, signup_role_id, reserve_role_id).await?;
-        Ok(role_resync(&snapshot, &managed))
+        let plan = role_resync(&snapshot, &managed);
+        tx.commit().await?;
+        Ok(plan)
     }
 
     pub async fn sweep_expired_substitutes(&self) -> ScrimResult<Vec<ExpiredSubstituteRoleSync>> {

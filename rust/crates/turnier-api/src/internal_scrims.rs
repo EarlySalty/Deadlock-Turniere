@@ -1397,7 +1397,7 @@ async fn post_team_announcement(
     idempotency_key: &str,
 ) -> AnnounceTeamResponse {
     let Some(channel_id) = positive_config_id(Some(state.config.scrim_announce_channel_id)) else {
-        tracing::warn!(team_id = team.id, "Scrim-Ankuendigung ohne gueltigen Kanal");
+        tracing::warn!(team_id = team.id, "Scrim-Ankündigung ohne gültigen Kanal");
         return AnnounceTeamResponse {
             message_id: None,
             ok: false,
@@ -1461,7 +1461,7 @@ async fn post_team_announcement(
             if message_id.is_none() {
                 tracing::warn!(
                     team_id = team.id,
-                    "Scrim-Ankuendigungsantwort enthaelt keine Message-ID"
+                    "Scrim-Ankündigungsantwort enthält keine Message-ID"
                 );
             }
             message_id
@@ -1470,7 +1470,7 @@ async fn post_team_announcement(
             tracing::warn!(
                 team_id = team.id,
                 %error,
-                "Scrim-Ankuendigung konnte nicht gepostet werden"
+                "Scrim-Ankündigung konnte nicht gepostet werden"
             );
             None
         }
@@ -1504,9 +1504,9 @@ async fn post_team_announcement(
                 channel_id,
                 message_id,
                 %error,
-                "Scrim-Ankuendigungsreaktion konnte nicht gesetzt werden"
+                "Scrim-Ankündigungsreaktion konnte nicht gesetzt werden"
             );
-            "Platzhalter".to_string()
+            "Der Aufruf steht im Scrim-Kanal, aber der ✅-Haken konnte nicht gesetzt werden. Setz ihn bitte einmal selbst darunter.".to_string()
         }
     };
     AnnounceTeamResponse {

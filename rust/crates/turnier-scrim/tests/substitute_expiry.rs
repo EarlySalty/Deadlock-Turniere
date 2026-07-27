@@ -139,6 +139,7 @@ async fn permanent_team_member_is_never_removed() {
 #[tokio::test]
 async fn participant_resync_preserves_team_role_held_as_coach() {
     let db = turnier_db::test_pool().await.expect("central test pool");
+    enable_turniere_runtime(db.pool()).await;
     seed_substitute(db.pool(), 4, None).await;
     sqlx::query(
         "INSERT INTO scrim.teams(id, name, coach_discord_id, discord_role_id, created_at) \
@@ -171,6 +172,7 @@ async fn participant_resync_preserves_team_role_held_as_coach() {
 #[tokio::test]
 async fn participant_resync_preserves_other_membership_for_same_discord_id() {
     let db = turnier_db::test_pool().await.expect("central test pool");
+    enable_turniere_runtime(db.pool()).await;
     seed_substitute(db.pool(), 7, None).await;
     sqlx::query(
         "INSERT INTO scrim.teams(id, name, discord_role_id, created_at) \
