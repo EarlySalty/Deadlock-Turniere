@@ -3054,6 +3054,7 @@ async fn turniere_runtime_consumes_result_fetches_and_scrim_reminders() {
             Some((0, Some("9007199254740996"), Some("9007199254740991"))),
             Some((1, None, Some("9007199254740997"))),
             None,
+            Some((0, Some("9007199254741096"), None)),
         ] {
             loop {
                 if let Some(id) = sqlx::query_scalar::<_, i64>(
@@ -3127,6 +3128,19 @@ async fn turniere_runtime_consumes_result_fetches_and_scrim_reminders() {
     turnier_api::internal_scrims::process_scrim_operational_once(&state)
         .await
         .expect("turniere operational consumer failed final result");
+    sqlx::query(
+        "INSERT INTO scrim.matches(\
+             id, team_a_id, team_b_id, status, lobby_state, steam_match_id, created_at, updated_at\
+         ) VALUES (\
+             96, 1, 2, 'scheduled', 'result_requested', 9007199254741096, now(), now()\
+         )",
+    )
+    .execute(db.pool())
+    .await
+    .expect("result fetch without ref");
+    turnier_api::internal_scrims::process_scrim_operational_once(&state)
+        .await
+        .expect("turniere operational consumer without result ref");
     steam_task.await.expect("steam worker");
 
     let result: (String, Option<i32>, Option<Value>) = sqlx::query_as(
@@ -3138,8 +3152,19 @@ async fn turniere_runtime_consumes_result_fetches_and_scrim_reminders() {
     assert_eq!(result.0, "finished");
     assert_eq!(result.1, None);
     assert_eq!(result.2, None);
-    let result_refs: Vec<(String, Option<i32>)> = sqlx::query_as(
-        "SELECT fetch_status, winner_team_id \
+    let result_without_ref: (String, Option<i32>, Option<Value>) = sqlx::query_as(
+        "SELECT lobby_state, winner_team_id, result_json FROM scrim.matches WHERE id=96",
+    )
+    .fetch_one(db.pool())
+    .await
+    .expect("consumed result without ref");
+    assert_eq!(result_without_ref.0, "finished");
+    assert_eq!(result_without_ref.1, Some(1));
+    let result_json = result_without_ref.2.expect("stored result without ref");
+    assert_eq!(result_json["match_id"], "9007199254741096");
+    assert_eq!(result_json["winning_team"], 0);
+    let result_refs: Vec<(String, Option<i32>, String)> = sqlx::query_as(
+        "SELECT fetch_status, winner_team_id, validation_status \
            FROM scrim.match_result_refs WHERE match_id=94 ORDER BY steam_match_id",
     )
     .fetch_all(db.pool())
@@ -3148,10 +3173,10 @@ async fn turniere_runtime_consumes_result_fetches_and_scrim_reminders() {
     assert_eq!(
         result_refs,
         vec![
-            ("failed".to_string(), None),
-            ("failed".to_string(), None),
-            ("failed".to_string(), None),
-            ("fetched".to_string(), Some(2)),
+            ("failed".to_string(), None, "unvalidated".to_string()),
+            ("failed".to_string(), None, "unvalidated".to_string()),
+            ("failed".to_string(), None, "unvalidated".to_string()),
+            ("fetched".to_string(), Some(2), "valid".to_string()),
         ]
     );
     let mismatched_result: (Option<String>, Option<Value>) = sqlx::query_as(
@@ -3528,6 +3553,24 @@ async fn replacement_candidates_are_ranked_and_requests_persist_and_transition()
         ]
     );
 
+    let (status, _) = send(
+        &app,
+        IpAddr::V4(Ipv4Addr::LOCALHOST),
+        coach_headers("replacement_request:create:sibling", "123456789"),
+        Method::POST,
+        &route,
+        Some(json!({"participant_id":"301","reason":"Zweite Anfrage"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let sibling_request_id: i64 = sqlx::query_scalar(
+        "SELECT id FROM scrim.replacement_requests WHERE need_id=$1 AND participant_id=301",
+    )
+    .bind(need_id)
+    .fetch_one(db.pool())
+    .await
+    .expect("sibling replacement request");
+
     let route = format!("/internal/turnier/v1/scrims/replacement-requests/{request_id}");
     let (status, _) = send(
         &app,
@@ -3581,6 +3624,22 @@ async fn replacement_candidates_are_ranked_and_requests_persist_and_transition()
             .await
             .expect("replacement need");
     assert_eq!(need_status, "filled");
+    let sibling_state: (String, String) = sqlx::query_as(
+        "SELECT request.status, effect.state \
+           FROM scrim.replacement_requests request \
+           JOIN scrim.replacement_request_effects link \
+             ON link.replacement_request_id=request.id \
+           JOIN scrim.outbox_effects effect ON effect.id=link.outbox_effect_id \
+          WHERE request.id=$1",
+    )
+    .bind(sibling_request_id)
+    .fetch_one(db.pool())
+    .await
+    .expect("cancelled sibling replacement effect");
+    assert_eq!(
+        sibling_state,
+        ("cancelled".to_string(), "cancelled".to_string())
+    );
 
     let (status, _) = send(
         &app,

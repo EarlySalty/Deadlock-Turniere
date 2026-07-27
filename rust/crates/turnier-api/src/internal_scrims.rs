@@ -564,6 +564,7 @@ async fn process_result_fetch(
             "UPDATE scrim.match_result_refs \
                 SET fetch_status='fetched', fetched_at=now(), last_error=NULL, \
                     winner_team_id=$2, raw_result_json=$3, normalized_result_json=$4, \
+                    validation_status=CASE WHEN $2 IS NULL THEN 'ambiguous' ELSE 'valid' END, \
                     updated_at=now() \
               WHERE id=$1",
         )
@@ -590,12 +591,18 @@ async fn process_result_fetch(
     .await?;
     sqlx::query(
         "UPDATE scrim.matches \
-            SET steam_match_id=COALESCE(steam_match_id, $2), lobby_state=$3, updated_at=now() \
+            SET steam_match_id=COALESCE(steam_match_id, $2), lobby_state=$3, \
+                winner_team_id=CASE WHEN $4 THEN $5 ELSE winner_team_id END, \
+                result_json=CASE WHEN $4 THEN $6 ELSE result_json END, \
+                updated_at=now() \
           WHERE id=$1",
     )
     .bind(claim.match_id)
     .bind(steam_match_id)
     .bind(next_state)
+    .bind(claim.result_ref_id.is_none())
+    .bind(winner_team_id)
+    .bind(&result)
     .execute(&mut *tx)
     .await?;
     tx.commit().await?;

@@ -2295,6 +2295,22 @@ impl PgScrimReadRepository {
             .bind(replacement_request_id)
             .execute(&mut *tx)
             .await?;
+            sqlx::query(
+                "UPDATE scrim.outbox_effects effect \
+                    SET state='cancelled', lease_owner=NULL, lease_until=NULL, \
+                        next_attempt_at=NULL, updated_at=now() \
+                   FROM scrim.replacement_request_effects link \
+                   JOIN scrim.replacement_requests request \
+                     ON request.id=link.replacement_request_id \
+                  WHERE effect.id=link.outbox_effect_id \
+                    AND request.need_id=$1 AND request.id<>$2 \
+                    AND request.status='cancelled' \
+                    AND effect.state IN ('pending', 'retry')",
+            )
+            .bind(need_id)
+            .bind(replacement_request_id)
+            .execute(&mut *tx)
+            .await?;
         }
         insert_audit_event(
             &mut tx,
