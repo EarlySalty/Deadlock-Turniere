@@ -134,6 +134,10 @@ Vorgehen:
   Ist es ein Regress gegenüber dort, hat der Befund Vorrang. Ist es altes Verhalten,
   behebe es trotzdem, wenn es echten Schaden anrichtet, und schreib das in den Bericht.
 - TDD: erst ein Test, der den Fehler zeigt, dann die Behebung.
+- Der Befund nennt EINE Stelle, der Fehler sitzt oft an mehreren. Bevor du fertig meldest:
+  suche im Repo nach allen Stellen, die denselben Wert, dieselbe Grenze oder dasselbe Muster
+  genauso verwenden, und behebe sie mit. Nenne die geprüften Fundstellen im Bericht — auch die,
+  die in Ordnung waren.
 - Fehler an der Grenze zu Discord dürfen den Datenbankstand nicht zurückrollen,
   müssen aber via tracing::warn! mit Kontext protokolliert werden. Niemals still verschlucken.
 

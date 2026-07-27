@@ -216,10 +216,15 @@ async fn fail_once_then_create_role(
     State(requests): State<Arc<Mutex<Vec<Value>>>>,
     Json(payload): Json<Value>,
 ) -> Result<Json<Value>, StatusCode> {
+    let key_is_too_long = payload["idempotency_key"]
+        .as_str()
+        .is_some_and(|key| key.chars().count() > 128);
     let mut requests = requests.lock().expect("broker requests");
     let first_request = requests.is_empty();
     requests.push(payload);
-    if first_request {
+    if key_is_too_long {
+        Err(StatusCode::BAD_REQUEST)
+    } else if first_request {
         Err(StatusCode::SERVICE_UNAVAILABLE)
     } else {
         Ok(Json(json!({"result":{"role_id":"912345678901234567"}})))
@@ -1829,7 +1834,7 @@ async fn participant_interaction_revalidates_slots_after_advisory_lock() {
 
 #[cfg(feature = "testing")]
 #[tokio::test]
-async fn team_creation_reports_role_creation_failure_without_rolling_back_team() {
+async fn maximal_valid_request_key_retries_team_role_creation_with_broker_safe_key() {
     let db = turnier_db::test_pool().await.expect("central test pool");
     enable_turniere_runtime(db.pool()).await;
     seed_coach(db.pool(), 123456789).await;
@@ -1849,7 +1854,9 @@ async fn team_creation_reports_role_creation_failure_without_rolling_back_team()
         axum::serve(listener, broker).await.expect("broker server");
     });
     let app = app_with_pool_and_broker(db.pool().clone(), Some(&broker_url));
-    let headers = coach_headers("roster:create:role-failure", "123456789");
+    let request_key = format!("{}:{}", "a".repeat(32), "b".repeat(96));
+    assert_eq!(request_key.chars().count(), 129);
+    let headers = coach_headers(&request_key, "123456789");
     let body = json!({
         "name":"Role Failure",
         "default_from":1200,
@@ -1883,7 +1890,6 @@ async fn team_creation_reports_role_creation_failure_without_rolling_back_team()
     {
         let requests = requests.lock().expect("broker requests");
         assert_eq!(requests.len(), 1);
-        assert_eq!(requests[0]["idempotency_key"], "roster:create:role-failure");
     }
 
     let (retry_status, retried) = send(
@@ -1908,9 +1914,14 @@ async fn team_creation_reports_role_creation_failure_without_rolling_back_team()
     {
         let requests = requests.lock().expect("broker requests");
         assert_eq!(requests.len(), 2);
+        let broker_key = format!("scrim-team-{team_id}-role-create");
+        assert!(broker_key.chars().count() <= 128);
         assert!(requests
             .iter()
-            .all(|request| request["idempotency_key"] == "roster:create:role-failure"));
+            .all(|request| request["idempotency_key"] == broker_key));
+        assert!(requests
+            .iter()
+            .all(|request| request["reason"] == "Scrim-Team Role Failure"));
     }
 
     let (replay_status, replayed) = send(

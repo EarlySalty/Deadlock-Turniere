@@ -2379,7 +2379,7 @@ async fn create_team(
     let existing_role_id = service.roster_team(team.id).await?.discord_role_id;
     let discord_role_id = match existing_role_id {
         Some(role_id) => Some(role_id),
-        None => create_team_discord_role(&state, &team, mutation.idempotency_key).await,
+        None => create_team_discord_role(&state, &team).await,
     };
     let request_key = mutation.idempotency_key;
     let mutation = service
@@ -2560,7 +2560,6 @@ async fn resync_participant_discord(
 async fn create_team_discord_role(
     state: &AppState,
     team: &turnier_scrim::dto::RosterTeam,
-    idempotency_key: &str,
 ) -> Option<i64> {
     let Some(guild_id) = positive_config_id(Some(state.config.scrim_guild_id)) else {
         tracing::warn!(
@@ -2579,8 +2578,8 @@ async fn create_team_discord_role(
                 "guild_id": guild_id,
                 "name": team.name,
                 "mentionable": false,
-                "reason": "scrim team role",
-                "idempotency_key": idempotency_key,
+                "reason": format!("Scrim-Team {}", team.name),
+                "idempotency_key": format!("scrim-team-{}-role-create", team.id),
             }),
         )
         .await;
