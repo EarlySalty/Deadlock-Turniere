@@ -356,15 +356,20 @@ async fn claim_result_fetch(pool: &sqlx::PgPool) -> Result<Option<ResultFetchCla
     let row = sqlx::query(
         "SELECT m.id, m.team_a_id, m.team_b_id, m.party_id, m.steam_match_id \
            FROM scrim.matches m \
-          WHERE m.lobby_state='result_requested' \
-             OR (m.lobby_state IN ('result_failed', 'result_fetching') \
-                 AND m.updated_at <= now() - interval '15 minutes') \
-             OR EXISTS(\
-                    SELECT 1 FROM scrim.match_result_refs stale_ref \
-                     WHERE stale_ref.match_id=m.id \
-                       AND stale_ref.fetch_status='fetching' \
-                       AND stale_ref.updated_at <= now() - interval '15 minutes'\
+          WHERE lower(m.status) NOT IN (\
+                    'cancelled', 'canceled', 'finished', 'completed', 'played', 'closed'\
                 ) \
+            AND COALESCE(lower(m.lobby_state), '') NOT IN ('cancelled', 'canceled', 'finished') \
+            AND (m.lobby_state='result_requested' \
+                 OR (m.lobby_state IN ('result_failed', 'result_fetching') \
+                     AND m.updated_at <= now() - interval '15 minutes') \
+                 OR EXISTS(\
+                        SELECT 1 FROM scrim.match_result_refs stale_ref \
+                         WHERE stale_ref.match_id=m.id \
+                           AND stale_ref.fetch_status='fetching' \
+                           AND stale_ref.validation_status IN ('unvalidated', 'ambiguous') \
+                           AND stale_ref.updated_at <= now() - interval '15 minutes'\
+                    )) \
           ORDER BY m.updated_at, m.id \
           LIMIT 1 FOR UPDATE OF m SKIP LOCKED",
     )
@@ -379,6 +384,7 @@ async fn claim_result_fetch(pool: &sqlx::PgPool) -> Result<Option<ResultFetchCla
         "SELECT id, steam_match_id \
            FROM scrim.match_result_refs \
           WHERE match_id=$1 \
+            AND validation_status IN ('unvalidated', 'ambiguous') \
             AND (fetch_status='pending' \
                  OR (fetch_status IN ('failed', 'fetching') \
                      AND updated_at <= now() - interval '15 minutes')) \
@@ -480,10 +486,49 @@ async fn process_result_fetch(
             }
             Ok((result, returned_match_id))
         });
+    let mut tx = state.pool.begin().await?;
+    let claim_is_current = sqlx::query_scalar::<_, bool>(
+        "SELECT lower(status) NOT IN (\
+                    'cancelled', 'canceled', 'finished', 'completed', 'played', 'closed'\
+                ) \
+                AND lobby_state='result_fetching' \
+                AND ($2::BIGINT IS NULL OR EXISTS(\
+                    SELECT 1 FROM scrim.match_result_refs result_ref \
+                     WHERE result_ref.id=$2 AND result_ref.match_id=$1 \
+                       AND result_ref.fetch_status='fetching' \
+                       AND result_ref.validation_status IN ('unvalidated', 'ambiguous')\
+                )) \
+           FROM scrim.matches WHERE id=$1 FOR UPDATE",
+    )
+    .bind(claim.match_id)
+    .bind(claim.result_ref_id)
+    .fetch_optional(&mut *tx)
+    .await?
+    .unwrap_or(false);
+    if !claim_is_current {
+        if let Some(result_ref_id) = claim.result_ref_id {
+            sqlx::query(
+                "UPDATE scrim.match_result_refs \
+                    SET fetch_status='failed', \
+                        last_error='Ergebnisabruf verworfen, weil das Match oder Ergebnis überholt ist', \
+                        updated_at=now() \
+                  WHERE id=$1 AND fetch_status='fetching'",
+            )
+            .bind(result_ref_id)
+            .execute(&mut *tx)
+            .await?;
+        }
+        tx.commit().await?;
+        tracing::warn!(
+            match_id = claim.match_id,
+            result_ref_id = claim.result_ref_id,
+            "Steam-Ergebnis wurde verworfen, weil der beanspruchte Scrim-Zustand nicht mehr gilt"
+        );
+        return Ok(());
+    }
     let (result, returned_match_id) = match result {
         Ok(result) => result,
         Err(error) => {
-            let mut tx = state.pool.begin().await?;
             if let Some(result_ref_id) = claim.result_ref_id {
                 sqlx::query(
                     "UPDATE scrim.match_result_refs \
@@ -576,7 +621,6 @@ async fn process_result_fetch(
         }
     }
 
-    let mut tx = state.pool.begin().await?;
     if let Some(result_ref_id) = claim.result_ref_id {
         sqlx::query(
             "UPDATE scrim.match_result_refs \

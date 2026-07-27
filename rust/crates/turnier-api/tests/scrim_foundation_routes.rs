@@ -3417,6 +3417,128 @@ async fn empty_steam_result_does_not_finish_scrim_match() {
 
 #[cfg(feature = "testing")]
 #[tokio::test]
+async fn cancelled_match_discards_in_flight_steam_result() {
+    let db = turnier_db::test_pool().await.expect("central test pool");
+    enable_turniere_runtime(db.pool()).await;
+    seed_teams(db.pool(), &[1, 2]).await;
+    sqlx::raw_sql(
+        r#"
+        INSERT INTO scrim.matches(
+            id, team_a_id, team_b_id, status, lobby_state, steam_match_id, created_at, updated_at
+        ) VALUES (
+            98, 1, 2, 'scheduled', 'result_requested', 9007199254741098, now(), now()
+        );
+        INSERT INTO scrim.match_result_refs(
+            match_id, steam_match_id, source_user_id, source_display_name,
+            fetch_status, entered_at, updated_at
+        ) VALUES (
+            98, 9007199254741098, '123456789', 'Coach', 'pending', now(), now()
+        );
+        "#,
+    )
+    .execute(db.pool())
+    .await
+    .expect("result fetch seed");
+
+    let steam_pool = sqlx::sqlite::SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect("sqlite::memory:")
+        .await
+        .expect("steam bridge");
+    sqlx::query(
+        "CREATE TABLE steam_tasks (\
+             id INTEGER PRIMARY KEY AUTOINCREMENT, type TEXT, payload TEXT, status TEXT, \
+             result TEXT, error TEXT, created_at INTEGER, updated_at INTEGER, \
+             started_at INTEGER, finished_at INTEGER, attempts INTEGER DEFAULT 0\
+         )",
+    )
+    .execute(&steam_pool)
+    .await
+    .expect("steam task schema");
+    let mut state = state_with_pool_broker_and_signup_role(db.pool().clone(), None, None);
+    state.match_manager = Arc::new(MatchManager::new(
+        db.pool().clone(),
+        None,
+        Some(SteamBridge::from_pool(steam_pool.clone())),
+        &state.config,
+    ));
+    let central_pool = db.pool().clone();
+    let steam_task = tokio::spawn(async move {
+        loop {
+            if let Some(id) =
+                sqlx::query_scalar::<_, i64>("SELECT id FROM steam_tasks WHERE status='PENDING'")
+                    .fetch_optional(&steam_pool)
+                    .await
+                    .expect("pending steam task")
+            {
+                sqlx::query(
+                    "UPDATE scrim.matches \
+                        SET status='cancelled', lobby_state='cancelled', updated_at=now() \
+                      WHERE id=98",
+                )
+                .execute(&central_pool)
+                .await
+                .expect("cancel claimed match");
+                sqlx::query(
+                    "UPDATE steam_tasks \
+                        SET status='DONE', result=$2, updated_at=1, finished_at=1 \
+                      WHERE id=$1",
+                )
+                .bind(id)
+                .bind(
+                    json!({
+                        "success": true,
+                        "match_id": "9007199254741098",
+                        "winning_team": 0
+                    })
+                    .to_string(),
+                )
+                .execute(&steam_pool)
+                .await
+                .expect("complete steam task");
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    });
+
+    turnier_api::internal_scrims::process_scrim_operational_once(&state)
+        .await
+        .expect("turniere operational consumer");
+    steam_task.await.expect("steam worker");
+
+    let result: (
+        String,
+        String,
+        Option<i32>,
+        Option<Value>,
+        String,
+        Option<Value>,
+    ) = sqlx::query_as(
+        "SELECT m.status, m.lobby_state, m.winner_team_id, m.result_json, \
+                    result_ref.fetch_status, result_ref.raw_result_json \
+               FROM scrim.matches m \
+               JOIN scrim.match_result_refs result_ref ON result_ref.match_id=m.id \
+              WHERE m.id=98",
+    )
+    .fetch_one(db.pool())
+    .await
+    .expect("cancelled result state");
+    assert_eq!(
+        result,
+        (
+            "cancelled".to_string(),
+            "cancelled".to_string(),
+            None,
+            None,
+            "failed".to_string(),
+            None,
+        )
+    );
+}
+
+#[cfg(feature = "testing")]
+#[tokio::test]
 async fn selected_result_is_the_only_discord_winner_and_dispatch_failure_keeps_selection() {
     let db = turnier_db::test_pool().await.expect("central test pool");
     enable_turniere_runtime(db.pool()).await;
