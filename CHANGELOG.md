@@ -1,3 +1,7 @@
+## #18 — Scrim-Betrieb läuft vollständig im Turnierdienst
+
+**Ausgangslage:** Die Scrim-Verwaltung war auf mehrere Dienste verteilt. Teile davon meldeten Erfolg, obwohl eine Discord-Nachricht gar nicht angekommen war, und abgelaufene Aushilfen liefen nie ab. **Änderung:** Kader, Terminabfragen, Ersatzsuche, Matches, Lobbys und Ankündigungen laufen jetzt an einer Stelle; jede Zustellung wird dauerhaft vermerkt, damit ein zweiter Versuch nachholt statt doppelt zu posten. **Aktuelles Verhalten:** Scheitert eine Discord-Zustellung, wird das jetzt gemeldet und der Vorgang bleibt gespeichert — ein erneuter Aufruf reicht die Nachricht nach, statt sie stillschweigend zu verlieren. Aushilfe-Anfragen kommen wieder mit Zusagen- und Absage-Knopf, und Ergebnisabrufe wie Erinnerungen werden auch dann weiterverarbeitet, wenn gerade niemand zusieht.
+
 ## #17 — Scrim-Planung bekommt einen neutralen Turnierkern
 
 **Ausgangslage:** Scrim-Planung, Terminantworten und Match-Auswertung waren noch an den Discord-Bot gekoppelt und konnten nicht sicher schrittweise umgezogen werden. **Änderung:** Der Turnierdienst erhält einen neutralen Matchkern sowie eine interne, abgesicherte Scrim-Schnittstelle mit eindeutigen Übergaben, offenen Gegnern, gemeinsamen oder matchspezifischen Slots und nachvollziehbaren Freigaben. **Aktuelles Verhalten:** Der bestehende Betrieb bleibt unverändert aktiv; der neue Pfad kann parallel geprüft werden und übernimmt erst nach der kontrollierten Umschaltung Schreibzugriffe.
