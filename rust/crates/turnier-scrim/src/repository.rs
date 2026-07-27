@@ -1089,9 +1089,6 @@ impl PgScrimReadRepository {
             .bind(SELF_SERVICE_ADVISORY_LOCK)
             .execute(&mut *tx)
             .await?;
-        let before =
-            participant_role_snapshot(&mut tx, participant_id, reserve_role_id, signup_role_id)
-                .await?;
         let rank = patch_text_value(request.rank);
         let roles = patch_text_value(request.roles);
         let notes = patch_text_value(request.notes);
@@ -1179,7 +1176,8 @@ impl PgScrimReadRepository {
         let after =
             participant_role_snapshot(&mut tx, participant_id, reserve_role_id, signup_role_id)
                 .await?;
-        let sync_plan = role_diff(&before, &after);
+        let managed = all_managed_role_ids(&mut tx, signup_role_id, reserve_role_id).await?;
+        let sync_plan = role_resync(&after, &managed);
         tx.commit().await?;
         Ok(ParticipantMutation {
             participant,
