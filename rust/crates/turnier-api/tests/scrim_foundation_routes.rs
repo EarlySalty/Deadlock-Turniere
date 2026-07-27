@@ -122,10 +122,13 @@ async fn record_and_accept_message(
     Json(payload): Json<Value>,
 ) -> Json<Value> {
     let channel_id = payload["channel_id"].clone();
-    requests.lock().expect("broker requests").push(payload);
+    let mut requests = requests.lock().expect("broker requests");
+    let message_id =
+        912_345_678_901_234_568_u64 + u64::try_from(requests.len()).expect("broker request count");
+    requests.push(payload);
     Json(json!({"result":{
         "channel_id": channel_id,
-        "message_id":"912345678901234568"
+        "message_id":message_id.to_string()
     }}))
 }
 
@@ -197,15 +200,26 @@ async fn record_and_fail_second_channel_once(
     Json(payload): Json<Value>,
 ) -> Result<Json<Value>, StatusCode> {
     let mut requests = requests.lock().expect("broker requests");
-    let first_attempt = !requests
-        .iter()
-        .any(|request| request["channel_id"] == payload["channel_id"]);
-    let fail = payload["channel_id"] == "1510102" && first_attempt;
+    let first_attempt = !requests.iter().any(|request| {
+        request["channel_id"] == payload["channel_id"]
+            && request["idempotency_key"] == payload["idempotency_key"]
+    });
+    let channel_id = payload["channel_id"].clone();
+    let message_id = channel_id
+        .as_str()
+        .map(str::to_string)
+        .or_else(|| channel_id.as_i64().map(|id| id.to_string()))
+        .expect("channel id");
+    let fail = message_id == "1510102" && first_attempt;
+    let request_number = requests.len();
     requests.push(payload);
     if fail {
         Err(StatusCode::SERVICE_UNAVAILABLE)
     } else {
-        Ok(Json(json!({})))
+        Ok(Json(json!({"result":{
+            "channel_id": channel_id,
+            "message_id": format!("91{message_id}{request_number}")
+        }})))
     }
 }
 
@@ -3539,7 +3553,232 @@ async fn cancelled_match_discards_in_flight_steam_result() {
 
 #[cfg(feature = "testing")]
 #[tokio::test]
-async fn selected_result_is_the_only_discord_winner_and_dispatch_failure_keeps_selection() {
+async fn result_selection_waits_for_confirmed_discord_deliveries() {
+    let db = turnier_db::test_pool().await.expect("central test pool");
+    enable_turniere_runtime(db.pool()).await;
+    seed_coach(db.pool(), 123456789).await;
+    seed_teams(db.pool(), &[1, 2]).await;
+    sqlx::query(
+        "UPDATE scrim.teams \
+            SET discord_channel_id=CASE id WHEN 1 THEN 1510101 ELSE 1510102 END \
+          WHERE id IN (1, 2)",
+    )
+    .execute(db.pool())
+    .await
+    .expect("team channel ids");
+    sqlx::raw_sql(
+        r#"
+        INSERT INTO scrim.matches(id, team_a_id, team_b_id, status, lobby_state, created_at)
+        VALUES (99, 1, 2, 'scheduled', 'finished', now());
+        INSERT INTO scrim.match_result_refs(
+            match_id, steam_match_id, source_user_id, source_display_name,
+            fetch_status, winner_team_id, normalized_result_json,
+            validation_status, fetched_at, entered_at, updated_at
+        ) VALUES (
+            99, 9007199254741099, '123456789', 'Coach', 'fetched', 2,
+            '{"winner_team_id":2}'::jsonb, 'valid', now(), now(), now()
+        );
+        "#,
+    )
+    .execute(db.pool())
+    .await
+    .expect("selectable result ref");
+    let result_ref_id: i64 =
+        sqlx::query_scalar("SELECT id FROM scrim.match_result_refs WHERE match_id=99")
+            .fetch_one(db.pool())
+            .await
+            .expect("result ref");
+
+    let requests = Arc::new(Mutex::new(Vec::new()));
+    let broker = Router::new()
+        .route(
+            "/internal/master/v1/discord/send-message",
+            post(record_and_fail_second_channel_once),
+        )
+        .with_state(requests.clone());
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("broker listener");
+    let broker_url = format!("http://{}", listener.local_addr().expect("broker address"));
+    let broker_task = tokio::spawn(async move {
+        axum::serve(listener, broker).await.expect("broker server");
+    });
+    let app = app_with_pool_and_broker(db.pool().clone(), Some(&broker_url));
+    let route = format!("/internal/turnier/v1/scrims/matches/99/result-refs/{result_ref_id}");
+
+    let (status, first_response) = send(
+        &app,
+        IpAddr::V4(Ipv4Addr::LOCALHOST),
+        coach_headers("match:select:delivery-gate", "123456789"),
+        Method::PATCH,
+        &route,
+        Some(json!({"message":"Steam-Ergebnis geprüft"})),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::BAD_GATEWAY,
+        "first response: {first_response}"
+    );
+    let selection_count: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM scrim.match_result_selections WHERE match_id=99")
+            .fetch_one(db.pool())
+            .await
+            .expect("selection count before delivery");
+    assert_eq!(selection_count, 0);
+    let partial_deliveries: Vec<(String, bool)> = sqlx::query_as(
+        "SELECT effect.state, EXISTS(\
+             SELECT 1 FROM scrim.effect_receipts receipt \
+              WHERE receipt.outbox_effect_id=effect.id AND receipt.status='confirmed'\
+         ) \
+           FROM scrim.outbox_effects effect \
+          WHERE effect.idempotency_key LIKE $1 \
+          ORDER BY effect.id",
+    )
+    .bind(format!("scrim_result:99:{result_ref_id}:%"))
+    .fetch_all(db.pool())
+    .await
+    .expect("partial result deliveries");
+    assert_eq!(
+        partial_deliveries,
+        vec![
+            ("delivered".to_string(), true),
+            ("retry".to_string(), false),
+        ]
+    );
+
+    let (status, selected) = send(
+        &app,
+        IpAddr::V4(Ipv4Addr::LOCALHOST),
+        coach_headers("match:select:delivery-gate", "123456789"),
+        Method::PATCH,
+        &route,
+        Some(json!({"message":"Steam-Ergebnis geprüft"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        selected["match"]["selected_result"]["result_ref_id"],
+        result_ref_id.to_string()
+    );
+    let completed_deliveries: Vec<(String, bool)> = sqlx::query_as(
+        "SELECT effect.state, EXISTS(\
+             SELECT 1 FROM scrim.effect_receipts receipt \
+              WHERE receipt.outbox_effect_id=effect.id AND receipt.status='confirmed'\
+         ) \
+           FROM scrim.outbox_effects effect \
+          WHERE effect.idempotency_key LIKE $1 \
+          ORDER BY effect.id",
+    )
+    .bind(format!("scrim_result:99:{result_ref_id}:%"))
+    .fetch_all(db.pool())
+    .await
+    .expect("completed result deliveries");
+    assert_eq!(
+        completed_deliveries,
+        vec![
+            ("delivered".to_string(), true),
+            ("delivered".to_string(), true),
+        ]
+    );
+
+    sqlx::raw_sql(
+        r#"
+        INSERT INTO scrim.matches(id, team_a_id, team_b_id, status, lobby_state, created_at)
+        VALUES (100, 1, 2, 'scheduled', 'finished', now());
+        INSERT INTO scrim.match_result_refs(
+            match_id, steam_match_id, source_user_id, source_display_name,
+            fetch_status, winner_team_id, normalized_result_json,
+            validation_status, fetched_at, entered_at, updated_at
+        ) VALUES (
+            100, 9007199254741100, '123456789', 'Coach', 'fetched', 2,
+            '{"winner_team_id":2}'::jsonb, 'valid', now(), now(), now()
+        );
+        "#,
+    )
+    .execute(db.pool())
+    .await
+    .expect("second selectable result ref");
+    let invalidated_ref_id: i64 =
+        sqlx::query_scalar("SELECT id FROM scrim.match_result_refs WHERE match_id=100")
+            .fetch_one(db.pool())
+            .await
+            .expect("second result ref");
+    let invalidated_route =
+        format!("/internal/turnier/v1/scrims/matches/100/result-refs/{invalidated_ref_id}");
+    let (status, _) = send(
+        &app,
+        IpAddr::V4(Ipv4Addr::LOCALHOST),
+        coach_headers("match:select:invalidated-delivery", "123456789"),
+        Method::PATCH,
+        &invalidated_route,
+        Some(json!({"message":"Steam-Ergebnis geprüft"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_GATEWAY);
+    sqlx::query(
+        "UPDATE scrim.match_result_refs \
+            SET validation_status='void', voided_at=now(), void_reason='operator_correction' \
+          WHERE id=$1",
+    )
+    .bind(invalidated_ref_id)
+    .execute(db.pool())
+    .await
+    .expect("invalidate result ref");
+    let (status, _) = send(
+        &app,
+        IpAddr::V4(Ipv4Addr::LOCALHOST),
+        coach_headers("match:select:invalidated-delivery", "123456789"),
+        Method::PATCH,
+        &invalidated_route,
+        Some(json!({"message":"Steam-Ergebnis geprüft"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    let invalidated_deliveries: Vec<String> = sqlx::query_scalar(
+        "SELECT effect.state \
+           FROM scrim.outbox_effects effect \
+          WHERE effect.idempotency_key LIKE $1 \
+          ORDER BY effect.id",
+    )
+    .bind(format!("scrim_result:100:{invalidated_ref_id}:%"))
+    .fetch_all(db.pool())
+    .await
+    .expect("invalidated result deliveries");
+    assert_eq!(
+        invalidated_deliveries,
+        vec!["delivered".to_string(), "cancelled".to_string()]
+    );
+    let invalidated_selection_count: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM scrim.match_result_selections WHERE match_id=100")
+            .fetch_one(db.pool())
+            .await
+            .expect("invalidated selection count");
+    assert_eq!(invalidated_selection_count, 0);
+
+    let requests = requests.lock().expect("broker requests");
+    assert_eq!(requests.len(), 5);
+    assert_eq!(
+        requests
+            .iter()
+            .filter(|payload| payload["channel_id"] == 1510101)
+            .count(),
+        2
+    );
+    assert_eq!(
+        requests
+            .iter()
+            .filter(|payload| payload["channel_id"] == 1510102)
+            .count(),
+        3
+    );
+
+    broker_task.abort();
+}
+
+#[cfg(feature = "testing")]
+#[tokio::test]
+async fn selected_result_is_the_only_discord_winner() {
     let db = turnier_db::test_pool().await.expect("central test pool");
     enable_turniere_runtime(db.pool()).await;
     seed_coach(db.pool(), 123456789).await;
@@ -3587,7 +3826,7 @@ async fn selected_result_is_the_only_discord_winner_and_dispatch_failure_keeps_s
     let broker = Router::new()
         .route(
             "/internal/master/v1/discord/send-message",
-            post(record_and_fail_broker),
+            post(record_and_accept_message),
         )
         .with_state(requests.clone());
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
@@ -3624,20 +3863,21 @@ async fn selected_result_is_the_only_discord_winner_and_dispatch_failure_keeps_s
     .expect("persisted selection");
     assert_eq!(persisted_ref_id, selected_ref_id);
 
-    let payloads = requests.lock().expect("broker requests");
-    assert_eq!(payloads.len(), 2);
-    for (payload, channel_id) in payloads.iter().zip([700001, 700002]) {
-        assert_eq!(payload["channel_id"], channel_id);
-        assert_eq!(
-            payload["content"],
-            "Scrim beendet. Das Ergebnis ist eingetragen. Sieger: Route Team 2."
-        );
-        assert_eq!(
-            payload["idempotency_key"],
-            format!("scrim-selected-result:95:{selected_ref_id}:{channel_id}")
-        );
+    {
+        let payloads = requests.lock().expect("broker requests");
+        assert_eq!(payloads.len(), 2);
+        for (payload, channel_id) in payloads.iter().zip([700001, 700002]) {
+            assert_eq!(payload["channel_id"], channel_id);
+            assert_eq!(
+                payload["content"],
+                "Scrim beendet. Das Ergebnis ist eingetragen. Sieger: Route Team 2."
+            );
+            assert_eq!(
+                payload["idempotency_key"],
+                format!("scrim-selected-result:95:{selected_ref_id}:{channel_id}")
+            );
+        }
     }
-    drop(payloads);
 
     let replacement_route =
         format!("/internal/turnier/v1/scrims/matches/95/result-refs/{replacement_ref_id}");

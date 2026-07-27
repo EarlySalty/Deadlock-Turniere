@@ -1641,6 +1641,9 @@ async fn select_result_ref(
     let actor = require_bff_actor(&headers)?;
     let service = service(&state);
     service.authorize_operator(actor.discord_id).await?;
+    if !body.message.trim().is_empty() && body.message.chars().count() <= 1_000 {
+        ensure_selected_result_deliveries(&state, id, ref_id).await?;
+    }
     let selected = service
         .select_result_ref(
             mutation.idempotency_key,
@@ -1651,95 +1654,234 @@ async fn select_result_ref(
             body,
         )
         .await?;
-    notify_selected_result(&state, &selected).await;
     Ok(Json(selected))
 }
 
-async fn notify_selected_result(state: &AppState, mutation: &MatchMutation) {
-    let scrim_match = &mutation.scrim_match;
-    let Some(selected) = scrim_match.selected_result.as_ref() else {
-        tracing::warn!(
-            match_id = scrim_match.id,
-            "Scrim-Ergebnisauswahl wurde gespeichert, enthält aber kein ausgewähltes Ergebnis"
-        );
-        return;
-    };
-    let winner = [scrim_match.team_a.as_ref(), scrim_match.team_b.as_ref()]
-        .into_iter()
-        .flatten()
-        .find(|team| Some(team.id) == selected.winner_team_id);
-    let Some(winner) = winner else {
-        tracing::warn!(
-            match_id = scrim_match.id,
-            result_ref_id = selected.result_ref_id,
-            winner_team_id = selected.winner_team_id,
-            "Scrim-Ergebnisauswahl wurde gespeichert, aber der Sieger gehört nicht zum Match"
-        );
-        return;
-    };
-    let channels = match sqlx::query_as::<_, (Option<i64>, Option<i64>)>(
-        "SELECT ta.discord_channel_id AS team_a_channel_id, \
-                tb.discord_channel_id AS team_b_channel_id \
+async fn ensure_selected_result_deliveries(
+    state: &AppState,
+    match_id: i32,
+    result_ref_id: i64,
+) -> WebResult<()> {
+    let selection = sqlx::query_as::<_, (String, Option<i64>, Option<i64>)>(
+        "SELECT winner.name, ta.discord_channel_id, tb.discord_channel_id \
            FROM scrim.matches m \
-           JOIN scrim.match_result_selections selection \
-             ON selection.match_id=m.id AND selection.result_ref_id=$2 \
+           JOIN scrim.match_result_refs result_ref \
+             ON result_ref.match_id=m.id AND result_ref.id=$2 \
+            AND result_ref.fetch_status='fetched' \
+            AND result_ref.validation_status='valid' \
+            AND result_ref.winner_team_id IS NOT NULL \
+            AND result_ref.voided_at IS NULL \
+            AND result_ref.superseded_by_ref_id IS NULL \
+           JOIN scrim.teams winner \
+             ON winner.id=result_ref.winner_team_id \
+            AND winner.id IN (m.team_a_id, m.team_b_id) \
            LEFT JOIN scrim.teams ta ON ta.id=m.team_a_id \
            LEFT JOIN scrim.teams tb ON tb.id=m.team_b_id \
           WHERE m.id=$1",
     )
-    .bind(scrim_match.id)
-    .bind(selected.result_ref_id)
+    .bind(match_id)
+    .bind(result_ref_id)
     .fetch_optional(&state.pool)
-    .await
-    {
-        Ok(Some(channels)) => channels,
-        Ok(None) => return,
-        Err(error) => {
-            tracing::warn!(
-                match_id = scrim_match.id,
-                result_ref_id = selected.result_ref_id,
-                %error,
-                "Scrim-Ergebnisauswahl wurde gespeichert, aber die Teamkanäle konnten nicht geladen werden"
-            );
-            return;
-        }
+    .await?;
+    let Some((winner_name, team_a_channel_id, team_b_channel_id)) = selection else {
+        sqlx::query(
+            "UPDATE scrim.outbox_effects \
+                SET state='cancelled', lease_owner=NULL, lease_until=NULL, \
+                    next_attempt_at=NULL, updated_at=now() \
+              WHERE effect_type='discord_scrim_effect' \
+                AND idempotency_key LIKE $1 \
+                AND state IN ('pending', 'leased', 'retry')",
+        )
+        .bind(format!("scrim_result:{match_id}:{result_ref_id}:%"))
+        .execute(&state.pool)
+        .await?;
+        return Ok(());
     };
-    let channels = [channels.0, channels.1]
+    let channels = [team_a_channel_id, team_b_channel_id]
         .into_iter()
         .flatten()
         .filter(|channel_id| *channel_id > 0)
         .collect::<BTreeSet<_>>();
-    let content = format!(
-        "Scrim beendet. Das Ergebnis ist eingetragen. Sieger: {}.",
-        winner.name
-    );
+    let content = format!("Scrim beendet. Das Ergebnis ist eingetragen. Sieger: {winner_name}.");
     for channel_id in channels {
-        if let Err(error) = state
-            .notifier
-            .broker()
-            .post_internal::<serde_json::Value, _>(
-                "/internal/master/v1/discord/send-message",
-                &serde_json::json!({
-                    "channel_id": channel_id,
-                    "content": content,
-                    "idempotency_key": format!(
-                        "scrim-selected-result:{}:{}:{channel_id}",
-                        scrim_match.id, selected.result_ref_id
-                    ),
-                }),
-            )
-            .await
+        if !deliver_selected_result_to_channel(state, match_id, result_ref_id, channel_id, &content)
+            .await?
         {
-            tracing::warn!(
-                match_id = scrim_match.id,
-                result_ref_id = selected.result_ref_id,
-                winner_team_id = selected.winner_team_id,
-                channel_id,
-                %error,
-                "Scrim-Ergebnisauswahl ist gespeichert, aber die Discord-Nachricht ging nicht raus"
-            );
+            return Err(WebError::new(StatusCode::BAD_GATEWAY, DISCORD_SYNC_FAILED));
         }
     }
+    Ok(())
+}
+
+async fn deliver_selected_result_to_channel(
+    state: &AppState,
+    match_id: i32,
+    result_ref_id: i64,
+    channel_id: i64,
+    content: &str,
+) -> Result<bool, sqlx::Error> {
+    let broker_idempotency_key =
+        format!("scrim-selected-result:{match_id}:{result_ref_id}:{channel_id}");
+    let effect_idempotency_key = format!("scrim_result:{match_id}:{result_ref_id}:{channel_id}");
+    let mut payload = serde_json::json!({
+        "channel_id": channel_id,
+        "content": content,
+        "idempotency_key": broker_idempotency_key,
+    });
+    let mut payload_hash = Sha256::digest(
+        serde_json::to_vec(&payload).map_err(|error| sqlx::Error::Protocol(error.to_string()))?,
+    )
+    .to_vec();
+    let mut tx = state.pool.begin().await?;
+    let effect = sqlx::query(
+        "SELECT effect.id, effect.state, effect.payload, effect.payload_hash, \
+                effect.state='leased' AND effect.lease_until > now() AS lease_active, \
+                EXISTS(\
+                    SELECT 1 FROM scrim.effect_receipts receipt \
+                     WHERE receipt.outbox_effect_id=effect.id AND receipt.status='confirmed'\
+                ) AS confirmed \
+           FROM scrim.outbox_effects effect \
+          WHERE effect.effect_type='discord_scrim_effect' \
+            AND effect.idempotency_key=$1 AND effect.idempotency_generation=0 \
+          FOR UPDATE",
+    )
+    .bind(&effect_idempotency_key)
+    .fetch_optional(&mut *tx)
+    .await?;
+    let effect_id = if let Some(effect) = effect {
+        let effect_id = effect.try_get::<i64, _>("id")?;
+        let effect_state = effect.try_get::<String, _>("state")?;
+        if effect_state == "delivered" {
+            let confirmed = effect.try_get::<bool, _>("confirmed")?;
+            tx.commit().await?;
+            return Ok(confirmed);
+        }
+        if matches!(effect_state.as_str(), "uncertain" | "dead" | "cancelled")
+            || effect.try_get::<bool, _>("lease_active")?
+        {
+            tx.commit().await?;
+            return Ok(false);
+        }
+        payload = effect.try_get("payload")?;
+        payload_hash = effect.try_get("payload_hash")?;
+        sqlx::query(
+            "UPDATE scrim.outbox_effects \
+                SET state='leased', lease_owner='turnier_api:result_selection', \
+                    lease_until=now() + interval '1 minute', attempts=attempts + 1, \
+                    next_attempt_at=NULL, last_error_code=NULL, updated_at=now() \
+              WHERE id=$1",
+        )
+        .bind(effect_id)
+        .execute(&mut *tx)
+        .await?;
+        effect_id
+    } else {
+        sqlx::query_scalar(
+            "INSERT INTO scrim.outbox_effects(\
+                 effect_type, idempotency_key, payload_hash, payload, state, \
+                 lease_owner, lease_until, attempts, remote_system\
+             ) VALUES (\
+                 'discord_scrim_effect', $1, $2, $3, 'leased', \
+                 'turnier_api:result_selection', now() + interval '1 minute', 1, 'discord'\
+             ) RETURNING id",
+        )
+        .bind(&effect_idempotency_key)
+        .bind(&payload_hash)
+        .bind(&payload)
+        .fetch_one(&mut *tx)
+        .await?
+    };
+    tx.commit().await?;
+
+    let response = state
+        .notifier
+        .broker()
+        .post_internal::<serde_json::Value, _>("/internal/master/v1/discord/send-message", &payload)
+        .await;
+    let response = match response {
+        Ok(response) => response,
+        Err(error) => {
+            sqlx::query(
+                "UPDATE scrim.outbox_effects \
+                    SET state='retry', lease_owner=NULL, lease_until=NULL, \
+                        next_attempt_at=now() + interval '15 minutes', \
+                        last_error_code='err_discord_send', updated_at=now() \
+                  WHERE id=$1 AND state='leased'",
+            )
+            .bind(effect_id)
+            .execute(&state.pool)
+            .await?;
+            tracing::warn!(
+                match_id,
+                result_ref_id,
+                channel_id,
+                %error,
+                "Scrim-Ergebnisauswahl wartet auf die fehlgeschlagene Discord-Zustellung"
+            );
+            return Ok(false);
+        }
+    };
+    let requested_channel_id = payload.get("channel_id").and_then(json_i64);
+    let response_channel_id = response.pointer("/result/channel_id").and_then(json_i64);
+    let discord_message_id = response.pointer("/result/message_id").and_then(json_i64);
+    let (Some(requested_channel_id), Some(discord_message_id)) =
+        (requested_channel_id, discord_message_id)
+    else {
+        mark_selected_result_delivery_uncertain(&state.pool, effect_id).await?;
+        return Ok(false);
+    };
+    if response_channel_id != Some(requested_channel_id) {
+        mark_selected_result_delivery_uncertain(&state.pool, effect_id).await?;
+        return Ok(false);
+    }
+    let remote_message_id = format!("discord:{requested_channel_id}:{discord_message_id}");
+    let mut tx = state.pool.begin().await?;
+    sqlx::query(
+        "UPDATE scrim.outbox_effects \
+            SET state='delivered', lease_owner=NULL, lease_until=NULL, \
+                next_attempt_at=NULL, remote_message_id=$2, last_error_code=NULL, \
+                delivered_at=now(), updated_at=now() \
+          WHERE id=$1 AND state='leased'",
+    )
+    .bind(effect_id)
+    .bind(&remote_message_id)
+    .execute(&mut *tx)
+    .await?;
+    let receipt = sqlx::query(
+        "INSERT INTO scrim.effect_receipts(\
+             outbox_effect_id, remote_system, remote_message_id, payload_hash, \
+             receipt_payload, status, observed_at\
+         ) VALUES ($1, 'discord', $2, $3, $4, 'confirmed', now()) \
+         ON CONFLICT (remote_system, remote_message_id) \
+             WHERE remote_message_id IS NOT NULL DO NOTHING",
+    )
+    .bind(effect_id)
+    .bind(&remote_message_id)
+    .bind(payload_hash)
+    .bind(serde_json::json!({
+        "channel_id": requested_channel_id.to_string(),
+        "message_id": discord_message_id.to_string(),
+    }))
+    .execute(&mut *tx)
+    .await?;
+    tx.commit().await?;
+    Ok(receipt.rows_affected() == 1)
+}
+
+async fn mark_selected_result_delivery_uncertain(
+    pool: &sqlx::PgPool,
+    effect_id: i64,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "UPDATE scrim.outbox_effects \
+            SET state='uncertain', lease_owner=NULL, lease_until=NULL, \
+                last_error_code='err_discord_effect_uncertain', updated_at=now() \
+          WHERE id=$1 AND state='leased'",
+    )
+    .bind(effect_id)
+    .execute(pool)
+    .await?;
+    Ok(())
 }
 
 async fn read_announcement_preview(
