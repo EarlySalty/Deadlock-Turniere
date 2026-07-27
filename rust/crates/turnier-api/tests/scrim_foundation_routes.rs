@@ -2042,19 +2042,37 @@ async fn match_request_patch_reminder_and_publication_persist_and_validate() {
         ("cancelled".to_string(), Some("Platzhalter".to_string()))
     );
 
+    let (status, _) = send(
+        &app,
+        IpAddr::V4(Ipv4Addr::LOCALHOST),
+        coach_headers("match_request_reminder_custom:92", "123456789"),
+        Method::POST,
+        "/internal/turnier/v1/scrims/match-requests/92/reminders",
+        Some(json!({"message":"Platzhalter"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    let reminder_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM scrim.match_request_reminders WHERE request_id=92",
+    )
+    .fetch_one(db.pool())
+    .await
+    .expect("reminder count");
+    assert_eq!(reminder_count, 0);
+
     let (status, body) = send(
         &app,
         IpAddr::V4(Ipv4Addr::LOCALHOST),
         coach_headers("match_request_reminder:92", "123456789"),
         Method::POST,
         "/internal/turnier/v1/scrims/match-requests/92/reminders",
-        Some(json!({"message":"Platzhalter"})),
+        Some(json!({"template":"frist_bald"})),
     )
     .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["accepted"], true);
-    let reminder: (i32, Vec<i32>, Vec<i64>, Option<i64>, String) = sqlx::query_as(
-        "SELECT missing_count, target_participant_ids, target_discord_user_ids, \
+    let reminder: (String, i32, Vec<i32>, Vec<i64>, Option<i64>, String) = sqlx::query_as(
+        "SELECT template, missing_count, target_participant_ids, target_discord_user_ids, \
                 target_role_id, target_kind \
            FROM scrim.match_request_reminders WHERE request_id=92",
     )
@@ -2063,7 +2081,14 @@ async fn match_request_patch_reminder_and_publication_persist_and_validate() {
     .expect("reminder");
     assert_eq!(
         reminder,
-        (1, vec![101], vec![1001], None, "members".to_string())
+        (
+            "frist_bald".to_string(),
+            1,
+            vec![101],
+            vec![1001],
+            None,
+            "members".to_string()
+        )
     );
     let reminder_command_result: Value = sqlx::query_scalar(
         "SELECT result_payload \
@@ -2117,7 +2142,7 @@ async fn match_request_patch_reminder_and_publication_persist_and_validate() {
         coach_headers("match_request_reminder:invalid", "123456789"),
         Method::POST,
         "/internal/turnier/v1/scrims/match-requests/92/reminders",
-        Some(json!({"message":"x".repeat(2001)})),
+        Some(json!({"template":"Platzhalter"})),
     )
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);

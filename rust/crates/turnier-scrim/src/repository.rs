@@ -1422,7 +1422,10 @@ impl PgScrimReadRepository {
         request: &ReminderRequest,
         actor: (&str, &str),
     ) -> ScrimResult<ActionReceipt> {
-        validated_message(request.message.as_deref())?;
+        let template = match request.template.as_deref().unwrap_or("antwort_fehlt") {
+            template @ ("antwort_fehlt" | "frist_bald" | "bestaetigung_offen") => template,
+            _ => return Err(ScrimError::InvalidProposal("Platzhalter".to_string())),
+        };
         let mut tx = self.pool.begin().await?;
         lock_runtime_control(&mut tx).await?;
         require_turniere_runtime(&mut tx).await?;
@@ -1522,11 +1525,12 @@ impl PgScrimReadRepository {
                      target_discord_user_ids, target_role_id, missing_count, \
                      approved_by_user_id, approved_by_display_name, status, \
                      discord_channel_id, source_message_id\
-                 ) VALUES ($1, $2, 'antwort_fehlt', $3, $4, $5, $6, $7, $8, $9, \
-                           'approved', $10, $11)",
+                 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, \
+                           'approved', $11, $12)",
             )
             .bind(request_id)
             .bind(team_id)
+            .bind(template)
             .bind(if all_have_discord { "members" } else { "team" })
             .bind(&participant_ids)
             .bind(&target_discord_ids)

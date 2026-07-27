@@ -381,7 +381,7 @@ pub struct EmptyRequest {}
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ReminderRequest {
-    pub message: Option<String>,
+    pub template: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]

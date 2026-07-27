@@ -119,7 +119,9 @@ und die Tests grün sind. Tests brauchen die Postgres-Testinstanz:
 Vorbestehend rot und NICHT zu reparieren: $KNOWN_RED (400 statt 409).
 
 Committe NICHT und pushe NICHT. Lass die Änderungen im Arbeitsbaum liegen.
-Formuliere KEINE deutschen Nutzertexte: schreibe "Platzhalter" und nenne Datei+Zeile.
+Nutzertexte formulierst du fertig aus, nach den Regeln in ~/.codex/AGENTS.md
+("Texte, die Nutzer lesen"). Ein "Platzhalter" darf nur stehen bleiben, wenn der
+Inhalt wirklich unklar ist — dann nennst du Datei und Zeile ausdrücklich im Bericht.
 Berichte am Ende: was war die Ursache, was hast du geändert, welche Tests belegen es.
 EOF
 
@@ -155,7 +157,7 @@ $(echo "$verdict" | head -1 | sed 's/^BLOCK: //')
 Automatisch behoben und verifiziert: fmt, clippy -D warnings und Tests grün.
 Belege im Arbeitsverzeichnis unter .gate-loop/round-$round-*.
 
-Co-authored-by: GPT 5.6 <modell@local>
+Co-authored-by: $MODEL <modell@local>
 Co-authored-by: Claude Opus 5 <modell@local>
 EOF
   say "Runde $round committet: $(git log --oneline -1)"
