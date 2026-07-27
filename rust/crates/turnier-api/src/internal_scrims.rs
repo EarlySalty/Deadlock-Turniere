@@ -965,7 +965,7 @@ async fn create_replacement_request(
     let service = service(&state);
     service.authorize_operator(actor.discord_id).await?;
     let payload = json_with_i64_target("replacement_need_id", id, &body)?;
-    let dispatch = service
+    let receipt = service
         .create_replacement_request(
             mutation.idempotency_key,
             mutation.request_id,
@@ -975,17 +975,7 @@ async fn create_replacement_request(
             (actor.discord_id, actor.display_name),
         )
         .await?;
-    let delivered = dispatch_discord(
-        &state,
-        "replacement_request_create",
-        mutation.idempotency_key,
-        &dispatch,
-    )
-    .await;
-    if !delivered {
-        return Err(WebError::new(StatusCode::BAD_GATEWAY, DISCORD_SYNC_FAILED));
-    }
-    Ok((StatusCode::OK, Json(dispatch.receipt)))
+    Ok((StatusCode::OK, Json(receipt)))
 }
 
 async fn patch_replacement_request(
@@ -1000,7 +990,6 @@ async fn patch_replacement_request(
     let mutation = require_mutation_headers(&headers)?;
     let actor = require_bff_actor(&headers)?;
     let service = service(&state);
-    service.authorize_operator(actor.discord_id).await?;
     let payload = json_with_i64_target("replacement_request_id", id, &body)?;
     let receipt = service
         .patch_replacement_request(

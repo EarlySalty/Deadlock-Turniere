@@ -12,6 +12,8 @@ pub enum ScrimError {
     CoachUnauthorized,
     #[error("participant does not belong to the requested team")]
     ParticipantUnauthorized,
+    #[error("replacement request does not belong to the actor")]
+    ReplacementRequestUnauthorized,
     #[error("actor Discord ID is invalid")]
     InvalidActor,
     #[error("scrim runtime is not writable by turniere: mode={mode}, writer={operational_writer}")]

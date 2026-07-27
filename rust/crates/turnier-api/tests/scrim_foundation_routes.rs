@@ -85,21 +85,6 @@ async fn accept_broker(Json(_payload): Json<Value>) -> Json<Value> {
     Json(json!({}))
 }
 
-#[cfg(feature = "testing")]
-async fn accept_broker_and_clear_receipt_result(
-    State(pool): State<PgPool>,
-    Json(_payload): Json<Value>,
-) -> Json<Value> {
-    sqlx::query(
-        "UPDATE scrim.command_receipts SET result_payload=NULL \
-          WHERE command_scope='replacement_request_create'",
-    )
-    .execute(&pool)
-    .await
-    .expect("clear command receipt result");
-    Json(json!({}))
-}
-
 #[derive(Clone, Copy, Default)]
 struct TestHeaders<'a> {
     token: Option<&'a str>,
@@ -2138,11 +2123,6 @@ async fn operator_request_routes_keep_boundary_and_operator_authorization() {
             "/internal/turnier/v1/scrims/replacement-needs/1/requests",
             Some(json!({"participant_id":"1"})),
         ),
-        (
-            Method::PATCH,
-            "/internal/turnier/v1/scrims/replacement-requests/1",
-            Some(json!({"action":"accept"})),
-        ),
     ];
     for (index, (method, route, body)) in routes.into_iter().enumerate() {
         let headers = TestHeaders {
@@ -2174,6 +2154,23 @@ async fn operator_request_routes_keep_boundary_and_operator_authorization() {
         .await;
         assert_eq!(status, StatusCode::FORBIDDEN, "operator route {index}");
     }
+
+    let (status, _) = send(
+        &app,
+        IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2)),
+        TestHeaders {
+            token: Some("internal-token"),
+            request_id: Some("request:replacement_boundary"),
+            idempotency_key: Some("replacement_boundary:route"),
+            actor_id: Some("987654321"),
+            actor_name: Some("Candidate"),
+        },
+        Method::PATCH,
+        "/internal/turnier/v1/scrims/replacement-requests/1",
+        Some(json!({"action":"accept"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "replacement boundary");
 }
 
 #[cfg(feature = "testing")]
@@ -2401,15 +2398,7 @@ async fn replacement_candidates_are_ranked_and_requests_persist_and_transition()
     seed_coach(db.pool(), 123456789).await;
     seed_teams(db.pool(), &[1]).await;
     let need_id = seed_replacement_fixture(db.pool()).await;
-    let broker = Router::new().route("/internal/master/v1/discord/send-dm", post(accept_broker));
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-        .await
-        .expect("broker listener");
-    let broker_url = format!("http://{}", listener.local_addr().expect("broker address"));
-    let broker_task = tokio::spawn(async move {
-        axum::serve(listener, broker).await.expect("broker server");
-    });
-    let app = app_with_pool_and_broker(db.pool().clone(), Some(&broker_url));
+    let app = app_with_pool(db.pool().clone());
 
     let route = format!("/internal/turnier/v1/scrims/replacement-needs/{need_id}/candidates");
     let (status, body) = send(
@@ -2443,7 +2432,7 @@ async fn replacement_candidates_are_ranked_and_requests_persist_and_transition()
         coach_headers("replacement_request:create", "123456789"),
         Method::POST,
         &route,
-        Some(json!({"participant_id":"302","reason":"Platzhalter"})),
+        Some(json!({"participant_id":"302","reason":"Support wird gebraucht"})),
     )
     .await;
     assert_eq!(status, StatusCode::OK);
@@ -2455,12 +2444,74 @@ async fn replacement_candidates_are_ranked_and_requests_persist_and_transition()
     .fetch_one(db.pool())
     .await
     .expect("replacement request");
+    let effect: (String, Value) = sqlx::query_as(
+        "SELECT effect.state, effect.payload \
+           FROM scrim.replacement_request_effects link \
+           JOIN scrim.outbox_effects effect ON effect.id=link.outbox_effect_id \
+          WHERE link.replacement_request_id=$1",
+    )
+    .bind(request_id)
+    .fetch_one(db.pool())
+    .await
+    .expect("replacement Discord effect");
+    assert_eq!(effect.0, "pending");
+    assert_eq!(effect.1["schema_version"], "discord-scrim-effect:v1");
+    assert_eq!(effect.1["message_kind"], "replacement_request");
+    assert_eq!(effect.1["operation"], "post");
+    assert_eq!(effect.1["recipient_user_id"], "3002");
+    assert_eq!(effect.1["body"]["flags"], 32_768);
+    assert_eq!(
+        effect.1["body"]["allowed_mentions"],
+        json!({"parse":[],"replied_user":false})
+    );
+    let buttons = effect.1["body"]["components"][0]["components"][1]["components"]
+        .as_array()
+        .expect("replacement buttons");
+    assert_eq!(
+        buttons,
+        &[
+            json!({
+                "type":2,
+                "style":3,
+                "label":"Ich springe ein",
+                "custom_id":format!("scrimrepl:v1:{request_id}:accept")
+            }),
+            json!({
+                "type":2,
+                "style":4,
+                "label":"Passt nicht",
+                "custom_id":format!("scrimrepl:v1:{request_id}:decline")
+            }),
+        ]
+    );
 
     let route = format!("/internal/turnier/v1/scrims/replacement-requests/{request_id}");
+    let (status, _) = send(
+        &app,
+        IpAddr::V4(Ipv4Addr::LOCALHOST),
+        TestHeaders {
+            token: Some("internal-token"),
+            request_id: Some("scrimrepl:v1:interaction:wrong-user"),
+            idempotency_key: Some("scrimrepl:v1:interaction:wrong-user"),
+            actor_id: Some("3001"),
+            actor_name: Some("First"),
+        },
+        Method::PATCH,
+        &route,
+        Some(json!({"action":"accept"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
     let (status, body) = send(
         &app,
         IpAddr::V4(Ipv4Addr::LOCALHOST),
-        coach_headers("replacement_request:accept", "123456789"),
+        TestHeaders {
+            token: Some("internal-token"),
+            request_id: Some("scrimrepl:v1:interaction:accept"),
+            idempotency_key: Some("scrimrepl:v1:interaction:accept"),
+            actor_id: Some("3002"),
+            actor_name: Some("Best"),
+        },
         Method::PATCH,
         &route,
         Some(json!({"action":"accept"})),
@@ -2468,6 +2519,10 @@ async fn replacement_candidates_are_ranked_and_requests_persist_and_transition()
     .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["accepted"], true);
+    assert_eq!(
+        body["message"],
+        "Ersatzanfrage angenommen. Du bist für den Scrim eingeplant."
+    );
     let state: (String, bool) = sqlx::query_as(
         "SELECT status, responded_at IS NOT NULL FROM scrim.replacement_requests WHERE id=$1",
     )
@@ -2497,15 +2552,19 @@ async fn replacement_candidates_are_ranked_and_requests_persist_and_transition()
     let (status, _) = send(
         &app,
         IpAddr::V4(Ipv4Addr::LOCALHOST),
-        coach_headers("replacement_request:repeat", "123456789"),
+        TestHeaders {
+            token: Some("internal-token"),
+            request_id: Some("scrimrepl:v1:interaction:repeat"),
+            idempotency_key: Some("scrimrepl:v1:interaction:repeat"),
+            actor_id: Some("3002"),
+            actor_name: Some("Best"),
+        },
         Method::PATCH,
         &route,
         Some(json!({"action":"decline"})),
     )
     .await;
     assert_eq!(status, StatusCode::CONFLICT);
-
-    broker_task.abort();
 }
 
 #[cfg(feature = "testing")]
@@ -2532,7 +2591,7 @@ async fn replacement_request_without_discord_target_keeps_need_open() {
         coach_headers("replacement_request:no_target", "123456789"),
         Method::POST,
         &format!("/internal/turnier/v1/scrims/replacement-needs/{need_id}/requests"),
-        Some(json!({"participant_id":"302","reason":"Platzhalter"})),
+        Some(json!({"participant_id":"302","reason":"Support wird gebraucht"})),
     )
     .await;
 
@@ -2556,137 +2615,6 @@ async fn replacement_request_without_discord_target_keeps_need_open() {
     .await
     .expect("replacement states");
     assert_eq!(states, ("open".to_string(), "candidate".to_string()));
-}
-
-#[cfg(feature = "testing")]
-#[tokio::test]
-async fn replacement_dispatch_failure_is_retryable_without_rolling_back_state() {
-    let db = turnier_db::test_pool().await.expect("central test pool");
-    enable_turniere_runtime(db.pool()).await;
-    seed_coach(db.pool(), 123456789).await;
-    seed_teams(db.pool(), &[1]).await;
-    let need_id = seed_replacement_fixture(db.pool()).await;
-    let requests = Arc::new(Mutex::new(Vec::new()));
-    let broker = Router::new()
-        .route(
-            "/internal/master/v1/discord/send-dm",
-            post(record_and_fail_broker),
-        )
-        .with_state(requests.clone());
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-        .await
-        .expect("broker listener");
-    let broker_url = format!("http://{}", listener.local_addr().expect("broker address"));
-    let broker_task = tokio::spawn(async move {
-        axum::serve(listener, broker).await.expect("broker server");
-    });
-    let app = app_with_pool_and_broker(db.pool().clone(), Some(&broker_url));
-    let route = format!("/internal/turnier/v1/scrims/replacement-needs/{need_id}/requests");
-
-    for _ in 0..2 {
-        let (status, body) = send(
-            &app,
-            IpAddr::V4(Ipv4Addr::LOCALHOST),
-            coach_headers("replacement_request:broker_failure", "123456789"),
-            Method::POST,
-            &route,
-            Some(json!({"participant_id":"302","reason":"Platzhalter"})),
-        )
-        .await;
-        assert_eq!(status, StatusCode::BAD_GATEWAY);
-        assert_eq!(
-            body["detail"],
-            "Gespeichert, aber die Discord-Nachricht ging nicht raus. Löse denselben Vorgang noch einmal aus, dann wird sie nachgereicht."
-        );
-    }
-
-    let states: (i64, String, String, String, i64) = sqlx::query_as(
-        "SELECT r.id, r.status, n.status, c.status, COUNT(*) OVER () \
-           FROM scrim.replacement_requests r \
-           JOIN scrim.replacement_needs n ON n.id=r.need_id \
-           JOIN scrim.replacement_candidates c ON c.id=r.candidate_id \
-          WHERE r.need_id=$1 AND r.participant_id=302",
-    )
-    .bind(need_id)
-    .fetch_one(db.pool())
-    .await
-    .expect("persisted replacement request");
-    assert_eq!(
-        states,
-        (
-            states.0,
-            "pending".to_string(),
-            "contacting".to_string(),
-            "requested".to_string(),
-            1,
-        )
-    );
-    let payloads = requests.lock().expect("broker requests");
-    assert_eq!(payloads.len(), 2);
-    assert_eq!(payloads[0], payloads[1]);
-    assert_eq!(
-        payloads[0]["idempotency_key"],
-        format!("scrim_dispatch:replacement_request:{}:user:3002", states.0)
-    );
-
-    broker_task.abort();
-}
-
-#[cfg(feature = "testing")]
-#[tokio::test]
-async fn replacement_delivery_tracking_failure_is_not_reported_as_success() {
-    let db = turnier_db::test_pool().await.expect("central test pool");
-    enable_turniere_runtime(db.pool()).await;
-    seed_coach(db.pool(), 123456789).await;
-    seed_teams(db.pool(), &[1]).await;
-    let need_id = seed_replacement_fixture(db.pool()).await;
-    let broker = Router::new()
-        .route(
-            "/internal/master/v1/discord/send-dm",
-            post(accept_broker_and_clear_receipt_result),
-        )
-        .with_state(db.pool().clone());
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-        .await
-        .expect("broker listener");
-    let broker_url = format!("http://{}", listener.local_addr().expect("broker address"));
-    let broker_task = tokio::spawn(async move {
-        axum::serve(listener, broker).await.expect("broker server");
-    });
-    let app = app_with_pool_and_broker(db.pool().clone(), Some(&broker_url));
-
-    let (status, _) = send(
-        &app,
-        IpAddr::V4(Ipv4Addr::LOCALHOST),
-        coach_headers("replacement_request:receipt_failure", "123456789"),
-        Method::POST,
-        &format!("/internal/turnier/v1/scrims/replacement-needs/{need_id}/requests"),
-        Some(json!({"participant_id":"302","reason":"Platzhalter"})),
-    )
-    .await;
-
-    assert_eq!(status, StatusCode::BAD_GATEWAY);
-    let states: (String, String, String) = sqlx::query_as(
-        "SELECT r.status, n.status, c.status \
-           FROM scrim.replacement_requests r \
-           JOIN scrim.replacement_needs n ON n.id=r.need_id \
-           JOIN scrim.replacement_candidates c ON c.id=r.candidate_id \
-          WHERE r.need_id=$1 AND r.participant_id=302",
-    )
-    .bind(need_id)
-    .fetch_one(db.pool())
-    .await
-    .expect("persisted replacement state");
-    assert_eq!(
-        states,
-        (
-            "pending".to_string(),
-            "contacting".to_string(),
-            "requested".to_string(),
-        )
-    );
-
-    broker_task.abort();
 }
 
 #[cfg(feature = "testing")]

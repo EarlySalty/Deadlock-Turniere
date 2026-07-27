@@ -420,7 +420,7 @@ impl ScrimService<PgScrimReadRepository> {
         need_id: i64,
         request: &ReplacementRequestCreate,
         actor: (&str, &str),
-    ) -> ScrimResult<MutationDispatch> {
+    ) -> ScrimResult<ActionReceipt> {
         self.repository
             .create_replacement_request(
                 idempotency_key,
@@ -510,6 +510,7 @@ impl ScrimService<PgScrimReadRepository> {
         request: &ReplacementRequestPatch,
         actor: (&str, &str),
     ) -> ScrimResult<ActionReceipt> {
+        let actor_discord_id = parse_discord_id(actor.0)?;
         self.repository
             .patch_replacement_request(
                 idempotency_key,
@@ -517,7 +518,7 @@ impl ScrimService<PgScrimReadRepository> {
                 payload,
                 replacement_request_id,
                 request,
-                actor,
+                (actor_discord_id, actor.1),
             )
             .await
     }

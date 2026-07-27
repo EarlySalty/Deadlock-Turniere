@@ -219,6 +219,9 @@ impl From<turnier_scrim::ScrimError> for WebError {
             ParticipantUnauthorized => {
                 Self::forbidden("Diese Scrim-Aktion gehört nicht zu deinem Team")
             }
+            ReplacementRequestUnauthorized => {
+                Self::forbidden("Diese Ersatzanfrage ist nicht für dich bestimmt")
+            }
             RuntimeNotWritable { .. } => Self::conflict(
                 "Scrim-Runtime erlaubt Turniere-Mutationen nur in draining/turniere.",
             ),

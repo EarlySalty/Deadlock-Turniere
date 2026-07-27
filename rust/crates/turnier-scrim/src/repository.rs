@@ -1781,7 +1781,7 @@ impl PgScrimReadRepository {
         need_id: i64,
         request: &ReplacementRequestCreate,
         actor: (&str, &str),
-    ) -> ScrimResult<MutationDispatch> {
+    ) -> ScrimResult<ActionReceipt> {
         let participant_id = crate::model::wire_id::parse_i32(&request.participant_id)
             .map_err(ScrimError::InvalidProposal)?;
         if request
@@ -1894,20 +1894,75 @@ impl PgScrimReadRepository {
             json!({"need_id": need_id.to_string(), "participant_id": participant_id.to_string()}),
         )
         .await?;
-        let receipt = placeholder_receipt();
-        let discord = vec![DiscordDispatch {
-            kind: "replacement_request".to_string(),
-            record_id: replacement_request_id,
-            user_id: Some(discord_user_id),
-            channel_id: None,
-            content: "Hey! 👋 Für ein Scrim wird noch jemand gesucht — du stehst als möglicher Ersatz auf der Liste. Wenn du Zeit und Lust hast, meld dich kurz im Team-Kanal. Danke dir! 🎮".to_string(),
-        }];
-        // Den vollstaendigen Dispatch ablegen, nicht nur die Quittung: sonst geht bei einem
-        // Replay verloren, welche Discord-Zustellungen noch offen sind.
-        let dispatch = MutationDispatch { receipt, discord };
-        complete_command(&mut tx, receipt_id, &dispatch).await?;
+        let effect_payload = json!({
+            "schema_version": "discord-scrim-effect:v1",
+            "message_kind": "replacement_request",
+            "operation": "post",
+            "channel_id": null,
+            "recipient_user_id": discord_user_id.to_string(),
+            "message_id": null,
+            "body": {
+                "flags": 32_768,
+                "allowed_mentions": {"parse": [], "replied_user": false},
+                "components": [{
+                    "type": 17,
+                    "accent_color": 0xC8A86B,
+                    "components": [
+                        {
+                            "type": 10,
+                            "content": "Hey! 👋 Für ein Scrim wird noch jemand gesucht — du stehst als möglicher Ersatz auf der Liste. Wenn du Zeit und Lust hast, antworte bitte direkt über die Buttons."
+                        },
+                        {
+                            "type": 1,
+                            "components": [
+                                {
+                                    "type": 2,
+                                    "style": 3,
+                                    "label": "Ich springe ein",
+                                    "custom_id": format!("scrimrepl:v1:{replacement_request_id}:accept")
+                                },
+                                {
+                                    "type": 2,
+                                    "style": 4,
+                                    "label": "Passt nicht",
+                                    "custom_id": format!("scrimrepl:v1:{replacement_request_id}:decline")
+                                }
+                            ]
+                        }
+                    ]
+                }]
+            }
+        });
+        let effect_hash = payload_hash(&effect_payload)?;
+        let effect_id: i64 = sqlx::query_scalar(
+            "INSERT INTO scrim.outbox_effects(\
+                 effect_type, idempotency_key, payload_hash, payload, state, \
+                 command_receipt_id, remote_system\
+             ) VALUES ('discord_scrim_effect', $1, $2, $3::jsonb, 'pending', $4, 'discord') \
+             RETURNING id",
+        )
+        .bind(format!("scrimrepl:v1:{replacement_request_id}"))
+        .bind(effect_hash)
+        .bind(effect_payload)
+        .bind(receipt_id)
+        .fetch_one(&mut *tx)
+        .await?;
+        sqlx::query(
+            "INSERT INTO scrim.replacement_request_effects(\
+                 replacement_request_id, outbox_effect_id\
+             ) VALUES ($1, $2)",
+        )
+        .bind(replacement_request_id)
+        .bind(effect_id)
+        .execute(&mut *tx)
+        .await?;
+        let receipt = ActionReceipt {
+            accepted: true,
+            message: "Ersatzanfrage gespeichert. Sie wird per Discord zugestellt.".to_string(),
+        };
+        complete_command(&mut tx, receipt_id, &receipt).await?;
         tx.commit().await?;
-        Ok(dispatch)
+        Ok(receipt)
     }
 
     pub async fn mark_dispatches_delivered(
@@ -1993,11 +2048,23 @@ impl PgScrimReadRepository {
         payload: &Value,
         replacement_request_id: i64,
         request: &ReplacementRequestPatch,
-        actor: (&str, &str),
+        actor: (i64, &str),
     ) -> ScrimResult<ActionReceipt> {
+        let actor_user_id = actor.0.to_string();
         let mut tx = self.pool.begin().await?;
         lock_runtime_control(&mut tx).await?;
         require_turniere_runtime(&mut tx).await?;
+        let row = sqlx::query(
+            "SELECT need_id, candidate_id, discord_user_id, status \
+               FROM scrim.replacement_requests WHERE id=$1 FOR UPDATE",
+        )
+        .bind(replacement_request_id)
+        .fetch_optional(&mut *tx)
+        .await?
+        .ok_or_else(|| ScrimError::NotFound("Diese Ersatzanfrage gibt es nicht.".to_string()))?;
+        if row.try_get::<i64, _>("discord_user_id")? != actor.0 {
+            return Err(ScrimError::ReplacementRequestUnauthorized);
+        }
         let receipt_id = match begin_command(
             &mut tx,
             "replacement_request_patch",
@@ -2012,14 +2079,6 @@ impl PgScrimReadRepository {
                 return Ok(receipt);
             }
         };
-        let row = sqlx::query(
-            "SELECT need_id, candidate_id, status FROM scrim.replacement_requests \
-              WHERE id=$1 FOR UPDATE",
-        )
-        .bind(replacement_request_id)
-        .fetch_optional(&mut *tx)
-        .await?
-        .ok_or_else(|| ScrimError::NotFound("Diese Ersatzanfrage gibt es nicht.".to_string()))?;
         if !matches!(
             row.try_get::<String, _>("status")?.as_str(),
             "pending" | "sent" | "uncertain"
@@ -2073,13 +2132,24 @@ impl PgScrimReadRepository {
             &mut tx,
             "replacement_request_responded",
             ("replacement_request", replacement_request_id),
-            actor.0,
+            &actor_user_id,
             api_request_id,
             idempotency_key,
             json!({"action": request.action}),
         )
         .await?;
-        let receipt = placeholder_receipt();
+        let receipt = ActionReceipt {
+            accepted: true,
+            message: match request.action {
+                ReplacementRequestAction::Accept => {
+                    "Ersatzanfrage angenommen. Du bist für den Scrim eingeplant."
+                }
+                ReplacementRequestAction::Decline => {
+                    "Ersatzanfrage abgelehnt. Für dich ist nichts weiter zu tun."
+                }
+            }
+            .to_string(),
+        };
         complete_command(&mut tx, receipt_id, &receipt).await?;
         tx.commit().await?;
         Ok(receipt)
