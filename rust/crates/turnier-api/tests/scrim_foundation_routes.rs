@@ -121,8 +121,24 @@ async fn record_and_accept_message(
     State(requests): State<Arc<Mutex<Vec<Value>>>>,
     Json(payload): Json<Value>,
 ) -> Json<Value> {
+    let channel_id = payload["channel_id"].clone();
     requests.lock().expect("broker requests").push(payload);
-    Json(json!({"result":{"message_id":"912345678901234568"}}))
+    Json(json!({"result":{
+        "channel_id": channel_id,
+        "message_id":"912345678901234568"
+    }}))
+}
+
+#[cfg(feature = "testing")]
+async fn record_and_mismatch_message_channel(
+    State(requests): State<Arc<Mutex<Vec<Value>>>>,
+    Json(payload): Json<Value>,
+) -> Json<Value> {
+    requests.lock().expect("broker requests").push(payload);
+    Json(json!({"result":{
+        "channel_id":"202",
+        "message_id":"912345678901234568"
+    }}))
 }
 
 #[cfg(feature = "testing")]
@@ -3259,6 +3275,68 @@ async fn turniere_runtime_consumes_result_fetches_and_scrim_reminders() {
         })
         .collect::<Vec<_>>();
     assert!(result_idempotency_keys.is_empty());
+
+    broker_task.abort();
+}
+
+#[cfg(feature = "testing")]
+#[tokio::test]
+async fn scrim_reminder_requires_matching_discord_channel_receipt() {
+    let db = turnier_db::test_pool().await.expect("central test pool");
+    enable_turniere_runtime(db.pool()).await;
+    seed_coach(db.pool(), 123456789).await;
+    seed_teams(db.pool(), &[1, 2]).await;
+    seed_operator_request_fixture(db.pool()).await;
+
+    let requests = Arc::new(Mutex::new(Vec::new()));
+    let broker = Router::new()
+        .route(
+            "/internal/master/v1/discord/send-message",
+            post(record_and_mismatch_message_channel),
+        )
+        .with_state(requests.clone());
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("broker listener");
+    let broker_url = format!("http://{}", listener.local_addr().expect("broker address"));
+    let broker_task = tokio::spawn(async move {
+        axum::serve(listener, broker).await.expect("broker server");
+    });
+    let state = state_with_pool_broker_and_signup_role(db.pool().clone(), Some(&broker_url), None);
+    let app = build_router(state.clone());
+
+    let (status, _) = send(
+        &app,
+        IpAddr::V4(Ipv4Addr::LOCALHOST),
+        coach_headers("runtime:reminder:channel-correlation", "123456789"),
+        Method::POST,
+        "/internal/turnier/v1/scrims/match-requests/92/reminders",
+        Some(json!({"template":"frist_bald"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    turnier_api::internal_scrims::process_scrim_operational_once(&state)
+        .await
+        .expect("turniere operational consumer");
+
+    let delivery: (String, String, i64) = sqlx::query_as(
+        "SELECT r.status, effect.state, \
+                (SELECT COUNT(*) FROM scrim.effect_receipts receipt \
+                  WHERE receipt.outbox_effect_id=effect.id AND receipt.status='confirmed') \
+           FROM scrim.match_request_reminders r \
+           JOIN scrim.match_request_reminder_effects link ON link.reminder_id=r.id \
+           JOIN scrim.outbox_effects effect ON effect.id=link.outbox_effect_id \
+          WHERE r.request_id=92",
+    )
+    .fetch_one(db.pool())
+    .await
+    .expect("reminder delivery status");
+    assert_eq!(
+        delivery,
+        ("uncertain".to_string(), "uncertain".to_string(), 0)
+    );
+    assert_eq!(requests.lock().expect("broker requests").len(), 1);
 
     broker_task.abort();
 }

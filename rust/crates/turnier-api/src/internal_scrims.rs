@@ -981,9 +981,11 @@ async fn process_reminder(state: &AppState, claim: ReminderClaim) -> Result<(), 
         .await;
     match result {
         Ok(response) => {
-            let channel_id = claim.payload.get("channel_id").and_then(json_i64);
+            let requested_channel_id = claim.payload.get("channel_id").and_then(json_i64);
+            let response_channel_id = response.pointer("/result/channel_id").and_then(json_i64);
             let discord_message_id = response.pointer("/result/message_id").and_then(json_i64);
-            let (Some(channel_id), Some(discord_message_id)) = (channel_id, discord_message_id)
+            let (Some(channel_id), Some(discord_message_id)) =
+                (requested_channel_id, discord_message_id)
             else {
                 let error =
                     "Discord hat den Scrim-Reminder ohne Channel- oder Message-ID bestätigt";
@@ -1015,6 +1017,39 @@ async fn process_reminder(state: &AppState, claim: ReminderClaim) -> Result<(), 
                 );
                 return Ok(());
             };
+            if response_channel_id != Some(channel_id) {
+                let error =
+                    "Discord hat den Scrim-Reminder nicht für den angeforderten Channel bestätigt";
+                let mut tx = state.pool.begin().await?;
+                sqlx::query(
+                    "UPDATE scrim.match_request_reminders \
+                        SET status='uncertain', last_error=$2, updated_at=now() WHERE id=$1",
+                )
+                .bind(claim.reminder_id)
+                .bind(error)
+                .execute(&mut *tx)
+                .await?;
+                sqlx::query(
+                    "UPDATE scrim.outbox_effects \
+                        SET state='uncertain', lease_owner=NULL, lease_until=NULL, \
+                            last_error_code='err_discord_effect_uncertain', updated_at=now() \
+                      WHERE id=$1",
+                )
+                .bind(claim.effect_id)
+                .execute(&mut *tx)
+                .await?;
+                tx.commit().await?;
+                tracing::warn!(
+                    reminder_id = claim.reminder_id,
+                    effect_id = claim.effect_id,
+                    request_id = claim.request_id,
+                    team_id = claim.team_id,
+                    requested_channel_id = channel_id,
+                    response_channel_id,
+                    "Discord-Zustellung des Scrim-Reminders gehört nicht zum angeforderten Channel"
+                );
+                return Ok(());
+            }
             let remote_message_id = format!("discord:{channel_id}:{discord_message_id}");
             let payload_hash = Sha256::digest(
                 serde_json::to_vec(&claim.payload)
