@@ -87,35 +87,6 @@ async fn match_operator_mutations_keep_the_dashboard_database_contract() {
     .await
     .expect("result refs");
 
-    sqlx::query("UPDATE scrim.matches SET lobby_state='in_progress' WHERE id=$1")
-        .bind(match_id)
-        .execute(db.pool())
-        .await
-        .expect("result-fetch state");
-    let first_ref_id = refs[0].get::<i64, _>("id");
-    let fetch = service
-        .request_result_fetch(
-            "match:fetch",
-            match_id,
-            ResultFetchRequest {
-                match_id_ref: Some(first_ref_id.to_string()),
-                ..ResultFetchRequest::default()
-            },
-        )
-        .await
-        .expect("result fetch");
-    assert_eq!(fetch.lobby_state, "result_requested");
-    sqlx::query(
-        "UPDATE scrim.match_result_refs \
-            SET fetch_status='fetched', validation_status='valid', winner_team_id=820101, \
-                normalized_result_json='{\"winner\":\"team_a\"}'::jsonb, fetched_at=now(), updated_at=now() \
-          WHERE match_id=$1",
-    )
-    .bind(match_id)
-    .execute(db.pool())
-    .await
-    .expect("restore fetched refs");
-
     for row in &refs {
         service
             .select_result_ref(
@@ -146,6 +117,86 @@ async fn match_operator_mutations_keep_the_dashboard_database_contract() {
     .await
     .expect("selection reason");
     assert_eq!(selection_reason, "wrong_winner");
+}
+
+#[tokio::test]
+async fn valid_result_ref_retry_becomes_worker_eligible() {
+    let db = turnier_db::test_pool().await.expect("central test pool");
+    enable_turniere_runtime(db.pool()).await;
+    sqlx::query(
+        "INSERT INTO scrim.teams(id, name, created_at) VALUES \
+         (820101, 'Operator A', now()), (820102, 'Operator B', now())",
+    )
+    .execute(db.pool())
+    .await
+    .expect("teams");
+    let service = ScrimService::new(PgScrimReadRepository::new(db.pool().clone()));
+    let created = service
+        .create_match(
+            "match:create",
+            CreateMatchRequest {
+                team_a_id: Some("820101".to_string()),
+                team_b_id: Some("820102".to_string()),
+                match_request_id: None,
+                scheduled_at: None,
+                note: None,
+                coach_spectator_discord_id: None,
+            },
+        )
+        .await
+        .expect("create match");
+    let match_id = created.scrim_match.id;
+    service
+        .add_match_ids(
+            "match:ids",
+            match_id,
+            "123456789",
+            "Coach",
+            MatchIdsRequest {
+                match_ids: vec!["9007199254740201".to_string()],
+            },
+        )
+        .await
+        .expect("add match ID");
+    let result_ref_id: i64 = sqlx::query_scalar(
+        "UPDATE scrim.match_result_refs \
+            SET fetch_status='fetched', validation_status='valid', winner_team_id=820101, \
+                normalized_result_json='{\"winner\":\"team_a\"}'::jsonb, fetched_at=now(), updated_at=now() \
+          WHERE match_id=$1 RETURNING id",
+    )
+    .bind(match_id)
+    .fetch_one(db.pool())
+    .await
+    .expect("valid result ref");
+    sqlx::query("UPDATE scrim.matches SET lobby_state='in_progress' WHERE id=$1")
+        .bind(match_id)
+        .execute(db.pool())
+        .await
+        .expect("result-fetch state");
+
+    let fetch = service
+        .request_result_fetch(
+            "match:fetch",
+            match_id,
+            ResultFetchRequest {
+                match_id_ref: Some(result_ref_id.to_string()),
+                ..ResultFetchRequest::default()
+            },
+        )
+        .await
+        .expect("result fetch");
+
+    assert_eq!(fetch.lobby_state, "result_requested");
+    let (fetch_status, validation_status): (String, String) = sqlx::query_as(
+        "SELECT fetch_status, validation_status \
+           FROM scrim.match_result_refs WHERE id=$1",
+    )
+    .bind(result_ref_id)
+    .fetch_one(db.pool())
+    .await
+    .expect("result ref state");
+    assert_eq!(fetch_status, "pending");
+    assert_eq!(validation_status, "unvalidated");
 }
 
 #[tokio::test]

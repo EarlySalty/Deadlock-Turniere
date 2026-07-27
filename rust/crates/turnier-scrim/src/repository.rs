@@ -508,7 +508,8 @@ impl PgScrimReadRepository {
         if let Some(result_ref_id) = result_ref_id {
             let updated = sqlx::query(
                 "UPDATE scrim.match_result_refs \
-                    SET fetch_status='pending', last_error=NULL, updated_at=now() \
+                    SET fetch_status='pending', validation_status='unvalidated', \
+                        last_error=NULL, updated_at=now() \
                   WHERE id=$1 AND match_id=$2",
             )
             .bind(result_ref_id)
