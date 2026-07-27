@@ -78,6 +78,14 @@ pub struct DiscordRoleSyncPlan {
     pub actions: Vec<DiscordRoleAction>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReplacementRequestMutation {
+    #[serde(flatten)]
+    pub receipt: ActionReceipt,
+    #[serde(default)]
+    pub sync_plans: Vec<DiscordRoleSyncPlan>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExpiredSubstituteRoleSync {
     pub receipt_ids: Vec<i64>,
@@ -2150,7 +2158,7 @@ impl PgScrimReadRepository {
         replacement_request_id: i64,
         request: &ReplacementRequestPatch,
         actor: (i64, &str),
-    ) -> ScrimResult<ActionReceipt> {
+    ) -> ScrimResult<ReplacementRequestMutation> {
         let actor_user_id = actor.0.to_string();
         let mut tx = self.pool.begin().await?;
         lock_runtime_control(&mut tx).await?;
@@ -2169,7 +2177,7 @@ impl PgScrimReadRepository {
         if row.try_get::<i64, _>("discord_user_id")? != actor.0 {
             return Err(ScrimError::ReplacementRequestUnauthorized);
         }
-        let receipt_id = match begin_command(
+        let receipt_id = match begin_command::<ReplacementRequestMutation>(
             &mut tx,
             "replacement_request_patch",
             idempotency_key,
@@ -2178,9 +2186,28 @@ impl PgScrimReadRepository {
         .await?
         {
             CommandStart::New(id) => id,
-            CommandStart::Replay(receipt) => {
+            CommandStart::Replay(mut mutation) => {
+                if request.action == ReplacementRequestAction::Accept
+                    && mutation.sync_plans.is_empty()
+                {
+                    let participant_id = match (
+                        row.try_get::<Option<i32>, _>("team_id")?,
+                        row.try_get::<Option<i32>, _>("participant_id")?,
+                    ) {
+                        (Some(_), Some(participant_id)) => participant_id,
+                        _ => {
+                            return Err(ScrimError::InvalidStoredData(
+                                "Für die angenommene Ersatzanfrage fehlt eine Teamzuordnung."
+                                    .to_string(),
+                            ));
+                        }
+                    };
+                    mutation
+                        .sync_plans
+                        .push(participant_team_role_resync_plan(&mut tx, participant_id).await?);
+                }
                 tx.commit().await?;
-                return Ok(receipt);
+                return Ok(mutation);
             }
         };
         if !matches!(
@@ -2197,6 +2224,7 @@ impl PgScrimReadRepository {
             ReplacementRequestAction::Accept => ("accepted", "selected"),
             ReplacementRequestAction::Decline => ("declined", "declined"),
         };
+        let mut sync_plans = Vec::new();
         sqlx::query(
             "UPDATE scrim.replacement_requests \
                 SET status=$2, responded_at=now(), updated_at=now() WHERE id=$1",
@@ -2230,6 +2258,7 @@ impl PgScrimReadRepository {
                 .bind(participant_id)
                 .execute(&mut *tx)
                 .await?;
+                sync_plans.push(participant_team_role_resync_plan(&mut tx, participant_id).await?);
             } else {
                 return Err(ScrimError::InvalidStoredData(
                     "Für die angenommene Ersatzanfrage fehlt eine Teamzuordnung.".to_string(),
@@ -2262,21 +2291,24 @@ impl PgScrimReadRepository {
             json!({"action": request.action}),
         )
         .await?;
-        let receipt = ActionReceipt {
-            accepted: true,
-            message: match request.action {
-                ReplacementRequestAction::Accept => {
-                    "Ersatzanfrage angenommen. Du bist für den Scrim eingeplant."
+        let mutation = ReplacementRequestMutation {
+            receipt: ActionReceipt {
+                accepted: true,
+                message: match request.action {
+                    ReplacementRequestAction::Accept => {
+                        "Ersatzanfrage angenommen. Du bist für den Scrim eingeplant."
+                    }
+                    ReplacementRequestAction::Decline => {
+                        "Ersatzanfrage abgelehnt. Für dich ist nichts weiter zu tun."
+                    }
                 }
-                ReplacementRequestAction::Decline => {
-                    "Ersatzanfrage abgelehnt. Für dich ist nichts weiter zu tun."
-                }
-            }
-            .to_string(),
+                .to_string(),
+            },
+            sync_plans,
         };
-        complete_command(&mut tx, receipt_id, &receipt).await?;
+        complete_command(&mut tx, receipt_id, &mutation).await?;
         tx.commit().await?;
-        Ok(receipt)
+        Ok(mutation)
     }
 
     pub async fn create_match_request_batch(
@@ -3147,6 +3179,15 @@ async fn pending_expired_substitute_syncs(
             participant_id,
         })
         .collect())
+}
+
+async fn participant_team_role_resync_plan(
+    tx: &mut Transaction<'_, Postgres>,
+    participant_id: i32,
+) -> ScrimResult<DiscordRoleSyncPlan> {
+    let snapshot = participant_role_snapshot(tx, participant_id, None, None).await?;
+    let managed = all_managed_role_ids(tx, None, None).await?;
+    Ok(role_resync(&snapshot, &managed))
 }
 
 fn role_diff(before: &RoleSnapshot, after: &RoleSnapshot) -> DiscordRoleSyncPlan {

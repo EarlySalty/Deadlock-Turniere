@@ -1133,9 +1133,10 @@ async fn patch_replacement_request(
     let actor = require_bff_actor(&headers)?;
     let service = service(&state);
     let payload = json_with_i64_target("replacement_request_id", id, &body)?;
-    let receipt = service
+    let request_key = mutation.idempotency_key;
+    let response = service
         .patch_replacement_request(
-            mutation.idempotency_key,
+            request_key,
             mutation.request_id,
             &payload,
             id,
@@ -1143,7 +1144,14 @@ async fn patch_replacement_request(
             (actor.discord_id, actor.display_name),
         )
         .await?;
-    Ok((StatusCode::OK, Json(receipt)))
+    if response
+        .sync_plans
+        .iter()
+        .any(|plan| !plan.actions.is_empty())
+    {
+        sync_discord_roles(&state, response.sync_plans, request_key).await;
+    }
+    Ok((StatusCode::OK, Json(response.receipt)))
 }
 
 async fn signup(

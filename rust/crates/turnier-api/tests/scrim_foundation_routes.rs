@@ -2985,13 +2985,31 @@ async fn replacement_candidates_are_ranked_and_requests_persist_and_transition()
 
 #[cfg(feature = "testing")]
 #[tokio::test]
-async fn merge_critic_replacement_accept_assigns_the_substitute_to_the_team() {
+async fn accepted_replacement_retries_the_team_role_after_a_broker_failure() {
     let db = turnier_db::test_pool().await.expect("central test pool");
     enable_turniere_runtime(db.pool()).await;
     seed_coach(db.pool(), 123456789).await;
     seed_teams(db.pool(), &[1]).await;
+    sqlx::query("UPDATE scrim.teams SET discord_role_id=8101 WHERE id=1")
+        .execute(db.pool())
+        .await
+        .expect("team role");
     let need_id = seed_replacement_fixture(db.pool()).await;
-    let app = app_with_pool(db.pool().clone());
+    let requests = Arc::new(Mutex::new(Vec::new()));
+    let broker = Router::new()
+        .route(
+            "/internal/master/v1/discord/member/add-role",
+            post(fail_once_then_create_role),
+        )
+        .with_state(requests.clone());
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("broker listener");
+    let broker_url = format!("http://{}", listener.local_addr().expect("broker address"));
+    let broker_task = tokio::spawn(async move {
+        axum::serve(listener, broker).await.expect("broker server");
+    });
+    let app = app_with_pool_and_broker(db.pool().clone(), Some(&broker_url));
 
     let (status, _) = send(
         &app,
@@ -3011,22 +3029,36 @@ async fn merge_critic_replacement_accept_assigns_the_substitute_to_the_team() {
     .await
     .expect("replacement request");
 
-    let (status, _) = send(
-        &app,
-        IpAddr::V4(Ipv4Addr::LOCALHOST),
-        TestHeaders {
-            token: Some("internal-token"),
-            request_id: Some("scrimrepl:v1:interaction:assign"),
-            idempotency_key: Some("scrimrepl:v1:interaction:assign"),
-            actor_id: Some("3002"),
-            actor_name: Some("Best"),
-        },
-        Method::PATCH,
-        &format!("/internal/turnier/v1/scrims/replacement-requests/{request_id}"),
-        Some(json!({"action":"accept"})),
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK);
+    for attempt in 0..2 {
+        let (status, _) = send(
+            &app,
+            IpAddr::V4(Ipv4Addr::LOCALHOST),
+            TestHeaders {
+                token: Some("internal-token"),
+                request_id: Some("scrimrepl:v1:interaction:assign"),
+                idempotency_key: Some("scrimrepl:v1:interaction:assign"),
+                actor_id: Some("3002"),
+                actor_name: Some("Best"),
+            },
+            Method::PATCH,
+            &format!("/internal/turnier/v1/scrims/replacement-requests/{request_id}"),
+            Some(json!({"action":"accept"})),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        if attempt == 0 {
+            let stripped = sqlx::query(
+                "UPDATE scrim.command_receipts \
+                    SET result_payload=result_payload - 'sync_plans' \
+                  WHERE command_scope='replacement_request_patch' \
+                    AND idempotency_key='scrimrepl:v1:interaction:assign'",
+            )
+            .execute(db.pool())
+            .await
+            .expect("legacy replacement receipt");
+            assert_eq!(stripped.rows_affected(), 1);
+        }
+    }
 
     let assignment: Option<(i32, bool, bool)> = sqlx::query_as(
         "SELECT team_id, is_bench, substitute_until IS NOT NULL \
@@ -3036,6 +3068,28 @@ async fn merge_critic_replacement_accept_assigns_the_substitute_to_the_team() {
     .await
     .expect("substitute assignment");
     assert_eq!(assignment, Some((1, true, true)));
+    assert_eq!(
+        requests.lock().expect("broker requests").as_slice(),
+        &[
+            json!({
+                "guild_id": 1289721245281292288_u64,
+                "user_id": 3002,
+                "role_id": 8101,
+                "reason": "scrim 302 add role 8101",
+                "idempotency_key":
+                    "scrim-scrimrepl:v1:interaction:assign-302-8101-add"
+            }),
+            json!({
+                "guild_id": 1289721245281292288_u64,
+                "user_id": 3002,
+                "role_id": 8101,
+                "reason": "scrim 302 add role 8101",
+                "idempotency_key":
+                    "scrim-scrimrepl:v1:interaction:assign-302-8101-add"
+            })
+        ]
+    );
+    broker_task.abort();
 }
 
 #[cfg(feature = "testing")]

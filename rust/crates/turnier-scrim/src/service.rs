@@ -20,7 +20,8 @@ use crate::model::{
 };
 use crate::repository::{
     DiscordRoleSyncPlan, MutationDispatch, ParticipantMutation, PgScrimReadRepository,
-    RosterPoolCandidate, ScrimReadRepository, SignupMutation, SubstituteMutation, TeamMutation,
+    ReplacementRequestMutation, RosterPoolCandidate, ScrimReadRepository, SignupMutation,
+    SubstituteMutation, TeamMutation,
 };
 use crate::{ScrimError, ScrimResult};
 
@@ -480,7 +481,7 @@ impl ScrimService<PgScrimReadRepository> {
         replacement_request_id: i64,
         request: &ReplacementRequestPatch,
         actor: (&str, &str),
-    ) -> ScrimResult<ActionReceipt> {
+    ) -> ScrimResult<ReplacementRequestMutation> {
         let actor_discord_id = parse_discord_id(actor.0)?;
         self.repository
             .patch_replacement_request(
