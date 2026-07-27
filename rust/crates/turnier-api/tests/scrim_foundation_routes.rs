@@ -1959,6 +1959,92 @@ async fn participant_discord_resync_is_blocked_until_turniere_owns_runtime() {
 
 #[cfg(feature = "testing")]
 #[tokio::test]
+async fn team_coach_role_removal_is_retried_from_the_saved_patch() {
+    let db = turnier_db::test_pool().await.expect("central test pool");
+    enable_turniere_runtime(db.pool()).await;
+    seed_coach(db.pool(), 123456789).await;
+    seed_coach(db.pool(), 987654321).await;
+    seed_roster_fixture(db.pool()).await;
+    sqlx::query(
+        "UPDATE scrim.teams \
+         SET coach='Coach', coach_discord_id=123456789, discord_role_id=8010 \
+         WHERE id=10",
+    )
+    .execute(db.pool())
+    .await
+    .expect("coach retry fixture");
+
+    let failed_removals = Arc::new(Mutex::new(Vec::new()));
+    let broker = Router::new()
+        .route(
+            "/internal/master/v1/discord/member/add-role",
+            post(accept_broker),
+        )
+        .route(
+            "/internal/master/v1/discord/member/remove-role",
+            post(record_and_fail_broker),
+        )
+        .with_state(failed_removals.clone());
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("broker listener");
+    let broker_url = format!("http://{}", listener.local_addr().expect("broker address"));
+    let broker_task = tokio::spawn(async move {
+        axum::serve(listener, broker).await.expect("broker server");
+    });
+    let app = app_with_pool_and_broker(db.pool().clone(), Some(&broker_url));
+    let headers = coach_headers("roster:patch-team:coach-retry", "123456789");
+    let body = json!({"coach_discord_id":"987654321"});
+
+    let (first_status, first) = send(
+        &app,
+        IpAddr::V4(Ipv4Addr::LOCALHOST),
+        headers,
+        Method::PATCH,
+        "/internal/turnier/v1/scrims/teams/10",
+        Some(body.clone()),
+    )
+    .await;
+    assert_eq!(first_status, StatusCode::OK);
+    assert_eq!(first["discord_sync"]["ok"], false);
+    let saved_coach: Option<i64> =
+        sqlx::query_scalar("SELECT coach_discord_id FROM scrim.teams WHERE id=10")
+            .fetch_one(db.pool())
+            .await
+            .expect("committed coach replacement");
+    assert_eq!(
+        saved_coach,
+        Some(987654321),
+        "Discord-Fehler darf den DB-Stand nicht zurückrollen"
+    );
+
+    let (retry_status, retry) = send(
+        &app,
+        IpAddr::V4(Ipv4Addr::LOCALHOST),
+        headers,
+        Method::PATCH,
+        "/internal/turnier/v1/scrims/teams/10",
+        Some(body),
+    )
+    .await;
+    assert_eq!(retry_status, StatusCode::OK);
+    assert_eq!(retry["discord_sync"]["ok"], false);
+
+    let failed_removals = failed_removals.lock().expect("failed removals");
+    assert_eq!(failed_removals.len(), 2);
+    assert!(failed_removals.iter().all(|request| {
+        request["user_id"] == 123456789
+            && request["role_id"] == 8010
+            && request["reason"] == "scrim coach-123456789 remove role 8010"
+            && request["idempotency_key"]
+                == "scrim-roster:patch-team:coach-retry-coach-123456789-8010-remove"
+    }));
+
+    broker_task.abort();
+}
+
+#[cfg(feature = "testing")]
+#[tokio::test]
 async fn participant_role_sync_retry_replays_the_full_target_state() {
     let db = turnier_db::test_pool().await.expect("central test pool");
     enable_turniere_runtime(db.pool()).await;

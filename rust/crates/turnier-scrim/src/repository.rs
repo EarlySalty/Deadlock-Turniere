@@ -151,7 +151,7 @@ impl ExpiredSubstituteRoleSyncDelivery {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TeamMutation {
     pub team: RosterTeam,
     pub sync_plans: Vec<DiscordRoleSyncPlan>,
@@ -1017,6 +1017,7 @@ impl PgScrimReadRepository {
 
     pub async fn patch_team(
         &self,
+        idempotency_key: &str,
         team_id: i32,
         request: TeamPatchRequest,
     ) -> ScrimResult<TeamMutation> {
@@ -1027,6 +1028,18 @@ impl PgScrimReadRepository {
             .bind(SELF_SERVICE_ADVISORY_LOCK)
             .execute(&mut *tx)
             .await?;
+        let payload = json!({
+            "team_id": team_id.to_string(),
+            "request": &request,
+        });
+        let receipt_id =
+            match begin_command(&mut tx, "roster_team_patch", idempotency_key, &payload).await? {
+                CommandStart::New(id) => id,
+                CommandStart::Replay(mutation) => {
+                    tx.commit().await?;
+                    return Ok(mutation);
+                }
+            };
         let team = load_roster_team(&mut tx, team_id).await?;
         let old_coach_id = team
             .coach_discord_id
@@ -1079,8 +1092,10 @@ impl PgScrimReadRepository {
         .await?;
         let team = load_roster_team(&mut tx, team_id).await?;
         let sync_plans = coach_sync_plans(&mut tx, before).await?;
+        let mutation = TeamMutation { team, sync_plans };
+        complete_command(&mut tx, receipt_id, &mutation).await?;
         tx.commit().await?;
-        Ok(TeamMutation { team, sync_plans })
+        Ok(mutation)
     }
 
     pub async fn patch_participant(

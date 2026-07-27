@@ -122,13 +122,16 @@ impl ScrimService<PgScrimReadRepository> {
 
     pub async fn patch_team(
         &self,
+        idempotency_key: &str,
         team_id: i32,
         request: TeamPatchRequest,
     ) -> ScrimResult<TeamMutation> {
         if let PatchValue::Value(name) = &request.name {
             validate_team_name(name)?;
         }
-        self.repository.patch_team(team_id, request).await
+        self.repository
+            .patch_team(idempotency_key, team_id, request)
+            .await
     }
 
     pub async fn patch_participant(

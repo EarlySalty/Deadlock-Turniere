@@ -1249,7 +1249,7 @@ async fn patch_team(
     let service = service(&state);
     service.authorize_operator(actor.discord_id).await?;
     let mutation = service
-        .patch_team(parse_db_id(&id, "team_id")?, body)
+        .patch_team(request_key, parse_db_id(&id, "team_id")?, body)
         .await?;
     let discord_sync = sync_discord_roles(&state, mutation.sync_plans, request_key).await;
     Ok(Json(TeamMutationResponse {
