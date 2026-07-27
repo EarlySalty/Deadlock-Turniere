@@ -2034,10 +2034,19 @@ async fn announce_reports_reaction_failure_without_losing_posted_message() {
     assert!(requests[0]["channel_id"].as_i64().is_some_and(|id| id > 0));
     assert_eq!(requests[0]["message_id"], "12345");
     assert_eq!(requests[0]["emoji"], "✅");
+    // Der Schluessel leitet sich aus Kanal und Nachricht ab, nicht aus dem Aufrufer-Key:
+    // der darf 129 Zeichen lang sein, der Broker nimmt 128.
+    let reaction_key = requests[0]["idempotency_key"]
+        .as_str()
+        .expect("reaction idempotency key");
     assert_eq!(
-        requests[0]["idempotency_key"],
-        "roster:announce:reaction-failure:reaction"
+        reaction_key,
+        format!(
+            "scrim-reaction-{}-12345",
+            requests[0]["channel_id"].as_i64().expect("channel id")
+        )
     );
+    assert!(reaction_key.chars().count() <= 128);
 
     broker_task.abort();
 }

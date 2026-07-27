@@ -2810,7 +2810,10 @@ async fn post_team_announcement(
                 "channel_id": channel_id,
                 "message_id": message_id,
                 "emoji": "✅",
-                "idempotency_key": format!("{idempotency_key}:reaction"),
+                // Nicht an den Aufrufer-Key anhaengen: der darf 129 Zeichen lang sein,
+                // der Broker nimmt 128. Kanal und Nachricht identifizieren die Reaktion
+                // ohnehin eindeutig und bleiben kurz.
+                "idempotency_key": format!("scrim-reaction-{channel_id}-{message_id}"),
             }),
         )
         .await
@@ -2897,7 +2900,12 @@ async fn send_substitute_dm(
                 "content": substitute_dm_content(team_name, &window),
                 "team_name": team_name,
                 "window": window,
-                "idempotency_key": format!("{idempotency_key}:dm"),
+                // Gehasht statt angehaengt: der Aufrufer-Key darf 129 Zeichen lang sein,
+                // der Broker nimmt 128. Der Hash haelt die Laenge konstant bei 75 Zeichen.
+                "idempotency_key": format!(
+                    "scrim-dm-{:x}",
+                    Sha256::digest(format!("{idempotency_key}\0{user_id}").as_bytes())
+                ),
             }),
         )
         .await;
