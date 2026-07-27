@@ -38,7 +38,7 @@ async fn match_operator_mutations_keep_the_dashboard_database_contract() {
     let match_id = created.scrim_match.id;
     assert_eq!(created.scrim_match.lobby_state.as_deref(), Some("draft"));
 
-    let (lobby, should_distribute) = service
+    let lobby = service
         .set_lobby_code(
             "match:lobby",
             match_id,
@@ -50,8 +50,16 @@ async fn match_operator_mutations_keep_the_dashboard_database_contract() {
         )
         .await
         .expect("set lobby code");
-    assert!(should_distribute);
     assert_eq!(lobby.scrim_match.join_code.as_deref(), Some("A1B2C"));
+    service
+        .repository()
+        .begin_lobby_code_delivery(&lobby)
+        .await
+        .expect("prepare lobby code delivery")
+        .expect("current lobby code delivery")
+        .finish()
+        .await
+        .expect("finish lobby code delivery");
 
     service
         .add_match_ids(
@@ -141,6 +149,68 @@ async fn match_operator_mutations_keep_the_dashboard_database_contract() {
 }
 
 #[tokio::test]
+async fn lobby_code_replay_remains_eligible_for_distribution() {
+    let db = turnier_db::test_pool().await.expect("central test pool");
+    enable_turniere_runtime(db.pool()).await;
+    sqlx::query(
+        "INSERT INTO scrim.teams(id, name, created_at) VALUES \
+         (820101, 'Operator A', now()), (820102, 'Operator B', now())",
+    )
+    .execute(db.pool())
+    .await
+    .expect("teams");
+    let service = ScrimService::new(PgScrimReadRepository::new(db.pool().clone()));
+    let created = service
+        .create_match(
+            "match:create",
+            CreateMatchRequest {
+                team_a_id: Some("820101".to_string()),
+                team_b_id: Some("820102".to_string()),
+                match_request_id: None,
+                scheduled_at: None,
+                note: None,
+                coach_spectator_discord_id: None,
+            },
+        )
+        .await
+        .expect("create match");
+    let request = LobbyCodeRequest {
+        lobby_code: "a1b2c".to_string(),
+    };
+
+    service
+        .set_lobby_code(
+            "match:lobby",
+            created.scrim_match.id,
+            "123456789",
+            "Coach",
+            request.clone(),
+        )
+        .await
+        .expect("set lobby code");
+    let replay = service
+        .set_lobby_code(
+            "match:lobby",
+            created.scrim_match.id,
+            "123456789",
+            "Coach",
+            request,
+        )
+        .await
+        .expect("replay lobby code");
+
+    service
+        .repository()
+        .begin_lobby_code_delivery(&replay)
+        .await
+        .expect("prepare replay delivery")
+        .expect("current replay delivery")
+        .finish()
+        .await
+        .expect("finish replay delivery");
+}
+
+#[tokio::test]
 async fn announcement_preview_is_read_only_and_actions_use_wire_ids() {
     let db = turnier_db::test_pool().await.expect("central test pool");
     enable_turniere_runtime(db.pool()).await;
@@ -168,9 +238,9 @@ async fn announcement_preview_is_read_only_and_actions_use_wire_ids() {
             "123456789",
             "Coach",
             AnnouncementPublicationRequest {
-                title: Some("Platzhalter".to_string()),
+                title: Some("Scrim-Woche 31".to_string()),
                 channel_id: Some("9007199254740302".to_string()),
-                message: "Platzhalter".to_string(),
+                message: "Die Scrims für Woche 31 stehen fest.".to_string(),
             },
         )
         .await
@@ -193,6 +263,58 @@ async fn announcement_preview_is_read_only_and_actions_use_wire_ids() {
     assert_eq!(
         serde_json::to_value(action).expect("wire action")["id"],
         action_id.to_string()
+    );
+}
+
+#[tokio::test]
+async fn announcement_publication_returns_its_inserted_draft() {
+    let db = turnier_db::test_pool().await.expect("central test pool");
+    enable_turniere_runtime(db.pool()).await;
+    let service = ScrimService::new(PgScrimReadRepository::new(db.pool().clone()));
+    let block_id = "two_week_scrim_block";
+    let newer = service
+        .create_announcement_publication(
+            block_id,
+            "announcement:newer",
+            "123456789",
+            "Coach",
+            AnnouncementPublicationRequest {
+                title: Some("Späterer Draft".to_string()),
+                channel_id: Some("9007199254740302".to_string()),
+                message: "Dieser Draft bleibt der neueste im Block.".to_string(),
+            },
+        )
+        .await
+        .expect("create newer draft");
+    sqlx::query(
+        "UPDATE scrim.announcement_drafts \
+            SET created_at = now() + interval '1 day' \
+          WHERE id = $1",
+    )
+    .bind(newer.id.expect("newer draft id"))
+    .execute(db.pool())
+    .await
+    .expect("move newer draft ahead");
+
+    let inserted = service
+        .create_announcement_publication(
+            block_id,
+            "announcement:inserted",
+            "123456789",
+            "Coach",
+            AnnouncementPublicationRequest {
+                title: Some("Gerade freigegeben".to_string()),
+                channel_id: Some("9007199254740303".to_string()),
+                message: "Genau dieser Draft soll jetzt veröffentlicht werden.".to_string(),
+            },
+        )
+        .await
+        .expect("create inserted draft");
+
+    assert_ne!(inserted.id, newer.id);
+    assert_eq!(
+        inserted.message,
+        "Genau dieser Draft soll jetzt veröffentlicht werden."
     );
 }
 

@@ -90,6 +90,17 @@ pub struct ExpiredSubstituteRoleSyncDelivery {
     pub plan: DiscordRoleSyncPlan,
 }
 
+pub struct LobbyCodeDelivery {
+    tx: Transaction<'static, Postgres>,
+}
+
+impl LobbyCodeDelivery {
+    pub async fn finish(self) -> ScrimResult<()> {
+        self.tx.commit().await?;
+        Ok(())
+    }
+}
+
 impl ExpiredSubstituteRoleSyncDelivery {
     pub async fn finish(mut self, delivered: bool) -> ScrimResult<()> {
         if delivered {
@@ -243,16 +254,25 @@ impl PgScrimReadRepository {
         code: &str,
         actor_user_id: &str,
         actor_display_name: &str,
-    ) -> ScrimResult<(MatchMutation, bool)> {
+    ) -> ScrimResult<MatchMutation> {
         let mut tx = self.pool.begin().await?;
         lock_runtime_control(&mut tx).await?;
         require_turniere_runtime(&mut tx).await?;
         let payload = json!({"match_id": match_id.to_string(), "lobby_code": code});
-        let receipt_id =
-            match begin_command(&mut tx, "match_lobby_code", idempotency_key, &payload).await? {
-                CommandStart::New(id) => id,
-                CommandStart::Replay(response) => return Ok((response, false)),
-            };
+        let receipt_id = match begin_command::<MatchMutation>(
+            &mut tx,
+            "match_lobby_code",
+            idempotency_key,
+            &payload,
+        )
+        .await?
+        {
+            CommandStart::New(id) => id,
+            CommandStart::Replay(response) => {
+                tx.commit().await?;
+                return Ok(response);
+            }
+        };
         let row =
             sqlx::query("SELECT lobby_state, join_code FROM scrim.matches WHERE id=$1 FOR UPDATE")
                 .bind(match_id)
@@ -300,7 +320,36 @@ impl PgScrimReadRepository {
         };
         complete_command(&mut tx, receipt_id, &response).await?;
         tx.commit().await?;
-        Ok((response, true))
+        Ok(response)
+    }
+
+    pub async fn begin_lobby_code_delivery(
+        &self,
+        mutation: &MatchMutation,
+    ) -> ScrimResult<Option<LobbyCodeDelivery>> {
+        let Some(expected_code) = mutation.scrim_match.join_code.as_deref() else {
+            return Ok(None);
+        };
+        let mut tx = self.pool.begin().await?;
+        // ponytail: Der bestehende globale Runtime-Lock reicht bei diesem seltenen
+        // Operatorpfad; bei relevantem Durchsatz auf einen Match-Lock eingrenzen.
+        lock_runtime_control(&mut tx).await?;
+        require_turniere_runtime(&mut tx).await?;
+        sqlx::query("SET LOCAL idle_in_transaction_session_timeout = '30s'")
+            .execute(&mut *tx)
+            .await?;
+        let current_code = sqlx::query_scalar::<_, Option<String>>(
+            "SELECT join_code FROM scrim.matches WHERE id=$1",
+        )
+        .bind(mutation.scrim_match.id)
+        .fetch_optional(&mut *tx)
+        .await?
+        .flatten();
+        if current_code.as_deref() != Some(expected_code) {
+            tx.commit().await?;
+            return Ok(None);
+        }
+        Ok(Some(LobbyCodeDelivery { tx }))
     }
 
     pub async fn add_match_ids(
@@ -556,7 +605,7 @@ impl PgScrimReadRepository {
             }
             return announcement_from_row(block_id, &row);
         }
-        let id = sqlx::query_scalar::<_, i64>(
+        let row = sqlx::query(
             "INSERT INTO scrim.announcement_drafts(\
                  scope, block_key, title, body, payload, payload_hash, status, \
                  idempotency_key, created_by_user_id, created_by_display_name, \
@@ -565,7 +614,8 @@ impl PgScrimReadRepository {
                  'block', $1, $2, $3, $4::jsonb, \
                  scrim.announcement_effect_hash('block', $1, $2, $3, $4::jsonb), \
                  'approved', $5, $6, $7, $6, $7, now()\
-             ) RETURNING id",
+             ) RETURNING id, title, body, payload->>'channel_id' AS channel_id, \
+                         status, published_at",
         )
         .bind(block_key)
         .bind(title)
@@ -576,6 +626,7 @@ impl PgScrimReadRepository {
         .bind(actor_display_name)
         .fetch_one(&mut *tx)
         .await?;
+        let id = row.try_get::<i64, _>("id")?;
         sqlx::query(
             "INSERT INTO scrim.announcement_approvals(\
                  draft_id, decision, decided_by_user_id, decided_by_display_name, decision_data\
@@ -586,8 +637,9 @@ impl PgScrimReadRepository {
         .bind(actor_display_name)
         .execute(&mut *tx)
         .await?;
+        let publication = announcement_from_row(block_id, &row)?;
         tx.commit().await?;
-        self.announcement_preview(block_id).await
+        Ok(publication)
     }
 
     pub async fn mark_announcement_published(

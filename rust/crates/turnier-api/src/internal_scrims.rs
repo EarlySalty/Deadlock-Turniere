@@ -55,6 +55,7 @@ const DISCORD_SYNC_FAILED: &str =
 const DM_NO_ACCOUNT: &str = "No linked Discord account; DM not sent.";
 const DM_SUCCESS: &str = "DM sent.";
 const DM_FAILED: &str = "DM delivery failed.";
+const LOBBY_CODE_DISCORD_TIMEOUT: Duration = Duration::from_secs(25);
 const SUBSTITUTE_DISCORD_SYNC_TIMEOUT: Duration = Duration::from_secs(20);
 
 pub fn router() -> Router<AppState> {
@@ -594,7 +595,7 @@ async fn set_lobby_code(
     let actor = require_bff_actor(&headers)?;
     let service = service(&state);
     service.authorize_operator(actor.discord_id).await?;
-    let (mutation, should_distribute) = service
+    let mutation = service
         .set_lobby_code(
             mutation_headers.idempotency_key,
             id,
@@ -603,8 +604,41 @@ async fn set_lobby_code(
             body,
         )
         .await?;
-    if should_distribute {
-        distribute_lobby_code(&state, &mutation).await;
+    match service
+        .repository()
+        .begin_lobby_code_delivery(&mutation)
+        .await
+    {
+        Ok(Some(delivery)) => {
+            if tokio::time::timeout(
+                LOBBY_CODE_DISCORD_TIMEOUT,
+                distribute_lobby_code(&state, &mutation),
+            )
+            .await
+            .is_err()
+            {
+                tracing::warn!(
+                    match_id = mutation.scrim_match.id,
+                    timeout_seconds = LOBBY_CODE_DISCORD_TIMEOUT.as_secs(),
+                    "Scrim-Lobbycode-Discord-Versand hat das Zeitlimit erreicht; offene Zustellungen bleiben für einen Retry"
+                );
+            }
+            if let Err(error) = delivery.finish().await {
+                tracing::warn!(
+                    match_id = mutation.scrim_match.id,
+                    %error,
+                    "Scrim-Lobbycode-Discord-Sperre konnte nach dem Versand nicht freigegeben werden"
+                );
+            }
+        }
+        Ok(None) => {}
+        Err(error) => {
+            tracing::warn!(
+                match_id = mutation.scrim_match.id,
+                %error,
+                "Scrim-Lobbycode-Discord-Versand konnte nicht vorbereitet werden; Datenbankstand bleibt gespeichert"
+            );
+        }
     }
     Ok(Json(mutation))
 }
@@ -748,36 +782,52 @@ async fn distribute_lobby_code(state: &AppState, mutation: &MatchMutation) {
             return;
         }
     };
-    for channel_id in model
+    let match_id = mutation.scrim_match.id;
+    let mut channels = model
         .teams
         .iter()
         .filter(|team| team_ids.contains(&Some(team.id)))
-        .filter_map(|team| team.discord_channel_id.as_deref())
+        .filter_map(|team| team.discord_channel_id.as_deref());
+    let Some(first) = channels.next() else {
+        return;
+    };
+    let Some(second) = channels.next() else {
+        distribute_lobby_code_to_channel(state, match_id, first, code).await;
+        return;
+    };
+    debug_assert!(channels.next().is_none(), "a match has at most two teams");
+    tokio::join!(
+        distribute_lobby_code_to_channel(state, match_id, first, code),
+        distribute_lobby_code_to_channel(state, match_id, second, code)
+    );
+}
+
+async fn distribute_lobby_code_to_channel(
+    state: &AppState,
+    match_id: i32,
+    channel_id: &str,
+    code: &str,
+) {
+    let idempotency_key = format!("scrim-lobby-code-{match_id}-{channel_id}-{code}");
+    if let Err(error) = state
+        .notifier
+        .broker()
+        .post_internal::<serde_json::Value, _>(
+            "/internal/master/v1/discord/send-message",
+            &serde_json::json!({
+                "channel_id": channel_id,
+                "content": format!("Lobby Code: {code}"),
+                "idempotency_key": idempotency_key,
+            }),
+        )
+        .await
     {
-        let idempotency_key = format!(
-            "scrim-lobby-code-{}-{channel_id}-{code}",
-            mutation.scrim_match.id
+        tracing::warn!(
+            match_id,
+            channel_id,
+            %error,
+            "Scrim-Lobbycode-Discord-Sync fail-open"
         );
-        if let Err(error) = state
-            .notifier
-            .broker()
-            .post_internal::<serde_json::Value, _>(
-                "/internal/master/v1/discord/send-message",
-                &serde_json::json!({
-                    "channel_id": channel_id,
-                    "content": format!("Lobby Code: {code}"),
-                    "idempotency_key": idempotency_key,
-                }),
-            )
-            .await
-        {
-            tracing::warn!(
-                match_id = mutation.scrim_match.id,
-                channel_id,
-                %error,
-                "Scrim-Lobbycode-Discord-Sync fail-open"
-            );
-        }
     }
 }
 

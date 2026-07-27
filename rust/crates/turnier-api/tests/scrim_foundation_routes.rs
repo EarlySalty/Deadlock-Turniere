@@ -1,6 +1,10 @@
 use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+#[cfg(feature = "testing")]
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
+#[cfg(feature = "testing")]
+use std::time::Duration;
 
 use axum::body::{to_bytes, Body};
 use axum::extract::ConnectInfo;
@@ -77,6 +81,30 @@ async fn record_and_fail_broker(
     Json(payload): Json<Value>,
 ) -> StatusCode {
     requests.lock().expect("broker requests").push(payload);
+    StatusCode::SERVICE_UNAVAILABLE
+}
+
+#[cfg(feature = "testing")]
+struct PausingBroker {
+    calls: AtomicUsize,
+    retry_started: tokio::sync::Notify,
+    both_retries_started: tokio::sync::Notify,
+    release_retry: tokio::sync::Notify,
+}
+
+#[cfg(feature = "testing")]
+async fn pause_first_retry_broker(
+    State(state): State<Arc<PausingBroker>>,
+    Json(_payload): Json<Value>,
+) -> StatusCode {
+    match state.calls.fetch_add(1, Ordering::SeqCst) {
+        2 => {
+            state.retry_started.notify_one();
+            state.release_retry.notified().await;
+        }
+        3 => state.both_retries_started.notify_one(),
+        _ => {}
+    }
     StatusCode::SERVICE_UNAVAILABLE
 }
 
@@ -2888,7 +2916,7 @@ async fn match_block_and_action_operator_routes_persist_the_canonical_flow() {
 
 #[cfg(feature = "testing")]
 #[tokio::test]
-async fn lobby_code_delivery_is_fail_open_and_old_replays_do_not_send_stale_codes() {
+async fn failed_lobby_code_delivery_retries_without_sending_stale_codes() {
     let db = turnier_db::test_pool().await.expect("central test pool");
     enable_turniere_runtime(db.pool()).await;
     seed_coach(db.pool(), 123456789).await;
@@ -2942,6 +2970,16 @@ async fn lobby_code_delivery_is_fail_open_and_old_replays_do_not_send_stale_code
     let (status, _) = send(
         &app,
         IpAddr::V4(Ipv4Addr::LOCALHOST),
+        coach_headers("match:lobby:delivery", "123456789"),
+        Method::PUT,
+        &route,
+        Some(json!({"lobby_code":"a1b2c"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, _) = send(
+        &app,
+        IpAddr::V4(Ipv4Addr::LOCALHOST),
         coach_headers("match:lobby:correction", "123456789"),
         Method::PUT,
         &route,
@@ -2972,7 +3010,7 @@ async fn lobby_code_delivery_is_fail_open_and_old_replays_do_not_send_stale_code
             .iter()
             .filter(|payload| payload["content"] == "Lobby Code: A1B2C")
             .count(),
-        2
+        4
     );
     assert_eq!(
         payloads
@@ -2981,8 +3019,125 @@ async fn lobby_code_delivery_is_fail_open_and_old_replays_do_not_send_stale_code
             .count(),
         2
     );
-    assert_eq!(payloads.len(), 4);
+    assert_eq!(payloads.len(), 6);
 
+    broker_task.abort();
+}
+
+#[cfg(feature = "testing")]
+#[tokio::test]
+async fn lobby_code_correction_waits_for_in_flight_replay_delivery() {
+    let db = turnier_db::test_pool().await.expect("central test pool");
+    enable_turniere_runtime(db.pool()).await;
+    seed_coach(db.pool(), 123456789).await;
+    seed_teams(db.pool(), &[810101, 810102]).await;
+    sqlx::query(
+        "UPDATE scrim.teams SET discord_channel_id = 700000 + id WHERE id IN (810101, 810102)",
+    )
+    .execute(db.pool())
+    .await
+    .expect("team channel ids");
+
+    let broker_state = Arc::new(PausingBroker {
+        calls: AtomicUsize::new(0),
+        retry_started: tokio::sync::Notify::new(),
+        both_retries_started: tokio::sync::Notify::new(),
+        release_retry: tokio::sync::Notify::new(),
+    });
+    let broker = Router::new()
+        .route(
+            "/internal/master/v1/discord/send-message",
+            post(pause_first_retry_broker),
+        )
+        .with_state(broker_state.clone());
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("broker listener");
+    let broker_url = format!("http://{}", listener.local_addr().expect("broker address"));
+    let broker_task = tokio::spawn(async move {
+        axum::serve(listener, broker).await.expect("broker server");
+    });
+    let app = app_with_pool_and_broker(db.pool().clone(), Some(&broker_url));
+
+    let (status, created) = send(
+        &app,
+        IpAddr::V4(Ipv4Addr::LOCALHOST),
+        coach_headers("match:create:lobby-race", "123456789"),
+        Method::POST,
+        "/internal/turnier/v1/scrims/matches",
+        Some(json!({"team_a_id":"810101","team_b_id":"810102"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let route = format!(
+        "/internal/turnier/v1/scrims/matches/{}/lobby-code",
+        created["match"]["id"].as_str().expect("wire match id")
+    );
+    let (status, _) = send(
+        &app,
+        IpAddr::V4(Ipv4Addr::LOCALHOST),
+        coach_headers("match:lobby:race", "123456789"),
+        Method::PUT,
+        &route,
+        Some(json!({"lobby_code":"a1b2c"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let replay_app = app.clone();
+    let replay_route = route.clone();
+    let replay = tokio::spawn(async move {
+        send(
+            &replay_app,
+            IpAddr::V4(Ipv4Addr::LOCALHOST),
+            coach_headers("match:lobby:race", "123456789"),
+            Method::PUT,
+            &replay_route,
+            Some(json!({"lobby_code":"a1b2c"})),
+        )
+        .await
+    });
+    tokio::time::timeout(
+        Duration::from_secs(2),
+        broker_state.retry_started.notified(),
+    )
+    .await
+    .expect("replay reached the broker");
+    tokio::time::timeout(
+        Duration::from_secs(2),
+        broker_state.both_retries_started.notified(),
+    )
+    .await
+    .expect("both team-channel deliveries reached the broker");
+    assert_eq!(
+        broker_state.calls.load(Ordering::SeqCst),
+        4,
+        "team-channel deliveries did not start in parallel"
+    );
+
+    let correction_app = app.clone();
+    let correction_route = route.clone();
+    let mut correction = tokio::spawn(async move {
+        send(
+            &correction_app,
+            IpAddr::V4(Ipv4Addr::LOCALHOST),
+            coach_headers("match:lobby:race:correction", "123456789"),
+            Method::PUT,
+            &correction_route,
+            Some(json!({"lobby_code":"b2c3d"})),
+        )
+        .await
+    });
+    assert!(
+        tokio::time::timeout(Duration::from_millis(200), &mut correction)
+            .await
+            .is_err(),
+        "correction committed while the old code was still being delivered"
+    );
+
+    broker_state.release_retry.notify_one();
+    assert_eq!(replay.await.expect("replay task").0, StatusCode::OK);
+    assert_eq!(correction.await.expect("correction task").0, StatusCode::OK);
     broker_task.abort();
 }
 
