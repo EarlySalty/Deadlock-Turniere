@@ -13,6 +13,7 @@ use chrono::{DateTime, Utc};
 use sha2::{Digest, Sha256};
 use sqlx::Row;
 
+use turnier_discord::ids::parse_snowflake;
 use turnier_scrim::decision::validate_match_request_batch;
 use turnier_scrim::dto::{
     ActionReceipt, AnnounceTeamRequest, AnnounceTeamResponse, AnnouncementPublicationRequest,
@@ -1641,9 +1642,6 @@ async fn select_result_ref(
     let actor = require_bff_actor(&headers)?;
     let service = service(&state);
     service.authorize_operator(actor.discord_id).await?;
-    if !body.message.trim().is_empty() && body.message.chars().count() <= 1_000 {
-        ensure_selected_result_deliveries(&state, id, ref_id).await?;
-    }
     let selected = service
         .select_result_ref(
             mutation.idempotency_key,
@@ -1654,6 +1652,15 @@ async fn select_result_ref(
             body,
         )
         .await?;
+    if let Err(error) = ensure_selected_result_deliveries(&state, id, ref_id).await {
+        tracing::warn!(
+            match_id = id,
+            result_ref_id = ref_id,
+            ?error,
+            "Scrim-Ergebnisauswahl ist gespeichert; Discord-Zustellung bleibt für einen Retry offen"
+        );
+        return Err(error);
+    }
     Ok(Json(selected))
 }
 
@@ -1672,6 +1679,9 @@ async fn ensure_selected_result_deliveries(
             AND result_ref.winner_team_id IS NOT NULL \
             AND result_ref.voided_at IS NULL \
             AND result_ref.superseded_by_ref_id IS NULL \
+           JOIN scrim.match_result_selections selected_result \
+             ON selected_result.match_id=m.id \
+            AND selected_result.result_ref_id=result_ref.id \
            JOIN scrim.teams winner \
              ON winner.id=result_ref.winner_team_id \
             AND winner.id IN (m.team_a_id, m.team_b_id) \
@@ -2115,13 +2125,23 @@ async fn publish_announcement(
                 .and_then(|value| {
                     value
                         .as_str()
-                        .map(ToOwned::to_owned)
-                        .or_else(|| value.as_u64().map(|id| id.to_string()))
+                        .and_then(parse_snowflake)
+                        .or_else(|| value.as_u64())
                 })
+                .filter(|message_id| *message_id > 0)
                 .map(|message_id| format!("discord:{channel_id}:{message_id}"));
+            let Some(remote_message_id) = remote_message_id else {
+                tracing::warn!(
+                    announcement_id,
+                    channel_id,
+                    idempotency_key,
+                    "Discord-Broker hat die Scrim-Ankündigung ohne Message-ID bestätigt; Zustellung bleibt für einen Retry offen"
+                );
+                return false;
+            };
             if let Err(error) = service(state)
                 .repository()
-                .mark_announcement_published(announcement_id, remote_message_id.as_deref())
+                .mark_announcement_published(announcement_id, &remote_message_id)
                 .await
             {
                 tracing::warn!(

@@ -705,7 +705,7 @@ impl PgScrimReadRepository {
     pub async fn mark_announcement_published(
         &self,
         announcement_id: i64,
-        remote_message_id: Option<&str>,
+        remote_message_id: &str,
     ) -> ScrimResult<()> {
         sqlx::query(
             "UPDATE scrim.announcement_drafts \

@@ -195,10 +195,41 @@ async fn fail_once_then_send_message(
 }
 
 #[cfg(feature = "testing")]
-async fn record_and_fail_second_channel_once(
+async fn announcement_failures_then_send_message(
     State(requests): State<Arc<Mutex<Vec<Value>>>>,
     Json(payload): Json<Value>,
 ) -> Result<Json<Value>, StatusCode> {
+    let mut requests = requests.lock().expect("broker requests");
+    let request_count = requests.len();
+    requests.push(payload);
+    match request_count {
+        0 => Err(StatusCode::SERVICE_UNAVAILABLE),
+        1 => Ok(Json(json!({"result":{}}))),
+        2 => Ok(Json(json!({"result":{"message_id":"keine-discord-id"}}))),
+        _ => Ok(Json(json!({"result":{"message_id":"912345678901234568"}}))),
+    }
+}
+
+#[cfg(feature = "testing")]
+async fn record_and_fail_second_channel_once(
+    State((requests, selection)): State<(Arc<Mutex<Vec<Value>>>, Option<(PgPool, i32)>)>,
+    Json(payload): Json<Value>,
+) -> Result<Json<Value>, StatusCode> {
+    if let Some((pool, match_id)) = selection {
+        let selection_exists: bool = sqlx::query_scalar(
+            "SELECT EXISTS(\
+                 SELECT 1 FROM scrim.match_result_selections WHERE match_id=$1\
+             )",
+        )
+        .bind(match_id)
+        .fetch_one(&pool)
+        .await
+        .expect("selection at Discord boundary");
+        assert!(
+            selection_exists,
+            "Discord delivery started before the result selection was committed"
+        );
+    }
     let mut requests = requests.lock().expect("broker requests");
     let first_attempt = !requests.iter().any(|request| {
         request["channel_id"] == payload["channel_id"]
@@ -3553,7 +3584,7 @@ async fn cancelled_match_discards_in_flight_steam_result() {
 
 #[cfg(feature = "testing")]
 #[tokio::test]
-async fn result_selection_waits_for_confirmed_discord_deliveries() {
+async fn result_selection_is_saved_before_discord_delivery() {
     let db = turnier_db::test_pool().await.expect("central test pool");
     enable_turniere_runtime(db.pool()).await;
     seed_coach(db.pool(), 123456789).await;
@@ -3595,7 +3626,7 @@ async fn result_selection_waits_for_confirmed_discord_deliveries() {
             "/internal/master/v1/discord/send-message",
             post(record_and_fail_second_channel_once),
         )
-        .with_state(requests.clone());
+        .with_state((requests.clone(), Some((db.pool().clone(), 99))));
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
         .expect("broker listener");
@@ -3625,7 +3656,7 @@ async fn result_selection_waits_for_confirmed_discord_deliveries() {
             .fetch_one(db.pool())
             .await
             .expect("selection count before delivery");
-    assert_eq!(selection_count, 0);
+    assert_eq!(selection_count, 1);
     let partial_deliveries: Vec<(String, bool)> = sqlx::query_as(
         "SELECT effect.state, EXISTS(\
              SELECT 1 FROM scrim.effect_receipts receipt \
@@ -3682,95 +3713,21 @@ async fn result_selection_waits_for_confirmed_discord_deliveries() {
         ]
     );
 
-    sqlx::raw_sql(
-        r#"
-        INSERT INTO scrim.matches(id, team_a_id, team_b_id, status, lobby_state, created_at)
-        VALUES (100, 1, 2, 'scheduled', 'finished', now());
-        INSERT INTO scrim.match_result_refs(
-            match_id, steam_match_id, source_user_id, source_display_name,
-            fetch_status, winner_team_id, normalized_result_json,
-            validation_status, fetched_at, entered_at, updated_at
-        ) VALUES (
-            100, 9007199254741100, '123456789', 'Coach', 'fetched', 2,
-            '{"winner_team_id":2}'::jsonb, 'valid', now(), now(), now()
-        );
-        "#,
-    )
-    .execute(db.pool())
-    .await
-    .expect("second selectable result ref");
-    let invalidated_ref_id: i64 =
-        sqlx::query_scalar("SELECT id FROM scrim.match_result_refs WHERE match_id=100")
-            .fetch_one(db.pool())
-            .await
-            .expect("second result ref");
-    let invalidated_route =
-        format!("/internal/turnier/v1/scrims/matches/100/result-refs/{invalidated_ref_id}");
-    let (status, _) = send(
-        &app,
-        IpAddr::V4(Ipv4Addr::LOCALHOST),
-        coach_headers("match:select:invalidated-delivery", "123456789"),
-        Method::PATCH,
-        &invalidated_route,
-        Some(json!({"message":"Steam-Ergebnis geprüft"})),
-    )
-    .await;
-    assert_eq!(status, StatusCode::BAD_GATEWAY);
-    sqlx::query(
-        "UPDATE scrim.match_result_refs \
-            SET validation_status='void', voided_at=now(), void_reason='operator_correction' \
-          WHERE id=$1",
-    )
-    .bind(invalidated_ref_id)
-    .execute(db.pool())
-    .await
-    .expect("invalidate result ref");
-    let (status, _) = send(
-        &app,
-        IpAddr::V4(Ipv4Addr::LOCALHOST),
-        coach_headers("match:select:invalidated-delivery", "123456789"),
-        Method::PATCH,
-        &invalidated_route,
-        Some(json!({"message":"Steam-Ergebnis geprüft"})),
-    )
-    .await;
-    assert_eq!(status, StatusCode::BAD_REQUEST);
-    let invalidated_deliveries: Vec<String> = sqlx::query_scalar(
-        "SELECT effect.state \
-           FROM scrim.outbox_effects effect \
-          WHERE effect.idempotency_key LIKE $1 \
-          ORDER BY effect.id",
-    )
-    .bind(format!("scrim_result:100:{invalidated_ref_id}:%"))
-    .fetch_all(db.pool())
-    .await
-    .expect("invalidated result deliveries");
-    assert_eq!(
-        invalidated_deliveries,
-        vec!["delivered".to_string(), "cancelled".to_string()]
-    );
-    let invalidated_selection_count: i64 =
-        sqlx::query_scalar("SELECT COUNT(*) FROM scrim.match_result_selections WHERE match_id=100")
-            .fetch_one(db.pool())
-            .await
-            .expect("invalidated selection count");
-    assert_eq!(invalidated_selection_count, 0);
-
     let requests = requests.lock().expect("broker requests");
-    assert_eq!(requests.len(), 5);
+    assert_eq!(requests.len(), 3);
     assert_eq!(
         requests
             .iter()
             .filter(|payload| payload["channel_id"] == 1510101)
             .count(),
-        2
+        1
     );
     assert_eq!(
         requests
             .iter()
             .filter(|payload| payload["channel_id"] == 1510102)
             .count(),
-        3
+        2
     );
 
     broker_task.abort();
@@ -4657,7 +4614,7 @@ async fn match_block_and_action_operator_routes_persist_the_canonical_flow() {
 
 #[cfg(feature = "testing")]
 #[tokio::test]
-async fn announcement_delivery_failure_is_reported_and_retried_from_saved_draft() {
+async fn announcement_delivery_failures_are_retried_from_saved_draft() {
     let db = turnier_db::test_pool().await.expect("central test pool");
     enable_turniere_runtime(db.pool()).await;
     seed_coach(db.pool(), 123456789).await;
@@ -4665,7 +4622,7 @@ async fn announcement_delivery_failure_is_reported_and_retried_from_saved_draft(
     let broker = Router::new()
         .route(
             "/internal/master/v1/discord/send-message",
-            post(fail_once_then_send_message),
+            post(announcement_failures_then_send_message),
         )
         .with_state(requests.clone());
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
@@ -4702,6 +4659,19 @@ async fn announcement_delivery_failure_is_reported_and_retried_from_saved_draft(
     .expect("saved announcement draft");
     assert_eq!(saved, (1, false));
 
+    for _ in 0..2 {
+        let (status, _) = send(
+            &app,
+            IpAddr::V4(Ipv4Addr::LOCALHOST),
+            headers,
+            Method::POST,
+            "/internal/turnier/v1/scrims/blocks/discord-retry/announcement-publications",
+            Some(body.clone()),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_GATEWAY);
+    }
+
     let (status, publication) = send(
         &app,
         IpAddr::V4(Ipv4Addr::LOCALHOST),
@@ -4718,7 +4688,7 @@ async fn announcement_delivery_failure_is_reported_and_retried_from_saved_draft(
         "{publication}; requests={request_count}"
     );
     assert!(publication["published_at"].is_string());
-    assert_eq!(request_count, 2);
+    assert_eq!(request_count, 4);
     let published: (bool, Option<String>) = sqlx::query_as(
         "SELECT published_at IS NOT NULL, remote_message_id \
            FROM scrim.announcement_drafts WHERE block_key='block:discord-retry'",
@@ -4850,7 +4820,7 @@ async fn lobby_code_replay_retries_only_the_failed_team_channel() {
             "/internal/master/v1/discord/send-message",
             post(record_and_fail_second_channel_once),
         )
-        .with_state(requests.clone());
+        .with_state((requests.clone(), None));
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
         .expect("broker listener");
