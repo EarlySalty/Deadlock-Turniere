@@ -3343,6 +3343,80 @@ async fn scrim_reminder_requires_matching_discord_channel_receipt() {
 
 #[cfg(feature = "testing")]
 #[tokio::test]
+async fn empty_steam_result_does_not_finish_scrim_match() {
+    let db = turnier_db::test_pool().await.expect("central test pool");
+    enable_turniere_runtime(db.pool()).await;
+    seed_teams(db.pool(), &[1, 2]).await;
+    sqlx::query(
+        "INSERT INTO scrim.matches(\
+             id, team_a_id, team_b_id, status, lobby_state, party_id, created_at, updated_at\
+         ) VALUES (97, 1, 2, 'scheduled', 'result_requested', 'party-empty', now(), now())",
+    )
+    .execute(db.pool())
+    .await
+    .expect("party result fetch seed");
+
+    let steam_pool = sqlx::sqlite::SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect("sqlite::memory:")
+        .await
+        .expect("steam bridge");
+    sqlx::query(
+        "CREATE TABLE steam_tasks (\
+             id INTEGER PRIMARY KEY AUTOINCREMENT, type TEXT, payload TEXT, status TEXT, \
+             result TEXT, error TEXT, created_at INTEGER, updated_at INTEGER, \
+             started_at INTEGER, finished_at INTEGER, attempts INTEGER DEFAULT 0\
+         )",
+    )
+    .execute(&steam_pool)
+    .await
+    .expect("steam task schema");
+    let mut state = state_with_pool_broker_and_signup_role(db.pool().clone(), None, None);
+    state.match_manager = Arc::new(MatchManager::new(
+        db.pool().clone(),
+        None,
+        Some(SteamBridge::from_pool(steam_pool.clone())),
+        &state.config,
+    ));
+    let steam_task = tokio::spawn(async move {
+        loop {
+            if let Some(id) =
+                sqlx::query_scalar::<_, i64>("SELECT id FROM steam_tasks WHERE status='PENDING'")
+                    .fetch_optional(&steam_pool)
+                    .await
+                    .expect("pending steam task")
+            {
+                sqlx::query(
+                    "UPDATE steam_tasks \
+                        SET status='DONE', result='{}', updated_at=1, finished_at=1 \
+                      WHERE id=$1",
+                )
+                .bind(id)
+                .execute(&steam_pool)
+                .await
+                .expect("complete empty steam task");
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    });
+
+    turnier_api::internal_scrims::process_scrim_operational_once(&state)
+        .await
+        .expect("turniere operational consumer");
+    steam_task.await.expect("steam worker");
+
+    let result: (String, Option<i32>, Option<Value>) = sqlx::query_as(
+        "SELECT lobby_state, winner_team_id, result_json FROM scrim.matches WHERE id=97",
+    )
+    .fetch_one(db.pool())
+    .await
+    .expect("empty result state");
+    assert_eq!(result, ("result_failed".to_string(), None, None));
+}
+
+#[cfg(feature = "testing")]
+#[tokio::test]
 async fn selected_result_is_the_only_discord_winner_and_dispatch_failure_keeps_selection() {
     let db = turnier_db::test_pool().await.expect("central test pool");
     enable_turniere_runtime(db.pool()).await;

@@ -460,6 +460,24 @@ async fn process_result_fetch(
                     ));
                 }
             }
+            let has_result_data = returned_match_id.is_some()
+                || [
+                    "winner",
+                    "winning_team",
+                    "match_time",
+                    "duration",
+                    "duration_s",
+                    "teams",
+                    "players",
+                    "lineups",
+                    "substitutes",
+                    "stats",
+                ]
+                .into_iter()
+                .any(|key| result.get(key).is_some_and(|value| !value.is_null()));
+            if !has_result_data {
+                return Err("Steam-Ergebnis enthält keine Matchdaten.".to_string());
+            }
             Ok((result, returned_match_id))
         });
     let (result, returned_match_id) = match result {
