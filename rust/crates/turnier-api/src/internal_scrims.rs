@@ -67,6 +67,7 @@ const SUBSTITUTE_DISCORD_SYNC_TIMEOUT: Duration = Duration::from_secs(20);
 const SCRIM_OPERATIONAL_POLL_INTERVAL: Duration = Duration::from_secs(15);
 const SCRIM_RUNTIME_LOCK_A: i32 = 724_060_001;
 const SCRIM_RUNTIME_LOCK_B: i32 = 724_060_002;
+const SCRIM_RESULT_SELECTION_LOCK_NAMESPACE: i32 = 20_260_727;
 
 struct ResultFetchClaim {
     match_id: i32,
@@ -1580,7 +1581,19 @@ async fn select_result_ref(
             body,
         )
         .await?;
-    if let Err(error) = ensure_selected_result_deliveries(&state, id, ref_id).await {
+    let delivery = async {
+        let mut guard = state.pool.begin().await?;
+        sqlx::query("SELECT pg_advisory_xact_lock($1, $2)")
+            .bind(SCRIM_RESULT_SELECTION_LOCK_NAMESPACE)
+            .bind(id)
+            .execute(&mut *guard)
+            .await?;
+        let result = ensure_selected_result_deliveries(&state, id, ref_id).await;
+        guard.commit().await?;
+        result
+    }
+    .await;
+    if let Err(error) = delivery {
         tracing::warn!(
             match_id = id,
             result_ref_id = ref_id,
@@ -1597,8 +1610,14 @@ async fn ensure_selected_result_deliveries(
     match_id: i32,
     result_ref_id: i64,
 ) -> WebResult<()> {
-    let selection = sqlx::query_as::<_, (String, Option<i64>, Option<i64>)>(
-        "SELECT winner.name, ta.discord_channel_id, tb.discord_channel_id \
+    let selection = sqlx::query_as::<_, (String, Option<i64>, Option<i64>, i64)>(
+        "SELECT winner.name, ta.discord_channel_id, tb.discord_channel_id, \
+                (SELECT event.id \
+                   FROM scrim.match_result_selection_events event \
+                  WHERE event.match_id=m.id \
+                    AND event.new_result_ref_id=result_ref.id \
+                    AND event.event_type IN ('selected', 'reselected') \
+                  ORDER BY event.id DESC LIMIT 1) AS selection_generation \
            FROM scrim.matches m \
            JOIN scrim.match_result_refs result_ref \
              ON result_ref.match_id=m.id AND result_ref.id=$2 \
@@ -1621,7 +1640,8 @@ async fn ensure_selected_result_deliveries(
     .bind(result_ref_id)
     .fetch_optional(&state.pool)
     .await?;
-    let Some((winner_name, team_a_channel_id, team_b_channel_id)) = selection else {
+    let Some((winner_name, team_a_channel_id, team_b_channel_id, selection_generation)) = selection
+    else {
         sqlx::query(
             "UPDATE scrim.outbox_effects \
                 SET state='cancelled', lease_owner=NULL, lease_until=NULL, \
@@ -1641,9 +1661,31 @@ async fn ensure_selected_result_deliveries(
         .filter(|channel_id| *channel_id > 0)
         .collect::<BTreeSet<_>>();
     let content = format!("Scrim beendet. Das Ergebnis ist eingetragen. Sieger: {winner_name}.");
+    sqlx::query(
+        "UPDATE scrim.outbox_effects \
+            SET state='cancelled', lease_owner=NULL, lease_until=NULL, \
+                next_attempt_at=NULL, updated_at=now() \
+          WHERE effect_type='discord_scrim_effect' \
+            AND idempotency_key LIKE $1 \
+            AND idempotency_key NOT LIKE $2 \
+            AND state IN ('pending', 'leased', 'retry')",
+    )
+    .bind(format!("scrim_result:{match_id}:%"))
+    .bind(format!(
+        "scrim_result:{match_id}:{result_ref_id}:{selection_generation}:%"
+    ))
+    .execute(&state.pool)
+    .await?;
     for channel_id in channels {
-        if !deliver_selected_result_to_channel(state, match_id, result_ref_id, channel_id, &content)
-            .await?
+        if !deliver_selected_result_to_channel(
+            state,
+            match_id,
+            result_ref_id,
+            selection_generation,
+            channel_id,
+            &content,
+        )
+        .await?
         {
             return Err(WebError::new(StatusCode::BAD_GATEWAY, DISCORD_SYNC_FAILED));
         }
@@ -1655,12 +1697,15 @@ async fn deliver_selected_result_to_channel(
     state: &AppState,
     match_id: i32,
     result_ref_id: i64,
+    selection_generation: i64,
     channel_id: i64,
     content: &str,
 ) -> Result<bool, sqlx::Error> {
-    let broker_idempotency_key =
-        format!("scrim-selected-result:{match_id}:{result_ref_id}:{channel_id}");
-    let effect_idempotency_key = format!("scrim_result:{match_id}:{result_ref_id}:{channel_id}");
+    let broker_idempotency_key = format!(
+        "scrim-selected-result:{match_id}:{result_ref_id}:{selection_generation}:{channel_id}"
+    );
+    let effect_idempotency_key =
+        format!("scrim_result:{match_id}:{result_ref_id}:{selection_generation}:{channel_id}");
     let mut payload = serde_json::json!({
         "channel_id": channel_id,
         "content": content,

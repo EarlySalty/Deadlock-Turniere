@@ -30,6 +30,7 @@ const MAIN_GUILD_ID: &str = "1289721245281292288";
 const ACTIVE_REQUEST_STATUSES: &[&str] = &["draft", "posting", "open", "post_failed"];
 const TEAM_LOCK_NAMESPACE: i32 = 20260725;
 const ID_LOCK_NAMESPACE: i32 = 20260726;
+const RESULT_SELECTION_LOCK_NAMESPACE: i32 = 20260727;
 const RUNTIME_LOCK_NAMESPACE: i32 = 724060001;
 const RUNTIME_LOCK_KEY: i32 = 724060002;
 const COMMAND_LEASE_OWNER: &str = "turniere:api";
@@ -547,6 +548,11 @@ impl PgScrimReadRepository {
         selection_reason: &str,
     ) -> ScrimResult<MatchMutation> {
         let mut tx = self.pool.begin().await?;
+        sqlx::query("SELECT pg_advisory_xact_lock($1, $2)")
+            .bind(RESULT_SELECTION_LOCK_NAMESPACE)
+            .bind(match_id)
+            .execute(&mut *tx)
+            .await?;
         lock_runtime_control(&mut tx).await?;
         require_turniere_runtime(&mut tx).await?;
         let payload = json!({
