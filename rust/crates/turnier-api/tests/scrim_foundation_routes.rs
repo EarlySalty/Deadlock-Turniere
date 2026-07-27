@@ -3216,7 +3216,14 @@ async fn turniere_runtime_consumes_result_fetches_and_scrim_reminders() {
             .fetch_one(db.pool())
             .await
             .expect("consumed reminder");
-    assert_eq!(reminder_status, "posted");
+    assert_eq!(reminder_status, "cancelled");
+    let reminder_effect_status: String =
+        sqlx::query_scalar("SELECT state FROM scrim.outbox_effects WHERE id=$1")
+            .bind(effect_id)
+            .fetch_one(db.pool())
+            .await
+            .expect("cancelled reminder effect");
+    assert_eq!(reminder_effect_status, "cancelled");
     let uncertain_status: String =
         sqlx::query_scalar("SELECT status FROM scrim.match_request_reminders WHERE id=$1")
             .bind(uncertain_reminder_id)
@@ -3232,9 +3239,9 @@ async fn turniere_runtime_consumes_result_fetches_and_scrim_reminders() {
     .fetch_one(db.pool())
     .await
     .expect("reminder delivery receipt");
-    assert_eq!(confirmed_receipts, 1);
+    assert_eq!(confirmed_receipts, 0);
     let payloads = requests.lock().expect("broker requests");
-    assert!(payloads
+    assert!(!payloads
         .iter()
         .any(|payload| payload == &persisted_reminder_payload));
     assert!(!payloads.iter().any(|payload| payload == &uncertain_payload));

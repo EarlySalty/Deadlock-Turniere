@@ -715,6 +715,58 @@ async fn claim_reminder(pool: &sqlx::PgPool) -> Result<Option<ReminderClaim>, sq
             tx.commit().await?;
             return Ok(None);
         }
+        let request_status = row.try_get::<String, _>("request_status")?;
+        let participant_ids = row.try_get::<Vec<i32>, _>("target_participant_ids")?;
+        let missing_participant_ids = sqlx::query_scalar::<_, i32>(
+            "SELECT p.id \
+               FROM scrim.participants p \
+              WHERE p.id=ANY($1) \
+                AND NOT EXISTS(\
+                    SELECT 1 FROM scrim.match_request_responses response \
+                     WHERE response.request_id=$2 AND response.team_id=$3 \
+                       AND response.participant_id=p.id\
+                ) \
+              ORDER BY array_position($1, p.id), p.id",
+        )
+        .bind(&participant_ids)
+        .bind(request_id)
+        .bind(team_id)
+        .fetch_all(&mut *tx)
+        .await?;
+        if !matches!(request_status.as_str(), "open" | "post_failed")
+            || missing_participant_ids != participant_ids
+        {
+            let last_error = if !matches!(request_status.as_str(), "open" | "post_failed") {
+                "Terminabfrage geschlossen"
+            } else if missing_participant_ids.is_empty() {
+                "Keine offenen Antworten mehr"
+            } else {
+                "Offene Antworten haben sich geändert"
+            };
+            sqlx::query(
+                "UPDATE scrim.outbox_effects \
+                    SET state='cancelled', lease_owner=NULL, lease_until=NULL, \
+                        next_attempt_at=NULL, updated_at=now() \
+                  WHERE id=$1 AND state IN ('pending', 'leased', 'retry')",
+            )
+            .bind(effect_id)
+            .execute(&mut *tx)
+            .await?;
+            sqlx::query(
+                "UPDATE scrim.match_request_reminders \
+                    SET status='cancelled', target_participant_ids=$2, \
+                        missing_count=$3, last_error=$4, updated_at=now() \
+                  WHERE id=$1",
+            )
+            .bind(reminder_id)
+            .bind(&missing_participant_ids)
+            .bind(i32::try_from(missing_participant_ids.len()).unwrap_or(i32::MAX))
+            .bind(last_error)
+            .execute(&mut *tx)
+            .await?;
+            tx.commit().await?;
+            return Ok(None);
+        }
         sqlx::query(
             "UPDATE scrim.outbox_effects \
                 SET state='leased', lease_owner='turnier_bot:scrim_reminder', \
