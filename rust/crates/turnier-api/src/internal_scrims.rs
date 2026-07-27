@@ -55,6 +55,8 @@ const DISCORD_SYNC_SUCCESS: &str = "Discord-Rollen aktualisiert.";
 /// Der Text muss das sagen, sonst versucht jemand die ganze Aktion neu statt nur den Versand.
 const DISCORD_SYNC_FAILED: &str =
     "Gespeichert, aber die Discord-Nachricht ging nicht raus. Löse denselben Vorgang noch einmal aus, dann wird sie nachgereicht.";
+const DISCORD_DELIVERY_UNCERTAIN: &str =
+    "Gespeichert. Die Discord-Zustellung ist unklar. Prüfe den Zielkanal, bevor du erneut sendest.";
 const DISCORD_ROLE_CREATION_FAILED: &str =
     "Team gespeichert, aber die Discord-Rolle konnte nicht erstellt werden. Löse denselben Vorgang noch einmal aus, damit die Rolle nachgereicht wird.";
 const DM_NO_ACCOUNT: &str = "No linked Discord account; DM not sent.";
@@ -678,13 +680,21 @@ fn json_i64(value: &serde_json::Value) -> Option<i64> {
         .or_else(|| value.as_str()?.trim().parse().ok())
 }
 
+fn json_snowflake(value: &serde_json::Value) -> Option<u64> {
+    value
+        .as_u64()
+        .or_else(|| value.as_str().and_then(parse_snowflake))
+        .filter(|value| *value > 0)
+}
+
 async fn claim_reminder(pool: &sqlx::PgPool) -> Result<Option<ReminderClaim>, sqlx::Error> {
     let mut tx = pool.begin().await?;
+    // Alte Deployments können posting/failed hinterlassen; ein vorhandener Effect wird
+    // unten nur abgeglichen und nie erneut an Discord gesendet.
     let row = sqlx::query(
         "SELECT r.id, r.request_id, r.team_id, r.template, r.target_participant_ids, \
                 r.target_role_id, r.discord_channel_id, mr.status AS request_status, \
-                t.name AS team_name, effect.id AS effect_id, effect.state AS effect_state, \
-                effect.payload AS effect_payload \
+                t.name AS team_name, effect.id AS effect_id, effect.state AS effect_state \
            FROM scrim.match_request_reminders r \
            JOIN scrim.match_requests mr ON mr.id=r.request_id \
            JOIN scrim.teams t ON t.id=r.team_id \
@@ -706,10 +716,9 @@ async fn claim_reminder(pool: &sqlx::PgPool) -> Result<Option<ReminderClaim>, sq
     let reminder_id = row.try_get::<i64, _>("id")?;
     let request_id = row.try_get::<i32, _>("request_id")?;
     let team_id = row.try_get::<i32, _>("team_id")?;
-    if let (Some(effect_id), Some(effect_state), Some(payload)) = (
+    if let (Some(effect_id), Some(effect_state)) = (
         row.try_get::<Option<i64>, _>("effect_id")?,
         row.try_get::<Option<String>, _>("effect_state")?,
-        row.try_get::<Option<serde_json::Value>, _>("effect_payload")?,
     ) {
         if effect_state == "delivered" {
             sqlx::query(
@@ -733,40 +742,6 @@ async fn claim_reminder(pool: &sqlx::PgPool) -> Result<Option<ReminderClaim>, sq
             tx.commit().await?;
             return Ok(None);
         }
-        if matches!(effect_state.as_str(), "uncertain" | "dead")
-            || payload.get("idempotency_key").is_none()
-        {
-            if !matches!(effect_state.as_str(), "uncertain" | "dead") {
-                sqlx::query(
-                    "UPDATE scrim.outbox_effects \
-                        SET state='uncertain', lease_owner=NULL, lease_until=NULL, \
-                            last_error_code='err_discord_effect_uncertain', updated_at=now() \
-                      WHERE id=$1 AND state IN ('pending', 'leased', 'retry')",
-                )
-                .bind(effect_id)
-                .execute(&mut *tx)
-                .await?;
-            }
-            sqlx::query(
-                "UPDATE scrim.match_request_reminders \
-                    SET status='uncertain', \
-                        last_error='Discord-Zustellung ist unklar; prüfe den Zielkanal, bevor du erneut sendest.', \
-                        updated_at=now() WHERE id=$1",
-            )
-            .bind(reminder_id)
-            .execute(&mut *tx)
-            .await?;
-            tx.commit().await?;
-            tracing::warn!(
-                reminder_id,
-                effect_id,
-                request_id,
-                team_id,
-                effect_state,
-                "Scrim-Reminder wird wegen unklarer Discord-Zustellung nicht automatisch erneut gesendet"
-            );
-            return Ok(None);
-        }
         if effect_state == "cancelled" {
             sqlx::query(
                 "UPDATE scrim.match_request_reminders \
@@ -778,83 +753,35 @@ async fn claim_reminder(pool: &sqlx::PgPool) -> Result<Option<ReminderClaim>, sq
             tx.commit().await?;
             return Ok(None);
         }
-        let request_status = row.try_get::<String, _>("request_status")?;
-        let participant_ids = row.try_get::<Vec<i32>, _>("target_participant_ids")?;
-        let missing_participant_ids = sqlx::query_scalar::<_, i32>(
-            "SELECT p.id \
-               FROM scrim.participants p \
-              WHERE p.id=ANY($1) \
-                AND NOT EXISTS(\
-                    SELECT 1 FROM scrim.match_request_responses response \
-                     WHERE response.request_id=$2 AND response.team_id=$3 \
-                       AND response.participant_id=p.id\
-                ) \
-              ORDER BY array_position($1, p.id), p.id",
-        )
-        .bind(&participant_ids)
-        .bind(request_id)
-        .bind(team_id)
-        .fetch_all(&mut *tx)
-        .await?;
-        if !matches!(request_status.as_str(), "open" | "post_failed")
-            || missing_participant_ids != participant_ids
-        {
-            let last_error = if !matches!(request_status.as_str(), "open" | "post_failed") {
-                "Terminabfrage geschlossen"
-            } else if missing_participant_ids.is_empty() {
-                "Keine offenen Antworten mehr"
-            } else {
-                "Offene Antworten haben sich geändert"
-            };
-            sqlx::query(
-                "UPDATE scrim.outbox_effects \
-                    SET state='cancelled', lease_owner=NULL, lease_until=NULL, \
-                        next_attempt_at=NULL, updated_at=now() \
-                  WHERE id=$1 AND state IN ('pending', 'leased', 'retry')",
-            )
-            .bind(effect_id)
-            .execute(&mut *tx)
-            .await?;
-            sqlx::query(
-                "UPDATE scrim.match_request_reminders \
-                    SET status='cancelled', target_participant_ids=$2, \
-                        missing_count=$3, last_error=$4, updated_at=now() \
-                  WHERE id=$1",
-            )
-            .bind(reminder_id)
-            .bind(&missing_participant_ids)
-            .bind(i32::try_from(missing_participant_ids.len()).unwrap_or(i32::MAX))
-            .bind(last_error)
-            .execute(&mut *tx)
-            .await?;
-            tx.commit().await?;
-            return Ok(None);
-        }
         sqlx::query(
             "UPDATE scrim.outbox_effects \
-                SET state='leased', lease_owner='turnier_bot:scrim_reminder', \
-                    lease_until=now() + interval '1 minute', attempts=attempts + 1, \
-                    next_attempt_at=NULL, updated_at=now() \
-              WHERE id=$1",
+                SET state='uncertain', lease_owner=NULL, lease_until=NULL, \
+                    next_attempt_at=NULL, last_error_code='err_discord_effect_uncertain', \
+                    updated_at=now() \
+              WHERE id=$1 AND state NOT IN ('delivered', 'cancelled', 'dead')",
         )
         .bind(effect_id)
         .execute(&mut *tx)
         .await?;
         sqlx::query(
             "UPDATE scrim.match_request_reminders \
-                SET status='posting', updated_at=now() WHERE id=$1",
+                SET status='uncertain', \
+                    last_error='Discord-Zustellung ist unklar; prüfe den Zielkanal, bevor du erneut sendest.', \
+                    updated_at=now() WHERE id=$1",
         )
         .bind(reminder_id)
         .execute(&mut *tx)
         .await?;
         tx.commit().await?;
-        return Ok(Some(ReminderClaim {
+        tracing::warn!(
             reminder_id,
             effect_id,
             request_id,
             team_id,
-            payload,
-        }));
+            effect_state,
+            "Scrim-Reminder wird nach einem begonnenen Discord-Versand nicht automatisch erneut gesendet"
+        );
+        return Ok(None);
     }
     let request_status = row.try_get::<String, _>("request_status")?;
     if !matches!(request_status.as_str(), "open" | "post_failed") {
@@ -991,10 +918,9 @@ async fn claim_reminder(pool: &sqlx::PgPool) -> Result<Option<ReminderClaim>, sq
     let effect_id: i64 = sqlx::query_scalar(
         "INSERT INTO scrim.outbox_effects(\
              effect_type, idempotency_key, payload_hash, payload, state, \
-             lease_owner, lease_until, attempts, remote_system\
+             attempts, remote_system\
          ) VALUES (\
-             'discord_scrim_effect', $1, $2, $3, 'leased', \
-             'turnier_bot:scrim_reminder', now() + interval '1 minute', 1, 'discord'\
+             'discord_scrim_effect', $1, $2, $3, 'uncertain', 1, 'discord'\
          ) RETURNING id",
     )
     .bind(format!("scrim_reminder:{reminder_id}"))
@@ -1012,7 +938,7 @@ async fn claim_reminder(pool: &sqlx::PgPool) -> Result<Option<ReminderClaim>, sq
     .await?;
     sqlx::query(
         "UPDATE scrim.match_request_reminders \
-            SET status='posting', target_kind=$2, target_participant_ids=$3, \
+            SET status='uncertain', target_kind=$2, target_participant_ids=$3, \
                 target_discord_user_ids=$4, missing_count=$5, updated_at=now() \
           WHERE id=$1",
     )
@@ -1052,25 +978,6 @@ async fn process_reminder(state: &AppState, claim: ReminderClaim) -> Result<(), 
             else {
                 let error =
                     "Discord hat den Scrim-Reminder ohne Channel- oder Message-ID bestätigt";
-                let mut tx = state.pool.begin().await?;
-                sqlx::query(
-                    "UPDATE scrim.match_request_reminders \
-                        SET status='uncertain', last_error=$2, updated_at=now() WHERE id=$1",
-                )
-                .bind(claim.reminder_id)
-                .bind(error)
-                .execute(&mut *tx)
-                .await?;
-                sqlx::query(
-                    "UPDATE scrim.outbox_effects \
-                        SET state='uncertain', lease_owner=NULL, lease_until=NULL, \
-                            last_error_code='err_discord_effect_uncertain', updated_at=now() \
-                      WHERE id=$1",
-                )
-                .bind(claim.effect_id)
-                .execute(&mut *tx)
-                .await?;
-                tx.commit().await?;
                 tracing::warn!(
                     reminder_id = claim.reminder_id,
                     effect_id = claim.effect_id,
@@ -1078,11 +985,6 @@ async fn process_reminder(state: &AppState, claim: ReminderClaim) -> Result<(), 
                     team_id = claim.team_id,
                     "Discord-Zustellung des Scrim-Reminders konnte nicht eindeutig bestätigt werden"
                 );
-                return Ok(());
-            };
-            if response_channel_id != Some(channel_id) {
-                let error =
-                    "Discord hat den Scrim-Reminder nicht für den angeforderten Channel bestätigt";
                 let mut tx = state.pool.begin().await?;
                 sqlx::query(
                     "UPDATE scrim.match_request_reminders \
@@ -1102,6 +1004,11 @@ async fn process_reminder(state: &AppState, claim: ReminderClaim) -> Result<(), 
                 .execute(&mut *tx)
                 .await?;
                 tx.commit().await?;
+                return Ok(());
+            };
+            if response_channel_id != Some(channel_id) {
+                let error =
+                    "Discord hat den Scrim-Reminder nicht für den angeforderten Channel bestätigt";
                 tracing::warn!(
                     reminder_id = claim.reminder_id,
                     effect_id = claim.effect_id,
@@ -1111,6 +1018,25 @@ async fn process_reminder(state: &AppState, claim: ReminderClaim) -> Result<(), 
                     response_channel_id,
                     "Discord-Zustellung des Scrim-Reminders gehört nicht zum angeforderten Channel"
                 );
+                let mut tx = state.pool.begin().await?;
+                sqlx::query(
+                    "UPDATE scrim.match_request_reminders \
+                        SET status='uncertain', last_error=$2, updated_at=now() WHERE id=$1",
+                )
+                .bind(claim.reminder_id)
+                .bind(error)
+                .execute(&mut *tx)
+                .await?;
+                sqlx::query(
+                    "UPDATE scrim.outbox_effects \
+                        SET state='uncertain', lease_owner=NULL, lease_until=NULL, \
+                            last_error_code='err_discord_effect_uncertain', updated_at=now() \
+                      WHERE id=$1",
+                )
+                .bind(claim.effect_id)
+                .execute(&mut *tx)
+                .await?;
+                tx.commit().await?;
                 return Ok(());
             }
             let remote_message_id = format!("discord:{channel_id}:{discord_message_id}");
@@ -1169,33 +1095,35 @@ async fn process_reminder(state: &AppState, claim: ReminderClaim) -> Result<(), 
             tx.commit().await?;
         }
         Err(error) => {
+            tracing::warn!(
+                reminder_id = claim.reminder_id,
+                effect_id = claim.effect_id,
+                request_id = claim.request_id,
+                team_id = claim.team_id,
+                %error,
+                "Scrim-Reminder blieb gespeichert; die Discord-Zustellung ist unklar und wird nicht automatisch wiederholt"
+            );
             let mut tx = state.pool.begin().await?;
             sqlx::query(
                 "UPDATE scrim.match_request_reminders \
-                    SET status='failed', last_error=$2, updated_at=now() WHERE id=$1",
+                    SET status='uncertain', \
+                        last_error='Discord-Zustellung ist unklar; prüfe den Zielkanal, bevor du erneut sendest.', \
+                        updated_at=now() WHERE id=$1",
             )
             .bind(claim.reminder_id)
-            .bind(error.to_string())
             .execute(&mut *tx)
             .await?;
             sqlx::query(
                 "UPDATE scrim.outbox_effects \
-                    SET state='retry', lease_owner=NULL, lease_until=NULL, \
-                        next_attempt_at=now() + interval '15 minutes', \
-                        last_error_code='err_discord_send', updated_at=now() \
+                    SET state='uncertain', lease_owner=NULL, lease_until=NULL, \
+                        next_attempt_at=NULL, last_error_code='err_discord_send', \
+                        updated_at=now() \
                   WHERE id=$1",
             )
             .bind(claim.effect_id)
             .execute(&mut *tx)
             .await?;
             tx.commit().await?;
-            tracing::warn!(
-                reminder_id = claim.reminder_id,
-                request_id = claim.request_id,
-                team_id = claim.team_id,
-                %error,
-                "Scrim-Reminder blieb gespeichert, aber die Discord-Nachricht ging nicht raus"
-            );
         }
     }
     Ok(())
@@ -1926,7 +1854,10 @@ async fn create_announcement_publication(
         )
         .await?;
     if !publish_announcement(&state, &publication, mutation.idempotency_key).await {
-        return Err(WebError::new(StatusCode::BAD_GATEWAY, DISCORD_SYNC_FAILED));
+        return Err(WebError::new(
+            StatusCode::BAD_GATEWAY,
+            DISCORD_DELIVERY_UNCERTAIN,
+        ));
     }
     Ok(Json(service.announcement_preview(&id).await?))
 }
@@ -2091,16 +2022,48 @@ async fn publish_announcement(
         );
         return false;
     };
-    // Wurde der Block schon veroeffentlicht, nicht erneut posten. Bei gleichem
-    // Idempotenzschluessel liefert die Datenbank denselben Entwurf zurueck; die
-    // Absicherung des Brokers gegen Doppelausfuehrung haelt nur begrenzte Zeit vor,
-    // ein spaeter Wiederholungsversuch wuerde die Ankuendigung sonst doppelt posten.
     if publication.published_at.is_some() {
         tracing::debug!(
             announcement_id,
-            "Scrim-Ankuendigung bereits veroeffentlicht, kein erneuter Versand"
+            "Scrim-Ankündigung bereits veröffentlicht, kein erneuter Versand"
         );
         return true;
+    }
+    if publication.status != "approved" {
+        tracing::warn!(
+            announcement_id,
+            channel_id,
+            idempotency_key,
+            status = publication.status,
+            "Scrim-Ankündigung wurde bereits zum Discord-Versand übernommen und wird nicht automatisch erneut gesendet"
+        );
+        return false;
+    }
+    match service(state)
+        .repository()
+        .claim_announcement_publication(announcement_id)
+        .await
+    {
+        Ok(true) => {}
+        Ok(false) => {
+            tracing::warn!(
+                announcement_id,
+                channel_id,
+                idempotency_key,
+                "Scrim-Ankündigung konnte nicht eindeutig zum Discord-Versand übernommen werden"
+            );
+            return false;
+        }
+        Err(error) => {
+            tracing::warn!(
+                announcement_id,
+                channel_id,
+                idempotency_key,
+                %error,
+                "Scrim-Ankündigung konnte vor dem Discord-Versand nicht dauerhaft übernommen werden"
+            );
+            return false;
+        }
     }
     let result = state
         .notifier
@@ -2116,44 +2079,67 @@ async fn publish_announcement(
         .await;
     match result {
         Ok(response) => {
-            // Der Broker antwortet als {"ok": true, "result": {...}} — die uebrigen Pfade
-            // sind nur Rueckfalloptionen, damit eine abweichende Antwortform nichts verliert.
-            let remote_message_id = response
+            let requested_channel_id = parse_snowflake(channel_id);
+            let response_channel_id = response
+                .pointer("/result/channel_id")
+                .or_else(|| response.pointer("/data/channel_id"))
+                .or_else(|| response.get("channel_id"))
+                .and_then(json_snowflake);
+            let message_id = response
                 .pointer("/result/message_id")
                 .or_else(|| response.pointer("/data/message_id"))
                 .or_else(|| response.get("message_id"))
-                .and_then(|value| {
-                    value
-                        .as_str()
-                        .and_then(parse_snowflake)
-                        .or_else(|| value.as_u64())
-                })
-                .filter(|message_id| *message_id > 0)
-                .map(|message_id| format!("discord:{channel_id}:{message_id}"));
-            let Some(remote_message_id) = remote_message_id else {
+                .and_then(json_snowflake);
+            let (Some(requested_channel_id), Some(response_channel_id), Some(message_id)) =
+                (requested_channel_id, response_channel_id, message_id)
+            else {
                 tracing::warn!(
                     announcement_id,
                     channel_id,
                     idempotency_key,
-                    "Discord-Broker hat die Scrim-Ankündigung ohne Message-ID bestätigt; Zustellung bleibt für einen Retry offen"
+                    ?response_channel_id,
+                    ?message_id,
+                    "Discord-Broker hat die Scrim-Ankündigung ohne eindeutige Channel- oder Message-ID bestätigt; sie wird nicht automatisch erneut gesendet"
                 );
                 return false;
             };
-            if let Err(error) = service(state)
+            if response_channel_id != requested_channel_id {
+                tracing::warn!(
+                    announcement_id,
+                    channel_id,
+                    response_channel_id,
+                    idempotency_key,
+                    "Discord-Broker hat die Scrim-Ankündigung für einen anderen Channel bestätigt; sie wird nicht automatisch erneut gesendet"
+                );
+                return false;
+            }
+            let remote_message_id = format!("discord:{requested_channel_id}:{message_id}");
+            match service(state)
                 .repository()
                 .mark_announcement_published(announcement_id, &remote_message_id)
                 .await
             {
-                tracing::warn!(
-                    announcement_id,
-                    channel_id,
-                    idempotency_key,
-                    %error,
-                    "Scrim-Ankuendigungsstatus konnte nach Discord-Versand nicht aktualisiert werden"
-                );
-                return false;
+                Ok(true) => true,
+                Ok(false) => {
+                    tracing::warn!(
+                        announcement_id,
+                        channel_id,
+                        idempotency_key,
+                        "Scrim-Ankündigungsstatus konnte nach Discord-Versand nicht eindeutig aktualisiert werden"
+                    );
+                    false
+                }
+                Err(error) => {
+                    tracing::warn!(
+                        announcement_id,
+                        channel_id,
+                        idempotency_key,
+                        %error,
+                        "Scrim-Ankündigungsstatus konnte nach Discord-Versand nicht aktualisiert werden"
+                    );
+                    false
+                }
             }
-            true
         }
         Err(error) => {
             tracing::warn!(
@@ -2161,7 +2147,7 @@ async fn publish_announcement(
                 channel_id,
                 idempotency_key,
                 %error,
-                "Scrim-Ankuendigungs-Discord-Versand fail-open"
+                "Scrim-Ankündigung blieb gespeichert; die Discord-Zustellung ist unklar und wird nicht automatisch wiederholt"
             );
             false
         }

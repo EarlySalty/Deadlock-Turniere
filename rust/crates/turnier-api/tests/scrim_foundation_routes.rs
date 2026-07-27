@@ -145,6 +145,47 @@ async fn record_and_mismatch_message_channel(
 }
 
 #[cfg(feature = "testing")]
+async fn record_committed_dispatch_and_fail(
+    State((requests, pool)): State<(Arc<Mutex<Vec<Value>>>, PgPool)>,
+    Json(payload): Json<Value>,
+) -> StatusCode {
+    let idempotency_key = payload["idempotency_key"]
+        .as_str()
+        .expect("broker idempotency key");
+    let announcement_status: Option<String> =
+        sqlx::query_scalar("SELECT status FROM scrim.announcement_drafts WHERE idempotency_key=$1")
+            .bind(idempotency_key)
+            .fetch_optional(&pool)
+            .await
+            .expect("announcement state at Discord boundary");
+    if let Some(status) = announcement_status {
+        assert_eq!(
+            status, "publishing",
+            "Discord delivery started before the announcement claim was committed"
+        );
+    } else {
+        let reminder_state: (String, String) = sqlx::query_as(
+            "SELECT reminder.status, effect.state \
+               FROM scrim.match_request_reminders reminder \
+               JOIN scrim.match_request_reminder_effects link ON link.reminder_id=reminder.id \
+               JOIN scrim.outbox_effects effect ON effect.id=link.outbox_effect_id \
+              WHERE effect.payload->>'idempotency_key'=$1",
+        )
+        .bind(idempotency_key)
+        .fetch_one(&pool)
+        .await
+        .expect("reminder state at Discord boundary");
+        assert_eq!(
+            reminder_state,
+            ("uncertain".to_string(), "uncertain".to_string()),
+            "Discord delivery started before the reminder claim was committed"
+        );
+    }
+    requests.lock().expect("broker requests").push(payload);
+    StatusCode::SERVICE_UNAVAILABLE
+}
+
+#[cfg(feature = "testing")]
 async fn accept_broker_once_per_idempotency_key(
     State(requests): State<Arc<Mutex<HashMap<String, Value>>>>,
     Json(payload): Json<Value>,
@@ -191,22 +232,6 @@ async fn fail_once_then_send_message(
         Err(StatusCode::SERVICE_UNAVAILABLE)
     } else {
         Ok(Json(json!({"result":{"message_id":"912345678901234568"}})))
-    }
-}
-
-#[cfg(feature = "testing")]
-async fn announcement_failures_then_send_message(
-    State(requests): State<Arc<Mutex<Vec<Value>>>>,
-    Json(payload): Json<Value>,
-) -> Result<Json<Value>, StatusCode> {
-    let mut requests = requests.lock().expect("broker requests");
-    let request_count = requests.len();
-    requests.push(payload);
-    match request_count {
-        0 => Err(StatusCode::SERVICE_UNAVAILABLE),
-        1 => Ok(Json(json!({"result":{}}))),
-        2 => Ok(Json(json!({"result":{"message_id":"keine-discord-id"}}))),
-        _ => Ok(Json(json!({"result":{"message_id":"912345678901234568"}}))),
     }
 }
 
@@ -2923,6 +2948,169 @@ async fn match_request_patch_reminder_and_publication_persist_and_validate() {
 
 #[cfg(feature = "testing")]
 #[tokio::test]
+async fn reminder_dispatch_is_persisted_before_discord_call() {
+    let db = turnier_db::test_pool().await.expect("central test pool");
+    enable_turniere_runtime(db.pool()).await;
+    seed_coach(db.pool(), 123456789).await;
+    seed_teams(db.pool(), &[1, 2]).await;
+    seed_operator_request_fixture(db.pool()).await;
+
+    let requests = Arc::new(Mutex::new(Vec::new()));
+    let broker = Router::new()
+        .route(
+            "/internal/master/v1/discord/send-message",
+            post(record_committed_dispatch_and_fail),
+        )
+        .with_state((requests.clone(), db.pool().clone()));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("broker listener");
+    let broker_url = format!("http://{}", listener.local_addr().expect("broker address"));
+    let broker_task = tokio::spawn(async move {
+        axum::serve(listener, broker).await.expect("broker server");
+    });
+    let state = state_with_pool_broker_and_signup_role(db.pool().clone(), Some(&broker_url), None);
+    let app = build_router(state.clone());
+
+    let (status, _) = send(
+        &app,
+        IpAddr::V4(Ipv4Addr::LOCALHOST),
+        coach_headers("runtime:reminder:persisted-before-send", "123456789"),
+        Method::POST,
+        "/internal/turnier/v1/scrims/match-requests/92/reminders",
+        Some(json!({"template":"frist_bald"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    turnier_api::internal_scrims::process_scrim_operational_once(&state)
+        .await
+        .expect("turniere operational consumer");
+    turnier_api::internal_scrims::process_scrim_operational_once(&state)
+        .await
+        .expect("turniere operational retry");
+
+    assert_eq!(requests.lock().expect("broker requests").len(), 1);
+    let dispatch: (String, String) = sqlx::query_as(
+        "SELECT reminder.status, effect.state \
+           FROM scrim.match_request_reminders reminder \
+           JOIN scrim.match_request_reminder_effects link ON link.reminder_id=reminder.id \
+           JOIN scrim.outbox_effects effect ON effect.id=link.outbox_effect_id \
+          WHERE reminder.request_id=92",
+    )
+    .fetch_one(db.pool())
+    .await
+    .expect("persisted reminder dispatch state");
+    assert_eq!(dispatch, ("uncertain".to_string(), "uncertain".to_string()));
+
+    broker_task.abort();
+}
+
+#[cfg(feature = "testing")]
+#[tokio::test]
+async fn abandoned_reminder_dispatch_is_not_sent_again() {
+    let db = turnier_db::test_pool().await.expect("central test pool");
+    enable_turniere_runtime(db.pool()).await;
+    seed_coach(db.pool(), 123456789).await;
+    seed_teams(db.pool(), &[1, 2]).await;
+    seed_operator_request_fixture(db.pool()).await;
+
+    let requests = Arc::new(Mutex::new(Vec::new()));
+    let broker = Router::new()
+        .route(
+            "/internal/master/v1/discord/send-message",
+            post(record_and_accept_message),
+        )
+        .with_state(requests.clone());
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("broker listener");
+    let broker_url = format!("http://{}", listener.local_addr().expect("broker address"));
+    let broker_task = tokio::spawn(async move {
+        axum::serve(listener, broker).await.expect("broker server");
+    });
+    let state = state_with_pool_broker_and_signup_role(db.pool().clone(), Some(&broker_url), None);
+    let app = build_router(state.clone());
+
+    let (status, _) = send(
+        &app,
+        IpAddr::V4(Ipv4Addr::LOCALHOST),
+        coach_headers("runtime:reminder:dispatch-once", "123456789"),
+        Method::POST,
+        "/internal/turnier/v1/scrims/match-requests/92/reminders",
+        Some(json!({"template":"frist_bald"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let reminder_id: i64 =
+        sqlx::query_scalar("SELECT id FROM scrim.match_request_reminders WHERE request_id=92")
+            .fetch_one(db.pool())
+            .await
+            .expect("reminder id");
+    sqlx::query(
+        "UPDATE scrim.match_request_reminders \
+            SET status='posting', updated_at=now() - interval '16 minutes' \
+          WHERE id=$1",
+    )
+    .bind(reminder_id)
+    .execute(db.pool())
+    .await
+    .expect("abandoned reminder dispatch");
+    let payload = json!({
+        "channel_id": 7001,
+        "content": "Erinnerung für Team 1: Die Frist läuft bald ab.",
+        "idempotency_key": format!("scrim-reminder:{reminder_id}")
+    });
+    let payload_hash =
+        Sha256::digest(serde_json::to_vec(&payload).expect("reminder payload JSON")).to_vec();
+    let effect_id: i64 = sqlx::query_scalar(
+        "INSERT INTO scrim.outbox_effects(\
+             effect_type, idempotency_key, payload_hash, payload, state, remote_system, \
+             lease_owner, lease_until, attempts\
+         ) VALUES (\
+             'discord_scrim_effect', $1, $2, $3, 'leased', 'discord', \
+             'turnier_bot:scrim_reminder', now() - interval '15 minutes', 1\
+         ) RETURNING id",
+    )
+    .bind(format!("scrim_reminder:{reminder_id}"))
+    .bind(payload_hash)
+    .bind(&payload)
+    .fetch_one(db.pool())
+    .await
+    .expect("persisted reminder dispatch");
+    sqlx::query(
+        "INSERT INTO scrim.match_request_reminder_effects(reminder_id, outbox_effect_id) \
+         VALUES ($1, $2)",
+    )
+    .bind(reminder_id)
+    .bind(effect_id)
+    .execute(db.pool())
+    .await
+    .expect("reminder effect link");
+
+    turnier_api::internal_scrims::process_scrim_operational_once(&state)
+        .await
+        .expect("turniere operational consumer");
+
+    assert!(requests.lock().expect("broker requests").is_empty());
+    let dispatch: (String, String) = sqlx::query_as(
+        "SELECT reminder.status, effect.state \
+           FROM scrim.match_request_reminders reminder \
+           JOIN scrim.match_request_reminder_effects link ON link.reminder_id=reminder.id \
+           JOIN scrim.outbox_effects effect ON effect.id=link.outbox_effect_id \
+          WHERE reminder.id=$1",
+    )
+    .bind(reminder_id)
+    .fetch_one(db.pool())
+    .await
+    .expect("persisted reminder dispatch state");
+    assert_eq!(dispatch, ("uncertain".to_string(), "uncertain".to_string()));
+
+    broker_task.abort();
+}
+
+#[cfg(feature = "testing")]
+#[tokio::test]
 async fn turniere_runtime_consumes_result_fetches_and_scrim_reminders() {
     let db = turnier_db::test_pool().await.expect("central test pool");
     enable_turniere_runtime(db.pool()).await;
@@ -3277,14 +3465,14 @@ async fn turniere_runtime_consumes_result_fetches_and_scrim_reminders() {
             .fetch_one(db.pool())
             .await
             .expect("consumed reminder");
-    assert_eq!(reminder_status, "cancelled");
+    assert_eq!(reminder_status, "uncertain");
     let reminder_effect_status: String =
         sqlx::query_scalar("SELECT state FROM scrim.outbox_effects WHERE id=$1")
             .bind(effect_id)
             .fetch_one(db.pool())
             .await
-            .expect("cancelled reminder effect");
-    assert_eq!(reminder_effect_status, "cancelled");
+            .expect("uncertain reminder effect");
+    assert_eq!(reminder_effect_status, "uncertain");
     let uncertain_status: String =
         sqlx::query_scalar("SELECT status FROM scrim.match_request_reminders WHERE id=$1")
             .bind(uncertain_reminder_id)
@@ -4614,7 +4802,7 @@ async fn match_block_and_action_operator_routes_persist_the_canonical_flow() {
 
 #[cfg(feature = "testing")]
 #[tokio::test]
-async fn announcement_delivery_failures_are_retried_from_saved_draft() {
+async fn announcement_receipt_uses_normalized_channel_id() {
     let db = turnier_db::test_pool().await.expect("central test pool");
     enable_turniere_runtime(db.pool()).await;
     seed_coach(db.pool(), 123456789).await;
@@ -4622,7 +4810,7 @@ async fn announcement_delivery_failures_are_retried_from_saved_draft() {
     let broker = Router::new()
         .route(
             "/internal/master/v1/discord/send-message",
-            post(announcement_failures_then_send_message),
+            post(record_and_accept_message),
         )
         .with_state(requests.clone());
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
@@ -4633,76 +4821,154 @@ async fn announcement_delivery_failures_are_retried_from_saved_draft() {
         axum::serve(listener, broker).await.expect("broker server");
     });
     let app = app_with_pool_and_broker(db.pool().clone(), Some(&broker_url));
-    let headers = coach_headers("announcement:discord-retry", "123456789");
-    let body = json!({
-        "title":"Platzhalter",
-        "channel_id":"9007199254740301",
-        "message":"Platzhalter"
-    });
 
-    let (status, _) = send(
+    let (status, response) = send(
         &app,
         IpAddr::V4(Ipv4Addr::LOCALHOST),
-        headers,
+        coach_headers("announcement:normalized-channel", "123456789"),
         Method::POST,
-        "/internal/turnier/v1/scrims/blocks/discord-retry/announcement-publications",
+        "/internal/turnier/v1/scrims/blocks/normalized-channel/announcement-publications",
+        Some(json!({
+            "title":"Scrim am Samstag",
+            "channel_id":" 9007199254740301 ",
+            "message":"Der nächste Scrim findet am Samstag um 20 Uhr statt."
+        })),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK, "{response}");
+    let publication: (String, Option<String>) = sqlx::query_as(
+        "SELECT status, remote_message_id FROM scrim.announcement_drafts \
+          WHERE block_key='block:normalized-channel'",
+    )
+    .fetch_one(db.pool())
+    .await
+    .expect("announcement receipt");
+    assert_eq!(
+        publication,
+        (
+            "published".to_string(),
+            Some("discord:9007199254740301:912345678901234568".to_string())
+        )
+    );
+
+    broker_task.abort();
+}
+
+#[cfg(feature = "testing")]
+#[tokio::test]
+async fn announcement_broker_confirmation_for_another_channel_stays_uncertain() {
+    let db = turnier_db::test_pool().await.expect("central test pool");
+    enable_turniere_runtime(db.pool()).await;
+    seed_coach(db.pool(), 123456789).await;
+    let requests = Arc::new(Mutex::new(Vec::new()));
+    let broker = Router::new()
+        .route(
+            "/internal/master/v1/discord/send-message",
+            post(record_and_mismatch_message_channel),
+        )
+        .with_state(requests.clone());
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("broker listener");
+    let broker_url = format!("http://{}", listener.local_addr().expect("broker address"));
+    let broker_task = tokio::spawn(async move {
+        axum::serve(listener, broker).await.expect("broker server");
+    });
+    let app = app_with_pool_and_broker(db.pool().clone(), Some(&broker_url));
+
+    let (status, response) = send(
+        &app,
+        IpAddr::V4(Ipv4Addr::LOCALHOST),
+        coach_headers("announcement:wrong-channel", "123456789"),
+        Method::POST,
+        "/internal/turnier/v1/scrims/blocks/wrong-channel/announcement-publications",
+        Some(json!({
+            "title":"Scrim am Samstag",
+            "channel_id":"9007199254740301",
+            "message":"Der nächste Scrim findet am Samstag um 20 Uhr statt."
+        })),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::BAD_GATEWAY);
+    assert_eq!(
+        response["detail"],
+        "Gespeichert. Die Discord-Zustellung ist unklar. Prüfe den Zielkanal, bevor du erneut sendest."
+    );
+    assert_eq!(requests.lock().expect("broker requests").len(), 1);
+    let publication: (String, bool, Option<String>) = sqlx::query_as(
+        "SELECT status, published_at IS NOT NULL, remote_message_id \
+           FROM scrim.announcement_drafts WHERE block_key='block:wrong-channel'",
+    )
+    .fetch_one(db.pool())
+    .await
+    .expect("announcement dispatch");
+    assert_eq!(publication, ("publishing".to_string(), false, None));
+
+    broker_task.abort();
+}
+
+#[cfg(feature = "testing")]
+#[tokio::test]
+async fn announcement_dispatch_in_progress_is_not_sent_again() {
+    let db = turnier_db::test_pool().await.expect("central test pool");
+    enable_turniere_runtime(db.pool()).await;
+    seed_coach(db.pool(), 123456789).await;
+    let requests = Arc::new(Mutex::new(Vec::new()));
+    let broker = Router::new()
+        .route(
+            "/internal/master/v1/discord/send-message",
+            post(record_committed_dispatch_and_fail),
+        )
+        .with_state((requests.clone(), db.pool().clone()));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("broker listener");
+    let broker_url = format!("http://{}", listener.local_addr().expect("broker address"));
+    let broker_task = tokio::spawn(async move {
+        axum::serve(listener, broker).await.expect("broker server");
+    });
+    let app = app_with_pool_and_broker(db.pool().clone(), Some(&broker_url));
+    let body = json!({
+        "title":"Scrim am Samstag",
+        "channel_id":"9007199254740301",
+        "message":"Der nächste Scrim findet am Samstag um 20 Uhr statt."
+    });
+
+    let (status, response) = send(
+        &app,
+        IpAddr::V4(Ipv4Addr::LOCALHOST),
+        coach_headers("announcement:dispatch-once", "123456789"),
+        Method::POST,
+        "/internal/turnier/v1/scrims/blocks/dispatch-once/announcement-publications",
         Some(body.clone()),
     )
     .await;
     assert_eq!(status, StatusCode::BAD_GATEWAY);
-    let saved: (i64, bool) = sqlx::query_as(
-        "SELECT COUNT(*), bool_or(published_at IS NOT NULL) \
-           FROM scrim.announcement_drafts WHERE block_key='block:discord-retry'",
-    )
-    .fetch_one(db.pool())
-    .await
-    .expect("saved announcement draft");
-    assert_eq!(saved, (1, false));
-
-    for _ in 0..2 {
-        let (status, _) = send(
-            &app,
-            IpAddr::V4(Ipv4Addr::LOCALHOST),
-            headers,
-            Method::POST,
-            "/internal/turnier/v1/scrims/blocks/discord-retry/announcement-publications",
-            Some(body.clone()),
-        )
-        .await;
-        assert_eq!(status, StatusCode::BAD_GATEWAY);
-    }
-
-    let (status, publication) = send(
+    assert_eq!(
+        response["detail"],
+        "Gespeichert. Die Discord-Zustellung ist unklar. Prüfe den Zielkanal, bevor du erneut sendest."
+    );
+    let (retry_status, _) = send(
         &app,
         IpAddr::V4(Ipv4Addr::LOCALHOST),
-        headers,
+        coach_headers("announcement:dispatch-once", "123456789"),
         Method::POST,
-        "/internal/turnier/v1/scrims/blocks/discord-retry/announcement-publications",
+        "/internal/turnier/v1/scrims/blocks/dispatch-once/announcement-publications",
         Some(body),
     )
     .await;
-    let request_count = requests.lock().expect("broker requests").len();
-    assert_eq!(
-        status,
-        StatusCode::OK,
-        "{publication}; requests={request_count}"
-    );
-    assert!(publication["published_at"].is_string());
-    assert_eq!(request_count, 4);
-    let published: (bool, Option<String>) = sqlx::query_as(
-        "SELECT published_at IS NOT NULL, remote_message_id \
-           FROM scrim.announcement_drafts WHERE block_key='block:discord-retry'",
+    assert_eq!(retry_status, StatusCode::BAD_GATEWAY);
+    assert_eq!(requests.lock().expect("broker requests").len(), 1);
+    let publication: (String, bool, Option<String>) = sqlx::query_as(
+        "SELECT status, published_at IS NOT NULL, remote_message_id \
+           FROM scrim.announcement_drafts WHERE block_key='block:dispatch-once'",
     )
     .fetch_one(db.pool())
     .await
-    .expect("published announcement");
-    assert_eq!(
-        published,
-        (
-            true,
-            Some("discord:9007199254740301:912345678901234568".to_owned())
-        )
-    );
+    .expect("announcement dispatch");
+    assert_eq!(publication, ("publishing".to_string(), false, None));
 
     broker_task.abort();
 }

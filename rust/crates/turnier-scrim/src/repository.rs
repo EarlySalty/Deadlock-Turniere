@@ -702,22 +702,34 @@ impl PgScrimReadRepository {
         Ok(publication)
     }
 
+    pub async fn claim_announcement_publication(&self, announcement_id: i64) -> ScrimResult<bool> {
+        let result = sqlx::query(
+            "UPDATE scrim.announcement_drafts \
+                SET status='publishing', updated_at=now() \
+              WHERE id=$1 AND status='approved'",
+        )
+        .bind(announcement_id)
+        .execute(&self.pool)
+        .await?;
+        Ok(result.rows_affected() == 1)
+    }
+
     pub async fn mark_announcement_published(
         &self,
         announcement_id: i64,
         remote_message_id: &str,
-    ) -> ScrimResult<()> {
-        sqlx::query(
+    ) -> ScrimResult<bool> {
+        let result = sqlx::query(
             "UPDATE scrim.announcement_drafts \
                 SET status='published', published_at=now(), remote_system='discord', \
                     remote_message_id=$2, updated_at=now() \
-              WHERE id=$1 AND status='approved'",
+              WHERE id=$1 AND status='publishing'",
         )
         .bind(announcement_id)
         .bind(remote_message_id)
         .execute(&self.pool)
         .await?;
-        Ok(())
+        Ok(result.rows_affected() == 1)
     }
 
     pub async fn action(&self, id: i64) -> ScrimResult<ScrimAction> {
