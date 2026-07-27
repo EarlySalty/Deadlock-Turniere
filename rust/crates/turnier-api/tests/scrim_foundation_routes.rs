@@ -85,6 +85,31 @@ async fn record_and_fail_broker(
 }
 
 #[cfg(feature = "testing")]
+async fn record_and_accept_broker(
+    State(requests): State<Arc<Mutex<Vec<Value>>>>,
+    Json(payload): Json<Value>,
+) -> Json<Value> {
+    requests.lock().expect("broker requests").push(payload);
+    Json(json!({}))
+}
+
+#[cfg(feature = "testing")]
+async fn record_and_fail_second_channel(
+    State(requests): State<Arc<Mutex<Vec<Value>>>>,
+    Json(payload): Json<Value>,
+) -> Result<Json<Value>, StatusCode> {
+    requests
+        .lock()
+        .expect("broker requests")
+        .push(payload.clone());
+    if payload["channel_id"] == "1510102" {
+        Err(StatusCode::SERVICE_UNAVAILABLE)
+    } else {
+        Ok(Json(json!({})))
+    }
+}
+
+#[cfg(feature = "testing")]
 struct PausingBroker {
     calls: AtomicUsize,
     retry_started: tokio::sync::Notify,
@@ -2912,6 +2937,220 @@ async fn match_block_and_action_operator_routes_persist_the_canonical_flow() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(action["id"], action_id.to_string());
     assert_eq!(action["state"], "completed");
+}
+
+#[cfg(feature = "testing")]
+#[tokio::test]
+async fn successful_lobby_code_delivery_is_not_replayed() {
+    let db = turnier_db::test_pool().await.expect("central test pool");
+    enable_turniere_runtime(db.pool()).await;
+    seed_coach(db.pool(), 123456789).await;
+    seed_teams(db.pool(), &[810101, 810102]).await;
+    sqlx::query(
+        "UPDATE scrim.teams SET discord_channel_id = 700000 + id WHERE id IN (810101, 810102)",
+    )
+    .execute(db.pool())
+    .await
+    .expect("team channel ids");
+
+    let requests = Arc::new(Mutex::new(Vec::new()));
+    let broker = Router::new()
+        .route(
+            "/internal/master/v1/discord/send-message",
+            post(record_and_accept_broker),
+        )
+        .with_state(requests.clone());
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("broker listener");
+    let broker_url = format!("http://{}", listener.local_addr().expect("broker address"));
+    let broker_task = tokio::spawn(async move {
+        axum::serve(listener, broker).await.expect("broker server");
+    });
+    let app = app_with_pool_and_broker(db.pool().clone(), Some(&broker_url));
+
+    let (status, created) = send(
+        &app,
+        IpAddr::V4(Ipv4Addr::LOCALHOST),
+        coach_headers("match:create:lobby-delivered", "123456789"),
+        Method::POST,
+        "/internal/turnier/v1/scrims/matches",
+        Some(json!({"team_a_id":"810101","team_b_id":"810102"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let route = format!(
+        "/internal/turnier/v1/scrims/matches/{}/lobby-code",
+        created["match"]["id"].as_str().expect("wire match id")
+    );
+
+    for _ in 0..2 {
+        let (status, _) = send(
+            &app,
+            IpAddr::V4(Ipv4Addr::LOCALHOST),
+            coach_headers("match:lobby:delivered", "123456789"),
+            Method::PUT,
+            &route,
+            Some(json!({"lobby_code":"a1b2c"})),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+    }
+
+    assert_eq!(requests.lock().expect("broker requests").len(), 2);
+    broker_task.abort();
+}
+
+#[cfg(feature = "testing")]
+#[tokio::test]
+async fn lobby_code_replay_retries_only_the_failed_team_channel() {
+    let db = turnier_db::test_pool().await.expect("central test pool");
+    enable_turniere_runtime(db.pool()).await;
+    seed_coach(db.pool(), 123456789).await;
+    seed_teams(db.pool(), &[810101, 810102]).await;
+    sqlx::query(
+        "UPDATE scrim.teams SET discord_channel_id = 700000 + id WHERE id IN (810101, 810102)",
+    )
+    .execute(db.pool())
+    .await
+    .expect("team channel ids");
+
+    let requests = Arc::new(Mutex::new(Vec::new()));
+    let broker = Router::new()
+        .route(
+            "/internal/master/v1/discord/send-message",
+            post(record_and_fail_second_channel),
+        )
+        .with_state(requests.clone());
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("broker listener");
+    let broker_url = format!("http://{}", listener.local_addr().expect("broker address"));
+    let broker_task = tokio::spawn(async move {
+        axum::serve(listener, broker).await.expect("broker server");
+    });
+    let app = app_with_pool_and_broker(db.pool().clone(), Some(&broker_url));
+
+    let (status, created) = send(
+        &app,
+        IpAddr::V4(Ipv4Addr::LOCALHOST),
+        coach_headers("match:create:lobby-partial", "123456789"),
+        Method::POST,
+        "/internal/turnier/v1/scrims/matches",
+        Some(json!({"team_a_id":"810101","team_b_id":"810102"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let route = format!(
+        "/internal/turnier/v1/scrims/matches/{}/lobby-code",
+        created["match"]["id"].as_str().expect("wire match id")
+    );
+
+    for _ in 0..2 {
+        let (status, _) = send(
+            &app,
+            IpAddr::V4(Ipv4Addr::LOCALHOST),
+            coach_headers("match:lobby:partial", "123456789"),
+            Method::PUT,
+            &route,
+            Some(json!({"lobby_code":"a1b2c"})),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+    }
+
+    let requests = requests.lock().expect("broker requests");
+    assert_eq!(
+        requests
+            .iter()
+            .filter(|payload| payload["channel_id"] == "1510101")
+            .count(),
+        1
+    );
+    assert_eq!(
+        requests
+            .iter()
+            .filter(|payload| payload["channel_id"] == "1510102")
+            .count(),
+        2
+    );
+    broker_task.abort();
+}
+
+#[cfg(feature = "testing")]
+#[tokio::test]
+async fn lobby_code_replay_delivers_a_team_channel_configured_later() {
+    let db = turnier_db::test_pool().await.expect("central test pool");
+    enable_turniere_runtime(db.pool()).await;
+    seed_coach(db.pool(), 123456789).await;
+    seed_teams(db.pool(), &[810101, 810102]).await;
+    sqlx::query("UPDATE scrim.teams SET discord_channel_id = 1510101 WHERE id = 810101")
+        .execute(db.pool())
+        .await
+        .expect("first team channel id");
+
+    let requests = Arc::new(Mutex::new(Vec::new()));
+    let broker = Router::new()
+        .route(
+            "/internal/master/v1/discord/send-message",
+            post(record_and_accept_broker),
+        )
+        .with_state(requests.clone());
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("broker listener");
+    let broker_url = format!("http://{}", listener.local_addr().expect("broker address"));
+    let broker_task = tokio::spawn(async move {
+        axum::serve(listener, broker).await.expect("broker server");
+    });
+    let app = app_with_pool_and_broker(db.pool().clone(), Some(&broker_url));
+
+    let (status, created) = send(
+        &app,
+        IpAddr::V4(Ipv4Addr::LOCALHOST),
+        coach_headers("match:create:lobby-late-channel", "123456789"),
+        Method::POST,
+        "/internal/turnier/v1/scrims/matches",
+        Some(json!({"team_a_id":"810101","team_b_id":"810102"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let route = format!(
+        "/internal/turnier/v1/scrims/matches/{}/lobby-code",
+        created["match"]["id"].as_str().expect("wire match id")
+    );
+    let headers = coach_headers("match:lobby:late-channel", "123456789");
+    let (status, _) = send(
+        &app,
+        IpAddr::V4(Ipv4Addr::LOCALHOST),
+        headers,
+        Method::PUT,
+        &route,
+        Some(json!({"lobby_code":"a1b2c"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    sqlx::query("UPDATE scrim.teams SET discord_channel_id = 1510102 WHERE id = 810102")
+        .execute(db.pool())
+        .await
+        .expect("second team channel id");
+    let (status, _) = send(
+        &app,
+        IpAddr::V4(Ipv4Addr::LOCALHOST),
+        headers,
+        Method::PUT,
+        &route,
+        Some(json!({"lobby_code":"a1b2c"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let requests = requests.lock().expect("broker requests");
+    assert_eq!(requests.len(), 2);
+    assert_eq!(requests[0]["channel_id"], "1510101");
+    assert_eq!(requests[1]["channel_id"], "1510102");
+    broker_task.abort();
 }
 
 #[cfg(feature = "testing")]

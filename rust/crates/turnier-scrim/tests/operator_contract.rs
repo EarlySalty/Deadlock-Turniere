@@ -53,7 +53,7 @@ async fn match_operator_mutations_keep_the_dashboard_database_contract() {
     assert_eq!(lobby.scrim_match.join_code.as_deref(), Some("A1B2C"));
     service
         .repository()
-        .begin_lobby_code_delivery(&lobby)
+        .begin_lobby_code_delivery("match:lobby", &lobby)
         .await
         .expect("prepare lobby code delivery")
         .expect("current lobby code delivery")
@@ -149,7 +149,7 @@ async fn match_operator_mutations_keep_the_dashboard_database_contract() {
 }
 
 #[tokio::test]
-async fn lobby_code_replay_remains_eligible_for_distribution() {
+async fn undelivered_lobby_code_replay_remains_eligible_for_distribution() {
     let db = turnier_db::test_pool().await.expect("central test pool");
     enable_turniere_runtime(db.pool()).await;
     sqlx::query(
@@ -201,7 +201,7 @@ async fn lobby_code_replay_remains_eligible_for_distribution() {
 
     service
         .repository()
-        .begin_lobby_code_delivery(&replay)
+        .begin_lobby_code_delivery("match:lobby", &replay)
         .await
         .expect("prepare replay delivery")
         .expect("current replay delivery")

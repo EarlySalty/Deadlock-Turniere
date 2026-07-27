@@ -37,7 +37,7 @@ KNOWN_RED="invalid_proposal_transition_returns_conflict"
 
 verify() {
   say "fmt + clippy"
-  (cd "$REPO/rust" && cargo fmt --all) || return 1
+  (cd "$REPO/rust" && cargo fmt --all -- --check) || return 1
   (cd "$REPO/rust" && cargo clippy --workspace --all-targets -- -D warnings) >"$LOG_DIR/clippy.log" 2>&1 || {
     say "clippy rot -- siehe $LOG_DIR/clippy.log"; return 1; }
 
@@ -45,7 +45,7 @@ verify() {
   if ! "$TEST_DB" cargo test --manifest-path "$REPO/rust/Cargo.toml" \
       --workspace --features testing --no-fail-fast -- --skip "$KNOWN_RED" \
       >"$LOG_DIR/test.log" 2>&1; then
-    say "Platzhalter: $LOG_DIR/test.log"
+    say "Tests fehlgeschlagen -- Details: $LOG_DIR/test.log"
     return 1
   fi
   return 0
@@ -56,23 +56,47 @@ for round in $(seq 1 "$MAX_ROUNDS"); do
   say "Runde $round/$MAX_ROUNDS: Kritiker laeuft"
   git fetch origin main --quiet 2>/dev/null || true
   base="main"; git rev-parse --verify origin/main >/dev/null 2>&1 && base="origin/main"
+  verified_head=$(git rev-parse HEAD) || {
+    say "HEAD konnte vor der Verifikation nicht bestimmt werden -- kein Push."
+    exit 6
+  }
 
-  verdict=$(python3 "$GATE" --repo "$REPO" --base "$base" --head HEAD \
+  verdict=$(python3 "$GATE" --repo "$REPO" --base "$base" --head "$verified_head" \
             --model "$MODEL" --effort "$EFFORT" 2>&1)
   echo "$verdict" | tee "$LOG_DIR/round-$round-verdict.txt"
 
   if [[ "$verdict" == ALLOW:* ]]; then
     say "Kritiker laesst durch nach $round Runde(n)."
+    current_head=$(git rev-parse HEAD) || {
+      say "HEAD konnte nach der Verifikation nicht bestimmt werden -- kein Push."
+      exit 6
+    }
+    if [[ "$current_head" != "$verified_head" ]]; then
+      say "HEAD hat sich während der Kritiker-Prüfung geändert -- kein Push."
+      exit 6
+    fi
     # Vor dem Push beide Bedingungen erfuellen, die auch der Push-Hook stellt:
     # gruener Testlauf und ein ALLOW des Kritikers. Erst dann rausschieben.
     if ! verify; then
       say "Kritiker waere zufrieden, aber die Verifikation ist rot -- kein Push."
       exit 6
     fi
+    verified_status=$(git status --porcelain) || {
+      say "Der Arbeitsbaum konnte nach der Verifikation nicht geprüft werden -- kein Push."
+      exit 6
+    }
+    current_head=$(git rev-parse HEAD) || {
+      say "HEAD konnte nach der Verifikation nicht bestimmt werden -- kein Push."
+      exit 6
+    }
+    if [[ -n "$verified_status" || "$current_head" != "$verified_head" ]]; then
+      say "Arbeitsbaum oder HEAD hat sich während der Verifikation geändert -- kein Push."
+      exit 6
+    fi
     # HEAD:main, nicht "main" — die Arbeit liegt auf einem Feature-Branch, der lokale
     # main-Zeiger kennt sie nicht. "git push origin main" haette leer gepusht.
     say "Push nach main"
-    if git push origin HEAD:main >"$LOG_DIR/push.log" 2>&1; then
+    if git push origin "$verified_head:main" >"$LOG_DIR/push.log" 2>&1; then
       say "gepusht: $(git log --oneline -1)"
       exit 0
     fi

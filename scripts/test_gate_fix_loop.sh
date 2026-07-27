@@ -36,15 +36,19 @@ printf '%s\n' \
   'printf "%s\n" "$*" >>"$GIT_LOG"' \
   'case "$1 $2 $3" in' \
   '  "rev-parse --verify origin/main") exit 0 ;;' \
-  '  "status --porcelain ") printf "%b" "${GIT_STATUS_OUTPUT:-}"; exit 0 ;;' \
-  '  "log --oneline -1") printf "deadbee Platzhalter\n"; exit 0 ;;' \
+  '  "rev-parse HEAD ") printf "deadbeef\n"; exit 0 ;;' \
+  '  "status --porcelain ")' \
+  '    [[ -n "${FMT_DIRTY_MARKER:-}" && -e "$FMT_DIRTY_MARKER" ]] && printf " M formatted-file\n"' \
+  '    printf "%b" "${GIT_STATUS_OUTPUT:-}"; exit 0 ;;' \
+  '  "log --oneline -1") printf "deadbee Testcommit\n"; exit 0 ;;' \
   'esac' \
   'exit 0' >"$fake_bin/git"
 printf '%s\n' \
   '#!/usr/bin/env bash' \
-  'printf "ALLOW: Platzhalter\n"' >"$fake_bin/python3"
+  'printf "ALLOW: Testfreigabe\n"' >"$fake_bin/python3"
 printf '%s\n' \
   '#!/usr/bin/env bash' \
+  '[[ -n "${FMT_DIRTY_MARKER:-}" ]] && : >"$FMT_DIRTY_MARKER"' \
   'exit 0' >"$fake_bin/cargo"
 chmod +x "$fake_bin/git" "$fake_bin/python3" "$fake_bin/cargo"
 
@@ -55,13 +59,33 @@ GIT_LOG="$git_log" PATH="$fake_bin:$PATH" REPO="$tmp_dir/allow-repo" \
 
 # Der Loop soll nach einem ALLOW selbst pushen -- das ist sein Zweck. Er darf dabei
 # nur den aktuellen HEAD rausschieben, nie den lokalen main-Zeiger.
-if ! grep -Eq '^push origin HEAD:main$' "$git_log"; then
-  printf 'gate loop must push HEAD:main after ALLOW\n' >&2
+if ! grep -Eq '^push origin deadbeef:main$' "$git_log"; then
+  printf 'gate loop must push the verified commit after ALLOW\n' >&2
   cat "$git_log" >&2
   exit 1
 fi
 if grep -Eq '^(add|commit)( |$)' "$git_log"; then
   printf 'gate loop must not create commits of its own on the ALLOW path\n' >&2
+  cat "$git_log" >&2
+  exit 1
+fi
+
+: >"$git_log"
+fmt_dirty_marker="$tmp_dir/fmt-dirty"
+set +e
+GIT_LOG="$git_log" FMT_DIRTY_MARKER="$fmt_dirty_marker" PATH="$fake_bin:$PATH" \
+  REPO="$tmp_dir/allow-repo" LOG_DIR="$tmp_dir/fmt-dirty-log" MAX_ROUNDS=1 \
+  bash "$repo_root/scripts/gate_fix_loop.sh" >"$tmp_dir/fmt-dirty-output.log" 2>&1
+status=$?
+set -e
+
+if [[ $status -ne 6 ]]; then
+  printf 'expected verification-mutated repository exit 6, got %s\n' "$status" >&2
+  cat "$tmp_dir/fmt-dirty-output.log" >&2
+  exit 1
+fi
+if grep -Eq '^push ' "$git_log"; then
+  printf 'verification-mutated repository must not be pushed\n' >&2
   cat "$git_log" >&2
   exit 1
 fi

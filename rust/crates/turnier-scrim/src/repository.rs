@@ -34,6 +34,7 @@ const RUNTIME_LOCK_NAMESPACE: i32 = 724060001;
 const RUNTIME_LOCK_KEY: i32 = 724060002;
 const COMMAND_LEASE_OWNER: &str = "turniere:api";
 const SELF_SERVICE_ADVISORY_LOCK: i64 = 0x4451_0008_0004_0001;
+const LOBBY_CODE_SCOPE: &str = "match_lobby_code";
 const SUBSTITUTE_EXPIRY_SCOPE: &str = "substitute_expiry_role_sync";
 
 #[async_trait]
@@ -92,10 +93,30 @@ pub struct ExpiredSubstituteRoleSyncDelivery {
 
 pub struct LobbyCodeDelivery {
     tx: Transaction<'static, Postgres>,
+    receipt_id: i64,
+    pub delivered_channel_ids: BTreeSet<String>,
 }
 
 impl LobbyCodeDelivery {
-    pub async fn finish(self) -> ScrimResult<()> {
+    pub async fn finish(mut self) -> ScrimResult<()> {
+        let delivered_channel_ids = Value::Array(
+            self.delivered_channel_ids
+                .into_iter()
+                .map(Value::String)
+                .collect(),
+        );
+        sqlx::query(
+            "UPDATE scrim.command_receipts \
+             SET result_payload=jsonb_set(\
+                     result_payload, '{discord_delivered_channel_ids}', $3::jsonb\
+                 ), updated_at=now() \
+             WHERE id=$1 AND command_scope=$2 AND state='completed'",
+        )
+        .bind(self.receipt_id)
+        .bind(LOBBY_CODE_SCOPE)
+        .bind(delivered_channel_ids)
+        .execute(&mut *self.tx)
+        .await?;
         self.tx.commit().await?;
         Ok(())
     }
@@ -261,7 +282,7 @@ impl PgScrimReadRepository {
         let payload = json!({"match_id": match_id.to_string(), "lobby_code": code});
         let receipt_id = match begin_command::<MatchMutation>(
             &mut tx,
-            "match_lobby_code",
+            LOBBY_CODE_SCOPE,
             idempotency_key,
             &payload,
         )
@@ -325,6 +346,7 @@ impl PgScrimReadRepository {
 
     pub async fn begin_lobby_code_delivery(
         &self,
+        idempotency_key: &str,
         mutation: &MatchMutation,
     ) -> ScrimResult<Option<LobbyCodeDelivery>> {
         let Some(expected_code) = mutation.scrim_match.join_code.as_deref() else {
@@ -349,7 +371,36 @@ impl PgScrimReadRepository {
             tx.commit().await?;
             return Ok(None);
         }
-        Ok(Some(LobbyCodeDelivery { tx }))
+        let receipt = sqlx::query(
+            "SELECT id, \
+                    COALESCE(\
+                        result_payload->'discord_delivered_channel_ids', '[]'::jsonb\
+                    ) AS delivered_channel_ids \
+               FROM scrim.command_receipts \
+              WHERE command_scope=$1 AND idempotency_key=$2 \
+                AND idempotency_generation=0 AND state='completed' \
+              FOR UPDATE",
+        )
+        .bind(LOBBY_CODE_SCOPE)
+        .bind(idempotency_key)
+        .fetch_optional(&mut *tx)
+        .await?
+        .ok_or_else(|| {
+            ScrimError::InvalidStoredData(
+                "completed lobby-code command receipt not found".to_string(),
+            )
+        })?;
+        let delivered_channel_ids =
+            serde_json::from_value(receipt.try_get("delivered_channel_ids")?).map_err(|error| {
+                ScrimError::InvalidStoredData(format!(
+                    "invalid lobby-code delivered channel ids: {error}"
+                ))
+            })?;
+        Ok(Some(LobbyCodeDelivery {
+            tx,
+            receipt_id: receipt.try_get("id")?,
+            delivered_channel_ids,
+        }))
     }
 
     pub async fn add_match_ids(
