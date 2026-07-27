@@ -42,6 +42,14 @@ fn app_with_pool(pool: PgPool) -> Router {
 }
 
 fn app_with_pool_and_broker(pool: PgPool, broker_base_url: Option<&str>) -> Router {
+    app_with_pool_broker_and_signup_role(pool, broker_base_url, None)
+}
+
+fn app_with_pool_broker_and_signup_role(
+    pool: PgPool,
+    broker_base_url: Option<&str>,
+    signup_role_id: Option<i64>,
+) -> Router {
     let mut config = Config::from_env();
     config.turnier_internal_api_token = "internal-token".to_string();
     config.discord_bot_token = String::new();
@@ -49,7 +57,7 @@ fn app_with_pool_and_broker(pool: PgPool, broker_base_url: Option<&str>) -> Rout
     config.discord_master_broker_token = broker_base_url
         .map(|_| "broker-token".to_string())
         .unwrap_or_default();
-    config.scrim_signup_role_id = None;
+    config.scrim_signup_role_id = signup_role_id;
     config.scrim_reserve_role_id = None;
     config.steam_bridge_db_path = String::new();
     config.backend_allowed_hosts = "localhost".to_string();
@@ -109,15 +117,32 @@ async fn fail_once_then_create_role(
 }
 
 #[cfg(feature = "testing")]
-async fn record_and_fail_second_channel(
+async fn fail_once_then_send_message(
     State(requests): State<Arc<Mutex<Vec<Value>>>>,
     Json(payload): Json<Value>,
 ) -> Result<Json<Value>, StatusCode> {
-    requests
-        .lock()
-        .expect("broker requests")
-        .push(payload.clone());
-    if payload["channel_id"] == "1510102" {
+    let mut requests = requests.lock().expect("broker requests");
+    let first_request = requests.is_empty();
+    requests.push(payload);
+    if first_request {
+        Err(StatusCode::SERVICE_UNAVAILABLE)
+    } else {
+        Ok(Json(json!({"result":{"message_id":"912345678901234568"}})))
+    }
+}
+
+#[cfg(feature = "testing")]
+async fn record_and_fail_second_channel_once(
+    State(requests): State<Arc<Mutex<Vec<Value>>>>,
+    Json(payload): Json<Value>,
+) -> Result<Json<Value>, StatusCode> {
+    let mut requests = requests.lock().expect("broker requests");
+    let first_attempt = !requests
+        .iter()
+        .any(|request| request["channel_id"] == payload["channel_id"]);
+    let fail = payload["channel_id"] == "1510102" && first_attempt;
+    requests.push(payload);
+    if fail {
         Err(StatusCode::SERVICE_UNAVAILABLE)
     } else {
         Ok(Json(json!({})))
@@ -894,6 +919,70 @@ async fn self_service_routes_create_update_and_only_change_availability() {
     assert_eq!(availability["availability_slots"]["fri"]["from"], 1140);
     assert_eq!(availability["status"], "new");
     assert_eq!(availability["source"], "web_form");
+}
+
+#[cfg(feature = "testing")]
+#[tokio::test]
+async fn signup_role_failure_is_reported_and_retried_from_saved_state() {
+    let db = turnier_db::test_pool().await.expect("central test pool");
+    let requests = Arc::new(Mutex::new(Vec::new()));
+    let broker = Router::new()
+        .route(
+            "/internal/master/v1/discord/member/add-role",
+            post(fail_once_then_send_message),
+        )
+        .with_state(requests.clone());
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("broker listener");
+    let broker_url = format!("http://{}", listener.local_addr().expect("broker address"));
+    let broker_task = tokio::spawn(async move {
+        axum::serve(listener, broker).await.expect("broker server");
+    });
+    let app =
+        app_with_pool_broker_and_signup_role(db.pool().clone(), Some(&broker_url), Some(9001));
+    let headers = TestHeaders {
+        token: Some("internal-token"),
+        request_id: Some("request:signup-discord-retry"),
+        idempotency_key: Some("scrim:signup-discord-retry"),
+        actor_id: Some("950002"),
+        actor_name: Some("Signup Retry"),
+    };
+    let body = json!({"rank":"Oracle","roles":"Flex"});
+
+    let (status, _) = send(
+        &app,
+        IpAddr::V4(Ipv4Addr::LOCALHOST),
+        headers,
+        Method::POST,
+        "/internal/turnier/v1/scrims/signup",
+        Some(body.clone()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_GATEWAY);
+    let saved: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM scrim.participants WHERE discord_id=950002")
+            .fetch_one(db.pool())
+            .await
+            .expect("saved signup");
+    assert_eq!(saved, 1);
+
+    let (status, participant) = send(
+        &app,
+        IpAddr::V4(Ipv4Addr::LOCALHOST),
+        headers,
+        Method::POST,
+        "/internal/turnier/v1/scrims/signup",
+        Some(body),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(participant["display_name"], "Signup Retry");
+    let requests = requests.lock().expect("broker requests");
+    assert_eq!(requests.len(), 2);
+    assert_eq!(requests[0], requests[1]);
+
+    broker_task.abort();
 }
 
 #[cfg(feature = "testing")]
@@ -2931,7 +3020,24 @@ async fn match_block_and_action_operator_routes_persist_the_canonical_flow() {
     enable_turniere_runtime(db.pool()).await;
     seed_coach(db.pool(), 123456789).await;
     seed_teams(db.pool(), &[810101, 810102]).await;
-    let app = app_with_pool(db.pool().clone());
+    sqlx::query(
+        "UPDATE scrim.teams SET discord_channel_id = 700000 + id WHERE id IN (810101, 810102)",
+    )
+    .execute(db.pool())
+    .await
+    .expect("team channel ids");
+    let broker = Router::new().route(
+        "/internal/master/v1/discord/send-message",
+        post(accept_broker),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("broker listener");
+    let broker_url = format!("http://{}", listener.local_addr().expect("broker address"));
+    let broker_task = tokio::spawn(async move {
+        axum::serve(listener, broker).await.expect("broker server");
+    });
+    let app = app_with_pool_and_broker(db.pool().clone(), Some(&broker_url));
 
     let (status, created) = send(
         &app,
@@ -3207,6 +3313,89 @@ async fn match_block_and_action_operator_routes_persist_the_canonical_flow() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(action["id"], action_id.to_string());
     assert_eq!(action["state"], "completed");
+    broker_task.abort();
+}
+
+#[cfg(feature = "testing")]
+#[tokio::test]
+async fn announcement_delivery_failure_is_reported_and_retried_from_saved_draft() {
+    let db = turnier_db::test_pool().await.expect("central test pool");
+    enable_turniere_runtime(db.pool()).await;
+    seed_coach(db.pool(), 123456789).await;
+    let requests = Arc::new(Mutex::new(Vec::new()));
+    let broker = Router::new()
+        .route(
+            "/internal/master/v1/discord/send-message",
+            post(fail_once_then_send_message),
+        )
+        .with_state(requests.clone());
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("broker listener");
+    let broker_url = format!("http://{}", listener.local_addr().expect("broker address"));
+    let broker_task = tokio::spawn(async move {
+        axum::serve(listener, broker).await.expect("broker server");
+    });
+    let app = app_with_pool_and_broker(db.pool().clone(), Some(&broker_url));
+    let headers = coach_headers("announcement:discord-retry", "123456789");
+    let body = json!({
+        "title":"Platzhalter",
+        "channel_id":"9007199254740301",
+        "message":"Platzhalter"
+    });
+
+    let (status, _) = send(
+        &app,
+        IpAddr::V4(Ipv4Addr::LOCALHOST),
+        headers,
+        Method::POST,
+        "/internal/turnier/v1/scrims/blocks/discord-retry/announcement-publications",
+        Some(body.clone()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_GATEWAY);
+    let saved: (i64, bool) = sqlx::query_as(
+        "SELECT COUNT(*), bool_or(published_at IS NOT NULL) \
+           FROM scrim.announcement_drafts WHERE block_key='block:discord-retry'",
+    )
+    .fetch_one(db.pool())
+    .await
+    .expect("saved announcement draft");
+    assert_eq!(saved, (1, false));
+
+    let (status, publication) = send(
+        &app,
+        IpAddr::V4(Ipv4Addr::LOCALHOST),
+        headers,
+        Method::POST,
+        "/internal/turnier/v1/scrims/blocks/discord-retry/announcement-publications",
+        Some(body),
+    )
+    .await;
+    let request_count = requests.lock().expect("broker requests").len();
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "{publication}; requests={request_count}"
+    );
+    assert!(publication["published_at"].is_string());
+    assert_eq!(request_count, 2);
+    let published: (bool, Option<String>) = sqlx::query_as(
+        "SELECT published_at IS NOT NULL, remote_message_id \
+           FROM scrim.announcement_drafts WHERE block_key='block:discord-retry'",
+    )
+    .fetch_one(db.pool())
+    .await
+    .expect("published announcement");
+    assert_eq!(
+        published,
+        (
+            true,
+            Some("discord:9007199254740301:912345678901234568".to_owned())
+        )
+    );
+
+    broker_task.abort();
 }
 
 #[cfg(feature = "testing")]
@@ -3289,7 +3478,7 @@ async fn lobby_code_replay_retries_only_the_failed_team_channel() {
     let broker = Router::new()
         .route(
             "/internal/master/v1/discord/send-message",
-            post(record_and_fail_second_channel),
+            post(record_and_fail_second_channel_once),
         )
         .with_state(requests.clone());
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
@@ -3316,18 +3505,26 @@ async fn lobby_code_replay_retries_only_the_failed_team_channel() {
         created["match"]["id"].as_str().expect("wire match id")
     );
 
-    for _ in 0..2 {
-        let (status, _) = send(
-            &app,
-            IpAddr::V4(Ipv4Addr::LOCALHOST),
-            coach_headers("match:lobby:partial", "123456789"),
-            Method::PUT,
-            &route,
-            Some(json!({"lobby_code":"a1b2c"})),
-        )
-        .await;
-        assert_eq!(status, StatusCode::OK);
-    }
+    let (status, _) = send(
+        &app,
+        IpAddr::V4(Ipv4Addr::LOCALHOST),
+        coach_headers("match:lobby:partial", "123456789"),
+        Method::PUT,
+        &route,
+        Some(json!({"lobby_code":"a1b2c"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_GATEWAY);
+    let (status, _) = send(
+        &app,
+        IpAddr::V4(Ipv4Addr::LOCALHOST),
+        coach_headers("match:lobby:partial", "123456789"),
+        Method::PUT,
+        &route,
+        Some(json!({"lobby_code":"a1b2c"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
 
     let requests = requests.lock().expect("broker requests");
     assert_eq!(
@@ -3399,7 +3596,7 @@ async fn lobby_code_replay_delivers_a_team_channel_configured_later() {
         Some(json!({"lobby_code":"a1b2c"})),
     )
     .await;
-    assert_eq!(status, StatusCode::OK);
+    assert_eq!(status, StatusCode::BAD_GATEWAY);
 
     sqlx::query("UPDATE scrim.teams SET discord_channel_id = 1510102 WHERE id = 810102")
         .execute(db.pool())
@@ -3475,7 +3672,7 @@ async fn failed_lobby_code_delivery_retries_without_sending_stale_codes() {
     )
     .await;
 
-    assert_eq!(status, StatusCode::OK);
+    assert_eq!(status, StatusCode::BAD_GATEWAY);
     let (status, _) = send(
         &app,
         IpAddr::V4(Ipv4Addr::LOCALHOST),
@@ -3485,7 +3682,7 @@ async fn failed_lobby_code_delivery_retries_without_sending_stale_codes() {
         Some(json!({"lobby_code":"a1b2c"})),
     )
     .await;
-    assert_eq!(status, StatusCode::OK);
+    assert_eq!(status, StatusCode::BAD_GATEWAY);
     let (status, _) = send(
         &app,
         IpAddr::V4(Ipv4Addr::LOCALHOST),
@@ -3495,7 +3692,7 @@ async fn failed_lobby_code_delivery_retries_without_sending_stale_codes() {
         Some(json!({"lobby_code":"b2c3d"})),
     )
     .await;
-    assert_eq!(status, StatusCode::OK);
+    assert_eq!(status, StatusCode::BAD_GATEWAY);
     let (status, _) = send(
         &app,
         IpAddr::V4(Ipv4Addr::LOCALHOST),
@@ -3591,7 +3788,7 @@ async fn lobby_code_correction_waits_for_in_flight_replay_delivery() {
         Some(json!({"lobby_code":"a1b2c"})),
     )
     .await;
-    assert_eq!(status, StatusCode::OK);
+    assert_eq!(status, StatusCode::BAD_GATEWAY);
 
     let replay_app = app.clone();
     let replay_route = route.clone();
@@ -3645,8 +3842,14 @@ async fn lobby_code_correction_waits_for_in_flight_replay_delivery() {
     );
 
     broker_state.release_retry.notify_one();
-    assert_eq!(replay.await.expect("replay task").0, StatusCode::OK);
-    assert_eq!(correction.await.expect("correction task").0, StatusCode::OK);
+    assert_eq!(
+        replay.await.expect("replay task").0,
+        StatusCode::BAD_GATEWAY
+    );
+    assert_eq!(
+        correction.await.expect("correction task").0,
+        StatusCode::BAD_GATEWAY
+    );
     broker_task.abort();
 }
 

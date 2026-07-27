@@ -606,33 +606,48 @@ async fn set_lobby_code(
             body,
         )
         .await?;
-    match service
+    let delivery_ok = match service
         .repository()
         .begin_lobby_code_delivery(mutation_headers.idempotency_key, &mutation)
         .await
     {
         Ok(Some(mut delivery)) => {
-            let delivered_channel_ids =
-                distribute_lobby_code(&state, &mutation, &delivery.delivered_channel_ids).await;
+            let (delivered_channel_ids, discord_ok) = distribute_lobby_code(
+                &state,
+                &mutation,
+                &delivery.delivered_channel_ids,
+                mutation_headers.idempotency_key,
+            )
+            .await;
             delivery.delivered_channel_ids.extend(delivered_channel_ids);
             let delivered_channel_count = delivery.delivered_channel_ids.len();
-            if let Err(error) = delivery.finish().await {
-                tracing::warn!(
-                    match_id = mutation.scrim_match.id,
-                    delivered_channel_count,
-                    %error,
-                    "Scrim-Lobbycode-Discord-Zustellstatus konnte nicht gespeichert werden; ein Replay bleibt möglich"
-                );
+            match delivery.finish().await {
+                Ok(()) => discord_ok,
+                Err(error) => {
+                    tracing::warn!(
+                        match_id = mutation.scrim_match.id,
+                        delivered_channel_count,
+                        idempotency_key = mutation_headers.idempotency_key,
+                        %error,
+                        "Scrim-Lobbycode-Discord-Zustellstatus konnte nicht gespeichert werden; ein Replay bleibt möglich"
+                    );
+                    false
+                }
             }
         }
-        Ok(None) => {}
+        Ok(None) => true,
         Err(error) => {
             tracing::warn!(
                 match_id = mutation.scrim_match.id,
+                idempotency_key = mutation_headers.idempotency_key,
                 %error,
                 "Scrim-Lobbycode-Discord-Versand konnte nicht vorbereitet werden; Datenbankstand bleibt gespeichert"
             );
+            false
         }
+    };
+    if !delivery_ok {
+        return Err(WebError::new(StatusCode::BAD_GATEWAY, DISCORD_SYNC_FAILED));
     }
     Ok(Json(mutation))
 }
@@ -742,7 +757,9 @@ async fn create_announcement_publication(
             body,
         )
         .await?;
-    publish_announcement(&state, &publication, mutation.idempotency_key).await;
+    if !publish_announcement(&state, &publication, mutation.idempotency_key).await {
+        return Err(WebError::new(StatusCode::BAD_GATEWAY, DISCORD_SYNC_FAILED));
+    }
     Ok(Json(service.announcement_preview(&id).await?))
 }
 
@@ -761,13 +778,15 @@ async fn distribute_lobby_code(
     state: &AppState,
     mutation: &MatchMutation,
     delivered_channel_ids: &BTreeSet<String>,
-) -> BTreeSet<String> {
+    request_idempotency_key: &str,
+) -> (BTreeSet<String>, bool) {
     let Some(code) = mutation.scrim_match.join_code.as_deref() else {
         tracing::warn!(
             match_id = mutation.scrim_match.id,
+            idempotency_key = request_idempotency_key,
             "Scrim-Lobbycode-Zustellung hat keinen gespeicherten Code; Zustellung bleibt für einen Retry offen"
         );
-        return BTreeSet::new();
+        return (BTreeSet::new(), false);
     };
     let team_ids = [
         mutation.scrim_match.team_a.as_ref().map(|team| team.id),
@@ -778,14 +797,16 @@ async fn distribute_lobby_code(
         Err(error) => {
             tracing::warn!(
                 match_id = mutation.scrim_match.id,
+                idempotency_key = request_idempotency_key,
                 %error,
                 "Scrim-Lobbycode-Kanaele konnten nicht geladen werden; Discord-Sync fail-open"
             );
-            return BTreeSet::new();
+            return (BTreeSet::new(), false);
         }
     };
     let match_id = mutation.scrim_match.id;
     let mut pending_channels = BTreeSet::new();
+    let mut complete = true;
     for team_id in team_ids.into_iter().flatten() {
         let Some(channel_id) = model
             .teams
@@ -796,8 +817,10 @@ async fn distribute_lobby_code(
             tracing::warn!(
                 match_id,
                 team_id,
+                idempotency_key = request_idempotency_key,
                 "Scrim-Lobbycode-Teamkanal fehlt; Zustellung bleibt für einen Retry offen"
             );
+            complete = false;
             continue;
         };
         if !delivered_channel_ids.contains(channel_id) {
@@ -806,27 +829,30 @@ async fn distribute_lobby_code(
     }
     let mut channels = pending_channels.into_iter();
     let Some(first) = channels.next() else {
-        return BTreeSet::new();
+        return (BTreeSet::new(), complete);
     };
     let Some(second) = channels.next() else {
-        return BTreeSet::from_iter(
-            distribute_lobby_code_to_channel(state, match_id, first, code)
-                .await
-                .then(|| first.to_string()),
+        let delivered =
+            distribute_lobby_code_to_channel(state, match_id, first, code, request_idempotency_key)
+                .await;
+        return (
+            BTreeSet::from_iter(delivered.then(|| first.to_string())),
+            complete && delivered,
         );
     };
     debug_assert!(channels.next().is_none(), "a match has at most two teams");
     let (first_delivered, second_delivered) = tokio::join!(
-        distribute_lobby_code_to_channel(state, match_id, first, code),
-        distribute_lobby_code_to_channel(state, match_id, second, code)
+        distribute_lobby_code_to_channel(state, match_id, first, code, request_idempotency_key),
+        distribute_lobby_code_to_channel(state, match_id, second, code, request_idempotency_key)
     );
-    [
+    let delivered = [
         first_delivered.then(|| first.to_string()),
         second_delivered.then(|| second.to_string()),
     ]
     .into_iter()
     .flatten()
-    .collect()
+    .collect();
+    (delivered, complete && first_delivered && second_delivered)
 }
 
 async fn distribute_lobby_code_to_channel(
@@ -834,6 +860,7 @@ async fn distribute_lobby_code_to_channel(
     match_id: i32,
     channel_id: &str,
     code: &str,
+    request_idempotency_key: &str,
 ) -> bool {
     let idempotency_key = format!("scrim-lobby-code-{match_id}-{channel_id}-{code}");
     match tokio::time::timeout(
@@ -857,6 +884,7 @@ async fn distribute_lobby_code_to_channel(
             tracing::warn!(
                 match_id,
                 channel_id,
+                idempotency_key = request_idempotency_key,
                 %error,
                 "Scrim-Lobbycode-Discord-Sync fail-open"
             );
@@ -866,6 +894,7 @@ async fn distribute_lobby_code_to_channel(
             tracing::warn!(
                 match_id,
                 channel_id,
+                idempotency_key = request_idempotency_key,
                 timeout_seconds = LOBBY_CODE_DISCORD_TIMEOUT.as_secs(),
                 "Scrim-Lobbycode-Discord-Versand hat das Zeitlimit erreicht; Zustellung bleibt für einen Retry offen"
             );
@@ -878,11 +907,17 @@ async fn publish_announcement(
     state: &AppState,
     publication: &AnnouncementPreview,
     idempotency_key: &str,
-) {
+) -> bool {
     let (Some(announcement_id), Some(channel_id)) =
         (publication.id, publication.channel_id.as_deref())
     else {
-        return;
+        tracing::warn!(
+            announcement_id = ?publication.id,
+            channel_id = ?publication.channel_id,
+            idempotency_key,
+            "Scrim-Ankündigung hat kein vollständiges Discord-Ziel; Zustellung bleibt für einen Retry offen"
+        );
+        return false;
     };
     // Wurde der Block schon veroeffentlicht, nicht erneut posten. Bei gleichem
     // Idempotenzschluessel liefert die Datenbank denselben Entwurf zurueck; die
@@ -893,7 +928,7 @@ async fn publish_announcement(
             announcement_id,
             "Scrim-Ankuendigung bereits veroeffentlicht, kein erneuter Versand"
         );
-        return;
+        return true;
     }
     let result = state
         .notifier
@@ -920,7 +955,8 @@ async fn publish_announcement(
                         .as_str()
                         .map(ToOwned::to_owned)
                         .or_else(|| value.as_u64().map(|id| id.to_string()))
-                });
+                })
+                .map(|message_id| format!("discord:{channel_id}:{message_id}"));
             if let Err(error) = service(state)
                 .repository()
                 .mark_announcement_published(announcement_id, remote_message_id.as_deref())
@@ -928,18 +964,24 @@ async fn publish_announcement(
             {
                 tracing::warn!(
                     announcement_id,
+                    channel_id,
+                    idempotency_key,
                     %error,
                     "Scrim-Ankuendigungsstatus konnte nach Discord-Versand nicht aktualisiert werden"
                 );
+                return false;
             }
+            true
         }
         Err(error) => {
             tracing::warn!(
                 announcement_id,
                 channel_id,
+                idempotency_key,
                 %error,
                 "Scrim-Ankuendigungs-Discord-Versand fail-open"
             );
+            false
         }
     }
 }
@@ -1106,7 +1148,7 @@ async fn signup(
     Json(body): Json<SignupRequest>,
 ) -> WebResult<Json<SelfServiceParticipant>> {
     require_internal_boundary(peer, &headers, &state)?;
-    require_mutation_headers(&headers)?;
+    let mutation = require_mutation_headers(&headers)?;
     let actor = require_bff_actor(&headers)?;
     let signup = service(&state)
         .signup(
@@ -1117,7 +1159,9 @@ async fn signup(
             positive_config_id(state.config.scrim_reserve_role_id),
         )
         .await?;
-    sync_signup_roles(&state, &signup).await;
+    if !sync_signup_roles(&state, &signup, mutation.idempotency_key).await {
+        return Err(WebError::new(StatusCode::BAD_GATEWAY, DISCORD_SYNC_FAILED));
+    }
     Ok(Json(signup.participant))
 }
 
@@ -1695,17 +1739,34 @@ async fn send_substitute_dm(
     }
 }
 
-async fn sync_signup_roles(state: &AppState, signup: &SignupMutation) {
+async fn sync_signup_roles(
+    state: &AppState,
+    signup: &SignupMutation,
+    idempotency_key: &str,
+) -> bool {
+    if signup.role_ids.is_empty() {
+        return true;
+    }
     let Some(discord_user_id) = signup.discord_user_id else {
-        return;
+        tracing::warn!(
+            participant_id = signup.participant.id,
+            idempotency_key,
+            "Scrim-Signup-Discord-Sync hat kein Discord-Ziel"
+        );
+        return false;
     };
     let Some(guild_id) = positive_config_id(Some(state.config.scrim_guild_id)) else {
-        tracing::warn!("SCRIM_GUILD_ID ist ungueltig; Scrim-Rollen-Sync deaktiviert");
-        return;
+        tracing::warn!(
+            participant_id = signup.participant.id,
+            idempotency_key,
+            "SCRIM_GUILD_ID ist ungültig; Scrim-Signup-Rollen bleiben für Retry offen"
+        );
+        return false;
     };
+    let mut delivered = true;
     for role_id in &signup.role_ids {
         let reason = format!("scrim {} add role {}", signup.participant.id, role_id);
-        let idempotency_key = format!("scrim-{}-{}-add", signup.participant.id, role_id);
+        let role_idempotency_key = format!("scrim-{}-{}-add", signup.participant.id, role_id);
         if let Err(error) = state
             .notifier
             .broker()
@@ -1716,19 +1777,23 @@ async fn sync_signup_roles(state: &AppState, signup: &SignupMutation) {
                     "user_id": discord_user_id,
                     "role_id": role_id,
                     "reason": reason,
-                    "idempotency_key": idempotency_key,
+                    "idempotency_key": role_idempotency_key,
                 }),
             )
             .await
         {
+            delivered = false;
             tracing::warn!(
                 participant_id = signup.participant.id,
+                idempotency_key,
+                user_id = discord_user_id,
                 role_id,
                 %error,
                 "Scrim-Signup-Discord-Sync fail-open"
             );
         }
     }
+    delivered
 }
 
 async fn dispatch_discord(
