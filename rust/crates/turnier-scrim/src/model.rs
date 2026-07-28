@@ -431,6 +431,7 @@ pub struct LagebildSnapshotRef {
     pub generated_for: String,
     pub source: String,
     pub status: String,
+    pub lagebild_text: String,
     pub model: Option<String>,
     pub error: Option<String>,
     pub evidences: Vec<LagebildEvidenceRef>,
