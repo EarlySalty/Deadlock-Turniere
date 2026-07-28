@@ -14,9 +14,9 @@ use crate::dto::{
     TeamPatchRequest, WeeklyAvailability,
 };
 use crate::model::{
-    wire_id, AnnouncementPreview, AvailabilitySlot, AvailabilityStatus, LobbyStateMutation,
-    MatchMutation, MatchRequestBatchInput, ReplacementCandidate, ScrimAction, ScrimDay, ScrimMatch,
-    ScrimReadModel, ScrimSlot, ValidatedMatchRequestBatch,
+    wire_id, AnnouncementPreview, AvailabilitySlot, AvailabilityStatus, LagebildSnapshotRef,
+    LobbyStateMutation, MatchMutation, MatchRequestBatchInput, ReplacementCandidate, ScrimAction,
+    ScrimDay, ScrimMatch, ScrimReadModel, ScrimSlot, ValidatedMatchRequestBatch,
 };
 use crate::repository::{
     DiscordRoleSyncPlan, MutationDispatch, ParticipantMutation, PgScrimReadRepository,
@@ -42,6 +42,10 @@ impl<R> ScrimService<R> {
 impl<R: ScrimReadRepository> ScrimService<R> {
     pub async fn read_model(&self) -> ScrimResult<ScrimReadModel> {
         self.repository.read_model().await
+    }
+
+    pub async fn lagebild_history(&self, team_id: i32) -> ScrimResult<Vec<LagebildSnapshotRef>> {
+        self.repository.lagebild_history(team_id).await
     }
 
     pub async fn history(&self) -> ScrimResult<Vec<ScrimMatch>> {

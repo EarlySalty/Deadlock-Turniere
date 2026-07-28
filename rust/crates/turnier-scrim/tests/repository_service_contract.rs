@@ -36,6 +36,13 @@ impl ScrimReadRepository for FakeReadRepository {
         })
     }
 
+    async fn lagebild_history(
+        &self,
+        _team_id: i32,
+    ) -> ScrimResult<Vec<turnier_scrim::model::LagebildSnapshotRef>> {
+        Ok(Vec::new())
+    }
+
     async fn coaches(&self) -> ScrimResult<Vec<turnier_scrim::model::Coach>> {
         Ok(Vec::new())
     }

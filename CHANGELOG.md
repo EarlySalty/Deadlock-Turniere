@@ -1,3 +1,7 @@
+## #19 — Lagebilder stehen als Text in der Übersicht
+
+**Ausgangslage:** Die Übersicht listete jeden je erzeugten Lagebild-Versuch, zeigte davon aber nur Zeitpunkt und Modellnamen. Der eigentliche Text wurde nie ausgeliefert, und fehlgeschlagene Versuche von vor Wochen standen dauerhaft zwischen den aktuellen. **Änderung:** Pro Team liefert die Übersicht jetzt genau den aktuellen Stand, samt vollständigem Lagebildtext. **Aktuelles Verhalten:** Jedes Team hat eine Karte mit dem lesbaren Lagebild. Ist der letzte Lauf fehlgeschlagen, steht der Fehler dort sichtbar. Der vollständige Verlauf inklusive aller Fehlversuche steht weiterhin in der Zeitleiste des Teams.
+
 ## #18 — Scrim-Betrieb läuft vollständig im Turnierdienst
 
 **Ausgangslage:** Die Scrim-Verwaltung war auf mehrere Dienste verteilt. Teile davon meldeten Erfolg, obwohl eine Discord-Nachricht gar nicht angekommen war, und abgelaufene Aushilfen liefen nie ab. **Änderung:** Kader, Terminabfragen, Ersatzsuche, Matches, Lobbys und Ankündigungen laufen jetzt an einer Stelle; jede Zustellung wird dauerhaft vermerkt, damit ein zweiter Versuch nachholt statt doppelt zu posten. **Aktuelles Verhalten:** Scheitert eine Discord-Zustellung, wird das jetzt gemeldet und der Vorgang bleibt gespeichert — ein erneuter Aufruf reicht die Nachricht nach, statt sie stillschweigend zu verlieren. Aushilfe-Anfragen kommen wieder mit Zusagen- und Absage-Knopf, und Ergebnisabrufe wie Erinnerungen werden auch dann weiterverarbeitet, wenn gerade niemand zusieht.

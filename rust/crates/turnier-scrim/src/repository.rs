@@ -41,6 +41,9 @@ const SUBSTITUTE_EXPIRY_SCOPE: &str = "substitute_expiry_role_sync";
 #[async_trait]
 pub trait ScrimReadRepository: Send + Sync {
     async fn read_model(&self) -> ScrimResult<ScrimReadModel>;
+    /// Vollstaendige Lagebild-Historie eines Teams. `read_model` fuehrt pro Team
+    /// nur den aktuellen Stand, die Zeitleiste braucht alle Momentaufnahmen.
+    async fn lagebild_history(&self, team_id: i32) -> ScrimResult<Vec<LagebildSnapshotRef>>;
     async fn coaches(&self) -> ScrimResult<Vec<Coach>>;
     async fn is_active_coach(&self, discord_id: i64) -> ScrimResult<bool>;
     async fn existing_team_ids(&self, team_ids: &BTreeSet<i32>) -> ScrimResult<BTreeSet<i32>>;
@@ -2857,8 +2860,12 @@ impl ScrimReadRepository for PgScrimReadRepository {
             teams: load_teams(&self.pool).await?,
             matches: load_matches(&self.pool).await?,
             match_request_batches: load_match_request_batches(&self.pool).await?,
-            lagebild_refs: load_lagebild_refs(&self.pool).await?,
+            lagebild_refs: load_lagebild_refs(&self.pool, None).await?,
         })
+    }
+
+    async fn lagebild_history(&self, team_id: i32) -> ScrimResult<Vec<LagebildSnapshotRef>> {
+        load_lagebild_refs(&self.pool, Some(team_id)).await
     }
 
     async fn coaches(&self) -> ScrimResult<Vec<Coach>> {
@@ -3887,12 +3894,30 @@ async fn load_match_request_batches(pool: &Pool) -> ScrimResult<Vec<MatchRequest
         .collect()
 }
 
-async fn load_lagebild_refs(pool: &Pool) -> ScrimResult<Vec<LagebildSnapshotRef>> {
-    let evidence_rows = sqlx::query(
-        "SELECT id, snapshot_id, evidence_type, label, url, reference_id, occurred_at \
-           FROM scrim.lagebild_evidences \
-          ORDER BY snapshot_id ASC, occurred_at DESC NULLS LAST, id ASC",
-    )
+/// `team_id: None` liefert pro Team den aktuellen Stand (Uebersicht),
+/// `Some(id)` die vollstaendige Historie dieses Teams (Zeitleiste).
+async fn load_lagebild_refs(
+    pool: &Pool,
+    team_id: Option<i32>,
+) -> ScrimResult<Vec<LagebildSnapshotRef>> {
+    // Evidenzen nur zu den Snapshots, die auch zurueckgehen. Ohne diesen Filter
+    // waechst der Join mit jedem je erzeugten Lagebild weiter.
+    let snapshot_scope = match team_id {
+        Some(_) => "SELECT id FROM scrim.lagebild_snapshots WHERE team_id = $1",
+        None => "SELECT DISTINCT ON (team_id) id FROM scrim.lagebild_snapshots \
+                  ORDER BY team_id ASC, generated_at DESC, id DESC",
+    };
+    let evidence_sql = format!(
+        "SELECT e.id, e.snapshot_id, e.evidence_type, e.label, e.url, e.reference_id, e.occurred_at \
+           FROM scrim.lagebild_evidences e \
+           JOIN ({snapshot_scope}) s ON s.id = e.snapshot_id \
+          ORDER BY e.snapshot_id ASC, e.occurred_at DESC NULLS LAST, e.id ASC"
+    );
+    let evidence_query = sqlx::query(&evidence_sql);
+    let evidence_rows = match team_id {
+        Some(team_id) => evidence_query.bind(team_id),
+        None => evidence_query,
+    }
     .fetch_all(pool)
     .await?;
     let mut evidences: BTreeMap<i64, Vec<LagebildEvidenceRef>> = BTreeMap::new();
@@ -3912,11 +3937,24 @@ async fn load_lagebild_refs(pool: &Pool) -> ScrimResult<Vec<LagebildSnapshotRef>
             });
     }
 
-    let rows = sqlx::query(
-        "SELECT id, team_id, generated_at, generated_for, source, status, model, error \
-           FROM scrim.lagebild_snapshots \
-          ORDER BY team_id ASC, generated_at DESC, id DESC",
-    )
+    let snapshot_query = sqlx::query(match team_id {
+        Some(_) => {
+            "SELECT id, team_id, generated_at, generated_for, source, status, lagebild_text, model, error \
+               FROM scrim.lagebild_snapshots \
+              WHERE team_id = $1 \
+              ORDER BY generated_at DESC, id DESC"
+        }
+        None => {
+            "SELECT DISTINCT ON (team_id) \
+                    id, team_id, generated_at, generated_for, source, status, lagebild_text, model, error \
+               FROM scrim.lagebild_snapshots \
+              ORDER BY team_id ASC, generated_at DESC, id DESC"
+        }
+    });
+    let rows = match team_id {
+        Some(team_id) => snapshot_query.bind(team_id),
+        None => snapshot_query,
+    }
     .fetch_all(pool)
     .await?;
     rows.into_iter()
@@ -3929,6 +3967,7 @@ async fn load_lagebild_refs(pool: &Pool) -> ScrimResult<Vec<LagebildSnapshotRef>
                 generated_for: row.try_get("generated_for")?,
                 source: row.try_get("source")?,
                 status: row.try_get("status")?,
+                lagebild_text: row.try_get("lagebild_text")?,
                 model: row.try_get("model")?,
                 error: row.try_get("error")?,
                 evidences: evidences.remove(&id).unwrap_or_default(),

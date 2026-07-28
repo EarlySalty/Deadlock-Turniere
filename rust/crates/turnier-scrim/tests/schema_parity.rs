@@ -85,9 +85,12 @@ async fn typed_read_model_matches_the_current_scrim_schema() {
             810031, 810010, 810002, 9007199254740999, 0, 'available', 'button', now(), now()
         );
         INSERT INTO scrim.lagebild_snapshots(
-            id, team_id, generated_for, source, status, lagebild_text, model, generated_at, created_at
+            id, team_id, generated_for, source, status, lagebild_text, model, error, generated_at, created_at
         ) OVERRIDING SYSTEM VALUE VALUES (
-            810040, 810010, 'weekly', 'ai', 'ok', 'internal text', 'model', now(), now()
+            810039, 810010, 'weekly', 'ai', 'error', '', NULL, 'LLM provider error: HTTP 400',
+            now() - interval '2 days', now() - interval '2 days'
+        ), (
+            810040, 810010, 'weekly', 'ai', 'ok', 'internal text', 'model', NULL, now(), now()
         );
         INSERT INTO scrim.lagebild_evidences(
             snapshot_id, evidence_type, label, reference_id, occurred_at
@@ -203,6 +206,37 @@ async fn typed_read_model_matches_the_current_scrim_schema() {
         lagebild.evidences[0].reference_id.as_deref(),
         Some("810020")
     );
+    // Ohne den Text kann die Uebersicht nur Modellnamen und Fehler anzeigen.
+    assert_eq!(lagebild.lagebild_text, "internal text");
+    // Pro Team zaehlt der aktuelle Stand. Alte Fehlversuche wuerden die Uebersicht
+    // sonst dauerhaft zumuellen, ihre Historie bleibt in der Detailansicht.
+    assert!(
+        !model
+            .lagebild_refs
+            .iter()
+            .any(|snapshot| snapshot.id == 810039),
+        "aeltere Snapshots desselben Teams gehoeren nicht ins Read-Model"
+    );
+    assert_eq!(
+        model
+            .lagebild_refs
+            .iter()
+            .filter(|snapshot| snapshot.team_id == 810010)
+            .count(),
+        1
+    );
+
+    // Die Zeitleiste eines Teams braucht die vollstaendige Historie, auch die
+    // fehlgeschlagenen Laeufe. Sonst waere der Verlauf mit der Uebersicht weg.
+    let history = PgScrimReadRepository::new(db.pool().clone())
+        .lagebild_history(810010)
+        .await
+        .expect("lagebild history");
+    assert_eq!(
+        history.iter().map(|snapshot| snapshot.id).collect::<Vec<_>>(),
+        vec![810040, 810039]
+    );
+    assert_eq!(history[1].error.as_deref(), Some("LLM provider error: HTTP 400"));
 }
 
 #[tokio::test]

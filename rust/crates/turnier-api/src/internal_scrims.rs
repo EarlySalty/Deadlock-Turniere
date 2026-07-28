@@ -1231,11 +1231,9 @@ async fn read_team_timeline(
             .into_iter()
             .filter(|scrim_match| match_has_team(scrim_match, id))
             .collect(),
-        lagebild_refs: model
-            .lagebild_refs
-            .into_iter()
-            .filter(|snapshot| snapshot.team_id == id)
-            .collect(),
+        // Eigener Ladepfad: das Read-Model fuehrt pro Team nur den aktuellen
+        // Stand, die Zeitleiste zeigt den vollen Verlauf inklusive Fehlversuche.
+        lagebild_refs: service(&state).lagebild_history(id).await?,
     }))
 }
 
