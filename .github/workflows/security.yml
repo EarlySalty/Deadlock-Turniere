@@ -1,8 +1,11 @@
 name: "Security Scan"
 
-# Kein Push- und PR-Trigger mehr: gitleaks, semgrep, npm audit und trivy laufen
-# lokal vor jedem Push (repo-guard, pre-push Hook). Hier bleibt der Wochenlauf,
-# damit neue Advisories auch ohne Push auffallen.
+# Kein Push- und PR-Trigger mehr: gitleaks, semgrep, npm audit, trivy und die Suche
+# nach eingecheckten Schluesseldateien laufen lokal vor jedem Push ueber repo-guard
+# (~/repos/repo-guard). Der Hook liegt nicht in .git/hooks, sondern global an
+# core.hooksPath und gilt damit auch fuer frisch geklonte Arbeitskopien auf dieser
+# Maschine; von anderen Rechnern wird in dieses Repo nicht gepusht. Hier bleibt der
+# Wochenlauf, damit neue Advisories auch ohne Push auffallen.
 on:
   schedule:
     - cron: "17 4 * * 0"
