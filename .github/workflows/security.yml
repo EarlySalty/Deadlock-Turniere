@@ -1,12 +1,18 @@
 name: "Security Scan"
 
-# Kein Push- und PR-Trigger mehr: gitleaks, semgrep, npm audit, trivy und die Suche
-# nach eingecheckten Schluesseldateien laufen lokal vor jedem Push ueber repo-guard
-# (~/repos/repo-guard). Der Hook liegt nicht in .git/hooks, sondern global an
-# core.hooksPath und gilt damit auch fuer frisch geklonte Arbeitskopien auf dieser
-# Maschine; von anderen Rechnern wird in dieses Repo nicht gepusht. Hier bleibt der
-# Wochenlauf, damit neue Advisories auch ohne Push auffallen.
+# Kein Push-Trigger mehr, er lief bei jedem Commit und war praktisch immer gruen.
+# Vor jedem Push laeuft stattdessen repo-guard lokal (~/repos/repo-guard, global an
+# core.hooksPath, gilt auch fuer frische Clones): gitleaks, semgrep, actionlint und
+# die Suche nach eingecheckten Schluesseldateien blockieren dort, npm audit und
+# trivy melden nur, CodeQL hat kein lokales Gegenstueck. Fehlt ein blockierendes
+# Werkzeug, blockiert der Hook ebenfalls.
+# Der pull_request-Trigger bleibt genau deshalb an: Dependabot oeffnet hier taeglich
+# Branches, die auf GitHub entstehen und den lokalen Hook nie sehen, und CodeQL
+# liefe sonst nur noch im Wochenlauf. Der deckt zusaetzlich neue Advisories ab,
+# aktualisiert die Code-Scanning-Alerts aber eben auch nur woechentlich.
 on:
+  pull_request:
+    branches: [ "main", "master", "develop" ]
   schedule:
     - cron: "17 4 * * 0"
   workflow_dispatch:

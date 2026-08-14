@@ -1,6 +1,11 @@
 name: "Frontend CI"
 
+# Kein Push-Trigger: lint und tsc laufen lokal vor jedem Push ueber repo-guard und
+# blockieren dort. Auf Dependabot-Branches greift der Hook nicht, ein npm-Bump waere
+# sonst mergebar, ohne dass das Frontend je gebaut hat.
 on:
+  pull_request:
+    branches: [ "main", "master", "develop" ]
   workflow_dispatch:
 
 permissions:
