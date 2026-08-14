@@ -1,10 +1,11 @@
 name: "Security Scan"
 
+# Kein Push- und PR-Trigger mehr: gitleaks, semgrep, npm audit und trivy laufen
+# lokal vor jedem Push (repo-guard, pre-push Hook). Hier bleibt der Wochenlauf,
+# damit neue Advisories auch ohne Push auffallen.
 on:
-  push:
-    branches: [ "main", "master", "develop" ]
-  pull_request:
-    branches: [ "main", "master", "develop" ]
+  schedule:
+    - cron: "17 4 * * 0"
   workflow_dispatch:
 
 permissions:
