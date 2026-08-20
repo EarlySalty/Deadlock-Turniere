@@ -47,10 +47,12 @@ fi
 unset DL_INFISICAL_READY
 unset INFISICAL_SERVICE_TOKEN
 
+if [[ -n "${INVOCATION_ID:-}" && ! -x "$DEPLOY_PREFLIGHT" ]]; then
+  echo "FEHLER: deploy-preflight fehlt unter systemd-Start, breche ab: $DEPLOY_PREFLIGHT" >&2
+  exit 1
+fi
 if [[ -x "$DEPLOY_PREFLIGHT" ]]; then
   "$DEPLOY_PREFLIGHT" "$ROOT_DIR" main "deadlock-turniere"
-else
-  echo "deploy-preflight uebersprungen: $DEPLOY_PREFLIGHT fehlt oder nicht ausfuehrbar" >&2
 fi
 
 export DISCORD_BOT_TOKEN="${DISCORD_BOT_TOKEN:-${DISCORD_TOKEN:-}}"
