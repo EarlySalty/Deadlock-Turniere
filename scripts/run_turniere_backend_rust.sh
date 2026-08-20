@@ -6,6 +6,10 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+DEPLOY_PREFLIGHT="${DEPLOY_PREFLIGHT:-$HOME/Documents/Admin-Scripts/deploy-preflight.sh}"
+if [[ -x "$DEPLOY_PREFLIGHT" ]]; then
+  "$DEPLOY_PREFLIGHT" "$ROOT_DIR" main "deadlock-turniere"
+fi
 CONFIG_FILE="${TURNIERE_CONFIG_FILE:-$HOME/.config/deadlock-turniere/turniere.env}"
 INFISICAL_CONFIG_FILE="${INFISICAL_CONFIG_FILE:-$HOME/.config/deadlock-bots/infisical.conf}"
 INFISICAL_LOADER="${INFISICAL_LOADER:-/home/naniadm/.local/bin/dl-infisical-env}"
