@@ -101,8 +101,21 @@ fn media_type_for_extension(ext_lower: &str) -> &'static str {
     }
 }
 
+/// Prüft, dass eine Discord-ID eine reine Snowflake ist, bevor sie in einen
+/// Dateipfad wandert. `Path::join` übernimmt sonst `../`-Ketten und absolute
+/// Pfade ungebremst, und `/api/avatars/{discord_id}` ist unauthentifiziert.
+/// Axum dekodiert Prozent-Escapes erst nach dem Routing, `%2e%2e%2f` erreicht
+/// den Handler also als `../`.
+fn ist_snowflake(discord_id: &str) -> bool {
+    let len = discord_id.len();
+    (1..=20).contains(&len) && discord_id.bytes().all(|b| b.is_ascii_digit())
+}
+
 /// Sucht eine vorhandene Avatar-Datei für eine Discord-ID (wie `_avatar_file_path`).
 fn avatar_file_path(avatar_dir: &str, discord_id: &str) -> Option<PathBuf> {
+    if !ist_snowflake(discord_id) {
+        return None;
+    }
     for extension in [".jpg", ".jpeg", ".png", ".webp"] {
         let candidate = FsPath::new(avatar_dir).join(format!("{discord_id}{extension}"));
         if candidate.exists() {
@@ -448,6 +461,9 @@ async fn upload_profile_avatar(
     }
 
     let (extension, _media_type) = detect_avatar_format(&data)?;
+    if !ist_snowflake(&user.discord_id) {
+        return Err(WebError::bad_request("Ungueltige Discord-ID"));
+    }
     let avatar_dir = &state.config.avatar_dir;
     tokio::fs::create_dir_all(avatar_dir)
         .await
@@ -612,5 +628,41 @@ fn push_profile_patch<'a>(
         ProfilePatch::OptText(value) => {
             separated.push_bind(value);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{avatar_file_path, ist_snowflake};
+
+    #[test]
+    fn snowflake_akzeptiert_nur_ziffern() {
+        assert!(ist_snowflake("123456789012345678"));
+        assert!(!ist_snowflake(""));
+        assert!(!ist_snowflake("../../etc/passwd"));
+        assert!(!ist_snowflake("+123456789012345678"));
+        assert!(!ist_snowflake("123456789012345678901"));
+        assert!(!ist_snowflake("12345678901234567a"));
+    }
+
+    #[test]
+    fn avatar_pfad_lehnt_traversal_ab() {
+        let dir = std::env::temp_dir().join("turnier-avatar-traversal-test");
+        std::fs::create_dir_all(&dir).expect("Testverzeichnis");
+        let ausserhalb = dir.join("geheim.png");
+        std::fs::write(&ausserhalb, b"x").expect("Testdatei");
+        let unterordner = dir.join("avatars");
+        std::fs::create_dir_all(&unterordner).expect("Avatar-Verzeichnis");
+        let avatar_dir = unterordner.to_string_lossy().to_string();
+
+        // Ohne Guard würde `join` hier auf ../geheim.png zeigen.
+        assert!(avatar_file_path(&avatar_dir, "../geheim").is_none());
+        assert!(avatar_file_path(&avatar_dir, "/tmp/geheim").is_none());
+
+        // Gültige ID findet die eigene Datei weiterhin.
+        std::fs::write(unterordner.join("123456789012345678.png"), b"x").expect("Avatar");
+        assert!(avatar_file_path(&avatar_dir, "123456789012345678").is_some());
+
+        std::fs::remove_dir_all(&dir).ok();
     }
 }
