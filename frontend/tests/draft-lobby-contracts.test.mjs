@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readFileSync, statSync } from 'node:fs'
 import test from 'node:test'
 import { fileURLToPath, URL } from 'node:url'
 
@@ -45,10 +45,34 @@ test('die Hero-Kachel reicht keine ungeprüfte Bildadresse an img weiter', () =>
   assert.ok(!board.includes('<img src={held.image_url}'))
 })
 
-test('externe Schriftimporte stehen vor allen erzeugenden CSS-Importen', () => {
+test('Schriften werden ausschließlich aus lokalen Build-Assets geladen', () => {
   const indexCss = readFileSync(new URL('../src/index.css', import.meta.url), 'utf8')
   const brandCss = readFileSync(new URL('../src/brand-tokens.css', import.meta.url), 'utf8')
+  const indexHtml = readFileSync(new URL('../index.html', import.meta.url), 'utf8')
+  const fontLicense = readFileSync(new URL('../public/fonts/OFL.txt', import.meta.url), 'utf8')
+  const fontFiles = [
+    'manrope-latin-ext.woff2',
+    'manrope-latin.woff2',
+    'sora-latin-ext.woff2',
+    'sora-latin.woff2',
+  ]
 
-  assert.ok(indexCss.trimStart().startsWith('@import url('))
+  assert.ok(!indexCss.includes('fonts.googleapis.com'))
   assert.ok(!brandCss.includes('@import url('))
+  assert.ok(!indexHtml.includes('fonts.googleapis.com'))
+  assert.ok(!indexHtml.includes('fonts.gstatic.com'))
+  assert.ok(fontLicense.includes('The Manrope Project Authors'))
+  assert.ok(fontLicense.includes('The Sora Project Authors'))
+  for (const fontFile of fontFiles) {
+    const fontPath = fileURLToPath(new URL(`../src/assets/fonts/${fontFile}`, import.meta.url))
+    assert.ok(indexCss.includes(`./assets/fonts/${fontFile}`))
+    assert.ok(existsSync(fontPath))
+    assert.ok(statSync(fontPath).size > 10_000)
+  }
+})
+
+test('HTML bindet kein nicht pinbares Cloudflare-Skript ein', () => {
+  const indexHtml = readFileSync(new URL('../index.html', import.meta.url), 'utf8')
+
+  assert.ok(!indexHtml.toLowerCase().includes('static.cloudflareinsights.com'))
 })

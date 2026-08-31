@@ -29,6 +29,10 @@ jobs:
         working-directory: frontend
         run: npm ci
 
+      - name: Run frontend contracts
+        working-directory: frontend
+        run: npm test
+
       - name: Run ESLint
         working-directory: frontend
         run: npm run lint
