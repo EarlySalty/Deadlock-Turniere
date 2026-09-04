@@ -139,8 +139,12 @@ async fn lobby_anlegen_und_oeffentlich_ohne_tokens_lesen() {
             .and_then(|v| v.to_str().ok()),
         Some("no-store")
     );
-    assert_eq!(state.body["team1_name"], "Team Eins");
-    assert_eq!(state.body["team2_name"], "Team Zwei");
+    let namen = [
+        state.body["team1_name"].as_str().expect("team1 name"),
+        state.body["team2_name"].as_str().expect("team2 name"),
+    ];
+    assert!(namen.contains(&"Team Eins"));
+    assert!(namen.contains(&"Team Zwei"));
     assert_eq!(state.body["status"], "in_progress");
     assert_eq!(state.body["round_seconds"], 60);
     assert_eq!(state.body["team1_reserve_left"], 30);
@@ -172,6 +176,20 @@ async fn lobby_aktion_prueft_token_und_liefert_neuen_vollzustand() {
     let team2_token = created.body["team2_token"].as_str().expect("team2 token");
     let uri = format!("/api/draft/lobbies/{code}/action");
 
+    let state = send_json(
+        &ctx.app,
+        ip,
+        Method::GET,
+        &format!("/api/draft/lobbies/{code}"),
+        None,
+    )
+    .await;
+    let (slot1_token, slot2_token) = if state.body["team1_name"] == "Team Eins" {
+        (team1_token, team2_token)
+    } else {
+        (team2_token, team1_token)
+    };
+
     let invalid = send_json(
         &ctx.app,
         ip,
@@ -187,7 +205,7 @@ async fn lobby_aktion_prueft_token_und_liefert_neuen_vollzustand() {
         ip,
         Method::POST,
         &uri,
-        Some(json!({"token": team2_token, "hero_name": "Abrams"})),
+        Some(json!({"token": slot2_token, "hero_name": "Abrams"})),
     )
     .await;
     assert_eq!(wrong_team.status, StatusCode::FORBIDDEN);
@@ -197,7 +215,7 @@ async fn lobby_aktion_prueft_token_und_liefert_neuen_vollzustand() {
         ip,
         Method::POST,
         &uri,
-        Some(json!({"token": team1_token, "hero_name": "Abrams"})),
+        Some(json!({"token": slot1_token, "hero_name": "Abrams"})),
     )
     .await;
     assert_eq!(accepted.status, StatusCode::OK);
