@@ -21,6 +21,14 @@ fn options(round_seconds: Option<i32>, reserve_seconds: Option<i32>) -> CreateLo
     }
 }
 
+async fn slot_tokens(pool: &Pool, code: &str) -> (String, String) {
+    sqlx::query_as("SELECT team1_token, team2_token FROM turnier.draft_sessions WHERE code = $1")
+        .bind(code)
+        .fetch_one(pool)
+        .await
+        .expect("Slot-Tokens laden")
+}
+
 async fn expire_at(pool: &Pool, code: &str, deadline: chrono::DateTime<Utc>) {
     sqlx::query("UPDATE turnier.draft_sessions SET deadline_at = $1 WHERE code = $2")
         .bind(deadline)
@@ -58,7 +66,8 @@ async fn lobby_tokens_unterscheiden_ungueltig_von_falschem_team() {
         .unwrap_err();
     assert!(matches!(invalid, DraftError::InvalidToken));
 
-    let wrong_team = take_lobby_action(db.pool(), &lobby.code, &lobby.team2_token, "Abrams")
+    let (_slot1_token, slot2_token) = slot_tokens(db.pool(), &lobby.code).await;
+    let wrong_team = take_lobby_action(db.pool(), &lobby.code, &slot2_token, "Abrams")
         .await
         .unwrap_err();
     assert!(matches!(wrong_team, DraftError::NotYourTurn));
@@ -68,6 +77,7 @@ async fn lobby_tokens_unterscheiden_ungueltig_von_falschem_team() {
 async fn quick_lobby_laeuft_mit_captain_tokens_bis_completed() {
     let db = temp_db().await;
     let lobby = create_lobby(db.pool(), options(None, None)).await.unwrap();
+    let (slot1_token, slot2_token) = slot_tokens(db.pool(), &lobby.code).await;
     let heroes = [
         "Abrams",
         "Bebop",
@@ -86,8 +96,8 @@ async fn quick_lobby_laeuft_mit_captain_tokens_bis_completed() {
     for hero in heroes {
         let state = get_state_by_code(db.pool(), &lobby.code).await.unwrap();
         let token = match state.current_team_slot {
-            Some(1) => &lobby.team1_token,
-            Some(2) => &lobby.team2_token,
+            Some(1) => &slot1_token,
+            Some(2) => &slot2_token,
             other => panic!("unerwarteter Team-Slot: {other:?}"),
         };
         take_lobby_action(db.pool(), &lobby.code, token, hero)

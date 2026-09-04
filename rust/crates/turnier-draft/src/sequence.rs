@@ -126,6 +126,25 @@ pub const COMPETITIVE_2BAN: [SequenceStep; 16] = [
     step(Pick, One),
 ];
 
+pub const COMPETITIVE_2BAN_MID: [SequenceStep; 16] = [
+    step(Ban, One),
+    step(Ban, Two),
+    step(Pick, One),
+    step(Pick, Two),
+    step(Pick, Two),
+    step(Pick, One),
+    step(Pick, One),
+    step(Pick, Two),
+    step(Ban, Two),
+    step(Ban, One),
+    step(Pick, Two),
+    step(Pick, One),
+    step(Pick, One),
+    step(Pick, Two),
+    step(Pick, Two),
+    step(Pick, One),
+];
+
 /// Wettbewerbs-Preset mit je einem Ban pro Team und dem Standard-Pickmuster.
 pub const COMPETITIVE_1BAN: [SequenceStep; 14] = [
     step(Ban, One),
@@ -175,6 +194,7 @@ pub const SEQUENCE_LEN: usize = DEFAULT_SEQUENCE.len();
 pub fn preset(name: &str) -> Option<&'static [SequenceStep]> {
     match name {
         "competitive_2ban" => Some(&COMPETITIVE_2BAN),
+        "competitive_2ban_mid" => Some(&COMPETITIVE_2BAN_MID),
         "competitive_1ban" => Some(&COMPETITIVE_1BAN),
         "quick_no_ban" => Some(&QUICK_NO_BAN),
         _ => None,
@@ -292,6 +312,7 @@ mod tests {
     fn presets_haben_die_erwartete_verteilung() {
         for (name, bans, picks) in [
             ("competitive_2ban", 4, 12),
+            ("competitive_2ban_mid", 4, 12),
             ("competitive_1ban", 2, 12),
             ("quick_no_ban", 0, 12),
         ] {
@@ -325,6 +346,50 @@ mod tests {
                     .count(),
                 2
             );
+        }
+    }
+
+    #[test]
+    fn competitive_2ban_mid_hat_die_erwartete_reihenfolge() {
+        let sequence = preset("competitive_2ban_mid").expect("bekanntes Preset");
+        let erwartet = [
+            (Ban, One),
+            (Ban, Two),
+            (Pick, One),
+            (Pick, Two),
+            (Pick, Two),
+            (Pick, One),
+            (Pick, One),
+            (Pick, Two),
+            (Ban, Two),
+            (Ban, One),
+            (Pick, Two),
+            (Pick, One),
+            (Pick, One),
+            (Pick, Two),
+            (Pick, Two),
+            (Pick, One),
+        ];
+        assert_eq!(sequence.len(), erwartet.len());
+        for (index, (at, ts)) in erwartet.into_iter().enumerate() {
+            assert_eq!(sequence[index], step(at, ts), "Schritt {index}");
+        }
+
+        for index in [0usize, 1, 8, 9] {
+            assert_eq!(sequence[index].action_type, Ban, "Ban an {index}");
+        }
+        for index in (2..8).chain(10..16) {
+            assert_eq!(sequence[index].action_type, Pick, "Pick an {index}");
+        }
+
+        for offset in 0..6 {
+            let erste = sequence[2 + offset].team_slot;
+            let zweite = sequence[10 + offset].team_slot;
+            let gespiegelt = match erste {
+                One => Two,
+                Two => One,
+            };
+            assert_eq!(zweite, gespiegelt, "Spiegel an Offset {offset}");
         }
     }
 

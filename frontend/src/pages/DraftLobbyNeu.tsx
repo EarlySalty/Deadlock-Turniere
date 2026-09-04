@@ -15,6 +15,7 @@ import { useCreateDraftLobby } from '@/hooks/useDraftLobby'
 import type { DraftPreset, LobbyCredentials } from '@/types/tournament'
 
 const PRESETS: { id: DraftPreset; titel: string; erklaerung: string }[] = [
+  { id: 'competitive_2ban_mid', titel: 'Competitive (Mid-Ban)', erklaerung: '2 Bans, 6 Picks, Ban-Trade in der Mitte, 6 Picks' },
   { id: 'competitive_2ban', titel: 'Competitive', erklaerung: '2 Bans pro Team, dann 6 Picks' },
   { id: 'competitive_1ban', titel: 'Ein Ban', erklaerung: '1 Ban pro Team, dann 6 Picks' },
   { id: 'quick_no_ban', titel: 'Schnell', erklaerung: 'Keine Bans, direkt picken' },
@@ -86,7 +87,7 @@ function Fertig({ zugang }: { zugang: LobbyCredentials }) {
 export default function DraftLobbyNeu() {
   const [team1, setTeam1] = useState('Team 1')
   const [team2, setTeam2] = useState('Team 2')
-  const [preset, setPreset] = useState<DraftPreset>('competitive_2ban')
+  const [preset, setPreset] = useState<DraftPreset>('competitive_2ban_mid')
   const [zugSekunden, setZugSekunden] = useState(30)
   const [reserveSekunden, setReserveSekunden] = useState(120)
   const anlegen = useCreateDraftLobby()

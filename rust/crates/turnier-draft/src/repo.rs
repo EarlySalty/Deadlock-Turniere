@@ -208,6 +208,22 @@ pub async fn create_lobby(pool: &Pool, opts: CreateLobbyOptions) -> DraftResult<
     let code = random_string(&mut rng, 8);
     let team1_token = random_string(&mut rng, 48);
     let team2_token = random_string(&mut rng, 48);
+    let flip = rng.gen_bool(0.5);
+    let (slot1_name, slot1_token, slot2_name, slot2_token) = if flip {
+        (
+            &opts.team2_name,
+            &team2_token,
+            &opts.team1_name,
+            &team1_token,
+        )
+    } else {
+        (
+            &opts.team1_name,
+            &team1_token,
+            &opts.team2_name,
+            &team2_token,
+        )
+    };
     let mut tx = pool.begin().await?;
 
     let (session_id,): (i64,) = sqlx::query_as(
@@ -221,10 +237,10 @@ pub async fn create_lobby(pool: &Pool, opts: CreateLobbyOptions) -> DraftResult<
          RETURNING id",
     )
     .bind(&code)
-    .bind(&opts.team1_name)
-    .bind(&opts.team2_name)
-    .bind(&team1_token)
-    .bind(&team2_token)
+    .bind(slot1_name)
+    .bind(slot2_name)
+    .bind(slot1_token)
+    .bind(slot2_token)
     .bind(Json(&opts.sequence))
     .bind(opts.round_seconds)
     .bind(reserve)

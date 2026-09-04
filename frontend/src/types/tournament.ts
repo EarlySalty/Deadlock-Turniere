@@ -762,7 +762,7 @@ export interface DraftHero {
   image_url: string
 }
 
-export type DraftPreset = 'competitive_2ban' | 'competitive_1ban' | 'quick_no_ban'
+export type DraftPreset = 'competitive_2ban' | 'competitive_2ban_mid' | 'competitive_1ban' | 'quick_no_ban'
 
 /** Ein Schritt der Draft-Reihenfolge dieser Lobby. */
 export interface DraftSequenceStep {
