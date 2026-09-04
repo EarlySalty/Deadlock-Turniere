@@ -139,7 +139,7 @@ export default function DraftLobbyNeu() {
 
           <div className="mt-6">
             <span className="mb-2 block text-xs font-semibold text-muted">Ablauf</span>
-            <div className="grid gap-2 sm:grid-cols-3">
+            <div className="grid gap-2 sm:grid-cols-2">
               {PRESETS.map((p) => (
                 <button
                   key={p.id}

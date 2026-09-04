@@ -190,7 +190,6 @@ const fn step(action_type: ActionType, team_slot: TeamSlot) -> SequenceStep {
 /// Anzahl der Aktionen in der Standard-Sequenz (entspricht `len(DEFAULT_SEQUENCE)`).
 pub const SEQUENCE_LEN: usize = DEFAULT_SEQUENCE.len();
 
-/// Liefert eines der genau drei unterstützten Sequenz-Presets.
 pub fn preset(name: &str) -> Option<&'static [SequenceStep]> {
     match name {
         "competitive_2ban" => Some(&COMPETITIVE_2BAN),

@@ -50,6 +50,21 @@ async fn lobby_anlegen_liefert_code_und_zwei_tokens() {
     assert!(!lobby.team2_token.is_empty());
     assert_ne!(lobby.team1_token, lobby.team2_token);
 
+    let (name1, token1, name2, token2): (String, String, String, String) = sqlx::query_as(
+        "SELECT team1_name, team1_token, team2_name, team2_token \
+         FROM turnier.draft_sessions WHERE code = $1",
+    )
+    .bind(&lobby.code)
+    .fetch_one(db.pool())
+    .await
+    .expect("Slot-Zeile laden");
+    let paare = [
+        (name1.as_str(), token1.as_str()),
+        (name2.as_str(), token2.as_str()),
+    ];
+    assert!(paare.contains(&("Team Eins", lobby.team1_token.as_str())));
+    assert!(paare.contains(&("Team Zwei", lobby.team2_token.as_str())));
+
     let state = get_state_by_code(db.pool(), &lobby.code).await.unwrap();
     assert!(state.session.bracket_match_id.is_none());
     assert_eq!(state.actions.len(), QUICK_NO_BAN.len());
