@@ -36,6 +36,14 @@ pub fn router() -> Router<AppState> {
             "/api/draft/lobbies/{code}/action",
             post(submit_lobby_action),
         )
+        .route("/api/draft/lobbies/{code}/claim", post(claim_lobby))
+        .route("/api/draft/lobbies/{code}/ready", post(ready_lobby))
+        .route("/api/draft/lobbies/{code}/leave", post(leave_lobby))
+        .route("/api/draft/lobbies/{code}/rematch", post(rematch_lobby))
+        .route(
+            "/api/draft/lobbies/{code}/lobby/retry",
+            post(retry_lobby_request_route),
+        )
         .route(
             "/api/draft/matches/{match_id}/start",
             post(start_match_draft),
@@ -57,6 +65,7 @@ async fn list_heroes() -> Json<Value> {
                 "id": hero.id,
                 "name": hero.name,
                 "image_url": hero.image_url,
+                "card_image_url": hero.card_image_url,
             })
         })
         .collect::<Vec<_>>();
@@ -66,11 +75,12 @@ async fn list_heroes() -> Json<Value> {
 /// Request-Body zum Anlegen einer freien Draft-Lobby.
 #[derive(Debug, Deserialize)]
 struct CreateLobbyRequest {
-    team1_name: String,
-    team2_name: String,
-    preset: String,
-    round_seconds: i32,
-    reserve_seconds: i32,
+    team1_name: Option<String>,
+    team2_name: Option<String>,
+    preset: Option<String>,
+    round_seconds: Option<i32>,
+    reserve_seconds: Option<i32>,
+    bans_per_team: Option<i32>,
 }
 
 /// Request-Body einer freien Lobby-Aktion.
@@ -80,30 +90,124 @@ struct LobbyActionRequest {
     hero_name: String,
 }
 
+/// Request-Body des Captain-Claims.
+#[derive(Debug, Deserialize)]
+struct ClaimRequest {
+    team: i64,
+}
+
+/// Request-Body aller Token-Routen.
+#[derive(Debug, Deserialize)]
+struct TokenRequest {
+    token: String,
+}
+
 /// `POST /api/draft/lobbies` — anonyme Draft-Lobby anlegen.
+///
+/// Mit `bans_per_team` entsteht ein Warteraum-Raum (Antwort nur `code`); ohne
+/// bleibt es beim bisherigen Verhalten mit Preset und beiden Slot-Tokens.
 async fn create_lobby(
     State(state): State<AppState>,
     ConnectInfo(address): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
     Json(body): Json<CreateLobbyRequest>,
 ) -> WebResult<Json<Value>> {
-    let options = validate_lobby(body)?;
     enforce_lobby_rate_limit(&state, client_ip(&headers, address.ip()))?;
-    let credentials = turnier_draft::create_lobby(&state.pool, options).await?;
-    Ok(Json(json!({
-        "code": credentials.code,
-        "team1_token": credentials.team1_token,
-        "team2_token": credentials.team2_token,
-    })))
+    match validate_lobby(body)? {
+        LobbyCreateKind::Legacy(options) => {
+            let credentials = turnier_draft::create_lobby(&state.pool, options).await?;
+            Ok(Json(json!({
+                "code": credentials.code,
+                "team1_token": credentials.team1_token,
+                "team2_token": credentials.team2_token,
+            })))
+        }
+        LobbyCreateKind::Room(options) => {
+            let code = turnier_draft::create_room(&state.pool, options).await?;
+            Ok(Json(json!({ "code": code })))
+        }
+    }
 }
 
-/// `GET /api/draft/lobbies/{code}` — öffentlichen Vollzustand lesen.
-async fn get_lobby(
-    State(state): State<AppState>,
-    Path(code): Path<String>,
-) -> WebResult<impl axum::response::IntoResponse> {
-    let draft_state = turnier_draft::get_state_by_code(&state.pool, &code).await?;
-    Ok(([(CACHE_CONTROL, "no-store")], Json(draft_state)))
+enum LobbyCreateKind {
+    Legacy(turnier_draft::CreateLobbyOptions),
+    Room(turnier_draft::CreateRoomOptions),
+}
+
+fn validate_lobby(body: CreateLobbyRequest) -> WebResult<LobbyCreateKind> {
+    if let Some(bans_per_team) = body.bans_per_team {
+        return Ok(LobbyCreateKind::Room(validate_room(body, bans_per_team)?));
+    }
+    let team1_name = validate_team_name(
+        body.team1_name
+            .ok_or_else(|| WebError::bad_request(MISSING_TEAM_NAME))?,
+    )?;
+    let team2_name = validate_team_name(
+        body.team2_name
+            .ok_or_else(|| WebError::bad_request(MISSING_TEAM_NAME))?,
+    )?;
+    let preset = turnier_draft::preset(
+        body.preset
+            .as_deref()
+            .ok_or_else(|| WebError::bad_request(UNKNOWN_PRESET))?,
+    )
+    .ok_or_else(|| WebError::bad_request(UNKNOWN_PRESET))?;
+    let round_seconds = body.round_seconds.ok_or_else(|| {
+        WebError::bad_request("Die Rundendauer muss zwischen 10 und 300 Sekunden liegen.")
+    })?;
+    if !(10..=300).contains(&round_seconds) {
+        return Err(WebError::bad_request(
+            "Die Rundendauer muss zwischen 10 und 300 Sekunden liegen.",
+        ));
+    }
+    let reserve_seconds = body.reserve_seconds.ok_or_else(|| {
+        WebError::bad_request("Die Reservezeit muss zwischen 0 und 600 Sekunden liegen.")
+    })?;
+    if !(0..=600).contains(&reserve_seconds) {
+        return Err(WebError::bad_request(
+            "Die Reservezeit muss zwischen 0 und 600 Sekunden liegen.",
+        ));
+    }
+    Ok(LobbyCreateKind::Legacy(turnier_draft::CreateLobbyOptions {
+        team1_name,
+        team2_name,
+        sequence: preset.to_vec(),
+        round_seconds: Some(round_seconds),
+        reserve_seconds: Some(reserve_seconds),
+    }))
+}
+
+const MISSING_TEAM_NAME: &str = "Teamnamen müssen 1 bis 40 Zeichen lang sein.";
+const UNKNOWN_PRESET: &str = "Dieses Draft-Preset wird nicht unterstützt.";
+
+fn validate_room(
+    body: CreateLobbyRequest,
+    bans_per_team: i32,
+) -> WebResult<turnier_draft::CreateRoomOptions> {
+    if !(0..=6).contains(&bans_per_team) {
+        return Err(WebError::bad_request(
+            "Die Anzahl der Bans je Team muss zwischen 0 und 6 liegen.",
+        ));
+    }
+    let round_seconds = body.round_seconds.unwrap_or(30);
+    if round_seconds != 0 && !(10..=300).contains(&round_seconds) {
+        return Err(WebError::bad_request(
+            "Die Rundendauer muss 0 (aus) oder zwischen 10 und 300 Sekunden liegen.",
+        ));
+    }
+    Ok(turnier_draft::CreateRoomOptions {
+        team1_name: match body.team1_name {
+            Some(name) => validate_team_name(name)?,
+            None => "Team 1".to_string(),
+        },
+        team2_name: match body.team2_name {
+            Some(name) => validate_team_name(name)?,
+            None => "Team 2".to_string(),
+        },
+        sequence: turnier_draft::sequence_for_bans(bans_per_team),
+        bans_per_team,
+        round_seconds: Some(round_seconds),
+    })
 }
 
 /// `POST /api/draft/lobbies/{code}/action` — Captain-Aktion ausführen.
@@ -117,28 +221,199 @@ async fn submit_lobby_action(
     Ok(Json(draft_state))
 }
 
-fn validate_lobby(body: CreateLobbyRequest) -> WebResult<turnier_draft::CreateLobbyOptions> {
-    let team1_name = validate_team_name(body.team1_name)?;
-    let team2_name = validate_team_name(body.team2_name)?;
-    if !(10..=300).contains(&body.round_seconds) {
-        return Err(WebError::bad_request(
-            "Die Rundendauer muss zwischen 10 und 300 Sekunden liegen.",
+/// `GET /api/draft/lobbies/{code}` — öffentlichen Vollzustand lesen.
+///
+/// Liefert die bestehenden Felder plus Warteraum-Vertrag: `phase`,
+/// `team1`/`team2`, `you` (per `X-Draft-Token`), `spectators` (per
+/// `X-Draft-Viewer`), indizierte `sequence`, `lobby` und `rematch_code`.
+async fn get_lobby(
+    State(state): State<AppState>,
+    Path(code): Path<String>,
+    headers: HeaderMap,
+) -> WebResult<impl axum::response::IntoResponse> {
+    let token = header_value(&headers, "x-draft-token");
+    let viewer = header_value(&headers, "x-draft-viewer");
+    let body = lobby_state(&state, &code, token.as_deref(), viewer.as_deref()).await?;
+    Ok(([(CACHE_CONTROL, "no-store")], Json(body)))
+}
+
+fn header_value(headers: &HeaderMap, name: &str) -> Option<String> {
+    headers
+        .get(name)
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_string)
+        .filter(|value| !value.trim().is_empty())
+}
+
+async fn lobby_state(
+    state: &AppState,
+    code: &str,
+    token: Option<&str>,
+    viewer: Option<&str>,
+) -> WebResult<Value> {
+    let draft_state = turnier_draft::get_state_by_code(&state.pool, code).await?;
+    let mut value = serde_json::to_value(&draft_state).unwrap_or_else(|_| json!({}));
+    let Value::Object(map) = &mut value else {
+        return Err(WebError::internal(
+            "Draft-Zustand konnte nicht gelesen werden",
         ));
+    };
+    let phase = match draft_state.session.status.as_str() {
+        "warteraum" => "warteraum",
+        "completed" => "abgeschlossen",
+        _ => "laeuft",
+    };
+    map.insert("phase".to_string(), json!(phase));
+    map.insert(
+        "team1".to_string(),
+        json!({
+            "name": draft_state.session.team1_name,
+            "claimed": draft_state.session.team1_claimed,
+            "ready": draft_state.session.team1_ready,
+        }),
+    );
+    map.insert(
+        "team2".to_string(),
+        json!({
+            "name": draft_state.session.team2_name,
+            "claimed": draft_state.session.team2_claimed,
+            "ready": draft_state.session.team2_ready,
+        }),
+    );
+    let you_team = match token {
+        Some(token) => token_to_team(&state.pool, code, token).await?,
+        None => None,
+    };
+    map.insert("you".to_string(), json!({ "team": you_team }));
+    map.insert(
+        "spectators".to_string(),
+        json!(count_viewers(state, code, viewer)),
+    );
+    map.insert(
+        "sequence".to_string(),
+        json!(draft_state
+            .session
+            .sequence
+            .iter()
+            .enumerate()
+            .map(|(index, step)| json!({
+                "index": index,
+                "team": step.team_slot.as_i64(),
+                "action": step.action_type.as_str(),
+            }))
+            .collect::<Vec<_>>()),
+    );
+    map.insert(
+        "lobby".to_string(),
+        json!({
+            "status": draft_state.session.lobby_status,
+            "join_code": draft_state.session.lobby_join_code,
+            "error": draft_state.session.lobby_error,
+            "match_id": draft_state.session.lobby_match_id,
+            "result": draft_state.session.lobby_result,
+        }),
+    );
+    let rematch_code: Option<String> = sqlx::query_scalar(
+        "SELECT code FROM turnier.draft_sessions \
+         WHERE rematch_of_code = $1 AND code IS NOT NULL \
+         ORDER BY created_at DESC, id DESC LIMIT 1",
+    )
+    .bind(code)
+    .fetch_optional(&state.pool)
+    .await?;
+    map.insert("rematch_code".to_string(), json!(rematch_code));
+    Ok(value)
+}
+
+async fn token_to_team(pool: &turnier_db::Pool, code: &str, token: &str) -> WebResult<Option<i64>> {
+    let team: Option<i64> = sqlx::query_scalar(
+        "SELECT CASE \
+             WHEN $2::text = team1_token THEN 1::BIGINT \
+             WHEN $2::text = team2_token THEN 2::BIGINT \
+         END \
+         FROM turnier.draft_sessions WHERE code = $1",
+    )
+    .bind(code)
+    .bind(token)
+    .fetch_optional(pool)
+    .await?
+    .flatten();
+    Ok(team)
+}
+
+/// Zählt die Zuschauer des Raums (20 Sekunden Fenster) und merkt den
+/// mitgelieferten Viewer als anwesend.
+fn count_viewers(state: &AppState, code: &str, viewer: Option<&str>) -> i64 {
+    let mut viewers = state
+        .draft_viewers
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let now = Instant::now();
+    let entry = viewers.entry(code.to_string()).or_default();
+    entry.retain(|_, seen| now.duration_since(*seen) < Duration::from_secs(20));
+    if let Some(viewer) = viewer {
+        entry.insert(viewer.to_string(), now);
     }
-    if !(0..=600).contains(&body.reserve_seconds) {
-        return Err(WebError::bad_request(
-            "Die Reservezeit muss zwischen 0 und 600 Sekunden liegen.",
-        ));
+    entry.len() as i64
+}
+
+/// `POST /api/draft/lobbies/{code}/claim` — Captain-Platz übernehmen.
+async fn claim_lobby(
+    State(state): State<AppState>,
+    Path(code): Path<String>,
+    Json(body): Json<ClaimRequest>,
+) -> WebResult<Json<Value>> {
+    let outcome = turnier_draft::claim_room(&state.pool, &code, body.team).await?;
+    Ok(Json(
+        json!({ "team": outcome.team, "token": outcome.token }),
+    ))
+}
+
+/// `POST /api/draft/lobbies/{code}/ready` — Bereit melden.
+async fn ready_lobby(
+    State(state): State<AppState>,
+    Path(code): Path<String>,
+    Json(body): Json<TokenRequest>,
+) -> WebResult<Json<Value>> {
+    let started = turnier_draft::room_ready(&state.pool, &code, &body.token).await?;
+    let mut value = lobby_state(&state, &code, Some(&body.token), None).await?;
+    if let Value::Object(map) = &mut value {
+        map.insert("started".to_string(), json!(started.started));
     }
-    let sequence = turnier_draft::preset(&body.preset)
-        .ok_or_else(|| WebError::bad_request("Dieses Draft-Preset wird nicht unterstützt."))?;
-    Ok(turnier_draft::CreateLobbyOptions {
-        team1_name,
-        team2_name,
-        sequence: sequence.to_vec(),
-        round_seconds: Some(body.round_seconds),
-        reserve_seconds: Some(body.reserve_seconds),
-    })
+    Ok(Json(value))
+}
+
+/// `POST /api/draft/lobbies/{code}/leave` — Platz freigeben.
+async fn leave_lobby(
+    State(state): State<AppState>,
+    Path(code): Path<String>,
+    Json(body): Json<TokenRequest>,
+) -> WebResult<Json<Value>> {
+    turnier_draft::leave_room(&state.pool, &code, &body.token).await?;
+    let value = lobby_state(&state, &code, Some(&body.token), None).await?;
+    Ok(Json(value))
+}
+
+/// `POST /api/draft/lobbies/{code}/rematch` — neuen Raum mit getauschten Seiten.
+async fn rematch_lobby(
+    State(state): State<AppState>,
+    Path(code): Path<String>,
+    Json(body): Json<TokenRequest>,
+) -> WebResult<Json<Value>> {
+    let new_code = turnier_draft::rematch_room(&state.pool, &code, &body.token).await?;
+    Ok(Json(json!({ "code": new_code })))
+}
+
+/// `POST /api/draft/lobbies/{code}/lobby/retry` — fehlgeschlagene Lobby-Anfrage
+/// erneut anstoßen.
+async fn retry_lobby_request_route(
+    State(state): State<AppState>,
+    Path(code): Path<String>,
+    Json(body): Json<TokenRequest>,
+) -> WebResult<Json<Value>> {
+    turnier_draft::retry_lobby_request(&state.pool, &code, &body.token).await?;
+    let value = lobby_state(&state, &code, Some(&body.token), None).await?;
+    Ok(Json(value))
 }
 
 fn validate_team_name(name: String) -> WebResult<String> {

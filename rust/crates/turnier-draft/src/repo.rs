@@ -576,6 +576,38 @@ pub async fn rematch_room(pool: &Pool, code: &str, token: &str) -> DraftResult<S
     Ok(new_code)
 }
 
+pub async fn retry_lobby_request(pool: &Pool, code: &str, token: &str) -> DraftResult<()> {
+    let mut tx = pool.begin().await?;
+    let (lobby_status, team1_token, team2_token): (String, String, String) = sqlx::query_as(
+        "SELECT lobby_status, team1_token, team2_token \
+         FROM turnier.draft_sessions WHERE code = $1 FOR UPDATE",
+    )
+    .bind(code)
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or(DraftError::LobbyNotFound)?;
+    if token != team1_token && token != team2_token {
+        return Err(DraftError::InvalidToken);
+    }
+    match lobby_status.as_str() {
+        "fehler" => {}
+        "angefordert" => {
+            tx.commit().await?;
+            return Ok(());
+        }
+        _ => return Err(DraftError::RoomNotOpen),
+    }
+    sqlx::query(
+        "UPDATE turnier.draft_sessions \
+         SET lobby_status = 'angefordert', lobby_error = NULL WHERE code = $1",
+    )
+    .bind(code)
+    .execute(&mut *tx)
+    .await?;
+    tx.commit().await?;
+    Ok(())
+}
+
 async fn materialize_actions(
     tx: &mut Transaction<'_, Postgres>,
     session_id: i64,

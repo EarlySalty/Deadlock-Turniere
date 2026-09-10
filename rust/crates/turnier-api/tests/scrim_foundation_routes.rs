@@ -95,6 +95,7 @@ fn state_with_pool_broker_and_signup_role(
         rank_resolver,
         notifier,
         draft_lobby_creations: Arc::new(Mutex::new(HashMap::new())),
+        draft_viewers: Arc::new(Mutex::new(HashMap::new())),
     }
 }
 

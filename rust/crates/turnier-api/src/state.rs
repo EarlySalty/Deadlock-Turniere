@@ -34,6 +34,8 @@ pub struct AppState {
     pub notifier: Arc<DiscordNotifier>,
     /// Erstellungszeitpunkte freier Draft-Lobbys je Client-IP.
     pub draft_lobby_creations: Arc<Mutex<HashMap<IpAddr, Vec<Instant>>>>,
+    /// Zuletzt gesehene Draft-Zuschauer je Raum-Code (Viewer-Heartbeat).
+    pub draft_viewers: Arc<Mutex<HashMap<String, HashMap<String, Instant>>>>,
 }
 
 impl AppState {
@@ -78,6 +80,7 @@ impl AppState {
             rank_resolver,
             notifier: Arc::new(notifier),
             draft_lobby_creations: Arc::new(Mutex::new(HashMap::new())),
+            draft_viewers: Arc::new(Mutex::new(HashMap::new())),
         })
     }
 }
