@@ -6,6 +6,7 @@
 //! Feldnamen entsprechen 1:1 dem JSON, das die `/api/draft`-Routen ausliefern.
 
 use serde::Serialize;
+use serde_json::Value;
 
 use crate::sequence::{ActionType, SequenceStep};
 
@@ -49,6 +50,16 @@ pub struct DraftSession {
     pub started_at: Option<String>,
     pub completed_at: Option<String>,
     pub created_at: String,
+    pub bans_per_team: i32,
+    pub team1_claimed: bool,
+    pub team2_claimed: bool,
+    pub team1_ready: bool,
+    pub team2_ready: bool,
+    pub lobby_status: String,
+    pub lobby_join_code: Option<String>,
+    pub lobby_error: Option<String>,
+    pub lobby_match_id: Option<String>,
+    pub lobby_result: Option<Value>,
 }
 
 /// Vollständiger Draft-Zustand — Rückgabe von [`crate::get_draft_state`].

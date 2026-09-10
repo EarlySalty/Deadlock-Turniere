@@ -190,6 +190,21 @@ const fn step(action_type: ActionType, team_slot: TeamSlot) -> SequenceStep {
 /// Anzahl der Aktionen in der Standard-Sequenz (entspricht `len(DEFAULT_SEQUENCE)`).
 pub const SEQUENCE_LEN: usize = DEFAULT_SEQUENCE.len();
 
+const SNAKE_PICKS: [TeamSlot; 12] = [One, Two, Two, One, One, Two, Two, One, One, Two, Two, One];
+
+pub fn sequence_for_bans(bans_per_team: i32) -> Vec<SequenceStep> {
+    let bans = bans_per_team.clamp(0, 6) as usize;
+    let mut sequence = Vec::with_capacity(bans * 2 + SNAKE_PICKS.len());
+    for index in 0..(bans * 2) {
+        let team_slot = if index % 2 == 0 { One } else { Two };
+        sequence.push(step(Ban, team_slot));
+    }
+    for team_slot in SNAKE_PICKS {
+        sequence.push(step(Pick, team_slot));
+    }
+    sequence
+}
+
 pub fn preset(name: &str) -> Option<&'static [SequenceStep]> {
     match name {
         "competitive_2ban" => Some(&COMPETITIVE_2BAN),
@@ -407,5 +422,73 @@ mod tests {
         assert!(is_complete(sequence, 12));
         assert_eq!(step_at(sequence, 11), Some(step(Pick, One)));
         assert_eq!(step_at(sequence, 12), None);
+    }
+
+    #[test]
+    fn generator_liefert_fuer_n3_sechs_bans_und_zwoelf_picks() {
+        let sequence = sequence_for_bans(3);
+        assert_eq!(sequence.len(), 18);
+        assert_eq!(sequence.iter().filter(|s| s.action_type == Ban).count(), 6);
+        assert_eq!(
+            sequence.iter().filter(|s| s.action_type == Pick).count(),
+            12
+        );
+        for team in [One, Two] {
+            assert_eq!(
+                sequence
+                    .iter()
+                    .filter(|s| s.action_type == Ban && s.team_slot == team)
+                    .count(),
+                3
+            );
+            assert_eq!(
+                sequence
+                    .iter()
+                    .filter(|s| s.action_type == Pick && s.team_slot == team)
+                    .count(),
+                6
+            );
+        }
+    }
+
+    #[test]
+    fn generator_bans_alternieren_vorne_und_picks_folgen_dem_snake() {
+        for bans_per_team in 0..=6_i32 {
+            let sequence = sequence_for_bans(bans_per_team);
+            assert_eq!(sequence.len(), (bans_per_team as usize) * 2 + 12);
+            for (index, s) in sequence
+                .iter()
+                .take((bans_per_team as usize) * 2)
+                .enumerate()
+            {
+                assert_eq!(s.action_type, Ban, "Ban an {index} bei n={bans_per_team}");
+                let erwartet = if index % 2 == 0 { One } else { Two };
+                assert_eq!(
+                    s.team_slot, erwartet,
+                    "Ban-Team an {index} bei n={bans_per_team}"
+                );
+            }
+            for (offset, s) in sequence
+                .iter()
+                .skip((bans_per_team as usize) * 2)
+                .enumerate()
+            {
+                assert_eq!(
+                    s.action_type, Pick,
+                    "Pick an Offset {offset} bei n={bans_per_team}"
+                );
+                assert_eq!(s.team_slot, SNAKE_PICKS[offset]);
+            }
+        }
+    }
+
+    #[test]
+    fn generator_ohne_bans_entspricht_dem_quick_preset() {
+        assert_eq!(sequence_for_bans(0), QUICK_NO_BAN.to_vec());
+    }
+
+    #[test]
+    fn generator_mit_drei_bans_entspricht_der_default_sequenz() {
+        assert_eq!(sequence_for_bans(3), DEFAULT_SEQUENCE.to_vec());
     }
 }
