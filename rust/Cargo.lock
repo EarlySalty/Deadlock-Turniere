@@ -2183,6 +2183,8 @@ dependencies = [
  "axum",
  "axum-extra",
  "chrono",
+ "once_cell",
+ "reqwest",
  "serde",
  "serde_json",
  "sha2",
