@@ -361,14 +361,14 @@ async fn lobby_job_bringt_einen_draft_bis_zum_ergebnis() {
         (
             posts[1]["idempotency_key"].clone(),
             posts[1]["channel_id"].clone(),
-            posts[1]["embed"]["description"].as_str().unwrap_or("").to_string(),
+            posts[1]["embed"]["description"]
+                .as_str()
+                .unwrap_or("")
+                .to_string(),
             match_field,
         )
     };
-    assert_eq!(
-        ergebnis_key,
-        json!(format!("draft:{code}:ergebnis"))
-    );
+    assert_eq!(ergebnis_key, json!(format!("draft:{code}:ergebnis")));
     assert_eq!(ergebnis_channel, 555);
     assert!(
         ergebnis_description.contains(&format!(

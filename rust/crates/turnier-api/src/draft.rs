@@ -102,10 +102,6 @@ struct TokenRequest {
     token: String,
 }
 
-/// `POST /api/draft/lobbies` — anonyme Draft-Lobby anlegen.
-///
-/// Mit `bans_per_team` entsteht ein Warteraum-Raum (Antwort nur `code`); ohne
-/// bleibt es beim bisherigen Verhalten mit Preset und beiden Slot-Tokens.
 async fn create_lobby(
     State(state): State<AppState>,
     ConnectInfo(address): ConnectInfo<SocketAddr>,
@@ -221,11 +217,6 @@ async fn submit_lobby_action(
     Ok(Json(draft_state))
 }
 
-/// `GET /api/draft/lobbies/{code}` — öffentlichen Vollzustand lesen.
-///
-/// Liefert die bestehenden Felder plus Warteraum-Vertrag: `phase`,
-/// `team1`/`team2`, `you` (per `X-Draft-Token`), `spectators` (per
-/// `X-Draft-Viewer`), indizierte `sequence`, `lobby` und `rematch_code`.
 async fn get_lobby(
     State(state): State<AppState>,
     Path(code): Path<String>,
@@ -357,7 +348,6 @@ fn count_viewers(state: &AppState, code: &str, viewer: Option<&str>) -> i64 {
     entry.len() as i64
 }
 
-/// `POST /api/draft/lobbies/{code}/claim` — Captain-Platz übernehmen.
 async fn claim_lobby(
     State(state): State<AppState>,
     Path(code): Path<String>,
@@ -369,7 +359,6 @@ async fn claim_lobby(
     ))
 }
 
-/// `POST /api/draft/lobbies/{code}/ready` — Bereit melden.
 async fn ready_lobby(
     State(state): State<AppState>,
     Path(code): Path<String>,
@@ -383,7 +372,6 @@ async fn ready_lobby(
     Ok(Json(value))
 }
 
-/// `POST /api/draft/lobbies/{code}/leave` — Platz freigeben.
 async fn leave_lobby(
     State(state): State<AppState>,
     Path(code): Path<String>,
@@ -394,7 +382,6 @@ async fn leave_lobby(
     Ok(Json(value))
 }
 
-/// `POST /api/draft/lobbies/{code}/rematch` — neuen Raum mit getauschten Seiten.
 async fn rematch_lobby(
     State(state): State<AppState>,
     Path(code): Path<String>,
@@ -404,8 +391,6 @@ async fn rematch_lobby(
     Ok(Json(json!({ "code": new_code })))
 }
 
-/// `POST /api/draft/lobbies/{code}/lobby/retry` — fehlgeschlagene Lobby-Anfrage
-/// erneut anstoßen.
 async fn retry_lobby_request_route(
     State(state): State<AppState>,
     Path(code): Path<String>,

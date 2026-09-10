@@ -564,7 +564,7 @@ async fn post_lobby_announcement(state: &AppState, row: &ScrimLobbyRow) -> Resul
             &row.code,
             row.team1_name.as_deref().unwrap_or("Team 1"),
             row.team2_name.as_deref().unwrap_or("Team 2"),
-            row.lobby_join_code.as_deref().unwrap_or("—"),
+            row.lobby_join_code.as_deref().unwrap_or("offen"),
             &bans_text,
             &picks.0,
             &picks.1,

@@ -1,7 +1,4 @@
 #!/usr/bin/env bash
-# Durchlauf durch den Scrim-Draft-Raum-Vertrag gegen ein laufendes Backend.
-# Standardziel ist der Worktree-Start auf 127.0.0.1:8900; abweichende Ziele
-# ueber BASE_URL. curl ist in Agenten-Shells gesperrt, daher urllib.
 set -euo pipefail
 
 BASE_URL="${BASE_URL:-http://127.0.0.1:8900}"

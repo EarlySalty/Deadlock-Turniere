@@ -34,20 +34,15 @@ pub enum DraftError {
     #[error("Du bist in diesem Draft kein Captain")]
     InvalidToken,
 
-    /// Team-Slot weder 1 noch 2.
     #[error("Ungültiges Team")]
     InvalidTeam,
 
-    /// Dieser Captain-Platz ist bereits von jemand anderem übernommen.
     #[error("Dieser Captain-Platz ist schon belegt")]
     SlotTaken,
 
-    /// Der Warteraum ist nicht mehr offen: der Draft läuft bereits oder ist
-    /// abgeschlossen, Claims und Leaves sind damit nicht mehr möglich.
     #[error("Dieser Draft läuft bereits")]
     RoomNotOpen,
 
-    /// Ein Rematch ist erst nach Abschluss des Drafts möglich.
     #[error("Ein Rematch ist erst nach Abschluss des Drafts möglich")]
     RematchUnavailable,
 

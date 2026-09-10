@@ -676,7 +676,7 @@ impl DiscordNotifier {
             .description(format!("**Sieger: {winner_name}**\nDauer: {duration_str}"))
             .field(
                 "Match ID (Deadlock)",
-                deadlock_match_id.unwrap_or("—").to_string(),
+                deadlock_match_id.unwrap_or("unbekannt").to_string(),
                 true,
             )
             .field("Teams", format!("{team1_name} vs {team2_name}"), true);
@@ -699,7 +699,6 @@ impl DiscordNotifier {
 
     // --- Scrim-Draft-Posts ------------------------------------------------
 
-    /// Postet die Scrim-Lobby-Ansage mit Join-Code in einen Kanal.
     #[allow(clippy::too_many_arguments)]
     pub async fn send_scrim_lobby_post(
         &self,
@@ -744,9 +743,6 @@ impl DiscordNotifier {
             .await
     }
 
-    /// Postet das Scrim-Ergebnis mit Sieger, Dauer und Match-ID in einen Kanal.
-    /// `result_card_png` ist der Platz für die Ergebniskarte aus dem Match-Daten
-    /// Nachfolgepaket; sie wird erst angehängt, wenn dort angeliert.
     #[allow(clippy::too_many_arguments)]
     pub async fn send_scrim_result_post(
         &self,
@@ -766,7 +762,11 @@ impl DiscordNotifier {
         let embed = Embed::new()
             .title(format!("Scrim-Ergebnis: {team1_name} vs {team2_name}"))
             .description(format!("**Sieger: {winner_text}**\nDauer: {duration_str}"))
-            .field("Match-ID", match_id.unwrap_or("—").to_string(), true);
+            .field(
+                "Match-ID",
+                match_id.unwrap_or("unbekannt").to_string(),
+                true,
+            );
 
         let payload = json!({
             "channel_id": channel_id,
@@ -901,7 +901,7 @@ fn routine_announcement_payload(tournament_id: i64, channel_id: i64, content: &s
 fn mentions_or_dash(ids: &[String]) -> String {
     let raw: Vec<String> = ids.iter().map(|id| format!("<@{id}>")).collect();
     if raw.is_empty() {
-        "—".to_string()
+        "keine".to_string()
     } else {
         raw.join(" ")
     }
@@ -909,7 +909,7 @@ fn mentions_or_dash(ids: &[String]) -> String {
 
 fn list_or_dash(values: &[String]) -> String {
     if values.is_empty() {
-        "—".to_string()
+        "keine".to_string()
     } else {
         values.join(", ")
     }

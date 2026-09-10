@@ -36,9 +36,7 @@ pub struct AppState {
     pub notifier: Arc<DiscordNotifier>,
     /// Erstellungszeitpunkte freier Draft-Lobbys je Client-IP.
     pub draft_lobby_creations: Arc<Mutex<HashMap<IpAddr, Vec<Instant>>>>,
-    /// Zuletzt gesehene Draft-Zuschauer je Raum-Code (Viewer-Heartbeat).
     pub draft_viewers: Arc<Mutex<HashMap<String, HashMap<String, Instant>>>>,
-    /// Client für die interne Steam-Bot-Lobby-API.
     pub scrim_lobby: Arc<ScrimLobbyClient>,
 }
 
