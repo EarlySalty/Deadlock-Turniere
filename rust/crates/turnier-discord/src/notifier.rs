@@ -697,6 +697,89 @@ impl DiscordNotifier {
             .await
     }
 
+    // --- Scrim-Draft-Posts ------------------------------------------------
+
+    /// Postet die Scrim-Lobby-Ansage mit Join-Code in einen Kanal.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn send_scrim_lobby_post(
+        &self,
+        channel_id: i64,
+        idempotency_key: &str,
+        code: &str,
+        team1_name: &str,
+        team2_name: &str,
+        join_code: &str,
+        bans_text: &str,
+        picks_team1: &[String],
+        picks_team2: &[String],
+    ) -> BrokerResult<Value> {
+        let mut embed = Embed::new()
+            .title(format!("Scrim-Draft: {team1_name} vs {team2_name}"))
+            .description(format!(
+                "Die Lobby für den Scrim-Draft `{code}` ist bereit."
+            ))
+            .field("Join-Code", format!("`{join_code}`"), true)
+            .field("Bans", bans_text.to_string(), true)
+            .field(
+                format!("Team 1: {team1_name}"),
+                list_or_dash(picks_team1),
+                true,
+            )
+            .field(
+                format!("Team 2: {team2_name}"),
+                list_or_dash(picks_team2),
+                true,
+            );
+        embed = embed.field("Raum", format!("`{code}`"), false);
+
+        let payload = json!({
+            "channel_id": channel_id,
+            "content": Value::Null,
+            "embed": embed,
+            "allowed_user_ids": Vec::<u64>::new(),
+            "idempotency_key": idempotency_key,
+        });
+        self.broker
+            .post_internal(path::SEND_RICH_MESSAGE, &payload)
+            .await
+    }
+
+    /// Postet das Scrim-Ergebnis mit Sieger, Dauer und Match-ID in einen Kanal.
+    /// `result_card_png` ist der Platz für die Ergebniskarte aus dem Match-Daten
+    /// Nachfolgepaket; sie wird erst angehängt, wenn dort angeliert.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn send_scrim_result_post(
+        &self,
+        channel_id: i64,
+        idempotency_key: &str,
+        team1_name: &str,
+        team2_name: &str,
+        winner_text: &str,
+        duration_s: Option<i64>,
+        match_id: Option<&str>,
+        #[allow(unused_variables)] result_card_png: Option<&[u8]>,
+    ) -> BrokerResult<Value> {
+        let duration_str = match duration_s {
+            Some(seconds) if seconds > 0 => format!("{}m {}s", seconds / 60, seconds % 60),
+            _ => "unbekannt".to_string(),
+        };
+        let embed = Embed::new()
+            .title(format!("Scrim-Ergebnis: {team1_name} vs {team2_name}"))
+            .description(format!("**Sieger: {winner_text}**\nDauer: {duration_str}"))
+            .field("Match-ID", match_id.unwrap_or("—").to_string(), true);
+
+        let payload = json!({
+            "channel_id": channel_id,
+            "content": Value::Null,
+            "embed": embed,
+            "allowed_user_ids": Vec::<u64>::new(),
+            "idempotency_key": idempotency_key,
+        });
+        self.broker
+            .post_internal(path::SEND_RICH_MESSAGE, &payload)
+            .await
+    }
+
     // --- Voice/Rollen-Abfragen ------------------------------------------
 
     /// Verschiebt User einzeln in einen Voice-Channel (idempotency_key pro Call).
@@ -821,6 +904,14 @@ fn mentions_or_dash(ids: &[String]) -> String {
         "—".to_string()
     } else {
         raw.join(" ")
+    }
+}
+
+fn list_or_dash(values: &[String]) -> String {
+    if values.is_empty() {
+        "—".to_string()
+    } else {
+        values.join(", ")
     }
 }
 

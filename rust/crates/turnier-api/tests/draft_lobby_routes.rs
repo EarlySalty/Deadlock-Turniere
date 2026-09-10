@@ -402,7 +402,7 @@ fn raum_body(bans_per_team: i32, round_seconds: i32) -> Value {
 async fn lese_zustand(ctx: &TestApp, code: &str, token: Option<&str>) -> TestResponse {
     let mut builder = Request::builder()
         .method(Method::GET)
-        .uri(&format!("/api/draft/lobbies/{code}"))
+        .uri(format!("/api/draft/lobbies/{code}"))
         .header(HOST, "localhost")
         .header(CONTENT_TYPE, "application/json");
     if let Some(token) = token {
@@ -818,7 +818,7 @@ async fn zuschauer_zaehlen_ueber_den_viewer_header() {
     for (viewer, erwartet) in [("viewer-a", 1), ("viewer-b", 2), ("viewer-a", 2)] {
         let request = Request::builder()
             .method(Method::GET)
-            .uri(&format!("/api/draft/lobbies/{code}"))
+            .uri(format!("/api/draft/lobbies/{code}"))
             .header(HOST, "localhost")
             .header("x-draft-viewer", viewer)
             .body(Body::empty())

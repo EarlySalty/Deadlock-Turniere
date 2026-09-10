@@ -26,6 +26,7 @@ pub mod internal_scrims;
 pub mod leaderboard;
 pub mod operations;
 pub mod public;
+pub mod scrim_lobby;
 pub mod test_mode;
 
 pub use app::build_router;

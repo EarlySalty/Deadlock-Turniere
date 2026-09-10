@@ -15,6 +15,8 @@ use turnier_discord::{BrokerClient, DiscordNotifier};
 use turnier_match::{MatchManager, SteamBridge};
 use turnier_steam::RankResolver;
 
+use crate::scrim_lobby::ScrimLobbyClient;
+
 /// Zentraler, geteilter Anwendungszustand.
 #[derive(Clone)]
 pub struct AppState {
@@ -36,6 +38,8 @@ pub struct AppState {
     pub draft_lobby_creations: Arc<Mutex<HashMap<IpAddr, Vec<Instant>>>>,
     /// Zuletzt gesehene Draft-Zuschauer je Raum-Code (Viewer-Heartbeat).
     pub draft_viewers: Arc<Mutex<HashMap<String, HashMap<String, Instant>>>>,
+    /// Client für die interne Steam-Bot-Lobby-API.
+    pub scrim_lobby: Arc<ScrimLobbyClient>,
 }
 
 impl AppState {
@@ -70,6 +74,10 @@ impl AppState {
 
         let rank_resolver: Arc<dyn RankResolver> =
             Arc::new(turnier_steam::build_resolver(pool.clone(), &config).await?);
+        let scrim_lobby = Arc::new(ScrimLobbyClient::new(
+            &config.steam_bot_base_url,
+            &config.steam_bot_internal_token,
+        ));
 
         Ok(Self {
             pool,
@@ -81,6 +89,7 @@ impl AppState {
             notifier: Arc::new(notifier),
             draft_lobby_creations: Arc::new(Mutex::new(HashMap::new())),
             draft_viewers: Arc::new(Mutex::new(HashMap::new())),
+            scrim_lobby,
         })
     }
 }
