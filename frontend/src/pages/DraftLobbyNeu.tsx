@@ -1,204 +1,309 @@
-/**
- * Freie Draft-Lobby anlegen (/turnier/draft).
- *
- * Kein Login. Wer die Lobby aufmacht, bekommt drei Links: einen je Captain und
- * einen zum Zuschauen. Die Captain-Tokens liefert der Server GENAU EINMAL, beim
- * Anlegen — danach sind sie nirgends mehr abrufbar. Deshalb bleiben sie hier
- * stehen, bis der Ersteller sie verteilt hat.
- */
 import { useState } from 'react'
-import { Link } from 'react-router-dom'
-import { Swords, Copy, Check, Eye } from 'lucide-react'
-import Card from '@/components/ui/Card'
-import Button from '@/components/ui/Button'
-import { useCreateDraftLobby } from '@/hooks/useDraftLobby'
-import type { DraftPreset, LobbyCredentials } from '@/types/tournament'
+import { useNavigate } from 'react-router-dom'
+import { motion } from 'framer-motion'
+import { Play, Swords } from 'lucide-react'
+import DraftHintergrund from '@/components/draft/DraftHintergrund'
+import { BLAU, GOLD, TINTE } from '@/components/draft/farben'
+import { useDraftHeroList, useDraftRaumAnlegen } from '@/hooks/useDraftLobby'
+import { heroImageUrl } from '@/hooks/draftLobbyState'
 
-const PRESETS: { id: DraftPreset; titel: string; erklaerung: string }[] = [
-  { id: 'competitive_2ban_mid', titel: 'Competitive (Mid-Ban)', erklaerung: '2 Bans, 6 Picks, Ban-Trade in der Mitte, 6 Picks' },
-  { id: 'competitive_2ban', titel: 'Competitive', erklaerung: '2 Bans pro Team, dann 6 Picks' },
-  { id: 'competitive_1ban', titel: 'Ein Ban', erklaerung: '1 Ban pro Team, dann 6 Picks' },
-  { id: 'quick_no_ban', titel: 'Schnell', erklaerung: 'Keine Bans, direkt picken' },
-]
+const BANS_OPTIONEN = [0, 1, 2, 3, 4, 5, 6]
+const TIMER_OPTIONEN = [0, 30, 45, 60, 90]
 
-function LinkZeile({ beschriftung, url, betont }: { beschriftung: string; url: string; betont?: boolean }) {
-  const [kopiert, setKopiert] = useState(false)
-  const kopieren = async () => {
-    try {
-      await navigator.clipboard.writeText(url)
-      setKopiert(true)
-      window.setTimeout(() => setKopiert(false), 1600)
-    } catch {
-      setKopiert(false)
-    }
-  }
+function PillGruppe({
+  label,
+  optionen,
+  aktiv,
+  onWahl,
+}: {
+  label: string
+  optionen: { wert: number; text: string; deaktiviert?: boolean }[]
+  aktiv: number
+  onWahl: (wert: number) => void
+}) {
   return (
-    <div className="flex items-center gap-3">
-      <div className="min-w-0 flex-1">
-        <div className={`text-xs font-semibold ${betont ? 'text-primary' : 'text-muted'}`}>{beschriftung}</div>
-        <div className="truncate font-mono text-xs text-foreground/70">{url}</div>
+    <div>
+      <div className="mb-2 text-[9px] uppercase tracking-[0.3em] text-white/30">{label}</div>
+      <div className="flex flex-wrap gap-1.5">
+        {optionen.map((o) => {
+          const gewaehlt = o.wert === aktiv
+          return (
+            <button
+              key={o.wert}
+              type="button"
+              disabled={o.deaktiviert}
+              onClick={() => onWahl(o.wert)}
+              className={`rounded-full border px-3 py-1 text-[10px] font-bold uppercase tracking-[0.15em] transition-colors ${
+                gewaehlt
+                  ? 'border-[#c8a86b] bg-[#c8a86b]/10 text-[#c8a86b]'
+                  : 'border-white/10 text-white/40 hover:border-white/25 hover:text-white/70'
+              } ${o.deaktiviert ? 'cursor-not-allowed opacity-25 hover:border-white/10 hover:text-white/40' : ''}`}
+            >
+              {o.text}
+            </button>
+          )
+        })}
       </div>
-      <Button variant={betont ? 'primary' : 'secondary'} size="sm" onClick={kopieren}>
-        {kopiert ? <Check size={14} /> : <Copy size={14} />}
-        <span className="ml-1.5">{kopiert ? 'Kopiert' : 'Kopieren'}</span>
-      </Button>
     </div>
   )
 }
 
-function Fertig({ zugang }: { zugang: LobbyCredentials }) {
-  const basis = `${window.location.origin}/turnier/draft/${zugang.code}`
+function VorschauPunkte({ farbe }: { farbe: string }) {
   return (
-    <Card className="p-6">
-      <h2 className="text-xl text-foreground">Lobby steht</h2>
-      <p className="mt-1 text-sm text-muted">
-        Schick jedem Captain seinen Link. Wer den Zuschauer-Link hat, sieht alles mit, kann aber nicht
-        eingreifen.
-      </p>
-
-      <div className="mt-5 rounded-lg border border-border bg-background/40 p-4">
-        <div className="text-xs text-muted">Draft-Code</div>
-        <div className="font-display text-3xl tracking-widest text-primary">{zugang.code}</div>
-      </div>
-
-      <div className="mt-5 space-y-4">
-        <LinkZeile beschriftung="Captain Team 1" url={`${basis}?t=${zugang.team1_token}`} betont />
-        <LinkZeile beschriftung="Captain Team 2" url={`${basis}?t=${zugang.team2_token}`} betont />
-        <LinkZeile beschriftung="Zuschauen" url={basis} />
-      </div>
-
-      <p className="mt-5 text-xs text-warning">
-        Die beiden Captain-Links gibt es nur jetzt. Sobald du diese Seite verlässt, sind sie weg und die
-        Lobby muss neu aufgemacht werden.
-      </p>
-
-      <div className="mt-5">
-        <Link to={`/draft/${zugang.code}`}>
-          <Button variant="secondary" size="sm">
-            <Eye size={14} />
-            <span className="ml-1.5">Zum Draft</span>
-          </Button>
-        </Link>
-      </div>
-    </Card>
+    <div className="flex gap-1.5">
+      {Array.from({ length: 6 }).map((_, i) => (
+        <span key={i} className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: farbe }} />
+      ))}
+    </div>
   )
 }
 
 export default function DraftLobbyNeu() {
+  const navigate = useNavigate()
+  const helden = useDraftHeroList()
+  const anlegen = useDraftRaumAnlegen()
+  const [segment, setSegment] = useState<'anlegen' | 'beitreten'>('anlegen')
   const [team1, setTeam1] = useState('Team 1')
   const [team2, setTeam2] = useState('Team 2')
-  const [preset, setPreset] = useState<DraftPreset>('competitive_2ban_mid')
-  const [zugSekunden, setZugSekunden] = useState(30)
-  const [reserveSekunden, setReserveSekunden] = useState(120)
-  const anlegen = useCreateDraftLobby()
+  const [bans, setBans] = useState(2)
+  const [timer, setTimer] = useState(30)
+  const [beitrittsCode, setBeitrittsCode] = useState('')
 
-  if (anlegen.data) return (
-    <div className="mx-auto max-w-2xl px-4 py-10">
-      <Fertig zugang={anlegen.data} />
-    </div>
-  )
+  const heldenListe = helden.data?.heroes ?? []
 
-  const absenden = (e: React.FormEvent) => {
+  const draftStarten = (e: React.FormEvent) => {
     e.preventDefault()
-    anlegen.mutate({
-      team1_name: team1.trim(),
-      team2_name: team2.trim(),
-      preset,
-      round_seconds: zugSekunden,
-      reserve_seconds: reserveSekunden,
-    })
+    anlegen.mutate(
+      {
+        team1_name: team1.trim() || undefined,
+        team2_name: team2.trim() || undefined,
+        bans_per_team: bans,
+        round_seconds: timer,
+      },
+      { onSuccess: (raum) => navigate(`/draft/${raum.code}`) },
+    )
   }
 
-  const feld = 'w-full rounded-lg border border-border bg-background/60 px-3 py-2 text-sm text-foreground outline-none focus:border-border-strong'
+  const beitreten = (e: React.FormEvent) => {
+    e.preventDefault()
+    const code = beitrittsCode.trim().toUpperCase()
+    if (code.length < 4) return
+    navigate(`/draft/${code}`)
+  }
 
   return (
-    <div className="mx-auto max-w-2xl px-4 py-10">
-      <div className="mb-8">
-        <div className="flex items-center gap-2 text-primary">
-          <Swords size={18} />
-          <span className="text-xs font-semibold tracking-widest">DRAFT</span>
+    <div className="relative -my-8 min-h-[calc(100vh-5rem)] overflow-hidden">
+      <DraftHintergrund />
+      {heldenListe.length > 0 && (
+        <div
+          className="pointer-events-none absolute inset-0 flex flex-wrap content-start gap-1 overflow-hidden opacity-[0.08] grayscale"
+          style={{
+            maskImage: 'radial-gradient(ellipse 80% 60% at 50% 40%, black 20%, transparent 75%)',
+            WebkitMaskImage:
+              'radial-gradient(ellipse 80% 60% at 50% 40%, black 20%, transparent 75%)',
+          }}
+          aria-hidden="true"
+        >
+          {heldenListe.slice(0, 40).map((h) => {
+            const bild = heroImageUrl(h.image_url)
+            return bild ? (
+              <img key={h.id} src={bild} alt="" className="h-24 w-24 rounded-lg object-cover" />
+            ) : null
+          })}
         </div>
-        <h1 className="mt-2 text-3xl text-foreground">Pick &amp; Ban</h1>
-        <p className="mt-2 text-sm text-muted">
-          Lobby aufmachen, Links an die Captains schicken, draften. Kein Konto nötig.
+      )}
+
+      <div className="relative z-10 mx-auto flex max-w-2xl flex-col items-center px-4 py-10">
+        <div className="fade-in-up flex items-center gap-2 text-[#c8a86b]" style={{ animationDelay: '0.05s' }}>
+          <Swords size={14} />
+          <span className="text-[10px] font-bold uppercase tracking-[0.35em]">Draft</span>
+        </div>
+        <h1
+          className="fade-in-up mt-3 text-center font-display text-4xl font-black uppercase tracking-tight text-white md:text-5xl"
+          style={{ animationDelay: '0.1s' }}
+        >
+          Deadlock <span className="text-[#c8a86b] drop-shadow-[0_0_30px_rgba(200,168,107,0.45)]">Draft</span>
+        </h1>
+        <div
+          className="fade-in-up mt-1 font-display text-xl font-black uppercase tracking-[0.4em] text-white/70"
+          style={{ animationDelay: '0.15s' }}
+        >
+          Tool
+        </div>
+        <p className="fade-in-up mt-3 text-sm text-white/40" style={{ animationDelay: '0.2s' }}>
+          Scrim- und Turnier-Draft
         </p>
-      </div>
 
-      <form onSubmit={absenden}>
-        <Card className="p-6">
-          <div className="grid gap-4 sm:grid-cols-2">
-            <label className="block">
-              <span className="mb-1.5 block text-xs font-semibold text-muted">Team 1</span>
-              <input className={feld} value={team1} maxLength={40} onChange={(e) => setTeam1(e.target.value)} />
-            </label>
-            <label className="block">
-              <span className="mb-1.5 block text-xs font-semibold text-muted">Team 2</span>
-              <input className={feld} value={team2} maxLength={40} onChange={(e) => setTeam2(e.target.value)} />
-            </label>
-          </div>
+        <div
+          className="fade-in-up mt-7 flex w-full max-w-sm rounded-xl border border-white/[0.08] bg-white/[0.02] p-1"
+          style={{ animationDelay: '0.25s' }}
+        >
+          {(
+            [
+              ['anlegen', 'Draft anlegen'],
+              ['beitreten', 'Raum beitreten'],
+            ] as const
+          ).map(([wert, text]) => (
+            <button
+              key={wert}
+              type="button"
+              onClick={() => setSegment(wert)}
+              className={`flex-1 rounded-lg px-4 py-2 text-[10px] font-bold uppercase tracking-[0.15em] transition-colors ${
+                segment === wert
+                  ? 'border border-[#c8a86b]/50 bg-[#c8a86b]/10 text-[#c8a86b]'
+                  : 'text-white/40 hover:text-white/70'
+              }`}
+            >
+              {text}
+            </button>
+          ))}
+        </div>
 
-          <div className="mt-6">
-            <span className="mb-2 block text-xs font-semibold text-muted">Ablauf</span>
-            <div className="grid gap-2 sm:grid-cols-2">
-              {PRESETS.map((p) => (
-                <button
-                  key={p.id}
-                  type="button"
-                  onClick={() => setPreset(p.id)}
-                  className={`rounded-lg border p-3 text-left transition-colors ${
-                    preset === p.id
-                      ? 'border-primary bg-primary-soft'
-                      : 'border-border bg-background/40 hover:border-border-hover'
-                  }`}
-                >
-                  <div className={`text-sm font-semibold ${preset === p.id ? 'text-primary' : 'text-foreground'}`}>
-                    {p.titel}
-                  </div>
-                  <div className="mt-0.5 text-xs text-muted">{p.erklaerung}</div>
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="mt-6 grid gap-4 sm:grid-cols-2">
+        {segment === 'beitreten' ? (
+          <form
+            onSubmit={beitreten}
+            className="fade-in-up mt-6 w-full max-w-sm rounded-2xl border border-white/[0.08] bg-white/[0.02] p-6 backdrop-blur-sm"
+          >
             <label className="block">
-              <span className="mb-1.5 block text-xs font-semibold text-muted">Sekunden pro Zug</span>
-              <input
-                className={feld}
-                type="number"
-                min={10}
-                max={300}
-                value={zugSekunden}
-                onChange={(e) => setZugSekunden(Number(e.target.value))}
-              />
-            </label>
-            <label className="block">
-              <span className="mb-1.5 block text-xs font-semibold text-muted">Reserve je Team</span>
-              <input
-                className={feld}
-                type="number"
-                min={0}
-                max={600}
-                value={reserveSekunden}
-                onChange={(e) => setReserveSekunden(Number(e.target.value))}
-              />
-              <span className="mt-1 block text-xs text-muted">
-                Wird angeknabbert, wenn ein Zug länger dauert.
+              <span className="mb-2 block text-[9px] uppercase tracking-[0.3em] text-white/30">
+                Raum-Code
               </span>
+              <input
+                value={beitrittsCode}
+                onChange={(e) => setBeitrittsCode(e.target.value.toUpperCase())}
+                maxLength={6}
+                placeholder="ABC123"
+                className="w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2.5 text-center font-mono text-xl tracking-[0.3em] text-white placeholder:text-white/20 focus:border-[#c8a86b]/60 focus:outline-none"
+              />
             </label>
-          </div>
+            <button
+              type="submit"
+              className="mt-4 w-full rounded-lg border border-[#c8a86b] bg-[#c8a86b]/10 py-2.5 text-[11px] font-bold uppercase tracking-[0.2em] text-[#c8a86b] transition-colors hover:bg-[#c8a86b]/20"
+            >
+              Raum beitreten
+            </button>
+            <p className="mt-3 text-center text-xs text-white/30">
+              Den Code hat dir dein Gegenüber geschickt.
+            </p>
+          </form>
+        ) : (
+          <form
+            onSubmit={draftStarten}
+            className="fade-in-up mt-6 w-full rounded-2xl border border-white/[0.08] bg-white/[0.02] p-6 backdrop-blur-sm"
+            style={{ animationDelay: '0.3s' }}
+          >
+            <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-3">
+              <input
+                value={team1}
+                maxLength={40}
+                onChange={(e) => setTeam1(e.target.value)}
+                placeholder="Name..."
+                className="w-full rounded-lg border border-[#c8a86b]/40 bg-black/40 px-3 py-2 text-sm font-bold uppercase tracking-wide text-[#c8a86b] placeholder:text-white/25 focus:border-[#c8a86b] focus:outline-none"
+              />
+              <div className="flex flex-col items-center gap-1">
+                <span
+                  className="flex h-12 w-12 items-center justify-center rounded-full border-2 font-display text-xs font-black"
+                  style={{ borderColor: GOLD, color: GOLD }}
+                >
+                  6v6
+                </span>
+                <span className="text-[9px] uppercase tracking-[0.2em] text-white/30">
+                  {timer > 0 ? `${timer}s` : 'Aus'}
+                </span>
+              </div>
+              <input
+                value={team2}
+                maxLength={40}
+                onChange={(e) => setTeam2(e.target.value)}
+                placeholder="Name..."
+                className="w-full rounded-lg border border-[#3b82f6]/40 bg-black/40 px-3 py-2 text-right text-sm font-bold uppercase tracking-wide text-[#3b82f6] placeholder:text-white/25 focus:border-[#3b82f6] focus:outline-none"
+              />
+            </div>
 
-          {anlegen.isError && (
-            <p className="mt-4 text-sm text-danger">{(anlegen.error as Error).message}</p>
-          )}
+            <div className="mt-5">
+              <div className="flex items-center justify-center gap-2 text-[9px] uppercase tracking-[0.3em] text-white/30">
+                Live-Vorschau
+                <span className="flex items-center gap-1 text-[#10b981]">
+                  <span className="h-1.5 w-1.5 rounded-full bg-[#10b981]" />
+                  Demo
+                </span>
+              </div>
+              <div className="mt-2 flex items-center justify-center gap-4">
+                <div className="flex flex-col items-center gap-1.5">
+                  <div className="flex gap-1">
+                    {Array.from({ length: bans }).map((_, i) => (
+                      <span key={i} className="h-6 w-4 rounded border" style={{ borderColor: `${GOLD}55` }} />
+                    ))}
+                  </div>
+                  <VorschauPunkte farbe={GOLD} />
+                </div>
+                <span className="text-[9px] font-bold uppercase tracking-[0.2em] text-white/20">
+                  vs
+                </span>
+                <div className="flex flex-col items-center gap-1.5">
+                  <div className="flex gap-1">
+                    {Array.from({ length: bans }).map((_, i) => (
+                      <span key={i} className="h-6 w-4 rounded border" style={{ borderColor: `${BLAU}55` }} />
+                    ))}
+                  </div>
+                  <VorschauPunkte farbe={BLAU} />
+                </div>
+              </div>
+            </div>
 
-          <div className="mt-6">
-            <Button type="submit" disabled={anlegen.isPending}>
-              {anlegen.isPending ? 'Wird angelegt…' : 'Lobby aufmachen'}
-            </Button>
-          </div>
-        </Card>
-      </form>
+            <div className="mt-6 grid gap-4 sm:grid-cols-3">
+              <PillGruppe
+                label="Format"
+                aktiv={0}
+                onWahl={() => {}}
+                optionen={[
+                  { wert: 0, text: '6v6' },
+                  { wert: 1, text: '4v4', deaktiviert: true },
+                  { wert: 2, text: '2v2', deaktiviert: true },
+                ]}
+              />
+              <PillGruppe
+                label="Bans"
+                aktiv={bans}
+                onWahl={setBans}
+                optionen={BANS_OPTIONEN.map((wert) => ({
+                  wert,
+                  text: wert === 0 ? '-' : String(wert),
+                }))}
+              />
+              <PillGruppe
+                label="Timer"
+                aktiv={timer}
+                onWahl={setTimer}
+                optionen={TIMER_OPTIONEN.map((wert) => ({
+                  wert,
+                  text: wert === 0 ? 'Aus' : `${wert}s`,
+                }))}
+              />
+            </div>
+
+            {anlegen.isError && (
+              <p className="mt-4 text-center text-xs text-[#ef4444]">
+                Der Draft antwortet gerade nicht, bitte nochmal versuchen.
+              </p>
+            )}
+
+            <motion.button
+              type="submit"
+              whileTap={{ scale: 0.98 }}
+              disabled={anlegen.isPending}
+              className="cta-pulse-gold mt-6 flex w-full items-center justify-center gap-2 rounded-lg py-3.5 text-sm font-black uppercase tracking-[0.25em] transition-opacity disabled:opacity-50"
+              style={{ backgroundColor: GOLD, color: TINTE }}
+            >
+              <Play size={15} />
+              {anlegen.isPending ? 'Wird angelegt...' : 'Draft starten'}
+            </motion.button>
+            <p className="mt-3 text-center text-[11px] text-white/30">
+              Auf der nächsten Seite bekommst du einen Raum-Code zum Teilen.
+            </p>
+          </form>
+        )}
+      </div>
     </div>
   )
 }
