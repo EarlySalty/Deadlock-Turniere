@@ -266,6 +266,9 @@ async fn process_scrim_lobby_tick(
          FROM turnier.draft_sessions \
          WHERE code IS NOT NULL \
            AND lobby_status IN ('angefordert', 'bereit', 'gestartet', 'beendet') \
+           AND NOT (lobby_status = 'beendet' \
+                    AND discord_lobby_posted_at IS NOT NULL \
+                    AND discord_result_posted_at IS NOT NULL) \
          ORDER BY id \
          FOR UPDATE SKIP LOCKED",
     )
