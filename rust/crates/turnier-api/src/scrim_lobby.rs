@@ -209,6 +209,7 @@ struct ScrimLobbyRow {
     lobby_party_id: Option<String>,
     lobby_join_code: Option<String>,
     lobby_match_id: Option<String>,
+    lobby_result: Option<serde_json::Value>,
     discord_lobby_posted_at: Option<DateTime<Utc>>,
     discord_result_posted_at: Option<DateTime<Utc>>,
 }
@@ -260,11 +261,11 @@ async fn process_scrim_lobby_tick(
 ) -> Result<usize, sqlx::Error> {
     let rows: Vec<ScrimLobbyRow> = sqlx::query_as(
         "SELECT id, code, team1_name, team2_name, bans_per_team, lobby_status, \
-                lobby_party_id, lobby_join_code, lobby_match_id, \
+                lobby_party_id, lobby_join_code, lobby_match_id, lobby_result, \
                 discord_lobby_posted_at, discord_result_posted_at \
          FROM turnier.draft_sessions \
          WHERE code IS NOT NULL \
-           AND lobby_status IN ('angefordert', 'bereit', 'gestartet') \
+           AND lobby_status IN ('angefordert', 'bereit', 'gestartet', 'beendet') \
          ORDER BY id \
          FOR UPDATE SKIP LOCKED",
     )
@@ -276,6 +277,10 @@ async fn process_scrim_lobby_tick(
             "angefordert" => handle_provision(state, &row).await,
             "bereit" => handle_reconcile(state, &row, cadence).await,
             "gestartet" => handle_collect(state, &row, cadence).await,
+            // Beendete Sessions sind nur noch da, um verlorene Discord-Posts
+            // nachzuholen (discord_*_posted_at als Retry-Marker); Match-Arme
+            // und Freigabe laufen nicht noch einmal.
+            "beendet" => nachhole_posts(state, &row).await,
             _ => Ok(()),
         };
         if let Err(error) = result {
@@ -485,7 +490,7 @@ async fn handle_collect(
 async fn frische_lobby_zeile(pool: &Pool, id: i64) -> Result<Option<ScrimLobbyRow>, String> {
     sqlx::query_as::<_, ScrimLobbyRow>(
         "SELECT id, code, team1_name, team2_name, bans_per_team, lobby_status, \
-                lobby_party_id, lobby_join_code, lobby_match_id, \
+                lobby_party_id, lobby_join_code, lobby_match_id, lobby_result, \
                 discord_lobby_posted_at, discord_result_posted_at \
          FROM turnier.draft_sessions WHERE id = $1",
     )
@@ -493,6 +498,23 @@ async fn frische_lobby_zeile(pool: &Pool, id: i64) -> Result<Option<ScrimLobbyRo
     .fetch_optional(pool)
     .await
     .map_err(|error| error.to_string())
+}
+
+/// Nachhole-Schritt fuer beendete Sessions: fehlgeschlagene Discord-Posts
+/// werden ueber die `discord_*_posted_at`-Marker erneut versucht. Der Rest
+/// des Lebenszyklus (Match-Arme, Freigabe) ist hier schon abgeschlossen.
+async fn nachhole_posts(state: &AppState, row: &ScrimLobbyRow) -> Result<(), String> {
+    if row.discord_lobby_posted_at.is_none() {
+        post_lobby_announcement(state, row).await?;
+    }
+    if let Some(result_value) = row.lobby_result.clone() {
+        let result: ScrimMatchResult = serde_json::from_value(result_value)
+            .map_err(|error| format!("Ergebnis nicht lesbar: {error}"))?;
+        if row.discord_result_posted_at.is_none() {
+            post_result_announcement(state, row, &result).await?;
+        }
+    }
+    Ok(())
 }
 
 async fn release_lobby(state: &AppState, row: &ScrimLobbyRow) {
