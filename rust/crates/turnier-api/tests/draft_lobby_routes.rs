@@ -387,4 +387,469 @@ async fn helden_route_liefert_objekte_mit_live_vertrag() {
     assert!(heroes[0]["id"].is_number());
     assert!(heroes[0]["name"].is_string());
     assert!(heroes[0]["image_url"].is_string());
+    assert!(heroes[0]["card_image_url"].is_string());
+}
+
+fn raum_body(bans_per_team: i32, round_seconds: i32) -> Value {
+    json!({
+        "team1_name": "Team Eins",
+        "team2_name": "Team Zwei",
+        "bans_per_team": bans_per_team,
+        "round_seconds": round_seconds
+    })
+}
+
+async fn lese_zustand(ctx: &TestApp, code: &str, token: Option<&str>) -> TestResponse {
+    let mut builder = Request::builder()
+        .method(Method::GET)
+        .uri(format!("/api/draft/lobbies/{code}"))
+        .header(HOST, "localhost")
+        .header(CONTENT_TYPE, "application/json");
+    if let Some(token) = token {
+        builder = builder.header("x-draft-token", token);
+    }
+    let request = builder.body(Body::empty()).expect("request");
+    let response = ctx.app.clone().oneshot(request).await.expect("response");
+    let status = response.status();
+    let headers = response.headers().clone();
+    let bytes = to_bytes(response.into_body(), 1024 * 1024)
+        .await
+        .expect("body");
+    TestResponse {
+        status,
+        headers,
+        body: serde_json::from_slice(&bytes).expect("json body"),
+    }
+}
+
+#[tokio::test]
+async fn raum_anlegen_mit_bans_und_timer_aus_liefert_warteraum_vertrag() {
+    let ctx = setup().await;
+    let ip = IpAddr::V4(Ipv4Addr::new(203, 0, 113, 21));
+
+    let created = send_json(
+        &ctx.app,
+        ip,
+        Method::POST,
+        "/api/draft/lobbies",
+        Some(raum_body(2, 0)),
+    )
+    .await;
+    assert_eq!(created.status, StatusCode::OK);
+    let code = created.body["code"].as_str().expect("code").to_string();
+    assert!(created.body["team1_token"].is_null());
+
+    let state = lese_zustand(&ctx, &code, None).await;
+    assert_eq!(state.status, StatusCode::OK);
+    assert_eq!(state.body["phase"], "warteraum");
+    assert_eq!(state.body["bans_per_team"], 2);
+    assert_eq!(state.body["round_seconds"], 0);
+    assert!(state.body["deadline_at"].is_null());
+    let namen = [
+        state.body["team1"]["name"].as_str().expect("team1 name"),
+        state.body["team2"]["name"].as_str().expect("team2 name"),
+    ];
+    assert!(namen.contains(&"Team Eins"));
+    assert!(namen.contains(&"Team Zwei"));
+    assert_eq!(state.body["team1"]["claimed"], false);
+    assert_eq!(state.body["team2"]["claimed"], false);
+    assert_eq!(state.body["team1"]["ready"], false);
+    assert_eq!(state.body["team2"]["ready"], false);
+    assert_eq!(state.body["you"]["team"], Value::Null);
+    assert_eq!(state.body["lobby"]["status"], "keine");
+    assert!(state.body["lobby"]["join_code"].is_null());
+    assert!(state.body["lobby"]["error"].is_null());
+    assert!(state.body["lobby"]["match_id"].is_null());
+    assert!(state.body["lobby"]["result"].is_null());
+    assert!(state.body["rematch_code"].is_null());
+    let sequence = state.body["sequence"].as_array().expect("sequence");
+    assert_eq!(sequence.len(), 16);
+    assert_eq!(sequence[0]["index"], 0);
+    assert_eq!(sequence[0]["team"], 1);
+    assert_eq!(sequence[0]["action"], "ban");
+}
+
+#[tokio::test]
+async fn claim_und_ready_starten_erst_nach_beiden_captains() {
+    let ctx = setup().await;
+    let ip = IpAddr::V4(Ipv4Addr::new(203, 0, 113, 22));
+    let created = send_json(
+        &ctx.app,
+        ip,
+        Method::POST,
+        "/api/draft/lobbies",
+        Some(raum_body(1, 30)),
+    )
+    .await;
+    let code = created.body["code"].as_str().expect("code").to_string();
+    let uri = |suffix: &str| format!("/api/draft/lobbies/{code}/{suffix}");
+
+    let claim1 = send_json(
+        &ctx.app,
+        ip,
+        Method::POST,
+        &uri("claim"),
+        Some(json!({"team": 1})),
+    )
+    .await;
+    assert_eq!(claim1.status, StatusCode::OK);
+    let token1 = claim1.body["token"].as_str().expect("token").to_string();
+    assert_eq!(claim1.body["team"], 1);
+
+    let doppelt = send_json(
+        &ctx.app,
+        ip,
+        Method::POST,
+        &uri("claim"),
+        Some(json!({"team": 1})),
+    )
+    .await;
+    assert_eq!(doppelt.status, StatusCode::CONFLICT);
+
+    let unbekanntes_team = send_json(
+        &ctx.app,
+        ip,
+        Method::POST,
+        &uri("claim"),
+        Some(json!({"team": 3})),
+    )
+    .await;
+    assert_eq!(unbekanntes_team.status, StatusCode::BAD_REQUEST);
+
+    let ready1 = send_json(
+        &ctx.app,
+        ip,
+        Method::POST,
+        &uri("ready"),
+        Some(json!({"token": token1})),
+    )
+    .await;
+    assert_eq!(ready1.status, StatusCode::OK);
+    assert_eq!(ready1.body["started"], false);
+    assert_eq!(ready1.body["phase"], "warteraum");
+
+    let state = lese_zustand(&ctx, &code, Some(&token1)).await;
+    assert_eq!(state.body["you"]["team"], 1);
+    assert_eq!(state.body["team1"]["claimed"], true);
+    assert_eq!(state.body["team1"]["ready"], true);
+    assert_eq!(state.body["team2"]["claimed"], false);
+
+    let claim2 = send_json(
+        &ctx.app,
+        ip,
+        Method::POST,
+        &uri("claim"),
+        Some(json!({"team": 2})),
+    )
+    .await;
+    assert_eq!(claim2.status, StatusCode::OK);
+    let token2 = claim2.body["token"].as_str().expect("token").to_string();
+    let ready2 = send_json(
+        &ctx.app,
+        ip,
+        Method::POST,
+        &uri("ready"),
+        Some(json!({"token": token2})),
+    )
+    .await;
+    assert_eq!(ready2.status, StatusCode::OK);
+    assert_eq!(ready2.body["started"], true);
+    assert_eq!(ready2.body["phase"], "laeuft");
+    assert!(ready2.body["deadline_at"].is_string());
+}
+
+#[tokio::test]
+async fn leave_ohne_start_gibt_den_slot_frei_und_meldet_fremde_tokens() {
+    let ctx = setup().await;
+    let ip = IpAddr::V4(Ipv4Addr::new(203, 0, 113, 23));
+    let created = send_json(
+        &ctx.app,
+        ip,
+        Method::POST,
+        "/api/draft/lobbies",
+        Some(raum_body(0, 0)),
+    )
+    .await;
+    let code = created.body["code"].as_str().expect("code").to_string();
+    let uri = |suffix: &str| format!("/api/draft/lobbies/{code}/{suffix}");
+
+    let fremder_token = send_json(
+        &ctx.app,
+        ip,
+        Method::POST,
+        &uri("ready"),
+        Some(json!({"token": "falsch"})),
+    )
+    .await;
+    assert_eq!(fremder_token.status, StatusCode::UNAUTHORIZED);
+
+    let claim = send_json(
+        &ctx.app,
+        ip,
+        Method::POST,
+        &uri("claim"),
+        Some(json!({"team": 2})),
+    )
+    .await;
+    let token = claim.body["token"].as_str().expect("token").to_string();
+
+    let leave = send_json(
+        &ctx.app,
+        ip,
+        Method::POST,
+        &uri("leave"),
+        Some(json!({"token": token})),
+    )
+    .await;
+    assert_eq!(leave.status, StatusCode::OK);
+    assert_eq!(leave.body["team2"]["claimed"], false);
+    assert_eq!(leave.body["team2"]["ready"], false);
+
+    let wieder = send_json(
+        &ctx.app,
+        ip,
+        Method::POST,
+        &uri("claim"),
+        Some(json!({"team": 2})),
+    )
+    .await;
+    assert_eq!(wieder.status, StatusCode::OK);
+}
+
+#[tokio::test]
+async fn rematch_route_liefert_neuen_raum_mit_getauschten_seiten() {
+    let ctx = setup().await;
+    let ip = IpAddr::V4(Ipv4Addr::new(203, 0, 113, 24));
+    let created = send_json(
+        &ctx.app,
+        ip,
+        Method::POST,
+        "/api/draft/lobbies",
+        Some(raum_body(0, 0)),
+    )
+    .await;
+    let code = created.body["code"].as_str().expect("code").to_string();
+
+    let claim1 = send_json(
+        &ctx.app,
+        ip,
+        Method::POST,
+        &format!("/api/draft/lobbies/{code}/claim"),
+        Some(json!({"team": 1})),
+    )
+    .await;
+    let token1 = claim1.body["token"].as_str().expect("token").to_string();
+    let claim2 = send_json(
+        &ctx.app,
+        ip,
+        Method::POST,
+        &format!("/api/draft/lobbies/{code}/claim"),
+        Some(json!({"team": 2})),
+    )
+    .await;
+    let token2 = claim2.body["token"].as_str().expect("token").to_string();
+    send_json(
+        &ctx.app,
+        ip,
+        Method::POST,
+        &format!("/api/draft/lobbies/{code}/ready"),
+        Some(json!({"token": token1})),
+    )
+    .await;
+    send_json(
+        &ctx.app,
+        ip,
+        Method::POST,
+        &format!("/api/draft/lobbies/{code}/ready"),
+        Some(json!({"token": token2})),
+    )
+    .await;
+
+    let helden = [
+        "Abrams",
+        "Bebop",
+        "Calico",
+        "Dynamo",
+        "Grey Talon",
+        "Haze",
+        "Holliday",
+        "Infernus",
+        "Ivy",
+        "Kelvin",
+        "Lady Geist",
+        "Lash",
+    ];
+    for held in helden {
+        let zustand = lese_zustand(&ctx, &code, None).await;
+        let token = if zustand.body["current_team_slot"] == 1 {
+            &token1
+        } else {
+            &token2
+        };
+        let zug = send_json(
+            &ctx.app,
+            ip,
+            Method::POST,
+            &format!("/api/draft/lobbies/{code}/action"),
+            Some(json!({"token": token, "hero_name": held})),
+        )
+        .await;
+        assert_eq!(zug.status, StatusCode::OK);
+    }
+
+    let alter_raum_vor_rematch = lese_zustand(&ctx, &code, None).await;
+    let alt1 = alter_raum_vor_rematch.body["team1"]["name"]
+        .as_str()
+        .expect("alter Slot 1")
+        .to_string();
+    let alt2 = alter_raum_vor_rematch.body["team2"]["name"]
+        .as_str()
+        .expect("alter Slot 2")
+        .to_string();
+
+    let rematch = send_json(
+        &ctx.app,
+        ip,
+        Method::POST,
+        &format!("/api/draft/lobbies/{code}/rematch"),
+        Some(json!({"token": token1})),
+    )
+    .await;
+    assert_eq!(rematch.status, StatusCode::OK);
+    let neuer_code = rematch.body["code"]
+        .as_str()
+        .expect("neuer Code")
+        .to_string();
+    assert_ne!(neuer_code, code);
+
+    let neuer_raum = lese_zustand(&ctx, &neuer_code, None).await;
+    assert_eq!(neuer_raum.body["phase"], "warteraum");
+    assert_eq!(neuer_raum.body["team1"]["name"], alt2);
+    assert_eq!(neuer_raum.body["team2"]["name"], alt1);
+    assert_eq!(neuer_raum.body["bans_per_team"], 0);
+
+    let alter_raum = lese_zustand(&ctx, &code, None).await;
+    assert_eq!(alter_raum.body["rematch_code"], neuer_code);
+
+    let fremd = send_json(
+        &ctx.app,
+        ip,
+        Method::POST,
+        &format!("/api/draft/lobbies/{code}/rematch"),
+        Some(json!({"token": "falsch"})),
+    )
+    .await;
+    assert_eq!(fremd.status, StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn lobby_retry_setzt_einen_fehler_zurueck() {
+    let ctx = setup().await;
+    let ip = IpAddr::V4(Ipv4Addr::new(203, 0, 113, 25));
+    let created = send_json(
+        &ctx.app,
+        ip,
+        Method::POST,
+        "/api/draft/lobbies",
+        Some(raum_body(2, 0)),
+    )
+    .await;
+    let code = created.body["code"].as_str().expect("code").to_string();
+    let claim = send_json(
+        &ctx.app,
+        ip,
+        Method::POST,
+        &format!("/api/draft/lobbies/{code}/claim"),
+        Some(json!({"team": 1})),
+    )
+    .await;
+    let token = claim.body["token"].as_str().expect("token").to_string();
+
+    sqlx::query(
+        "UPDATE turnier.draft_sessions \
+         SET lobby_status = 'fehler', lobby_error = 'Steam-Bot nicht erreichbar' \
+         WHERE code = $1",
+    )
+    .bind(&code)
+    .execute(ctx._db.pool())
+    .await
+    .expect("Lobby-Fehler simulieren");
+
+    let fremd = send_json(
+        &ctx.app,
+        ip,
+        Method::POST,
+        &format!("/api/draft/lobbies/{code}/lobby/retry"),
+        Some(json!({"token": "falsch"})),
+    )
+    .await;
+    assert_eq!(fremd.status, StatusCode::UNAUTHORIZED);
+
+    let retry = send_json(
+        &ctx.app,
+        ip,
+        Method::POST,
+        &format!("/api/draft/lobbies/{code}/lobby/retry"),
+        Some(json!({"token": token})),
+    )
+    .await;
+    assert_eq!(retry.status, StatusCode::OK);
+    assert_eq!(retry.body["lobby"]["status"], "angefordert");
+    assert!(retry.body["lobby"]["error"].is_null());
+}
+
+#[tokio::test]
+async fn zuschauer_zaehlen_ueber_den_viewer_header() {
+    let ctx = setup().await;
+    let ip = IpAddr::V4(Ipv4Addr::new(203, 0, 113, 26));
+    let created = send_json(
+        &ctx.app,
+        ip,
+        Method::POST,
+        "/api/draft/lobbies",
+        Some(raum_body(2, 0)),
+    )
+    .await;
+    let code = created.body["code"].as_str().expect("code").to_string();
+
+    let leere = lese_zustand(&ctx, &code, None).await;
+    assert_eq!(leere.body["spectators"], 0);
+
+    for (viewer, erwartet) in [("viewer-a", 1), ("viewer-b", 2), ("viewer-a", 2)] {
+        let request = Request::builder()
+            .method(Method::GET)
+            .uri(format!("/api/draft/lobbies/{code}"))
+            .header(HOST, "localhost")
+            .header("x-draft-viewer", viewer)
+            .body(Body::empty())
+            .expect("request");
+        let response = ctx.app.clone().oneshot(request).await.expect("response");
+        let bytes = to_bytes(response.into_body(), 1024 * 1024)
+            .await
+            .expect("body");
+        let body: Value = serde_json::from_slice(&bytes).expect("json body");
+        assert_eq!(body["spectators"], erwartet, "Zuschauer {viewer}");
+    }
+}
+
+#[tokio::test]
+async fn legacy_lobby_behaelt_ihren_vertrag() {
+    let ctx = setup().await;
+    let ip = IpAddr::V4(Ipv4Addr::new(203, 0, 113, 27));
+    let created = send_json(
+        &ctx.app,
+        ip,
+        Method::POST,
+        "/api/draft/lobbies",
+        Some(lobby_body()),
+    )
+    .await;
+    assert_eq!(created.status, StatusCode::OK);
+    assert!(created.body["team1_token"].is_string());
+
+    let state = lese_zustand(&ctx, created.body["code"].as_str().unwrap(), None).await;
+    assert_eq!(state.body["phase"], "laeuft");
+    assert_eq!(state.body["status"], "in_progress");
+    assert_eq!(state.body["team1"]["claimed"], false);
+    assert_eq!(state.body["lobby"]["status"], "keine");
 }

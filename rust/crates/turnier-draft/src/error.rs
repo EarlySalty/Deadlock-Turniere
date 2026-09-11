@@ -34,6 +34,18 @@ pub enum DraftError {
     #[error("Du bist in diesem Draft kein Captain")]
     InvalidToken,
 
+    #[error("Ungültiges Team")]
+    InvalidTeam,
+
+    #[error("Dieser Captain-Platz ist schon belegt")]
+    SlotTaken,
+
+    #[error("Dieser Draft läuft bereits")]
+    RoomNotOpen,
+
+    #[error("Ein Rematch ist erst nach Abschluss des Drafts möglich")]
+    RematchUnavailable,
+
     /// Captain-Token ist gültig, aber das andere Team ist am Zug.
     #[error("Das andere Team ist am Zug")]
     NotYourTurn,

@@ -20,6 +20,7 @@ pub struct Hero {
     pub id: u32,
     pub name: String,
     pub image_url: String,
+    pub card_image_url: String,
 }
 
 /// Injizierbare Quelle für Live-Helden. Tests liefern hier keinen HTTP-Client.
@@ -136,15 +137,18 @@ struct ApiHeroImages {
 
 impl From<ApiHero> for Hero {
     fn from(hero: ApiHero) -> Self {
+        let card_image_url = hero.images.icon_hero_card_webp.clone().unwrap_or_default();
+        let image_url = hero
+            .images
+            .icon_image_small_webp
+            .or(hero.images.icon_image_small)
+            .or(hero.images.icon_hero_card_webp)
+            .unwrap_or_default();
         Self {
             id: hero.id,
             name: hero.name,
-            image_url: hero
-                .images
-                .icon_image_small_webp
-                .or(hero.images.icon_image_small)
-                .or(hero.images.icon_hero_card_webp)
-                .unwrap_or_default(),
+            image_url,
+            card_image_url,
         }
     }
 }
@@ -157,6 +161,7 @@ fn static_heroes() -> Vec<Hero> {
             id: index as u32 + 1,
             name: (*name).to_string(),
             image_url: String::new(),
+            card_image_url: String::new(),
         })
         .collect()
 }
@@ -167,4 +172,44 @@ pub(crate) static DEFAULT_PROVIDER: Lazy<HeroesProvider<ReqwestHeroFetcher>> =
 /// Liefert die gecachte Live-Liste beziehungsweise den statischen Fallback.
 pub async fn load_heroes() -> Vec<Hero> {
     DEFAULT_PROVIDER.heroes().await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn api_held_liefert_portrait_und_splash() {
+        let api_hero = ApiHero {
+            id: 12,
+            name: "Beispielsheld".to_string(),
+            player_selectable: true,
+            disabled: false,
+            images: ApiHeroImages {
+                icon_image_small_webp: Some("https://example.invalid/sm.webp".to_string()),
+                icon_image_small: None,
+                icon_hero_card_webp: Some("https://example.invalid/card.webp".to_string()),
+            },
+        };
+        let hero = Hero::from(api_hero);
+        assert_eq!(hero.image_url, "https://example.invalid/sm.webp");
+        assert_eq!(hero.card_image_url, "https://example.invalid/card.webp");
+    }
+
+    #[test]
+    fn api_held_ohne_splash_liefert_leere_card_url() {
+        let api_hero = ApiHero {
+            id: 13,
+            name: "Schlichtheld".to_string(),
+            player_selectable: true,
+            disabled: false,
+            images: ApiHeroImages {
+                icon_image_small_webp: Some("https://example.invalid/sm.webp".to_string()),
+                icon_image_small: None,
+                icon_hero_card_webp: None,
+            },
+        };
+        let hero = Hero::from(api_hero);
+        assert_eq!(hero.card_image_url, "");
+    }
 }

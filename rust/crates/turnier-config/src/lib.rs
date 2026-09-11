@@ -66,6 +66,10 @@ pub struct Config {
     // --- Scrim cutover ---
     pub turnier_internal_api_token: String,
 
+    // --- Steam-Bot (interne HTTP-API, localhost) ---
+    pub steam_bot_base_url: String,
+    pub steam_bot_internal_token: String,
+
     // --- Routine-Turniere (sicherer Default: aus) ---
     pub routine_tournaments_enabled: bool,
     pub routine_proposal_channel_id: i64,
@@ -170,7 +174,7 @@ impl Config {
             ),
             scrim_announce_channel_id: get_int(
                 "SCRIM_ANNOUNCE_CHANNEL_ID",
-                1_520_842_755_037_855_975,
+                1_521_522_998_199_324_853,
             ),
             scrim_substitute_sweep_interval_seconds: positive_seconds(
                 get_int("SCRIM_SUBSTITUTE_SWEEP_INTERVAL_SECONDS", 600),
@@ -192,6 +196,11 @@ impl Config {
             ),
             discord_webhook_url: get_string("DISCORD_WEBHOOK_URL", ""),
             turnier_internal_api_token: get_string("TURNIER_INTERNAL_API_TOKEN", ""),
+            steam_bot_base_url: get_string("STEAM_BOT_BASE_URL", "http://127.0.0.1:8782"),
+            steam_bot_internal_token: get_first_string(
+                &["STEAM_BOT_INTERNAL_TOKEN", "TURNIER_INTERNAL_API_TOKEN"],
+                "",
+            ),
             routine_tournaments_enabled: get_bool("ROUTINE_TOURNAMENTS_ENABLED", false),
             routine_proposal_channel_id: get_int(
                 "ROUTINE_PROPOSAL_CHANNEL_ID",

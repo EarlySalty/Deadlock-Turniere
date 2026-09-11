@@ -11,6 +11,7 @@ use anyhow::Context;
 use turnier_api::{
     build_router,
     internal_scrims::{spawn_scrim_operational_worker, spawn_substitute_sweep_worker},
+    scrim_lobby::spawn_scrim_lobby_worker,
     AppState,
 };
 use turnier_config::Config;
@@ -75,7 +76,8 @@ async fn main() -> anyhow::Result<()> {
     let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
     let scheduler_handle = tokio::spawn(start_scheduler(scheduler, shutdown_rx));
     spawn_substitute_sweep_worker(state.clone());
-    spawn_scrim_operational_worker(state);
+    spawn_scrim_operational_worker(state.clone());
+    spawn_scrim_lobby_worker(state);
 
     let addr = format!("{}:{}", config.backend_host, config.backend_port);
     let listener = tokio::net::TcpListener::bind(&addr).await?;

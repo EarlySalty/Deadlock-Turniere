@@ -25,7 +25,7 @@ use crate::error::{DraftError, DraftResult};
 use crate::heroes::is_valid_hero;
 use crate::heroes_provider::{load_heroes, Hero};
 use crate::sequence::SequenceStep;
-use crate::sequence::{self, DEFAULT_SEQUENCE, SEQUENCE_LEN};
+use crate::sequence::{self, sequence_for_bans, DEFAULT_SEQUENCE, SEQUENCE_LEN};
 use crate::state::{ActionOutcome, DraftAction, DraftSession, DraftState};
 
 /// Eingaben zum Anlegen einer freien Draft-Lobby.
@@ -65,6 +65,16 @@ struct DraftSessionRow {
     started_at: Option<DateTime<Utc>>,
     completed_at: Option<DateTime<Utc>>,
     created_at: DateTime<Utc>,
+    bans_per_team: i32,
+    team1_claimed_at: Option<DateTime<Utc>>,
+    team2_claimed_at: Option<DateTime<Utc>>,
+    team1_ready: bool,
+    team2_ready: bool,
+    lobby_status: String,
+    lobby_join_code: Option<String>,
+    lobby_error: Option<String>,
+    lobby_match_id: Option<String>,
+    lobby_result: Option<serde_json::Value>,
 }
 
 impl From<DraftSessionRow> for DraftSession {
@@ -87,6 +97,16 @@ impl From<DraftSessionRow> for DraftSession {
             started_at: row.started_at.map(|value| value.to_rfc3339()),
             completed_at: row.completed_at.map(|value| value.to_rfc3339()),
             created_at: row.created_at.to_rfc3339(),
+            bans_per_team: row.bans_per_team,
+            team1_claimed: row.team1_claimed_at.is_some(),
+            team2_claimed: row.team2_claimed_at.is_some(),
+            team1_ready: row.team1_ready,
+            team2_ready: row.team2_ready,
+            lobby_status: row.lobby_status,
+            lobby_join_code: row.lobby_join_code,
+            lobby_error: row.lobby_error,
+            lobby_match_id: row.lobby_match_id,
+            lobby_result: row.lobby_result,
         }
     }
 }
@@ -256,6 +276,346 @@ pub async fn create_lobby(pool: &Pool, opts: CreateLobbyOptions) -> DraftResult<
         team1_token,
         team2_token,
     })
+}
+
+pub struct CreateRoomOptions {
+    pub team1_name: String,
+    pub team2_name: String,
+    pub sequence: Vec<SequenceStep>,
+    pub bans_per_team: i32,
+    pub round_seconds: Option<i32>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ClaimOutcome {
+    pub team: i64,
+    pub token: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ReadyOutcome {
+    pub started: bool,
+}
+
+pub async fn create_room(pool: &Pool, opts: CreateRoomOptions) -> DraftResult<String> {
+    let now = now_utc();
+    let mut rng = StdRng::from_entropy();
+    let code = random_string(&mut rng, 8);
+    let team1_token = random_string(&mut rng, 48);
+    let team2_token = random_string(&mut rng, 48);
+    let flip = rng.gen_bool(0.5);
+    let (slot1_name, slot1_token, slot2_name, slot2_token) = if flip {
+        (
+            &opts.team2_name,
+            &team2_token,
+            &opts.team1_name,
+            &team1_token,
+        )
+    } else {
+        (
+            &opts.team1_name,
+            &team1_token,
+            &opts.team2_name,
+            &team2_token,
+        )
+    };
+    let mut tx = pool.begin().await?;
+
+    let (session_id,): (i64,) = sqlx::query_as(
+        "INSERT INTO turnier.draft_sessions \
+             (bracket_match_id, code, team1_name, team2_name, team1_token, team2_token, \
+              sequence, bans_per_team, round_seconds, reserve_seconds, team1_reserve_left, \
+              team2_reserve_left, deadline_at, status, current_action_index, created_at) \
+         VALUES (NULL, $1, $2, $3, $4, $5, $6, $7, $8, 0, 0, 0, NULL, \
+                 'warteraum', 0, $9) \
+         RETURNING id",
+    )
+    .bind(&code)
+    .bind(slot1_name)
+    .bind(slot2_name)
+    .bind(slot1_token)
+    .bind(slot2_token)
+    .bind(Json(&opts.sequence))
+    .bind(opts.bans_per_team)
+    .bind(opts.round_seconds)
+    .bind(now)
+    .fetch_one(&mut *tx)
+    .await?;
+
+    materialize_actions(&mut tx, session_id, &opts.sequence).await?;
+    tx.commit().await?;
+    Ok(code)
+}
+
+pub async fn claim_room(pool: &Pool, code: &str, team: i64) -> DraftResult<ClaimOutcome> {
+    let now = now_utc();
+    let mut tx = pool.begin().await?;
+    let (status, team1_token, team2_token): (String, String, String) = sqlx::query_as(
+        "SELECT status, team1_token, team2_token FROM turnier.draft_sessions \
+         WHERE code = $1 FOR UPDATE",
+    )
+    .bind(code)
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or(DraftError::LobbyNotFound)?;
+    if status != "warteraum" {
+        return Err(DraftError::RoomNotOpen);
+    }
+    let (column, token) = match team {
+        1 => ("team1_claimed_at", team1_token),
+        2 => ("team2_claimed_at", team2_token),
+        _ => return Err(DraftError::InvalidTeam),
+    };
+    let query = format!(
+        "UPDATE turnier.draft_sessions SET {column} = $1 \
+         WHERE code = $2 AND {column} IS NULL AND status = 'warteraum'"
+    );
+    let result = sqlx::query(&query)
+        .bind(now)
+        .bind(code)
+        .execute(&mut *tx)
+        .await?;
+    if result.rows_affected() != 1 {
+        return Err(DraftError::SlotTaken);
+    }
+    tx.commit().await?;
+    Ok(ClaimOutcome { team, token })
+}
+
+pub async fn room_ready(pool: &Pool, code: &str, token: &str) -> DraftResult<ReadyOutcome> {
+    let mut tx = pool.begin().await?;
+    let (status, team1_token, team2_token, team1_claimed_at, team2_claimed_at): (
+        String,
+        String,
+        String,
+        Option<DateTime<Utc>>,
+        Option<DateTime<Utc>>,
+    ) = sqlx::query_as(
+        "SELECT status, team1_token, team2_token, team1_claimed_at, team2_claimed_at \
+         FROM turnier.draft_sessions WHERE code = $1 FOR UPDATE",
+    )
+    .bind(code)
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or(DraftError::LobbyNotFound)?;
+    if status != "warteraum" {
+        return Err(DraftError::RoomNotOpen);
+    }
+    let team = if token == team1_token {
+        1
+    } else if token == team2_token {
+        2
+    } else {
+        return Err(DraftError::InvalidToken);
+    };
+    let claimed = if team == 1 {
+        team1_claimed_at.is_some()
+    } else {
+        team2_claimed_at.is_some()
+    };
+    if !claimed {
+        return Err(DraftError::InvalidToken);
+    }
+    let (ready_column, claimed_column) = if team == 1 {
+        ("team1_ready", "team1_claimed_at")
+    } else {
+        ("team2_ready", "team2_claimed_at")
+    };
+    let query = format!("UPDATE turnier.draft_sessions SET {ready_column} = TRUE WHERE code = $1 AND {claimed_column} IS NOT NULL AND status = 'warteraum'");
+    let result = sqlx::query(&query).bind(code).execute(&mut *tx).await?;
+    if result.rows_affected() != 1 {
+        return Err(DraftError::RoomNotOpen);
+    }
+
+    let started = sqlx::query_scalar::<_, bool>(
+        "SELECT team1_ready AND team2_ready FROM turnier.draft_sessions WHERE code = $1",
+    )
+    .bind(code)
+    .fetch_one(&mut *tx)
+    .await?;
+    if started {
+        let (round_seconds, reserve_left1, reserve_left2): (Option<i32>, Option<i32>, Option<i32>) =
+            sqlx::query_as(
+                "SELECT round_seconds, team1_reserve_left, team2_reserve_left \
+                 FROM turnier.draft_sessions WHERE code = $1",
+            )
+            .bind(code)
+            .fetch_one(&mut *tx)
+            .await?;
+        let now = now_utc();
+        let deadline = round_seconds.filter(|round| *round > 0).map(|round| {
+            let reserve = reserve_left1.unwrap_or(0).max(reserve_left2.unwrap_or(0));
+            now + Duration::seconds(i64::from(round) + i64::from(reserve.max(0)))
+        });
+        let result = sqlx::query(
+            "UPDATE turnier.draft_sessions \
+             SET status = 'in_progress', started_at = $1, deadline_at = $2 \
+             WHERE code = $3 AND status = 'warteraum' AND team1_ready AND team2_ready",
+        )
+        .bind(now)
+        .bind(deadline)
+        .bind(code)
+        .execute(&mut *tx)
+        .await?;
+        if result.rows_affected() != 1 {
+            return Err(DraftError::RoomNotOpen);
+        }
+    }
+    tx.commit().await?;
+    Ok(ReadyOutcome { started })
+}
+
+pub async fn leave_room(pool: &Pool, code: &str, token: &str) -> DraftResult<()> {
+    let mut tx = pool.begin().await?;
+    let (status, team1_token, team2_token): (String, String, String) = sqlx::query_as(
+        "SELECT status, team1_token, team2_token FROM turnier.draft_sessions \
+         WHERE code = $1 FOR UPDATE",
+    )
+    .bind(code)
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or(DraftError::LobbyNotFound)?;
+    if status != "warteraum" {
+        return Err(DraftError::RoomNotOpen);
+    }
+    let (claimed_column, ready_column, token_column) = if token == team1_token {
+        ("team1_claimed_at", "team1_ready", "team1_token")
+    } else if token == team2_token {
+        ("team2_claimed_at", "team2_ready", "team2_token")
+    } else {
+        return Err(DraftError::InvalidToken);
+    };
+    // Token rotieren: der Verlassende behält sonst sein bekanntes Token und
+    // damit die vollen Captain-Rechte über den nächsten Claimer (BLOCK-Fund
+    // 2026-09-11). Im Warteraum läuft noch kein Draft, ein neues Token ist
+    // gefahrlos möglich.
+    let mut rng = StdRng::from_entropy();
+    let neues_token = random_string(&mut rng, 48);
+    let query = format!(
+        "UPDATE turnier.draft_sessions \
+         SET {claimed_column} = NULL, {ready_column} = FALSE, {token_column} = $2 \
+         WHERE code = $1 AND {claimed_column} IS NOT NULL AND status = 'warteraum'"
+    );
+    let result = sqlx::query(&query)
+        .bind(code)
+        .bind(neues_token)
+        .execute(&mut *tx)
+        .await?;
+    if result.rows_affected() != 1 {
+        return Err(DraftError::InvalidToken);
+    }
+    tx.commit().await?;
+    Ok(())
+}
+
+#[derive(Debug, sqlx::FromRow)]
+struct RematchSourceRow {
+    status: String,
+    team1_token: String,
+    team2_token: String,
+    team1_name: Option<String>,
+    team2_name: Option<String>,
+    sequence: Option<Json<Vec<SequenceStep>>>,
+    bans_per_team: i32,
+    round_seconds: Option<i32>,
+}
+
+pub async fn rematch_room(pool: &Pool, code: &str, token: &str) -> DraftResult<String> {
+    let now = now_utc();
+    let mut tx = pool.begin().await?;
+    let source: RematchSourceRow = sqlx::query_as::<_, RematchSourceRow>(
+        "SELECT status, team1_token, team2_token, team1_name, team2_name, sequence, \
+                bans_per_team, round_seconds \
+         FROM turnier.draft_sessions WHERE code = $1 FOR UPDATE",
+    )
+    .bind(code)
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or(DraftError::LobbyNotFound)?;
+    let RematchSourceRow {
+        status,
+        team1_token,
+        team2_token,
+        team1_name,
+        team2_name,
+        sequence,
+        bans_per_team,
+        round_seconds,
+    } = source;
+    if token != team1_token && token != team2_token {
+        return Err(DraftError::InvalidToken);
+    }
+    if status != "completed" {
+        return Err(DraftError::RematchUnavailable);
+    }
+    let team1_name = team1_name.unwrap_or_else(|| "Team 1".to_string());
+    let team2_name = team2_name.unwrap_or_else(|| "Team 2".to_string());
+    let sequence = sequence
+        .map(|stored| stored.0)
+        .unwrap_or_else(|| sequence_for_bans(bans_per_team));
+    let mut rng = StdRng::from_entropy();
+    let new_code = random_string(&mut rng, 8);
+    let new_team1_token = random_string(&mut rng, 48);
+    let new_team2_token = random_string(&mut rng, 48);
+
+    let (session_id,): (i64,) = sqlx::query_as(
+        "INSERT INTO turnier.draft_sessions \
+             (bracket_match_id, code, team1_name, team2_name, team1_token, team2_token, \
+              sequence, bans_per_team, round_seconds, reserve_seconds, team1_reserve_left, \
+              team2_reserve_left, deadline_at, status, current_action_index, created_at, \
+              rematch_of_code) \
+         VALUES (NULL, $1, $2, $3, $4, $5, $6, $7, $8, 0, 0, 0, NULL, \
+                 'warteraum', 0, $9, $10) \
+         RETURNING id",
+    )
+    .bind(&new_code)
+    .bind(&team2_name)
+    .bind(&team1_name)
+    .bind(&new_team1_token)
+    .bind(&new_team2_token)
+    .bind(Json(&sequence))
+    .bind(bans_per_team)
+    .bind(round_seconds)
+    .bind(now)
+    .bind(code)
+    .fetch_one(&mut *tx)
+    .await?;
+
+    materialize_actions(&mut tx, session_id, &sequence).await?;
+    tx.commit().await?;
+    Ok(new_code)
+}
+
+pub async fn retry_lobby_request(pool: &Pool, code: &str, token: &str) -> DraftResult<()> {
+    let mut tx = pool.begin().await?;
+    let (lobby_status, team1_token, team2_token): (String, String, String) = sqlx::query_as(
+        "SELECT lobby_status, team1_token, team2_token \
+         FROM turnier.draft_sessions WHERE code = $1 FOR UPDATE",
+    )
+    .bind(code)
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or(DraftError::LobbyNotFound)?;
+    if token != team1_token && token != team2_token {
+        return Err(DraftError::InvalidToken);
+    }
+    match lobby_status.as_str() {
+        "fehler" => {}
+        "angefordert" => {
+            tx.commit().await?;
+            return Ok(());
+        }
+        _ => return Err(DraftError::RoomNotOpen),
+    }
+    sqlx::query(
+        "UPDATE turnier.draft_sessions \
+         SET lobby_status = 'angefordert', lobby_error = NULL WHERE code = $1",
+    )
+    .bind(code)
+    .execute(&mut *tx)
+    .await?;
+    tx.commit().await?;
+    Ok(())
 }
 
 async fn materialize_actions(
@@ -507,7 +867,7 @@ async fn settle_expired<R: Rng + ?Sized>(
     heroes: &[Hero],
     rng: &mut R,
 ) -> DraftResult<()> {
-    let Some(_round_seconds) = session.round_seconds else {
+    if !session.round_seconds.is_some_and(|round| round > 0) {
         return Ok(());
     };
     let now = now_utc();
@@ -560,6 +920,9 @@ async fn settle_expired<R: Rng + ?Sized>(
 
 fn consume_reserve(session: &LobbySessionRow, team: i64, now: DateTime<Utc>) -> Option<i32> {
     let round = session.round_seconds?;
+    if round <= 0 {
+        return None;
+    }
     let deadline = session.deadline_at?;
     let reserve = if team == 1 {
         session.team1_reserve_left
@@ -588,7 +951,7 @@ async fn advance_lobby_session(
         sequence::step_at(&session.sequence, next_idx as usize)
     };
     let next_deadline = match (session.round_seconds, next_step) {
-        (Some(round), Some(step)) => {
+        (Some(round), Some(step)) if round > 0 => {
             let reserve = if step.team_slot.as_i64() == 1 {
                 session.team1_reserve_left.unwrap_or(0)
             } else {
@@ -606,7 +969,9 @@ async fn advance_lobby_session(
          SET current_action_index = $1, \
              status = CASE WHEN $2 THEN 'completed' ELSE status END, \
              completed_at = CASE WHEN $2 THEN $3 ELSE completed_at END, \
-             team1_reserve_left = $4, team2_reserve_left = $5, deadline_at = $6 \
+             team1_reserve_left = $4, team2_reserve_left = $5, deadline_at = $6, \
+             lobby_status = CASE WHEN $2 AND lobby_status <> 'keine' \
+                            THEN 'angefordert' ELSE lobby_status END \
          WHERE id = $7 AND current_action_index = $8 AND status = 'in_progress'",
     )
     .bind(next_idx)
@@ -747,16 +1112,19 @@ mod tests {
                 id: 1,
                 name: "Vergeben".to_string(),
                 image_url: String::new(),
+                card_image_url: String::new(),
             },
             Hero {
                 id: 2,
                 name: "Frei A".to_string(),
                 image_url: String::new(),
+                card_image_url: String::new(),
             },
             Hero {
                 id: 3,
                 name: "Frei B".to_string(),
                 image_url: String::new(),
+                card_image_url: String::new(),
             },
         ];
         let used = vec!["Vergeben".to_string()];

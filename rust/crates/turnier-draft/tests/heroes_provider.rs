@@ -47,6 +47,7 @@ async fn zweiter_aufruf_kommt_aus_dem_cache() {
             id: 7,
             name: "Testheld".to_string(),
             image_url: "https://example.invalid/test.webp".to_string(),
+            card_image_url: String::new(),
         }]),
     };
     let provider = HeroesProvider::new(
@@ -60,6 +61,28 @@ async fn zweiter_aufruf_kommt_aus_dem_cache() {
     assert!(provider.is_valid_hero("Testheld").await);
     assert!(!provider.is_valid_hero("testheld").await);
     assert_eq!(calls.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn splash_art_wird_als_card_image_url_durchgereicht() {
+    let fetcher = FakeFetcher {
+        calls: Arc::new(AtomicUsize::new(0)),
+        result: Ok(vec![Hero {
+            id: 8,
+            name: "Kartenheld".to_string(),
+            image_url: "https://example.invalid/portrait.webp".to_string(),
+            card_image_url: "https://example.invalid/karte.webp".to_string(),
+        }]),
+    };
+    let provider = HeroesProvider::new(
+        fetcher,
+        Duration::from_secs(24 * 60 * 60),
+        Duration::from_secs(60),
+    );
+
+    let held = &provider.heroes().await[0];
+    assert_eq!(held.image_url, "https://example.invalid/portrait.webp");
+    assert_eq!(held.card_image_url, "https://example.invalid/karte.webp");
 }
 
 #[tokio::test]
@@ -92,6 +115,7 @@ impl HeroFetcher for FailOnceFetcher {
                     id: 99,
                     name: "Live-Held".to_string(),
                     image_url: "https://example.invalid/live.webp".to_string(),
+                    card_image_url: String::new(),
                 }])
             }
         })

@@ -676,7 +676,7 @@ impl DiscordNotifier {
             .description(format!("**Sieger: {winner_name}**\nDauer: {duration_str}"))
             .field(
                 "Match ID (Deadlock)",
-                deadlock_match_id.unwrap_or("—").to_string(),
+                deadlock_match_id.unwrap_or("unbekannt").to_string(),
                 true,
             )
             .field("Teams", format!("{team1_name} vs {team2_name}"), true);
@@ -691,6 +691,89 @@ impl DiscordNotifier {
             "embed": embed,
             "allowed_user_ids": Vec::<u64>::new(),
             "idempotency_key": idempotency_key(&format!("stats-{match_id}")),
+        });
+        self.broker
+            .post_internal(path::SEND_RICH_MESSAGE, &payload)
+            .await
+    }
+
+    // --- Scrim-Draft-Posts ------------------------------------------------
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn send_scrim_lobby_post(
+        &self,
+        channel_id: i64,
+        idempotency_key: &str,
+        code: &str,
+        team1_name: &str,
+        team2_name: &str,
+        join_code: &str,
+        bans_text: &str,
+        picks_team1: &[String],
+        picks_team2: &[String],
+    ) -> BrokerResult<Value> {
+        let mut embed = Embed::new()
+            .title(format!("Scrim-Draft: {team1_name} vs {team2_name}"))
+            .description(format!(
+                "Die Lobby für den Scrim-Draft `{code}` ist bereit."
+            ))
+            .field("Join-Code", format!("`{join_code}`"), true)
+            .field("Bans", bans_text.to_string(), true)
+            .field(
+                format!("Team 1: {team1_name}"),
+                list_or_dash(picks_team1),
+                true,
+            )
+            .field(
+                format!("Team 2: {team2_name}"),
+                list_or_dash(picks_team2),
+                true,
+            );
+        embed = embed.field("Raum", format!("`{code}`"), false);
+
+        let payload = json!({
+            "channel_id": channel_id,
+            "content": Value::Null,
+            "embed": embed,
+            "allowed_user_ids": Vec::<u64>::new(),
+            "idempotency_key": idempotency_key,
+        });
+        self.broker
+            .post_internal(path::SEND_RICH_MESSAGE, &payload)
+            .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn send_scrim_result_post(
+        &self,
+        channel_id: i64,
+        idempotency_key: &str,
+        team1_name: &str,
+        team2_name: &str,
+        winner_text: &str,
+        duration_s: Option<i64>,
+        match_id: Option<&str>,
+        #[allow(unused_variables)] result_card_png: Option<&[u8]>,
+    ) -> BrokerResult<Value> {
+        let duration_str = match duration_s {
+            Some(seconds) if seconds > 0 => format!("{}m {}s", seconds / 60, seconds % 60),
+            _ => "unbekannt".to_string(),
+        };
+        let embed = Embed::new()
+            .title(format!("Scrim-Ergebnis: {team1_name} vs {team2_name}"))
+            .description(format!("**Sieger: {winner_text}**\nDauer: {duration_str}"))
+            .field(
+                "Match-ID",
+                match_id.unwrap_or("unbekannt").to_string(),
+                true,
+            );
+
+        let payload = json!({
+            "channel_id": channel_id,
+            "content": Value::Null,
+            "embed": embed,
+            "allowed_user_ids": Vec::<u64>::new(),
+            "idempotency_key": idempotency_key,
         });
         self.broker
             .post_internal(path::SEND_RICH_MESSAGE, &payload)
@@ -818,9 +901,17 @@ fn routine_announcement_payload(tournament_id: i64, channel_id: i64, content: &s
 fn mentions_or_dash(ids: &[String]) -> String {
     let raw: Vec<String> = ids.iter().map(|id| format!("<@{id}>")).collect();
     if raw.is_empty() {
-        "—".to_string()
+        "keine".to_string()
     } else {
         raw.join(" ")
+    }
+}
+
+fn list_or_dash(values: &[String]) -> String {
+    if values.is_empty() {
+        "keine".to_string()
+    } else {
+        values.join(", ")
     }
 }
 

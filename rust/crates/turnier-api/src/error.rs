@@ -151,6 +151,12 @@ impl From<turnier_draft::DraftError> for WebError {
             SessionNotFound => Self::not_found("Draft-Session nicht gefunden"),
             LobbyNotFound => Self::not_found("Diesen Draft-Code gibt es nicht"),
             InvalidToken => Self::unauthorized("Du bist in diesem Draft kein Captain"),
+            InvalidTeam => Self::bad_request("Ungültiges Team"),
+            SlotTaken => Self::conflict("Dieser Captain-Platz ist schon belegt"),
+            RoomNotOpen => Self::conflict("Dieser Draft läuft bereits"),
+            RematchUnavailable => {
+                Self::conflict("Ein Rematch ist erst nach Abschluss des Drafts möglich")
+            }
             NotYourTurn => Self::forbidden("Das andere Team ist am Zug"),
             UnknownHero(msg) => Self::bad_request(msg),
             SessionNotActive => Self::bad_request("Draft ist nicht aktiv"),

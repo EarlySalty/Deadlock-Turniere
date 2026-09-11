@@ -25,11 +25,12 @@ pub use error::{DraftError, DraftResult};
 pub use heroes::{is_valid_hero, DEADLOCK_HEROES};
 pub use heroes_provider::{load_heroes, Hero, HeroFetcher, HeroesProvider, ReqwestHeroFetcher};
 pub use repo::{
-    create_lobby, get_draft_state, get_state_by_code, start_draft, take_action, take_lobby_action,
-    CreateLobbyOptions, LobbyCredentials,
+    claim_room, create_lobby, create_room, get_draft_state, get_state_by_code, leave_room,
+    rematch_room, retry_lobby_request, room_ready, start_draft, take_action, take_lobby_action,
+    ClaimOutcome, CreateLobbyOptions, CreateRoomOptions, LobbyCredentials, ReadyOutcome,
 };
 pub use sequence::{
-    is_complete, preset, step_at, ActionType, SequenceStep, TeamSlot, COMPETITIVE_1BAN,
-    DEFAULT_SEQUENCE, QUICK_NO_BAN, SEQUENCE_LEN,
+    is_complete, preset, sequence_for_bans, step_at, ActionType, SequenceStep, TeamSlot,
+    COMPETITIVE_1BAN, DEFAULT_SEQUENCE, QUICK_NO_BAN, SEQUENCE_LEN,
 };
 pub use state::{ActionOutcome, DraftAction, DraftSession, DraftState};
