@@ -198,7 +198,7 @@ impl OperationError {
     }
 }
 
-#[derive(Debug, sqlx::FromRow)]
+#[derive(Debug, Clone, sqlx::FromRow)]
 struct ScrimLobbyRow {
     id: i64,
     code: String,
@@ -342,7 +342,12 @@ async fn handle_provision(state: &AppState, row: &ScrimLobbyRow) -> Result<(), S
             .execute(&state.pool)
             .await
             .map_err(|error| error.to_string())?;
-            post_lobby_announcement(state, row).await
+            // Post mit der Zeile nach dem UPDATE: die Zeile aus dem Query-Start
+            // hat noch lobby_join_code = NULL, der Post wuerde nie den Code zeigen.
+            let frisch = frische_lobby_zeile(&state.pool, row.id)
+                .await?
+                .unwrap_or_else(|| row.clone());
+            post_lobby_announcement(state, &frisch).await
         }
         _ => {
             let error_text = response_error_text(&response);
@@ -383,7 +388,10 @@ async fn handle_reconcile(
     let response = match state.scrim_lobby.send(&request, OTHER_TIMEOUT).await {
         Ok(response) => response,
         Err(error) => {
-            mark_failed(&state.pool, &row.code, &error).await;
+            // Nur der Fehler selbst, kein Statuswechsel: ein Transportfehler
+            // mitten in einem laufenden Match darf Match-ID und Ergebnis nicht
+            // wegwerfen (BLOCK-Fund 2026-09-11, doppelter Provision-Lauf).
+            merke_lobby_fehler(&state.pool, &row.code, &error).await;
             return Err(error);
         }
     };
@@ -438,7 +446,9 @@ async fn handle_collect(
     let response = match state.scrim_lobby.send(&request, OTHER_TIMEOUT).await {
         Ok(response) => response,
         Err(error) => {
-            mark_failed(&state.pool, &row.code, &error).await;
+            // Wie Reconcile: kein Statuswechsel aus einem Transportfehler,
+            // das Ergebnis bleibt sonst fuer immer verloren.
+            merke_lobby_fehler(&state.pool, &row.code, &error).await;
             return Err(error);
         }
     };
@@ -461,9 +471,28 @@ async fn handle_collect(
     .await
     .map_err(|error| error.to_string())?;
 
-    post_result_announcement(state, row, &result).await?;
+    // Release vor dem Post-Err: beendet faellt aus der Worker-Query, nur der
+    // Freigabe-Weg hier sorgt dafuer, dass Posts nachgeholt und die Steam-Lobby
+    // freigegeben werden, auch wenn der Post einmal scheitert.
     release_lobby(state, row).await;
+    let frisch = frische_lobby_zeile(&state.pool, row.id)
+        .await?
+        .unwrap_or_else(|| row.clone());
+    post_result_announcement(state, &frisch, &result).await?;
     Ok(())
+}
+
+async fn frische_lobby_zeile(pool: &Pool, id: i64) -> Result<Option<ScrimLobbyRow>, String> {
+    sqlx::query_as::<_, ScrimLobbyRow>(
+        "SELECT id, code, team1_name, team2_name, bans_per_team, lobby_status, \
+                lobby_party_id, lobby_join_code, lobby_match_id, \
+                discord_lobby_posted_at, discord_result_posted_at \
+         FROM turnier.draft_sessions WHERE id = $1",
+    )
+    .bind(id)
+    .fetch_optional(pool)
+    .await
+    .map_err(|error| error.to_string())
 }
 
 async fn release_lobby(state: &AppState, row: &ScrimLobbyRow) {
@@ -504,6 +533,22 @@ async fn mark_failed(pool: &Pool, code: &str, error: &str) {
     .await
     {
         tracing::warn!(code = %code, error = %db_error, "Lobby-Fehlerzustand konnte nicht gespeichert werden");
+    }
+}
+
+async fn merke_lobby_fehler(pool: &Pool, code: &str, error: &str) {
+    // Fehler sichtbar machen, ohne den Status zu aendern: Reconcile und
+    // Collect laufen im naechsten Tick einfach wieder.
+    if let Err(db_error) = sqlx::query(
+        "UPDATE turnier.draft_sessions \
+         SET lobby_error = $1 WHERE code = $2 AND lobby_status IN ('bereit', 'gestartet')",
+    )
+    .bind(error)
+    .bind(code)
+    .execute(pool)
+    .await
+    {
+        tracing::warn!(code = %code, error = %db_error, "Lobby-Fehlernote konnte nicht gespeichert werden");
     }
 }
 

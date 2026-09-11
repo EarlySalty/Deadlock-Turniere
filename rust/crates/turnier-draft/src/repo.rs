@@ -478,19 +478,29 @@ pub async fn leave_room(pool: &Pool, code: &str, token: &str) -> DraftResult<()>
     if status != "warteraum" {
         return Err(DraftError::RoomNotOpen);
     }
-    let (claimed_column, ready_column) = if token == team1_token {
-        ("team1_claimed_at", "team1_ready")
+    let (claimed_column, ready_column, token_column) = if token == team1_token {
+        ("team1_claimed_at", "team1_ready", "team1_token")
     } else if token == team2_token {
-        ("team2_claimed_at", "team2_ready")
+        ("team2_claimed_at", "team2_ready", "team2_token")
     } else {
         return Err(DraftError::InvalidToken);
     };
+    // Token rotieren: der Verlassende behält sonst sein bekanntes Token und
+    // damit die vollen Captain-Rechte über den nächsten Claimer (BLOCK-Fund
+    // 2026-09-11). Im Warteraum läuft noch kein Draft, ein neues Token ist
+    // gefahrlos möglich.
+    let mut rng = StdRng::from_entropy();
+    let neues_token = random_string(&mut rng, 48);
     let query = format!(
         "UPDATE turnier.draft_sessions \
-         SET {claimed_column} = NULL, {ready_column} = FALSE \
+         SET {claimed_column} = NULL, {ready_column} = FALSE, {token_column} = $2 \
          WHERE code = $1 AND {claimed_column} IS NOT NULL AND status = 'warteraum'"
     );
-    let result = sqlx::query(&query).bind(code).execute(&mut *tx).await?;
+    let result = sqlx::query(&query)
+        .bind(code)
+        .bind(neues_token)
+        .execute(&mut *tx)
+        .await?;
     if result.rows_affected() != 1 {
         return Err(DraftError::InvalidToken);
     }
@@ -960,7 +970,8 @@ async fn advance_lobby_session(
              status = CASE WHEN $2 THEN 'completed' ELSE status END, \
              completed_at = CASE WHEN $2 THEN $3 ELSE completed_at END, \
              team1_reserve_left = $4, team2_reserve_left = $5, deadline_at = $6, \
-             lobby_status = CASE WHEN $2 THEN 'angefordert' ELSE lobby_status END \
+             lobby_status = CASE WHEN $2 AND lobby_status <> 'keine' \
+                            THEN 'angefordert' ELSE lobby_status END \
          WHERE id = $7 AND current_action_index = $8 AND status = 'in_progress'",
     )
     .bind(next_idx)
