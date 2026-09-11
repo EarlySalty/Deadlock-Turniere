@@ -54,7 +54,7 @@ async function draftFetch<T>(
     headers: {
       'Content-Type': 'application/json',
       'X-Draft-Viewer': viewerId,
-      ...(claim ? { 'X-Draft-Claim': claim } : {}),
+      ...(claim ? { 'X-Draft-Token': claim } : {}),
       ...rest.headers,
     },
   })

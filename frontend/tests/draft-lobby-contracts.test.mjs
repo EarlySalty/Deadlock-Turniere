@@ -28,6 +28,13 @@ test('der Claim-Token wird je Raum-Code unter festem Schlüssel geführt', async
   assert.notEqual(claimSpeicherSchluessel('ABC123'), claimSpeicherSchluessel('XYZ789'))
 })
 
+test('Captain-Token wird mit dem Backend-Vertragsheader gesendet', () => {
+  const hook = readFileSync(new URL('../src/hooks/useDraftLobby.ts', import.meta.url), 'utf8')
+
+  assert.ok(hook.includes("'X-Draft-Token': claim"))
+  assert.ok(!hook.includes("'X-Draft-Claim': claim"))
+})
+
 test('die Countdown-Anzeige formatiert Minuten und Sekunden zweistellig', async () => {
   const { countdownText } = await loadHelpers()
 
