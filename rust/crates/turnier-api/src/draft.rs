@@ -14,6 +14,7 @@
 use std::net::SocketAddr;
 use std::time::{Duration, Instant};
 
+use axum::body::Bytes;
 use axum::extract::{ConnectInfo, Path, State};
 use axum::http::header::CACHE_CONTROL;
 use axum::http::{HeaderMap, StatusCode};
@@ -86,7 +87,7 @@ struct CreateLobbyRequest {
 /// Request-Body einer freien Lobby-Aktion.
 #[derive(Debug, Deserialize)]
 struct LobbyActionRequest {
-    token: String,
+    token: Option<String>,
     hero_name: String,
 }
 
@@ -99,7 +100,7 @@ struct ClaimRequest {
 /// Request-Body aller Token-Routen.
 #[derive(Debug, Deserialize)]
 struct TokenRequest {
-    token: String,
+    token: Option<String>,
 }
 
 async fn create_lobby(
@@ -210,9 +211,11 @@ fn validate_room(
 async fn submit_lobby_action(
     State(state): State<AppState>,
     Path(code): Path<String>,
+    headers: HeaderMap,
     Json(body): Json<LobbyActionRequest>,
 ) -> WebResult<Json<turnier_draft::DraftState>> {
-    turnier_draft::take_lobby_action(&state.pool, &code, &body.token, &body.hero_name).await?;
+    let token = captain_token(&headers, body.token.as_deref())?;
+    turnier_draft::take_lobby_action(&state.pool, &code, &token, &body.hero_name).await?;
     let draft_state = turnier_draft::get_state_by_code(&state.pool, &code).await?;
     Ok(Json(draft_state))
 }
@@ -234,6 +237,28 @@ fn header_value(headers: &HeaderMap, name: &str) -> Option<String> {
         .and_then(|value| value.to_str().ok())
         .map(str::to_string)
         .filter(|value| !value.trim().is_empty())
+}
+
+fn captain_token(headers: &HeaderMap, body_token: Option<&str>) -> WebResult<String> {
+    header_value(headers, "x-draft-token")
+        .or_else(|| {
+            body_token
+                .map(str::trim)
+                .filter(|token| !token.is_empty())
+                .map(str::to_string)
+        })
+        .ok_or_else(|| WebError::unauthorized("Du bist in diesem Draft kein Captain"))
+}
+
+fn captain_token_from_bytes(headers: &HeaderMap, body: &[u8]) -> WebResult<String> {
+    let body_token = if body.is_empty() {
+        None
+    } else {
+        serde_json::from_slice::<TokenRequest>(body)
+            .ok()
+            .and_then(|request| request.token)
+    };
+    captain_token(headers, body_token.as_deref())
 }
 
 async fn lobby_state(
@@ -362,10 +387,12 @@ async fn claim_lobby(
 async fn ready_lobby(
     State(state): State<AppState>,
     Path(code): Path<String>,
+    headers: HeaderMap,
     Json(body): Json<TokenRequest>,
 ) -> WebResult<Json<Value>> {
-    let started = turnier_draft::room_ready(&state.pool, &code, &body.token).await?;
-    let mut value = lobby_state(&state, &code, Some(&body.token), None).await?;
+    let token = captain_token(&headers, body.token.as_deref())?;
+    let started = turnier_draft::room_ready(&state.pool, &code, &token).await?;
+    let mut value = lobby_state(&state, &code, Some(&token), None).await?;
     if let Value::Object(map) = &mut value {
         map.insert("started".to_string(), json!(started.started));
     }
@@ -375,29 +402,35 @@ async fn ready_lobby(
 async fn leave_lobby(
     State(state): State<AppState>,
     Path(code): Path<String>,
+    headers: HeaderMap,
     Json(body): Json<TokenRequest>,
 ) -> WebResult<Json<Value>> {
-    turnier_draft::leave_room(&state.pool, &code, &body.token).await?;
-    let value = lobby_state(&state, &code, Some(&body.token), None).await?;
+    let token = captain_token(&headers, body.token.as_deref())?;
+    turnier_draft::leave_room(&state.pool, &code, &token).await?;
+    let value = lobby_state(&state, &code, Some(&token), None).await?;
     Ok(Json(value))
 }
 
 async fn rematch_lobby(
     State(state): State<AppState>,
     Path(code): Path<String>,
-    Json(body): Json<TokenRequest>,
+    headers: HeaderMap,
+    body: Bytes,
 ) -> WebResult<Json<Value>> {
-    let new_code = turnier_draft::rematch_room(&state.pool, &code, &body.token).await?;
+    let token = captain_token_from_bytes(&headers, &body)?;
+    let new_code = turnier_draft::rematch_room(&state.pool, &code, &token).await?;
     Ok(Json(json!({ "code": new_code })))
 }
 
 async fn retry_lobby_request_route(
     State(state): State<AppState>,
     Path(code): Path<String>,
+    headers: HeaderMap,
     Json(body): Json<TokenRequest>,
 ) -> WebResult<Json<Value>> {
-    turnier_draft::retry_lobby_request(&state.pool, &code, &body.token).await?;
-    let value = lobby_state(&state, &code, Some(&body.token), None).await?;
+    let token = captain_token(&headers, body.token.as_deref())?;
+    turnier_draft::retry_lobby_request(&state.pool, &code, &token).await?;
+    let value = lobby_state(&state, &code, Some(&token), None).await?;
     Ok(Json(value))
 }
 
@@ -548,5 +581,31 @@ mod tests {
         );
 
         assert_eq!(client_ip(&headers, peer), peer);
+    }
+
+    #[test]
+    fn captain_token_akzeptiert_header_und_body_fallback() {
+        let mut headers = HeaderMap::new();
+        headers.insert("x-draft-token", HeaderValue::from_static("aus-header"));
+
+        assert_eq!(
+            captain_token(&headers, Some("aus-body")).expect("header token"),
+            "aus-header"
+        );
+        assert_eq!(
+            captain_token(&HeaderMap::new(), Some("aus-body")).expect("body token"),
+            "aus-body"
+        );
+    }
+
+    #[test]
+    fn captain_token_aus_header_funktioniert_auch_bei_leerem_body() {
+        let mut headers = HeaderMap::new();
+        headers.insert("x-draft-token", HeaderValue::from_static("nur-header"));
+
+        assert_eq!(
+            captain_token_from_bytes(&headers, b"").expect("header token ohne body"),
+            "nur-header"
+        );
     }
 }
