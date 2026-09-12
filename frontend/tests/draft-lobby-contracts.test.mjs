@@ -28,11 +28,14 @@ test('der Claim-Token wird je Raum-Code unter festem Schlüssel geführt', async
   assert.notEqual(claimSpeicherSchluessel('ABC123'), claimSpeicherSchluessel('XYZ789'))
 })
 
-test('Captain-Token wird mit dem Backend-Vertragsheader gesendet', () => {
+test('Captain-Token wird mit dem Backend-Vertragsheader und in Mutations-Bodies gesendet', () => {
   const hook = readFileSync(new URL('../src/hooks/useDraftLobby.ts', import.meta.url), 'utf8')
 
   assert.ok(hook.includes("'X-Draft-Token': claim"))
   assert.ok(!hook.includes("'X-Draft-Claim': claim"))
+  assert.ok(hook.includes("body: JSON.stringify({ ...koerper, ...(claim ? { token: claim } : {}) })"))
+  assert.ok(hook.includes("body: JSON.stringify({ hero_name: heldName, ...(claim ? { token: claim } : {}) })"))
+  assert.ok(hook.includes("body: JSON.stringify(claim ? { token: claim } : {})"))
 })
 
 test('die Countdown-Anzeige formatiert Minuten und Sekunden zweistellig', async () => {

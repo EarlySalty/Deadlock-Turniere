@@ -178,16 +178,18 @@ function useRaumPost(code: string | undefined, abschnitt: string) {
   const viewerId = useViewerId()
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: (koerper: Record<string, unknown> = {}) =>
-      draftFetch<DraftRaumZustand>(
+    mutationFn: (koerper: Record<string, unknown> = {}) => {
+      const claim = code ? leseClaimToken(code) : null
+      return draftFetch<DraftRaumZustand>(
         `/draft/lobbies/${encodeURIComponent(code!)}/${abschnitt}`,
         viewerId,
         {
           method: 'POST',
-          body: JSON.stringify(koerper),
-          claim: code ? leseClaimToken(code) : null,
+          body: JSON.stringify({ ...koerper, ...(claim ? { token: claim } : {}) }),
+          claim,
         },
-      ),
+      )
+    },
     onSuccess: (data) => {
       if (code) qc.setQueryData(['draft', 'scrim', code, viewerId], data)
     },
@@ -223,16 +225,18 @@ export function useDraftAktion(code: string | undefined) {
   const viewerId = useViewerId()
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: (heldName: string) =>
-      draftFetch<DraftRaumZustand>(
+    mutationFn: (heldName: string) => {
+      const claim = code ? leseClaimToken(code) : null
+      return draftFetch<DraftRaumZustand>(
         `/draft/lobbies/${encodeURIComponent(code!)}/action`,
         viewerId,
         {
           method: 'POST',
-          body: JSON.stringify({ hero_name: heldName }),
-          claim: code ? leseClaimToken(code) : null,
+          body: JSON.stringify({ hero_name: heldName, ...(claim ? { token: claim } : {}) }),
+          claim,
         },
-      ),
+      )
+    },
     onSuccess: (data) => {
       if (code) qc.setQueryData(['draft', 'scrim', code, viewerId], data)
     },
@@ -246,10 +250,14 @@ export function useLobbyRetry(code: string | undefined) {
 export function useRematch(code: string | undefined) {
   const viewerId = useViewerId()
   return useMutation({
-    mutationFn: () =>
-      draftFetch<DraftRaumCode>(`/draft/lobbies/${encodeURIComponent(code!)}/rematch`, viewerId, {
+    mutationFn: () => {
+      const claim = code ? leseClaimToken(code) : null
+      return draftFetch<DraftRaumCode>(`/draft/lobbies/${encodeURIComponent(code!)}/rematch`, viewerId, {
         method: 'POST',
-      }),
+        body: JSON.stringify(claim ? { token: claim } : {}),
+        claim,
+      })
+    },
   })
 }
 
