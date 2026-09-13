@@ -65,6 +65,23 @@ if [[ -z "${DEADLOCK_CENTRAL_DSN:-}" ]]; then
   exit 1
 fi
 
+# Expliziter One-shot-Hook fuer den kanonischen zentralen Migrator. Der Dienst
+# migriert NICHT bei normalen Restarts. Nur ein vom Deploy angelegter lokaler
+# Marker fordert genau einen Lauf an; nach erfolgreicher Migration wird er
+# entfernt. So bleiben Secrets im bestehenden Infisical-Pfad und die zentrale
+# Migration weiterhin Eigentum von dl-central-migrate.
+CENTRAL_MIGRATION_MARKER="$ROOT_DIR/.apply-central-migrations-once"
+CENTRAL_MIGRATOR_BIN="${DL_CENTRAL_MIGRATOR_BIN:-$(dirname "$ROOT_DIR")/Deadlock-Bots/rust/target/release/dl-central-migrate}"
+if [[ -f "$CENTRAL_MIGRATION_MARKER" ]]; then
+  if [[ ! -x "$CENTRAL_MIGRATOR_BIN" ]]; then
+    echo "Zentraler Migrator fehlt oder ist nicht ausfuehrbar: $CENTRAL_MIGRATOR_BIN" >&2
+    exit 1
+  fi
+  echo "turniere: explizite zentrale One-shot-Migration angefordert." >&2
+  "$CENTRAL_MIGRATOR_BIN"
+  rm -f "$CENTRAL_MIGRATION_MARKER"
+fi
+
 # cwd = backend/, damit der AVATAR_DIR-Default (data/avatars) wie bei Python auf
 # backend/data/avatars zeigt. DATABASE_PATH ist Rust-seitig Legacy/ignoriert; die
 # Turnier-Fachdaten kommen aus DEADLOCK_CENTRAL_DSN.
