@@ -14,6 +14,7 @@ import {
   setObserverMode,
 } from '@/api/client'
 import type { ObserverMode, ObserverSession } from '@/types/tournament'
+import { useDraftHeroList } from '@/hooks/useDraftLobby'
 
 const modeCopy: Record<ObserverMode, string> = {
   shadow: 'Shadow',
@@ -73,10 +74,24 @@ export default function ObserverPanel() {
     enabled: selectedId !== null,
     refetchInterval: 1000,
   })
+  const heroesQuery = useDraftHeroList()
 
+  const heroNames = useMemo(
+    () => new Map((heroesQuery.data?.heroes ?? []).map((hero) => [hero.id, hero.name])),
+    [heroesQuery.data?.heroes],
+  )
   const sessions = useMemo(() => sessionsQuery.data?.sessions ?? [], [sessionsQuery.data?.sessions])
   const active = useMemo(() => sessions.filter((session) => !session.finished_at), [sessions])
   const selected = detailQuery.data?.session ?? sessions.find((session) => session.id === selectedId) ?? null
+  const recentDecisions = detailQuery.data?.recent_decisions ?? []
+  const recommendedDecision = selected?.recommended_account_id
+    ? recentDecisions.find((decision) => decision.account_id === selected.recommended_account_id)
+    : undefined
+  const currentDecision = selected?.current_account_id
+    ? recentDecisions.find((decision) => decision.account_id === selected.current_account_id)
+    : undefined
+  const heroLabel = (heroId: number | null | undefined, accountId: string | null | undefined) =>
+    (heroId != null ? heroNames.get(heroId) : undefined) ?? (accountId ? `Account ${accountId}` : 'Directed')
 
   const invalidate = async (id?: number) => {
     await qc.invalidateQueries({ queryKey: ['observer', 'sessions'] })
@@ -297,13 +312,21 @@ export default function ObserverPanel() {
               <div className="grid gap-3 sm:grid-cols-3">
                 <div className="rounded-lg border border-border bg-background/40 p-3">
                   <div className="text-xs text-muted">Aktueller POV</div>
-                  <div className="mt-1 text-lg font-semibold text-foreground">{selected.current_account_id ?? 'Directed'}</div>
-                  <div className="text-xs text-muted">Score {selected.current_score?.toFixed(1) ?? '—'}</div>
+                  <div className="mt-1 text-lg font-semibold text-foreground">
+                    {heroLabel(currentDecision?.hero_id, selected.current_account_id)}
+                  </div>
+                  <div className="text-xs text-muted">
+                    {selected.current_account_id ? `Account ${selected.current_account_id} · ` : ''}Score {selected.current_score?.toFixed(1) ?? '—'}
+                  </div>
                 </div>
                 <div className="rounded-lg border border-primary/30 bg-primary/5 p-3">
                   <div className="text-xs text-muted">Empfehlung</div>
-                  <div className="mt-1 text-lg font-semibold text-primary">{selected.recommended_account_id ?? 'Directed'}</div>
-                  <div className="text-xs text-muted">Score {selected.recommended_score?.toFixed(1) ?? '—'}</div>
+                  <div className="mt-1 text-lg font-semibold text-primary">
+                    {heroLabel(recommendedDecision?.hero_id, selected.recommended_account_id)}
+                  </div>
+                  <div className="text-xs text-muted">
+                    {selected.recommended_account_id ? `Account ${selected.recommended_account_id} · ` : ''}Score {selected.recommended_score?.toFixed(1) ?? '—'}
+                  </div>
                 </div>
                 <div className="rounded-lg border border-border bg-background/40 p-3">
                   <div className="text-xs text-muted">Auto-Gate</div>
@@ -360,10 +383,13 @@ export default function ObserverPanel() {
                       <tr><th className="px-3 py-2">Zeit</th><th className="px-3 py-2">POV</th><th className="px-3 py-2">Score</th><th className="px-3 py-2">Grund</th><th className="px-3 py-2">Cut</th></tr>
                     </thead>
                     <tbody>
-                      {(detailQuery.data?.recent_decisions ?? []).map((decision, index) => (
+                      {recentDecisions.map((decision, index) => (
                         <tr key={`${decision.observed_at}-${index}`} className="border-t border-border/50 text-foreground/90">
                           <td className="whitespace-nowrap px-3 py-2">{new Date(decision.observed_at).toLocaleTimeString('de-DE')}</td>
-                          <td className="px-3 py-2 font-mono">{decision.account_id ?? 'Directed'}</td>
+                          <td className="px-3 py-2">
+                            <div className="font-semibold">{heroLabel(decision.hero_id, decision.account_id)}</div>
+                            {decision.account_id && <div className="font-mono text-[10px] text-muted">{decision.account_id}</div>}
+                          </td>
                           <td className="px-3 py-2">{decision.score.toFixed(1)}</td>
                           <td className="px-3 py-2">{reasonCopy[decision.reason] ?? decision.reason}</td>
                           <td className="px-3 py-2">{decision.switched ? 'ja' : 'nein'}</td>
