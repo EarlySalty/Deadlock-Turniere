@@ -213,7 +213,10 @@ impl Config {
                 &["STEAM_BOT_INTERNAL_TOKEN", "TURNIER_INTERNAL_API_TOKEN"],
                 "",
             ),
-            observer_enabled: get_bool("SCRIM_OBSERVER_ENABLED", false),
+            // Shadow/Assist analysieren ausschließlich den externen Live-Matchfeed und
+            // senden keine Eingaben an Deadlock. Daher ist der sichere Observer-Kern
+            // standardmäßig aktiv; echte Game-Control bleibt separat default-off.
+            observer_enabled: get_bool("SCRIM_OBSERVER_ENABLED", true),
             observer_game_control_enabled: get_bool("SCRIM_OBSERVER_GAME_CONTROL_ENABLED", false),
             observer_agent_token: get_string("SCRIM_OBSERVER_AGENT_TOKEN", ""),
             observer_steam_bot2_base_url: get_string(
