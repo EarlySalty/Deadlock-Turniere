@@ -32,6 +32,10 @@ pub struct DeadlockLiveClient {
 impl DeadlockLiveClient {
     pub fn new(base_url: impl Into<String>) -> Result<Self, LiveError> {
         let http = reqwest::Client::builder()
+            // deadlock-api.com akzeptiert normale API-Clients, blockt aber derzeit
+            // Requests ohne brauchbaren User-Agent teilweise bereits am Edge mit
+            // HTTP 403. Fester, ehrlicher Produkt-UA statt Browser-Imitation.
+            .user_agent("DeutscheDeadlockCommunity-Observer/1.0")
             .connect_timeout(StdDuration::from_secs(5))
             .tcp_keepalive(StdDuration::from_secs(30))
             .build()?;
