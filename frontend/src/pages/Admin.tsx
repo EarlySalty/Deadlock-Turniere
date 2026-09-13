@@ -20,6 +20,7 @@ import TournamentCasterPanel from '@/components/admin/TournamentCasterPanel'
 import ArchivedTournamentView from '@/components/admin/ArchivedTournamentView'
 import TestModePanel from '@/components/admin/TestModePanel'
 import AutomatikPanel from '@/components/admin/automatik/AutomatikPanel'
+import ObserverPanel from '@/components/admin/ObserverPanel'
 import { AUTOMATIK_COPY } from '@/components/admin/automatik/copy'
 import Leitstand from '@/components/admin/Leitstand'
 import AdminPhaseNav, {
@@ -33,6 +34,7 @@ import AutoLobbyButton from '@/components/admin/AutoLobbyButton'
 import {
   Archive,
   CalendarClock,
+  Crosshair,
   FlaskConical,
   Plus,
   Radio,
@@ -42,13 +44,14 @@ import {
   Trophy,
 } from 'lucide-react'
 
-type AdminMode = 'live' | 'archive' | 'test' | 'automatik'
+type AdminMode = 'live' | 'archive' | 'test' | 'automatik' | 'observer'
 
 const MODE_TABS: { key: AdminMode; label: string; icon: typeof Trophy }[] = [
   { key: 'live', label: 'Live', icon: Radio },
   { key: 'archive', label: 'Archiv', icon: Archive },
   { key: 'test', label: 'Test-Modus', icon: FlaskConical },
   { key: 'automatik', label: AUTOMATIK_COPY.tabLabel, icon: CalendarClock },
+  { key: 'observer', label: 'Observer', icon: Crosshair },
 ]
 
 export default function Admin() {
@@ -520,6 +523,7 @@ export default function Admin() {
 
       {adminMode === 'test' && <TestModePanel />}
       {adminMode === 'automatik' && <AutomatikPanel />}
+      {adminMode === 'observer' && <ObserverPanel />}
     </div>
   )
 }

@@ -21,6 +21,7 @@ turnier-draft = { path = "../turnier-draft" }
 turnier-scheduler = { path = "../turnier-scheduler" }
 turnier-automatik = { path = "../turnier-automatik" }
 turnier-scrim = { path = "../turnier-scrim" }
+turnier-observer = { path = "../turnier-observer" }
 
 sqlx.workspace = true
 axum.workspace = true
@@ -35,6 +36,7 @@ tracing.workspace = true
 thiserror.workspace = true
 once_cell.workspace = true
 reqwest.workspace = true
+anyhow.workspace = true
 sha2 = "0.10"
 
 [features]

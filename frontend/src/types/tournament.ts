@@ -821,3 +821,61 @@ export interface LobbyAction {
   /** true = der Timer lief ab und hat automatisch gewaehlt. */
   is_auto: boolean
 }
+
+// --- Auto-Observer / Scrim-Regie ---
+
+export type ObserverMode = 'shadow' | 'assist' | 'auto' | 'manual'
+export type ObserverState = 'waiting' | 'pairing' | 'live' | 'degraded' | 'finished' | 'error'
+
+export interface ObserverSession {
+  id: number
+  session_key: string
+  scrim_match_id: number | null
+  draft_code: string | null
+  steam_match_id: string | null
+  lobby_party_id: string | null
+  bot_account_id: number
+  mode: ObserverMode
+  state: ObserverState
+  enabled: boolean
+  current_account_id: string | null
+  current_score: number | null
+  recommended_account_id: string | null
+  recommended_score: number | null
+  fallback_reason: string | null
+  last_live_event_at: string | null
+  last_agent_heartbeat_at: string | null
+  last_agent_version: string | null
+  last_vconsole_ok: boolean | null
+  last_game_connected: boolean | null
+  /** False = Safe Mode: keinerlei automatisierte Spieleingaben. */
+  game_control_enabled: boolean
+  created_at: string
+  updated_at: string
+  finished_at: string | null
+}
+
+export interface ObserverDecision {
+  observed_at: string
+  account_id: string | null
+  hero_id: number | null
+  score: number
+  current_score: number | null
+  switched: boolean
+  reason: string
+  factors: Record<string, number>
+  frame_age_ms: number | null
+}
+
+export interface ObserverSessionDetail {
+  session: ObserverSession
+  recent_decisions: ObserverDecision[]
+}
+
+export interface ObserverBot2Lease {
+  bot_account_id: number
+  reserved: boolean
+  steam_connected: boolean
+  gc_connected: boolean
+  restart_requested: boolean
+}

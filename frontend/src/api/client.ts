@@ -57,6 +57,10 @@ import type {
   CreateLobbyBody,
   LobbyCredentials,
   LobbyState,
+  ObserverBot2Lease,
+  ObserverMode,
+  ObserverSession,
+  ObserverSessionDetail,
 } from '@/types/tournament'
 
 const API_BASE = '/turnier/api'
@@ -675,4 +679,43 @@ export const submitDraftLobbyAction = (code: string, token: string, heroName: st
   lobbyRequest<LobbyState>(`/draft/lobbies/${encodeURIComponent(code)}/action`, {
     method: 'POST',
     body: JSON.stringify({ token, hero_name: heroName }),
+  })
+
+// --- Auto-Observer (Admin) ---
+export const fetchObserverSessions = () =>
+  request<{ sessions: ObserverSession[] }>('/observer/sessions')
+
+export const fetchObserverSession = (id: number) =>
+  request<ObserverSessionDetail>(`/observer/sessions/${id}`)
+
+export const createObserverSession = (body: {
+  steam_match_id?: string
+  scrim_match_id?: number
+  draft_code?: string
+  mode?: ObserverMode
+}) =>
+  request<ObserverSession>('/observer/sessions', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  })
+
+export const setObserverMode = (id: number, mode: ObserverMode) =>
+  request<ObserverSession>(`/observer/sessions/${id}/mode`, {
+    method: 'POST',
+    body: JSON.stringify({ mode }),
+  })
+
+export const retryObserverSession = (id: number) =>
+  request<ObserverSession>(`/observer/sessions/${id}/retry`, { method: 'POST' })
+
+export const finishObserverSession = (id: number) =>
+  request<ObserverSession>(`/observer/sessions/${id}/finish`, { method: 'POST' })
+
+export const fetchObserverBot2Lease = () =>
+  request<ObserverBot2Lease>('/observer/bot2/lease')
+
+export const setObserverBot2Lease = (reserved: boolean) =>
+  request<ObserverBot2Lease>('/observer/bot2/lease', {
+    method: 'POST',
+    body: JSON.stringify({ reserved }),
   })

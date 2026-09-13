@@ -70,6 +70,18 @@ pub struct Config {
     pub steam_bot_base_url: String,
     pub steam_bot_internal_token: String,
 
+    // --- Auto-Observer / Steam Bot 2 ---
+    pub observer_enabled: bool,
+    /// Separater Kill-Switch fuer jede automatisierte Interaktion mit dem
+    /// lokalen Deadlock-Client. Default bleibt aus; Shadow/Assist funktionieren
+    /// ohne diesen Schalter.
+    pub observer_game_control_enabled: bool,
+    pub observer_agent_token: String,
+    pub observer_steam_bot2_base_url: String,
+    pub observer_deadlock_api_base_url: String,
+    pub observer_controller_query: String,
+    pub observer_pawn_query: String,
+
     // --- Routine-Turniere (sicherer Default: aus) ---
     pub routine_tournaments_enabled: bool,
     pub routine_proposal_channel_id: i64,
@@ -200,6 +212,25 @@ impl Config {
             steam_bot_internal_token: get_first_string(
                 &["STEAM_BOT_INTERNAL_TOKEN", "TURNIER_INTERNAL_API_TOKEN"],
                 "",
+            ),
+            observer_enabled: get_bool("SCRIM_OBSERVER_ENABLED", false),
+            observer_game_control_enabled: get_bool("SCRIM_OBSERVER_GAME_CONTROL_ENABLED", false),
+            observer_agent_token: get_string("SCRIM_OBSERVER_AGENT_TOKEN", ""),
+            observer_steam_bot2_base_url: get_string(
+                "SCRIM_OBSERVER_STEAM_BOT2_BASE_URL",
+                "http://127.0.0.1:8784",
+            ),
+            observer_deadlock_api_base_url: get_string(
+                "SCRIM_OBSERVER_DEADLOCK_API_BASE_URL",
+                "https://api.deadlock-api.com",
+            ),
+            observer_controller_query: get_string(
+                "SCRIM_OBSERVER_CONTROLLER_QUERY",
+                "SELECT * FROM CCitadelPlayerController",
+            ),
+            observer_pawn_query: get_string(
+                "SCRIM_OBSERVER_PAWN_QUERY",
+                "SELECT * FROM CCitadelPlayerPawn",
             ),
             routine_tournaments_enabled: get_bool("ROUTINE_TOURNAMENTS_ENABLED", false),
             routine_proposal_channel_id: get_int(

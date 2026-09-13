@@ -77,7 +77,8 @@ async fn main() -> anyhow::Result<()> {
     let scheduler_handle = tokio::spawn(start_scheduler(scheduler, shutdown_rx));
     spawn_substitute_sweep_worker(state.clone());
     spawn_scrim_operational_worker(state.clone());
-    spawn_scrim_lobby_worker(state);
+    spawn_scrim_lobby_worker(state.clone());
+    turnier_api::observer::spawn_observer_worker(state);
 
     let addr = format!("{}:{}", config.backend_host, config.backend_port);
     let listener = tokio::net::TcpListener::bind(&addr).await?;

@@ -25,6 +25,7 @@ pub mod internal_automatik;
 pub mod internal_scrims;
 pub mod leaderboard;
 pub mod operations;
+pub mod observer;
 pub mod public;
 pub mod scrim_lobby;
 pub mod test_mode;
