@@ -70,7 +70,7 @@ fi
 # Marker fordert genau einen Lauf an; nach erfolgreicher Migration wird er
 # entfernt. So bleiben Secrets im bestehenden Infisical-Pfad und die zentrale
 # Migration weiterhin Eigentum von dl-central-migrate.
-CENTRAL_MIGRATION_MARKER="$ROOT_DIR/.apply-central-migrations-once"
+CENTRAL_MIGRATION_MARKER="${XDG_RUNTIME_DIR:-/tmp}/deadlock-turniere-apply-central-migrations-once"
 CENTRAL_MIGRATOR_BIN="${DL_CENTRAL_MIGRATOR_BIN:-$(dirname "$ROOT_DIR")/Deadlock-Bots/rust/target/release/dl-central-migrate}"
 if [[ -f "$CENTRAL_MIGRATION_MARKER" ]]; then
   if [[ ! -x "$CENTRAL_MIGRATOR_BIN" ]]; then
