@@ -93,7 +93,10 @@ impl DeadlockLiveClient {
                     line.pop();
                 }
                 if line.is_empty() {
-                    if event == "message" && !data.is_empty() {
+                    // Nach SSE ist ein fehlendes `event:` implizit ein
+                    // `message`-Event. deadlock-api.com liefert seine Live-Rows
+                    // aktuell genau in dieser Default-Form (`data:` + Leerzeile).
+                    if is_message_event(&event) && !data.is_empty() {
                         let value: Value = serde_json::from_str(&data)
                             .map_err(|e| LiveError::Sse(format!("ungueltiges JSON: {e}")))?;
                         let received_at = Utc::now();
@@ -398,6 +401,10 @@ fn normalize_account_id(value: i64) -> Option<u32> {
     Some((value as u64 & 0xffff_ffff) as u32).filter(|v| *v > 0)
 }
 
+fn is_message_event(event: &str) -> bool {
+    event.is_empty() || event == "message"
+}
+
 fn normalize_live_rows(value: Value) -> Vec<Value> {
     match value {
         Value::Array(items) => items,
@@ -515,6 +522,14 @@ mod tests {
         assert_eq!(rows.len(), 2);
         assert_eq!(rows[0]["account_id"], 1);
         assert_eq!(rows[1]["account_id"], 2);
+    }
+
+    #[test]
+    fn sse_default_event_is_a_message() {
+        assert!(is_message_event(""));
+        assert!(is_message_event("message"));
+        assert!(!is_message_event("status"));
+        assert!(!is_message_event("error"));
     }
 
     #[test]
