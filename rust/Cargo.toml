@@ -22,6 +22,7 @@ serde_json = "1"
 thiserror = "2"
 anyhow = "1"
 chrono = { version = "0.4", features = ["serde", "clock"] }
+chrono-tz = "0.10"
 
 # --- Async / Laufzeit ---
 # Statt "full": nur die tatsächlich genutzten Bausteine (tokio::main/test,

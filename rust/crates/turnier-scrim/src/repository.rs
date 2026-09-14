@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use async_trait::async_trait;
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Datelike, TimeZone, Utc};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -9,7 +9,9 @@ use sqlx::{Postgres, Row, Transaction};
 
 use turnier_db::Pool;
 
-use crate::decision::{derive_match_request_facts, rank_replacement_candidates};
+use crate::decision::{
+    availability_covers_slot, derive_match_request_facts, rank_replacement_candidates,
+};
 use crate::dto::{
     ActionReceipt, AnnouncementPublicationRequest, CreateTeamRequest, MatchRequestAction,
     MatchRequestPatch, MatchRequestResponseRequest, ParticipantPatchRequest, PatchValue,
@@ -20,9 +22,9 @@ use crate::dto::{
 use crate::model::{
     AnnouncementPreview, AvailabilitySlot, AvailabilityStatus, Coach, LagebildEvidenceRef,
     LagebildSnapshotRef, LobbyStateMutation, MatchMutation, MatchRequest, MatchRequestBatch,
-    MatchRequestResponse, MatchRequestTemplate, Participant, ReplacementCandidate, ResponseChoice,
-    RosterMember, ScrimAction, ScrimMatch, ScrimReadModel, ScrimSlot, SelectedMatchResult, Team,
-    TeamMember, TeamRef, ValidatedMatchRequestBatch, WeeklyAvailability,
+    MatchRequestResponse, MatchRequestTemplate, Participant, ReplacementCandidate, ReplacementNeed,
+    ResponseChoice, RosterMember, ScrimAction, ScrimDay, ScrimMatch, ScrimReadModel, ScrimSlot,
+    SelectedMatchResult, Team, TeamMember, TeamRef, ValidatedMatchRequestBatch, WeeklyAvailability,
 };
 use crate::{ScrimError, ScrimResult};
 
@@ -193,6 +195,14 @@ pub struct RosterPoolCandidate {
     pub availability_confirmed: bool,
     pub status: String,
     pub source: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AutoReplacementContact {
+    pub need_id: i64,
+    pub team_id: i32,
+    pub candidate_id: i64,
+    pub participant_id: i32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1589,6 +1599,405 @@ impl PgScrimReadRepository {
         Ok(receipt)
     }
 
+    pub async fn auto_schedule_match_request_reminder_once(
+        &self,
+        now: DateTime<Utc>,
+    ) -> ScrimResult<bool> {
+        let mut tx = self.pool.begin().await?;
+        lock_runtime_control(&mut tx).await?;
+        require_turniere_runtime(&mut tx).await?;
+        let row = sqlx::query(
+            r#"
+            WITH request_teams AS (
+                SELECT mr.id AS request_id,
+                       mr.team_a_id AS team_id,
+                       mr.team_query_message_ids,
+                       mr.created_at,
+                       mr.status,
+                       batch.deadline_at
+                  FROM scrim.match_requests mr
+                  JOIN scrim.match_request_batches batch ON batch.id = mr.batch_id
+                UNION ALL
+                SELECT mr.id AS request_id,
+                       mr.team_b_id AS team_id,
+                       mr.team_query_message_ids,
+                       mr.created_at,
+                       mr.status,
+                       batch.deadline_at
+                  FROM scrim.match_requests mr
+                  JOIN scrim.match_request_batches batch ON batch.id = mr.batch_id
+                 WHERE mr.team_b_id IS NOT NULL
+            )
+            SELECT request_teams.request_id,
+                   request_teams.team_id,
+                   request_teams.team_query_message_ids,
+                   request_teams.deadline_at,
+                   team.discord_role_id,
+                   team.discord_channel_id
+              FROM request_teams
+              JOIN scrim.teams team ON team.id = request_teams.team_id
+             WHERE request_teams.status IN ('open', 'post_failed')
+               AND request_teams.deadline_at > $1
+               AND team.discord_channel_id IS NOT NULL
+               AND request_teams.team_query_message_ids ? request_teams.team_id::TEXT
+               AND EXISTS(
+                   SELECT 1
+                     FROM scrim.team_members tm
+                     JOIN scrim.participants p ON p.id = tm.participant_id
+                    WHERE tm.team_id = request_teams.team_id
+                      AND tm.is_bench = FALSE
+                      AND NOT EXISTS(
+                          SELECT 1
+                            FROM scrim.match_request_responses response
+                           WHERE response.request_id = request_teams.request_id
+                             AND response.team_id = request_teams.team_id
+                             AND response.participant_id = p.id
+                      )
+               )
+               AND (
+                   team.discord_role_id IS NOT NULL
+                   OR NOT EXISTS(
+                       SELECT 1
+                         FROM scrim.team_members tm
+                         JOIN scrim.participants p ON p.id = tm.participant_id
+                        WHERE tm.team_id = request_teams.team_id
+                          AND tm.is_bench = FALSE
+                          AND p.discord_id IS NULL
+                          AND NOT EXISTS(
+                              SELECT 1
+                                FROM scrim.match_request_responses response
+                               WHERE response.request_id = request_teams.request_id
+                                 AND response.team_id = request_teams.team_id
+                                 AND response.participant_id = p.id
+                          )
+                   )
+               )
+               AND (
+                   (
+                       request_teams.deadline_at <= $1 + interval '12 hours'
+                       AND NOT EXISTS(
+                           SELECT 1
+                             FROM scrim.match_request_reminders reminder
+                            WHERE reminder.request_id = request_teams.request_id
+                              AND reminder.team_id = request_teams.team_id
+                              AND reminder.template = 'frist_bald'
+                              AND reminder.status NOT IN ('failed', 'cancelled')
+                       )
+                   )
+                   OR (
+                       request_teams.created_at <= $1 - interval '24 hours'
+                       AND request_teams.deadline_at > $1 + interval '12 hours'
+                       AND NOT EXISTS(
+                           SELECT 1
+                             FROM scrim.match_request_reminders reminder
+                            WHERE reminder.request_id = request_teams.request_id
+                              AND reminder.team_id = request_teams.team_id
+                              AND reminder.template = 'antwort_fehlt'
+                              AND reminder.status NOT IN ('failed', 'cancelled')
+                       )
+                   )
+               )
+             ORDER BY request_teams.deadline_at ASC,
+                      request_teams.request_id ASC,
+                      request_teams.team_id ASC
+             LIMIT 1
+            "#,
+        )
+        .bind(now)
+        .fetch_optional(&mut *tx)
+        .await?;
+        let Some(row) = row else {
+            tx.commit().await?;
+            return Ok(false);
+        };
+        let request_id = row.try_get::<i32, _>("request_id")?;
+        let team_id = row.try_get::<i32, _>("team_id")?;
+        let deadline_at = row.try_get::<DateTime<Utc>, _>("deadline_at")?;
+        let template = if deadline_at <= now + chrono::Duration::hours(12) {
+            "frist_bald"
+        } else {
+            "antwort_fehlt"
+        };
+        let message_ids = row.try_get::<Value, _>("team_query_message_ids")?;
+        let (channel_id, source_message_id) = team_query_message(&message_ids, team_id)?;
+        let stored_channel_id = row
+            .try_get::<Option<i64>, _>("discord_channel_id")?
+            .ok_or_else(|| {
+                ScrimError::InvalidStoredData("Dem Team fehlt der Discord-Kanal.".to_string())
+            })?;
+        if channel_id != stored_channel_id {
+            return Err(ScrimError::InvalidStoredData(
+                "Die Terminabfrage gehört nicht zum aktuellen Teamkanal.".to_string(),
+            ));
+        }
+        let missing = sqlx::query(
+            r#"
+            SELECT p.id, p.discord_id
+              FROM scrim.team_members tm
+              JOIN scrim.participants p ON p.id = tm.participant_id
+             WHERE tm.team_id = $1
+               AND tm.is_bench = FALSE
+               AND NOT EXISTS(
+                   SELECT 1
+                     FROM scrim.match_request_responses response
+                    WHERE response.request_id = $2
+                      AND response.team_id = $1
+                      AND response.participant_id = p.id
+               )
+             ORDER BY p.display_name ASC, p.id ASC
+            "#,
+        )
+        .bind(team_id)
+        .bind(request_id)
+        .fetch_all(&mut *tx)
+        .await?;
+        if missing.is_empty() {
+            tx.commit().await?;
+            return Ok(false);
+        }
+        let participant_ids = missing
+            .iter()
+            .map(|member| member.try_get::<i32, _>("id"))
+            .collect::<Result<Vec<_>, _>>()?;
+        let discord_ids = missing
+            .iter()
+            .map(|member| member.try_get::<Option<i64>, _>("discord_id"))
+            .collect::<Result<Vec<_>, _>>()?;
+        let all_have_discord = discord_ids.iter().all(Option::is_some);
+        let target_discord_ids = if all_have_discord {
+            discord_ids.into_iter().flatten().collect::<Vec<_>>()
+        } else {
+            Vec::new()
+        };
+        let target_role_id = if all_have_discord {
+            None
+        } else {
+            row.try_get::<Option<i64>, _>("discord_role_id")?
+        };
+        if !all_have_discord && target_role_id.is_none() {
+            tx.commit().await?;
+            return Ok(false);
+        }
+        sqlx::query(
+            r#"
+            INSERT INTO scrim.match_request_reminders(
+                request_id, team_id, template, target_kind, target_participant_ids,
+                target_discord_user_ids, target_role_id, missing_count,
+                approved_by_user_id, approved_by_display_name, approved_at, scheduled_for,
+                status, discord_channel_id, source_message_id, created_at, updated_at
+            ) VALUES (
+                $1, $2, $3, $4, $5, $6, $7, $8,
+                'scrim-auto', 'Scrim-Automatik', now(), $9,
+                'approved', $10, $11, now(), now()
+            )
+            "#,
+        )
+        .bind(request_id)
+        .bind(team_id)
+        .bind(template)
+        .bind(if all_have_discord { "members" } else { "team" })
+        .bind(&participant_ids)
+        .bind(&target_discord_ids)
+        .bind(target_role_id)
+        .bind(i32::try_from(participant_ids.len()).unwrap_or(i32::MAX))
+        .bind(now)
+        .bind(channel_id)
+        .bind(source_message_id)
+        .execute(&mut *tx)
+        .await?;
+        tx.commit().await?;
+        Ok(true)
+    }
+
+    pub async fn auto_schedule_match_confirmation_once(
+        &self,
+        now: DateTime<Utc>,
+    ) -> ScrimResult<bool> {
+        let mut tx = self.pool.begin().await?;
+        lock_runtime_control(&mut tx).await?;
+        require_turniere_runtime(&mut tx).await?;
+        let rows = sqlx::query(
+            r#"
+            WITH request_teams AS (
+                SELECT mr.id AS request_id, mr.team_a_id AS team_id, mr.released_at,
+                       mr.released_slot, mr.team_status_message_ids
+                  FROM scrim.match_requests mr
+                 WHERE mr.status='closed'
+                UNION ALL
+                SELECT mr.id AS request_id, mr.team_b_id AS team_id, mr.released_at,
+                       mr.released_slot, mr.team_status_message_ids
+                  FROM scrim.match_requests mr
+                 WHERE mr.status='closed' AND mr.team_b_id IS NOT NULL
+            )
+            SELECT request_teams.request_id, request_teams.team_id,
+                   request_teams.released_at, request_teams.released_slot,
+                   request_teams.team_status_message_ids,
+                   team.discord_role_id, team.discord_channel_id
+              FROM request_teams
+              JOIN scrim.teams team ON team.id=request_teams.team_id
+             WHERE request_teams.released_at IS NOT NULL
+               AND request_teams.released_slot ? 'date'
+               AND request_teams.released_slot->>'date' IS NOT NULL
+               AND request_teams.team_status_message_ids ? request_teams.team_id::TEXT
+               AND team.discord_channel_id IS NOT NULL
+               AND EXISTS(
+                   SELECT 1
+                     FROM scrim.team_members tm
+                     JOIN scrim.participants p ON p.id=tm.participant_id
+                    WHERE tm.team_id=request_teams.team_id AND tm.is_bench=FALSE
+                      AND NOT EXISTS(
+                          SELECT 1 FROM scrim.match_request_responses response
+                           WHERE response.request_id=request_teams.request_id
+                             AND response.team_id=request_teams.team_id
+                             AND response.participant_id=p.id
+                             AND response.responded_at > request_teams.released_at
+                      )
+               )
+               AND (
+                   team.discord_role_id IS NOT NULL
+                   OR NOT EXISTS(
+                       SELECT 1
+                         FROM scrim.team_members tm
+                         JOIN scrim.participants p ON p.id=tm.participant_id
+                        WHERE tm.team_id=request_teams.team_id AND tm.is_bench=FALSE
+                          AND p.discord_id IS NULL
+                          AND NOT EXISTS(
+                              SELECT 1 FROM scrim.match_request_responses response
+                               WHERE response.request_id=request_teams.request_id
+                                 AND response.team_id=request_teams.team_id
+                                 AND response.participant_id=p.id
+                                 AND response.responded_at > request_teams.released_at
+                          )
+                   )
+               )
+               AND NOT EXISTS(
+                   SELECT 1 FROM scrim.match_request_reminders reminder
+                    WHERE reminder.request_id=request_teams.request_id
+                      AND reminder.team_id=request_teams.team_id
+                      AND reminder.template='bestaetigung_offen'
+                      AND reminder.status NOT IN ('failed', 'cancelled')
+               )
+             ORDER BY request_teams.released_slot->>'date' ASC,
+                      request_teams.request_id ASC, request_teams.team_id ASC
+             LIMIT 50
+            "#,
+        )
+        .fetch_all(&mut *tx)
+        .await?;
+
+        let mut selected = None;
+        for row in rows {
+            let slot = parse_optional_slot(row.try_get("released_slot")?)?.ok_or_else(|| {
+                ScrimError::InvalidStoredData("Freigegebener Termin fehlt.".to_string())
+            })?;
+            let Some(scheduled_at) = scrim_slot_scheduled_at(&slot)? else {
+                continue;
+            };
+            if scheduled_at <= now {
+                continue;
+            }
+            selected = Some((row, scheduled_at));
+            break;
+        }
+        let Some((row, scheduled_at)) = selected else {
+            tx.commit().await?;
+            return Ok(false);
+        };
+
+        let request_id = row.try_get::<i32, _>("request_id")?;
+        let team_id = row.try_get::<i32, _>("team_id")?;
+        let released_at = row.try_get::<DateTime<Utc>, _>("released_at")?;
+        let message_ids = row.try_get::<Value, _>("team_status_message_ids")?;
+        let (channel_id, source_message_id) = team_query_message(&message_ids, team_id)?;
+        let stored_channel_id = row
+            .try_get::<Option<i64>, _>("discord_channel_id")?
+            .ok_or_else(|| {
+                ScrimError::InvalidStoredData("Dem Team fehlt der Discord-Kanal.".to_string())
+            })?;
+        if channel_id != stored_channel_id {
+            return Err(ScrimError::InvalidStoredData(
+                "Die Terminmeldung gehört nicht zum aktuellen Teamkanal.".to_string(),
+            ));
+        }
+        let missing = sqlx::query(
+            r#"
+            SELECT p.id, p.discord_id
+              FROM scrim.team_members tm
+              JOIN scrim.participants p ON p.id=tm.participant_id
+             WHERE tm.team_id=$1 AND tm.is_bench=FALSE
+               AND NOT EXISTS(
+                   SELECT 1 FROM scrim.match_request_responses response
+                    WHERE response.request_id=$2 AND response.team_id=$1
+                      AND response.participant_id=p.id
+                      AND response.responded_at > $3
+               )
+             ORDER BY p.display_name ASC, p.id ASC
+            "#,
+        )
+        .bind(team_id)
+        .bind(request_id)
+        .bind(released_at)
+        .fetch_all(&mut *tx)
+        .await?;
+        if missing.is_empty() {
+            tx.commit().await?;
+            return Ok(false);
+        }
+        let participant_ids = missing
+            .iter()
+            .map(|member| member.try_get::<i32, _>("id"))
+            .collect::<Result<Vec<_>, _>>()?;
+        let discord_ids = missing
+            .iter()
+            .map(|member| member.try_get::<Option<i64>, _>("discord_id"))
+            .collect::<Result<Vec<_>, _>>()?;
+        let all_have_discord = discord_ids.iter().all(Option::is_some);
+        let target_discord_ids = if all_have_discord {
+            discord_ids.into_iter().flatten().collect::<Vec<_>>()
+        } else {
+            Vec::new()
+        };
+        let target_role_id = if all_have_discord {
+            None
+        } else {
+            row.try_get::<Option<i64>, _>("discord_role_id")?
+        };
+        if !all_have_discord && target_role_id.is_none() {
+            tx.commit().await?;
+            return Ok(false);
+        }
+        let reminder_at = scheduled_at - chrono::Duration::hours(24);
+        let scheduled_for = if reminder_at > now { reminder_at } else { now };
+        sqlx::query(
+            r#"
+            INSERT INTO scrim.match_request_reminders(
+                request_id, team_id, template, target_kind, target_participant_ids,
+                target_discord_user_ids, target_role_id, missing_count,
+                approved_by_user_id, approved_by_display_name, approved_at, scheduled_for,
+                status, discord_channel_id, source_message_id, created_at, updated_at
+            ) VALUES (
+                $1, $2, 'bestaetigung_offen', $3, $4, $5, $6, $7,
+                'scrim-auto', 'Scrim-Automatik', now(), $8,
+                'approved', $9, $10, now(), now()
+            )
+            "#,
+        )
+        .bind(request_id)
+        .bind(team_id)
+        .bind(if all_have_discord { "members" } else { "team" })
+        .bind(&participant_ids)
+        .bind(&target_discord_ids)
+        .bind(target_role_id)
+        .bind(i32::try_from(participant_ids.len()).unwrap_or(i32::MAX))
+        .bind(scheduled_for)
+        .bind(channel_id)
+        .bind(source_message_id)
+        .execute(&mut *tx)
+        .await?;
+        tx.commit().await?;
+        Ok(true)
+    }
+
     pub async fn create_match_request_reminders(
         &self,
         idempotency_key: &str,
@@ -1867,6 +2276,137 @@ impl PgScrimReadRepository {
         Ok(dispatch)
     }
 
+    pub async fn expire_stale_replacement_request_once(
+        &self,
+        now: DateTime<Utc>,
+    ) -> ScrimResult<bool> {
+        let mut tx = self.pool.begin().await?;
+        lock_runtime_control(&mut tx).await?;
+        require_turniere_runtime(&mut tx).await?;
+        let row = sqlx::query(
+            r#"
+            SELECT request.id, request.need_id, request.candidate_id
+              FROM scrim.replacement_requests request
+              JOIN scrim.replacement_needs need ON need.id = request.need_id
+             WHERE request.status IN ('pending', 'sent', 'uncertain')
+               AND request.requested_at <= $1 - interval '12 hours'
+               AND need.status IN ('open', 'contacting')
+             ORDER BY request.requested_at ASC, request.id ASC
+             LIMIT 1
+             FOR UPDATE OF request, need SKIP LOCKED
+            "#,
+        )
+        .bind(now)
+        .fetch_optional(&mut *tx)
+        .await?;
+        let Some(row) = row else {
+            tx.commit().await?;
+            return Ok(false);
+        };
+        let request_id = row.try_get::<i64, _>("id")?;
+        let need_id = row.try_get::<i64, _>("need_id")?;
+        let candidate_id = row.try_get::<Option<i64>, _>("candidate_id")?;
+        sqlx::query(
+            "UPDATE scrim.replacement_requests \
+                SET status='expired', responded_at=now(), updated_at=now() \
+              WHERE id=$1",
+        )
+        .bind(request_id)
+        .execute(&mut *tx)
+        .await?;
+        if let Some(candidate_id) = candidate_id {
+            sqlx::query(
+                "UPDATE scrim.replacement_candidates \
+                    SET status='expired', updated_at=now() \
+                  WHERE id=$1 AND status IN ('candidate', 'shortlisted', 'requested')",
+            )
+            .bind(candidate_id)
+            .execute(&mut *tx)
+            .await?;
+        }
+        sqlx::query(
+            "UPDATE scrim.replacement_needs \
+                SET status='open', updated_at=now() \
+              WHERE id=$1 AND status='contacting'",
+        )
+        .bind(need_id)
+        .execute(&mut *tx)
+        .await?;
+        sqlx::query(
+            "UPDATE scrim.outbox_effects effect \
+                SET state='cancelled', lease_owner=NULL, lease_until=NULL, \
+                    next_attempt_at=NULL, updated_at=now() \
+               FROM scrim.replacement_request_effects link \
+              WHERE link.replacement_request_id=$1 \
+                AND effect.id=link.outbox_effect_id \
+                AND effect.state IN ('pending', 'retry')",
+        )
+        .bind(request_id)
+        .execute(&mut *tx)
+        .await?;
+        tx.commit().await?;
+        Ok(true)
+    }
+
+    pub async fn next_auto_replacement_contact(
+        &self,
+    ) -> ScrimResult<Option<AutoReplacementContact>> {
+        let row = sqlx::query(
+            r#"
+            SELECT need.id AS need_id,
+                   need.team_id,
+                   candidate.id AS candidate_id,
+                   candidate.participant_id
+              FROM scrim.replacement_needs need
+              JOIN scrim.replacement_candidates candidate ON candidate.need_id = need.id
+             WHERE need.status IN ('open', 'contacting')
+               AND need.team_id IS NOT NULL
+               AND candidate.status IN ('candidate', 'shortlisted')
+               AND candidate.participant_id IS NOT NULL
+               AND candidate.discord_user_id IS NOT NULL
+               AND candidate.candidate_data->>'availability' = 'confirmed'
+               AND NOT EXISTS(
+                   SELECT 1
+                     FROM scrim.replacement_requests pending
+                    WHERE pending.need_id = need.id
+                      AND pending.status IN ('pending', 'sent', 'uncertain')
+               )
+               AND NOT EXISTS(
+                   SELECT 1
+                     FROM scrim.replacement_requests busy_request
+                    WHERE busy_request.participant_id = candidate.participant_id
+                      AND busy_request.status IN ('pending', 'sent', 'uncertain')
+               )
+               AND NOT EXISTS(
+                   SELECT 1
+                     FROM scrim.team_members active_sub
+                    WHERE active_sub.participant_id = candidate.participant_id
+                      AND active_sub.substitute_until IS NOT NULL
+                      AND active_sub.substitute_until > now()
+               )
+             ORDER BY need.created_at ASC,
+                      CASE
+                          WHEN jsonb_typeof(candidate.score_data->'score') = 'number'
+                          THEN (candidate.score_data->>'score')::DOUBLE PRECISION
+                          ELSE 0
+                      END DESC,
+                      candidate.id ASC
+             LIMIT 1
+            "#,
+        )
+        .fetch_optional(&self.pool)
+        .await?;
+        row.map(|row| {
+            Ok(AutoReplacementContact {
+                need_id: row.try_get("need_id")?,
+                team_id: row.try_get("team_id")?,
+                candidate_id: row.try_get("candidate_id")?,
+                participant_id: row.try_get("participant_id")?,
+            })
+        })
+        .transpose()
+    }
+
     pub async fn replacement_candidates(
         &self,
         need_id: i64,
@@ -1959,8 +2499,12 @@ impl PgScrimReadRepository {
             }
         };
         let need = sqlx::query(
-            "SELECT match_id, team_id, status FROM scrim.replacement_needs \
-              WHERE id=$1 FOR UPDATE",
+            "SELECT need.match_id, need.team_id, need.status, team.name AS team_name, \
+                    scrim_match.when_text, scrim_match.scheduled_at \
+               FROM scrim.replacement_needs need \
+               LEFT JOIN scrim.teams team ON team.id=need.team_id \
+               LEFT JOIN scrim.matches scrim_match ON scrim_match.id=need.match_id \
+              WHERE need.id=$1 FOR UPDATE OF need",
         )
         .bind(need_id)
         .fetch_optional(&mut *tx)
@@ -2040,6 +2584,18 @@ impl PgScrimReadRepository {
             json!({"need_id": need_id.to_string(), "participant_id": participant_id.to_string()}),
         )
         .await?;
+        let team_name = need
+            .try_get::<Option<String>, _>("team_name")?
+            .unwrap_or_else(|| "das Team".to_string());
+        let scheduled_at = need.try_get::<Option<DateTime<Utc>>, _>("scheduled_at")?;
+        let when_text = need.try_get::<Option<String>, _>("when_text")?;
+        let match_time = scheduled_at
+            .map(|value| format!("<t:{}:f>", value.timestamp()))
+            .or(when_text)
+            .unwrap_or_else(|| "den festgelegten Scrim-Termin".to_string());
+        let replacement_message = format!(
+            "Für **{team_name}** wird Ersatz für {match_time} gesucht. Deine hinterlegte Verfügbarkeit passt zu diesem Slot. Wenn du übernehmen kannst, antworte bitte direkt über die Buttons."
+        );
         let effect_payload = json!({
             "schema_version": "discord-scrim-effect:v1",
             "message_kind": "replacement_request",
@@ -2056,7 +2612,7 @@ impl PgScrimReadRepository {
                     "components": [
                         {
                             "type": 10,
-                            "content": "Hey! 👋 Für ein Scrim wird noch jemand gesucht — du stehst als möglicher Ersatz auf der Liste. Wenn du Zeit und Lust hast, antworte bitte direkt über die Buttons."
+                            "content": replacement_message
                         },
                         {
                             "type": 1,
@@ -2202,9 +2758,11 @@ impl PgScrimReadRepository {
         require_turniere_runtime(&mut tx).await?;
         let row = sqlx::query(
             "SELECT request.need_id, request.candidate_id, request.participant_id, \
-                    request.discord_user_id, request.status, need.team_id \
+                    request.discord_user_id, request.status, need.team_id, need.match_id, \
+                    scrim_match.scheduled_at \
                FROM scrim.replacement_requests request \
                JOIN scrim.replacement_needs need ON need.id=request.need_id \
+               LEFT JOIN scrim.matches scrim_match ON scrim_match.id=need.match_id \
               WHERE request.id=$1 FOR UPDATE OF request, need",
         )
         .bind(replacement_request_id)
@@ -2284,15 +2842,22 @@ impl PgScrimReadRepository {
             if let (Some(team_id), Some(participant_id)) =
                 (row.try_get::<Option<i32>, _>("team_id")?, participant_id)
             {
+                let fallback_until = Utc::now() + chrono::Duration::hours(24);
+                let substitute_until = row
+                    .try_get::<Option<DateTime<Utc>>, _>("scheduled_at")?
+                    .map(|scheduled_at| scheduled_at + chrono::Duration::hours(6))
+                    .filter(|until| *until > fallback_until)
+                    .unwrap_or(fallback_until);
                 sqlx::query(
                     "INSERT INTO scrim.team_members(\
                          team_id, participant_id, is_bench, is_captain, substitute_until\
-                     ) VALUES($1, $2, TRUE, FALSE, now() + interval '24 hours') \
+                     ) VALUES($1, $2, TRUE, FALSE, $3) \
                      ON CONFLICT (team_id, participant_id) DO UPDATE SET \
-                         is_bench=TRUE, substitute_until=now() + interval '24 hours'",
+                         is_bench=TRUE, substitute_until=$3",
                 )
                 .bind(team_id)
                 .bind(participant_id)
+                .bind(substitute_until)
                 .execute(&mut *tx)
                 .await?;
                 sync_plans.push(participant_team_role_resync_plan(&mut tx, participant_id).await?);
@@ -2412,6 +2977,20 @@ impl PgScrimReadRepository {
                     .to_string(),
             ));
         }
+        let team_id_list = team_ids.iter().copied().collect::<Vec<_>>();
+        let target_rows = sqlx::query(
+            "SELECT id, name, discord_channel_id FROM scrim.teams WHERE id=ANY($1) ORDER BY id",
+        )
+        .bind(&team_id_list)
+        .fetch_all(&mut *tx)
+        .await?;
+        let mut delivery_targets = BTreeMap::<i32, (String, Option<i64>)>::new();
+        for row in target_rows {
+            let id = row.try_get::<i32, _>("id")?;
+            let name = row.try_get::<String, _>("name")?;
+            let channel_id = row.try_get::<Option<i64>, _>("discord_channel_id")?;
+            delivery_targets.insert(id, (name, channel_id));
+        }
 
         lock_id_generation(&mut tx).await?;
         let batch_id = next_id(&mut tx, "scrim.match_request_batches").await?;
@@ -2446,11 +3025,95 @@ impl PgScrimReadRepository {
             })?)
             .execute(&mut *tx)
             .await?;
+
+            let team_a = delivery_targets.get(&request.team_a_id).ok_or_else(|| {
+                ScrimError::InvalidStoredData("Team A delivery target missing".to_string())
+            })?;
+            let team_b = request
+                .team_b_id
+                .and_then(|team_id| delivery_targets.get(&team_id));
+            let mut query_targets = vec![(
+                request.team_a_id,
+                team_a.0.as_str(),
+                team_a.1,
+                team_b.map(|target| target.0.as_str()),
+            )];
+            if let (Some(team_b_id), Some(team_b)) = (request.team_b_id, team_b) {
+                query_targets.push((
+                    team_b_id,
+                    team_b.0.as_str(),
+                    team_b.1,
+                    Some(team_a.0.as_str()),
+                ));
+            }
+            let request_post_failed = query_targets.iter().any(|target| target.2.is_none());
+            for (target_team_id, target_team_name, channel_id, opponent_name) in query_targets {
+                let Some(channel_id) = channel_id else {
+                    continue;
+                };
+                let body = match_request_query_body(
+                    batch_id,
+                    match_request_id,
+                    target_team_id,
+                    target_team_name,
+                    opponent_name,
+                    batch.deadline_at,
+                    &request.slots,
+                );
+                let effect_payload = json!({
+                    "schema_version": "discord-scrim-effect:v1",
+                    "message_kind": "match_request",
+                    "operation": "post",
+                    "channel_id": channel_id.to_string(),
+                    "recipient_user_id": null,
+                    "message_id": null,
+                    "context": {
+                        "batch_id": batch_id.to_string(),
+                        "request_id": match_request_id.to_string(),
+                        "team_id": target_team_id.to_string(),
+                    },
+                    "body": body,
+                });
+                let effect_hash = payload_hash(&effect_payload)?;
+                sqlx::query(
+                    "INSERT INTO scrim.outbox_effects(\
+                         effect_type, idempotency_key, payload_hash, payload, state, \
+                         command_receipt_id, remote_system\
+                     ) VALUES ('discord_scrim_effect', $1, $2, $3::jsonb, 'pending', $4, 'discord')",
+                )
+                .bind(format!("scrimreq:v1:{match_request_id}:{target_team_id}"))
+                .bind(effect_hash)
+                .bind(effect_payload)
+                .bind(receipt_id)
+                .execute(&mut *tx)
+                .await?;
+            }
+            sqlx::query("UPDATE scrim.match_requests SET status=$2, updated_at=now() WHERE id=$1")
+                .bind(match_request_id)
+                .bind(if request_post_failed {
+                    "post_failed"
+                } else {
+                    "posting"
+                })
+                .execute(&mut *tx)
+                .await?;
             created_request_ids.push(match_request_id);
             match_request_id = match_request_id.checked_add(1).ok_or_else(|| {
                 ScrimError::InvalidProposal("too many match requests".to_string())
             })?;
         }
+        sqlx::query(
+            "UPDATE scrim.match_request_batches \
+                SET status=CASE WHEN EXISTS (\
+                    SELECT 1 FROM scrim.match_requests \
+                     WHERE batch_id=$1 AND status='post_failed'\
+                ) THEN 'post_failed' ELSE 'posting' END, updated_at=now() \
+              WHERE id=$1",
+        )
+        .bind(batch_id)
+        .execute(&mut *tx)
+        .await?;
+
         if let Some(entity_id) = created_request_ids.first() {
             insert_audit_event(
                 &mut tx,
@@ -2511,9 +3174,12 @@ impl PgScrimReadRepository {
 
         let row = sqlx::query(
             "SELECT mr.batch_id, mr.team_a_id, mr.team_b_id, mr.slot_options, mr.status, \
-                    b.deadline_at \
+                    b.deadline_at, ta.name AS team_a_name, ta.discord_channel_id AS team_a_channel_id, \
+                    tb.name AS team_b_name, tb.discord_channel_id AS team_b_channel_id \
                FROM scrim.match_requests mr \
                JOIN scrim.match_request_batches b ON b.id = mr.batch_id \
+               JOIN scrim.teams ta ON ta.id = mr.team_a_id \
+               LEFT JOIN scrim.teams tb ON tb.id = mr.team_b_id \
               WHERE mr.id = $1 \
               FOR UPDATE OF mr",
         )
@@ -2529,9 +3195,7 @@ impl PgScrimReadRepository {
             ));
         }
         let deadline_at = row.try_get::<DateTime<Utc>, _>("deadline_at")?;
-        if deadline_at > Utc::now() {
-            return Err(ScrimError::Conflict("Deadline has not passed".to_string()));
-        }
+        let deadline_passed = deadline_at <= Utc::now();
 
         let batch_id = row.try_get::<i32, _>("batch_id")?;
         let team_a_id = row.try_get::<i32, _>("team_a_id")?;
@@ -2549,31 +3213,62 @@ impl PgScrimReadRepository {
             &team_ids,
             &roster,
             &responses,
-            true,
+            deadline_passed,
             None,
         )?;
-        let recommended_slot_index = facts.recommended_slot_index;
-        let released_slot_index = request
+        let automatic_slot_index = if deadline_passed {
+            facts.safe_release_slot_index
+        } else {
+            facts.ready_slot_index
+        };
+        let requested_slot_index = request
             .slot_index
             .map(|index| {
                 usize::try_from(index).map_err(|_| {
                     ScrimError::InvalidProposal("slot_index is out of range".to_string())
                 })
             })
-            .transpose()?
-            .or(recommended_slot_index)
-            .ok_or_else(|| ScrimError::Conflict("No recommended slot available".to_string()))?;
+            .transpose()?;
+        if !deadline_passed
+            && requested_slot_index.is_some()
+            && requested_slot_index != facts.ready_slot_index
+        {
+            return Err(ScrimError::Conflict(
+                "Vor Fristende wird nur automatisch freigegeben, wenn alle 12 Stammspieler denselben eindeutigen Slot bestätigt haben.".to_string(),
+            ));
+        }
+        let released_slot_index =
+            requested_slot_index
+                .or(automatic_slot_index)
+                .ok_or_else(|| {
+                    ScrimError::Conflict(if deadline_passed {
+                        "Kein sicher automatisch freigebbarer Slot: bitte Termin explizit wählen."
+                            .to_string()
+                    } else {
+                        "Terminabfrage läuft noch und ist noch nicht eindeutig bestätigt."
+                            .to_string()
+                    })
+                })?;
         let released_slot = slots
             .get(released_slot_index)
             .cloned()
             .ok_or_else(|| ScrimError::InvalidProposal("slot_index is out of range".to_string()))?;
-        let override_reason = if request.slot_index.is_some()
-            && Some(released_slot_index) != recommended_slot_index
+        let override_reason = if requested_slot_index.is_some()
+            && Some(released_slot_index) != automatic_slot_index
         {
             request.reason.clone()
         } else {
             None
         };
+        let released_facts = derive_match_request_facts(
+            request_id,
+            slots.len(),
+            &team_ids,
+            &roster,
+            &responses,
+            deadline_passed,
+            Some(released_slot_index),
+        )?;
         let released_slot_index_i32 = i32::try_from(released_slot_index)
             .map_err(|_| ScrimError::InvalidProposal("slot_index is out of range".to_string()))?;
         sqlx::query(
@@ -2594,6 +3289,112 @@ impl PgScrimReadRepository {
         .bind(&override_reason)
         .execute(&mut *tx)
         .await?;
+
+        let scheduled_at = scrim_slot_scheduled_at(&released_slot)?;
+        let created_match_id = if let Some(team_b_id) = team_b_id {
+            lock_id_generation(&mut tx).await?;
+            let match_id = next_id(&mut tx, "scrim.matches").await?;
+            sqlx::query(
+                "INSERT INTO scrim.matches(\
+                     id, team_a_id, team_b_id, when_text, scheduled_at, status, lobby_state, \
+                     created_at, updated_at\
+                 ) VALUES ($1, $2, $3, $4, $5, 'scheduled', 'draft', now(), now())",
+            )
+            .bind(match_id)
+            .bind(team_a_id)
+            .bind(team_b_id)
+            .bind(scrim_slot_display(&released_slot))
+            .bind(scheduled_at)
+            .execute(&mut *tx)
+            .await?;
+            Some(match_id)
+        } else {
+            None
+        };
+
+        persist_replacement_needs_tx(
+            &mut tx,
+            request_id,
+            created_match_id,
+            released_slot_index,
+            &released_slot,
+            &released_facts.replacement_needs,
+            actor,
+        )
+        .await?;
+
+        let team_a_name = row.try_get::<String, _>("team_a_name")?;
+        let team_b_name = row.try_get::<Option<String>, _>("team_b_name")?;
+        let confirmed_starters = released_facts
+            .slots
+            .get(released_slot_index)
+            .map(|slot| slot.starter_available_count)
+            .unwrap_or(0);
+        let starter_total = roster.iter().filter(|member| !member.is_bench).count();
+        let mut status_targets = vec![(
+            team_a_id,
+            row.try_get::<Option<i64>, _>("team_a_channel_id")?,
+        )];
+        if let Some(team_b_id) = team_b_id {
+            status_targets.push((
+                team_b_id,
+                row.try_get::<Option<i64>, _>("team_b_channel_id")?,
+            ));
+        }
+        let mut status_effects = 0_usize;
+        for (team_id, channel_id) in status_targets {
+            let Some(channel_id) = channel_id else {
+                continue;
+            };
+            let status_body = match_status_effect_body(
+                request_id,
+                team_id,
+                released_slot_index,
+                &team_a_name,
+                team_b_name.as_deref(),
+                &released_slot,
+                confirmed_starters,
+                starter_total,
+                &released_facts.replacement_needs,
+            );
+            let effect_payload = json!({
+                "schema_version": "discord-scrim-effect:v1",
+                "message_kind": "match_status",
+                "operation": "post",
+                "channel_id": channel_id.to_string(),
+                "recipient_user_id": null,
+                "message_id": null,
+                "context": {
+                    "request_id": request_id.to_string(),
+                    "team_id": team_id.to_string(),
+                },
+                "body": status_body.clone(),
+            });
+            let effect_hash = payload_hash(&effect_payload)?;
+            sqlx::query(
+                "INSERT INTO scrim.outbox_effects(\
+                     effect_type, idempotency_key, payload_hash, payload, state, \
+                     command_receipt_id, remote_system\
+                 ) VALUES ('discord_scrim_effect', $1, $2, $3::jsonb, 'pending', $4, 'discord')",
+            )
+            .bind(format!("scrimstatus:v1:{request_id}:{team_id}"))
+            .bind(effect_hash)
+            .bind(effect_payload)
+            .bind(receipt_id)
+            .execute(&mut *tx)
+            .await?;
+            status_effects += 1;
+        }
+        if status_effects > 0 {
+            sqlx::query(
+                "UPDATE scrim.match_requests \
+                    SET status_message_state='queued', updated_at=now() WHERE id=$1",
+            )
+            .bind(request_id)
+            .execute(&mut *tx)
+            .await?;
+        }
+
         sqlx::query(
             "UPDATE scrim.match_request_batches b \
                 SET status = 'closed', updated_at = now() \
@@ -2618,6 +3419,7 @@ impl PgScrimReadRepository {
                 "request_id": request_id.to_string(),
                 "batch_id": batch_id.to_string(),
                 "released_slot_index": released_slot_index,
+                "scheduled_match_id": created_match_id.map(|id| id.to_string()),
                 "override_reason_present": override_reason.is_some(),
             }),
         )
@@ -2710,8 +3512,9 @@ impl PgScrimReadRepository {
             .execute(&mut *tx)
             .await?;
         let row = sqlx::query(
-            "SELECT mr.status, mr.slot_options, mr.team_query_message_ids, \
-                    tm.participant_id::bigint AS participant_id \
+            "SELECT mr.status, mr.slot_options, mr.team_query_message_ids, mr.team_status_message_ids, \
+                    mr.released_slot_index, mr.released_slot, mr.released_at, \
+                    mr.team_a_id, mr.team_b_id, tm.participant_id::bigint AS participant_id \
                FROM scrim.match_requests mr \
                LEFT JOIN scrim.participants p ON p.discord_id = $3 \
                LEFT JOIN scrim.team_members tm ON tm.participant_id = p.id AND tm.team_id = $2 \
@@ -2728,31 +3531,53 @@ impl PgScrimReadRepository {
             ScrimError::InvalidResponse("Diese Terminantwort ist ungültig.".to_string())
         })?;
         let status = row.try_get::<String, _>("status")?;
-        if !matches!(status.as_str(), "open" | "post_failed") {
+        let attendance_mode = status == "closed";
+        if !matches!(status.as_str(), "open" | "post_failed" | "closed") {
             return Err(ScrimError::Conflict(
                 "Diese Abstimmung ist nicht mehr offen.".to_string(),
             ));
         }
         row.try_get::<Option<i64>, _>("participant_id")?
             .ok_or(ScrimError::ParticipantUnauthorized)?;
-        if slot_index >= 0 {
-            let slot_options = row.try_get::<Value, _>("slot_options")?;
-            let slot_count = slot_options
-                .as_array()
-                .ok_or_else(|| {
-                    ScrimError::InvalidStoredData("slot_options is not an array".to_string())
-                })?
-                .len();
-            if usize::try_from(slot_index)
+        let slot_options = row.try_get::<Value, _>("slot_options")?;
+        let slot_count = slot_options
+            .as_array()
+            .ok_or_else(|| {
+                ScrimError::InvalidStoredData("slot_options is not an array".to_string())
+            })?
+            .len();
+        if slot_index >= 0
+            && usize::try_from(slot_index)
                 .ok()
                 .is_none_or(|index| index >= slot_count)
-            {
-                return Err(ScrimError::InvalidResponse(
-                    "slot is out of range".to_string(),
+        {
+            return Err(ScrimError::InvalidResponse(
+                "slot is out of range".to_string(),
+            ));
+        }
+        let released_slot_index = row.try_get::<Option<i32>, _>("released_slot_index")?;
+        if attendance_mode {
+            let released_slot_index = released_slot_index.ok_or_else(|| {
+                ScrimError::InvalidStoredData(
+                    "Dem geschlossenen Termin fehlt der freigegebene Slot.".to_string(),
+                )
+            })?;
+            if slot_index >= 0 && slot_index != released_slot_index {
+                return Err(ScrimError::Conflict(
+                    "Für die finale Bestätigung gilt nur der festgelegte Termin.".to_string(),
                 ));
             }
-        }
-        if !posted_message_matches(
+            if !posted_message_matches(
+                &row.try_get::<Value, _>("team_status_message_ids")?,
+                team_id,
+                channel_id,
+                message_id,
+            ) {
+                return Err(ScrimError::Conflict(
+                    "Diese Bestätigung gehört nicht zur aktuellen Terminmeldung.".to_string(),
+                ));
+            }
+        } else if !posted_message_matches(
             &row.try_get::<Value, _>("team_query_message_ids")?,
             team_id,
             channel_id,
@@ -2809,7 +3634,54 @@ impl PgScrimReadRepository {
         .bind(channel_id)
         .execute(&mut *tx)
         .await?;
+
         let actor_user_id = actor_id.to_string();
+        if attendance_mode {
+            let released_slot_index = released_slot_index.ok_or_else(|| {
+                ScrimError::InvalidStoredData(
+                    "Dem geschlossenen Termin fehlt der freigegebene Slot.".to_string(),
+                )
+            })?;
+            let released_slot_index_usize = usize::try_from(released_slot_index).map_err(|_| {
+                ScrimError::InvalidStoredData("released_slot_index is out of range".to_string())
+            })?;
+            let released_slot =
+                parse_optional_slot(row.try_get("released_slot")?)?.ok_or_else(|| {
+                    ScrimError::InvalidStoredData(
+                        "Dem geschlossenen Termin fehlt der freigegebene Termin.".to_string(),
+                    )
+                })?;
+            let team_a_id = row.try_get::<i32, _>("team_a_id")?;
+            let team_b_id = row.try_get::<Option<i32>, _>("team_b_id")?;
+            let team_ids = [Some(team_a_id), team_b_id]
+                .into_iter()
+                .flatten()
+                .collect::<Vec<_>>();
+            let linked_match_id =
+                find_released_match_id_tx(&mut tx, team_a_id, team_b_id, &released_slot).await?;
+            let roster = load_roster_members_tx(&mut tx, &team_ids).await?;
+            let responses = load_match_request_responses_tx(&mut tx, request_id).await?;
+            let facts = derive_match_request_facts(
+                request_id,
+                slot_count,
+                &team_ids,
+                &roster,
+                &responses,
+                true,
+                Some(released_slot_index_usize),
+            )?;
+            persist_replacement_needs_tx(
+                &mut tx,
+                request_id,
+                linked_match_id,
+                released_slot_index_usize,
+                &released_slot,
+                &facts.replacement_needs,
+                (&actor_user_id, "Finale Teilnahme"),
+            )
+            .await?;
+        }
+
         insert_audit_event(
             &mut tx,
             "match_request_response_recorded",
@@ -2821,6 +3693,7 @@ impl PgScrimReadRepository {
                 "request_id": request_id.to_string(),
                 "team_id": team_id.to_string(),
                 "slot_index": slot_index,
+                "phase": if attendance_mode { "final_confirmation" } else { "scheduling" },
                 "response": if slot_index == -1 { "unavailable" } else { "available" },
             }),
         )
@@ -2828,7 +3701,14 @@ impl PgScrimReadRepository {
 
         let receipt = ActionReceipt {
             accepted: true,
-            message: if slot_index == -1 {
+            message: if attendance_mode {
+                if slot_index == -1 {
+                    "Ausfall gespeichert. Die Ersatzsuche wird automatisch aktualisiert."
+                        .to_string()
+                } else {
+                    "Teilnahme am festen Scrim-Termin bestätigt.".to_string()
+                }
+            } else if slot_index == -1 {
                 "Antwort gespeichert: Kein Slot passt.".to_string()
             } else {
                 format!("Antwort gespeichert: Slot {} passt.", slot_index + 1)
@@ -3904,8 +4784,10 @@ async fn load_lagebild_refs(
     // waechst der Join mit jedem je erzeugten Lagebild weiter.
     let snapshot_scope = match team_id {
         Some(_) => "SELECT id FROM scrim.lagebild_snapshots WHERE team_id = $1",
-        None => "SELECT DISTINCT ON (team_id) id FROM scrim.lagebild_snapshots \
-                  ORDER BY team_id ASC, generated_at DESC, id DESC",
+        None => {
+            "SELECT DISTINCT ON (team_id) id FROM scrim.lagebild_snapshots \
+                  ORDER BY team_id ASC, generated_at DESC, id DESC"
+        }
     };
     let evidence_sql = format!(
         "SELECT e.id, e.snapshot_id, e.evidence_type, e.label, e.url, e.reference_id, e.occurred_at \
@@ -4358,6 +5240,420 @@ async fn load_match_request_responses_tx(
     .collect()
 }
 
+fn scrim_day_label(day: ScrimDay) -> &'static str {
+    match day {
+        ScrimDay::Monday => "Mo",
+        ScrimDay::Tuesday => "Di",
+        ScrimDay::Wednesday => "Mi",
+        ScrimDay::Thursday => "Do",
+        ScrimDay::Friday => "Fr",
+        ScrimDay::Saturday => "Sa",
+        ScrimDay::Sunday => "So",
+    }
+}
+
+fn scrim_minute_label(value: u16) -> String {
+    format!("{:02}:{:02}", value / 60, value % 60)
+}
+
+fn scrim_slot_display(slot: &ScrimSlot) -> String {
+    let date = slot
+        .date
+        .map(|date| format!(" {:02}.{:02}.", date.day(), date.month()))
+        .unwrap_or_default();
+    format!(
+        "{}{} {}–{}",
+        scrim_day_label(slot.day),
+        date,
+        scrim_minute_label(slot.from),
+        scrim_minute_label(slot.to)
+    )
+}
+
+fn scrim_slot_scheduled_at(slot: &ScrimSlot) -> ScrimResult<Option<DateTime<Utc>>> {
+    let Some(date) = slot.date else {
+        return Ok(None);
+    };
+    let hour = u32::from(slot.from / 60);
+    let minute = u32::from(slot.from % 60);
+    let local = date.and_hms_opt(hour, minute, 0).ok_or_else(|| {
+        ScrimError::InvalidStoredData("Der freigegebene Scrim-Termin ist ungültig.".to_string())
+    })?;
+    match chrono_tz::Europe::Berlin.from_local_datetime(&local) {
+        chrono::LocalResult::Single(value) => Ok(Some(value.with_timezone(&Utc))),
+        chrono::LocalResult::Ambiguous(_, _) => Err(ScrimError::InvalidStoredData(
+            "Der freigegebene Scrim-Termin ist wegen der Zeitumstellung nicht eindeutig."
+                .to_string(),
+        )),
+        chrono::LocalResult::None => Err(ScrimError::InvalidStoredData(
+            "Der freigegebene Scrim-Termin existiert wegen der Zeitumstellung nicht.".to_string(),
+        )),
+    }
+}
+
+async fn find_released_match_id_tx(
+    tx: &mut Transaction<'_, Postgres>,
+    team_a_id: i32,
+    team_b_id: Option<i32>,
+    slot: &ScrimSlot,
+) -> ScrimResult<Option<i32>> {
+    let Some(team_b_id) = team_b_id else {
+        return Ok(None);
+    };
+    let scheduled_at = scrim_slot_scheduled_at(slot)?;
+    let when_text = scrim_slot_display(slot);
+    Ok(sqlx::query_scalar::<_, i32>(
+        "SELECT id FROM scrim.matches \
+          WHERE team_a_id=$1 AND team_b_id=$2 \
+            AND (($3::timestamptz IS NOT NULL AND scheduled_at=$3) \
+                 OR ($3::timestamptz IS NULL AND scheduled_at IS NULL AND when_text=$4)) \
+          ORDER BY created_at DESC, id DESC LIMIT 1",
+    )
+    .bind(team_a_id)
+    .bind(team_b_id)
+    .bind(scheduled_at)
+    .bind(when_text)
+    .fetch_optional(&mut **tx)
+    .await?)
+}
+
+fn match_request_query_body(
+    batch_id: i32,
+    request_id: i32,
+    team_id: i32,
+    team_name: &str,
+    opponent_name: Option<&str>,
+    deadline_at: DateTime<Utc>,
+    slots: &[ScrimSlot],
+) -> Value {
+    let slot_lines = slots
+        .iter()
+        .enumerate()
+        .map(|(index, slot)| format!("{}. {}", index + 1, scrim_slot_display(slot)))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let mut rows = Vec::new();
+    for chunk in (0..slots.len()).collect::<Vec<_>>().chunks(5) {
+        rows.push(json!({
+            "type": 1,
+            "components": chunk.iter().map(|index| {
+                let slot = &slots[*index];
+                json!({
+                    "type": 2,
+                    "style": 3,
+                    "label": scrim_slot_display(slot),
+                    "custom_id": format!("scrimreq:v1:slot:{request_id}:{team_id}:{index}"),
+                })
+            }).collect::<Vec<_>>()
+        }));
+    }
+    rows.push(json!({
+        "type": 1,
+        "components": [{
+            "type": 2,
+            "style": 4,
+            "label": "Kein Slot passt",
+            "custom_id": format!("scrimreq:v1:none:{request_id}:{team_id}"),
+        }]
+    }));
+    let opponent = opponent_name.unwrap_or("Gegner offen");
+    let mut components = vec![
+        json!({
+            "type": 10,
+            "content": format!(
+                "**Scrim-Terminabfrage #{batch_id}**\n**{team_name} vs {opponent}**\nAntwortfrist: <t:{}:f>",
+                deadline_at.timestamp()
+            )
+        }),
+        json!({
+            "type": 10,
+            "content": format!(
+                "Wähle **alle** Zeiten, an denen du sicher kannst. Wenn mehrere passen, klicke mehrere. Wenn keine passt, nutze **Kein Slot passt**.\n\n{slot_lines}"
+            )
+        }),
+    ];
+    components.extend(rows);
+    json!({
+        "flags": 32_768,
+        "allowed_mentions": {"parse": [], "replied_user": false},
+        "components": [{
+            "type": 17,
+            "accent_color": 0xC8A86B,
+            "components": components,
+        }]
+    })
+}
+
+fn match_status_effect_body(
+    request_id: i32,
+    team_id: i32,
+    slot_index: usize,
+    team_a_name: &str,
+    team_b_name: Option<&str>,
+    slot: &ScrimSlot,
+    confirmed_starters: u32,
+    starter_total: usize,
+    needs: &[ReplacementNeed],
+) -> Value {
+    let match_label = team_b_name
+        .map(|name| format!("{team_a_name} vs {name}"))
+        .unwrap_or_else(|| format!("{team_a_name} · Gegner offen"));
+    let replacement_line = if needs.is_empty() {
+        "Lineup: Stamm komplett bestätigt.".to_string()
+    } else {
+        format!(
+            "Ersatz läuft automatisch für: {}.",
+            needs
+                .iter()
+                .map(|need| need.display_name.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
+    };
+    json!({
+        "flags": 32_768,
+        "allowed_mentions": {"parse": [], "replied_user": false},
+        "components": [{
+            "type": 17,
+            "accent_color": 0xC8A86B,
+            "components": [
+                {
+                    "type": 10,
+                    "content": format!(
+                        "**Scrim-Termin steht · #{request_id}**\n**{match_label}**\n{}\nStammzusagen: {confirmed_starters}/{starter_total}\n{replacement_line}\n\nBitte bestätigt den festen Termin noch einmal. Ändert sich später etwas, könnt ihr eure Antwort hier aktualisieren.",
+                        scrim_slot_display(slot),
+                    )
+                },
+                {
+                    "type": 1,
+                    "components": [
+                        {
+                            "type": 2,
+                            "style": 3,
+                            "label": "Dabei",
+                            "custom_id": format!("scrimreq:v1:slot:{request_id}:{team_id}:{slot_index}"),
+                        },
+                        {
+                            "type": 2,
+                            "style": 4,
+                            "label": "Falle aus",
+                            "custom_id": format!("scrimreq:v1:none:{request_id}:{team_id}"),
+                        }
+                    ]
+                }
+            ]
+        }]
+    })
+}
+
+fn replacement_reason_code(reason: &str) -> &'static str {
+    match reason {
+        "Kein Slot passt" => "no_slot",
+        "Antwort fehlt" => "missing_response",
+        _ => "slot_not_confirmed",
+    }
+}
+
+async fn persist_replacement_needs_tx(
+    tx: &mut Transaction<'_, Postgres>,
+    request_id: i32,
+    match_id: Option<i32>,
+    slot_index: usize,
+    slot: &ScrimSlot,
+    needs: &[ReplacementNeed],
+    actor: (&str, &str),
+) -> ScrimResult<()> {
+    let slot_index = i32::try_from(slot_index)
+        .map_err(|_| ScrimError::InvalidProposal("slot_index is out of range".to_string()))?;
+    let current_participant_ids = needs
+        .iter()
+        .map(|need| need.participant_id)
+        .collect::<Vec<_>>();
+    for need in needs {
+        let need_id: i64 = sqlx::query_scalar(
+            r#"
+            INSERT INTO scrim.replacement_needs(
+                match_id, match_request_id, team_id, participant_id, slot_index, reason, status,
+                created_by_user_id, created_by_display_name, created_at, updated_at
+            ) VALUES ($1, $2, $3, $4, $5, $6, 'open', $7, $8, now(), now())
+            ON CONFLICT (match_request_id, team_id, participant_id, slot_index)
+            WHERE match_request_id IS NOT NULL
+              AND team_id IS NOT NULL
+              AND participant_id IS NOT NULL
+              AND slot_index IS NOT NULL
+            DO UPDATE SET
+                match_id = COALESCE(EXCLUDED.match_id, scrim.replacement_needs.match_id),
+                reason = EXCLUDED.reason,
+                status = 'open',
+                closed_at = NULL,
+                updated_at = now()
+            RETURNING id
+            "#,
+        )
+        .bind(match_id)
+        .bind(request_id)
+        .bind(need.team_id)
+        .bind(need.participant_id)
+        .bind(slot_index)
+        .bind(replacement_reason_code(&need.reason))
+        .bind(actor.0)
+        .bind(actor.1)
+        .fetch_one(&mut **tx)
+        .await?;
+        populate_replacement_candidates_tx(tx, need_id, need.team_id, need.participant_id, slot)
+            .await?;
+    }
+
+    let cancelled_need_ids = sqlx::query_scalar::<_, i64>(
+        "UPDATE scrim.replacement_needs \
+            SET status='cancelled', closed_at=now(), updated_at=now() \
+          WHERE match_request_id=$1 AND slot_index=$2 \
+            AND status IN ('open', 'contacting') \
+            AND NOT (participant_id = ANY($3)) \
+          RETURNING id",
+    )
+    .bind(request_id)
+    .bind(slot_index)
+    .bind(&current_participant_ids)
+    .fetch_all(&mut **tx)
+    .await?;
+    if !cancelled_need_ids.is_empty() {
+        sqlx::query(
+            "UPDATE scrim.replacement_requests \
+                SET status='cancelled', responded_at=COALESCE(responded_at, now()), updated_at=now() \
+              WHERE need_id=ANY($1) AND status IN ('pending', 'sent', 'uncertain')",
+        )
+        .bind(&cancelled_need_ids)
+        .execute(&mut **tx)
+        .await?;
+        sqlx::query(
+            "UPDATE scrim.outbox_effects effect \
+                SET state='cancelled', lease_owner=NULL, lease_until=NULL, \
+                    next_attempt_at=NULL, updated_at=now() \
+               FROM scrim.replacement_request_effects link \
+               JOIN scrim.replacement_requests request \
+                 ON request.id=link.replacement_request_id \
+              WHERE effect.id=link.outbox_effect_id \
+                AND request.need_id=ANY($1) \
+                AND request.status='cancelled' \
+                AND effect.state IN ('pending', 'retry')",
+        )
+        .bind(&cancelled_need_ids)
+        .execute(&mut **tx)
+        .await?;
+    }
+    Ok(())
+}
+
+async fn populate_replacement_candidates_tx(
+    tx: &mut Transaction<'_, Postgres>,
+    need_id: i64,
+    team_id: i32,
+    missing_participant_id: i32,
+    slot: &ScrimSlot,
+) -> ScrimResult<()> {
+    let rows = sqlx::query(
+        r#"
+        SELECT p.id, p.discord_id, p.availability_slots, p.status,
+               EXISTS(
+                   SELECT 1
+                     FROM scrim.team_members own
+                    WHERE own.team_id = $1
+                      AND own.participant_id = p.id
+                      AND own.is_bench = TRUE
+               ) AS same_team_bench
+          FROM scrim.participants p
+         WHERE p.id <> $2
+           AND p.status <> 'inactive'
+           AND NOT EXISTS(
+               SELECT 1
+                 FROM scrim.team_members starter
+                WHERE starter.participant_id = p.id
+                  AND starter.is_bench = FALSE
+           )
+           AND (
+               EXISTS(
+                   SELECT 1
+                     FROM scrim.team_members own
+                    WHERE own.team_id = $1
+                      AND own.participant_id = p.id
+                      AND own.is_bench = TRUE
+               )
+               OR (
+                   p.status = 'reserve'
+                   AND NOT EXISTS(
+                       SELECT 1
+                         FROM scrim.team_members any_team
+                        WHERE any_team.participant_id = p.id
+                   )
+               )
+           )
+         ORDER BY same_team_bench DESC, p.created_at ASC, p.id ASC
+        "#,
+    )
+    .bind(team_id)
+    .bind(missing_participant_id)
+    .fetch_all(&mut **tx)
+    .await?;
+
+    for row in rows {
+        let participant_id = row.try_get::<i32, _>("id")?;
+        let discord_user_id = row.try_get::<Option<i64>, _>("discord_id")?;
+        let same_team_bench = row.try_get::<bool, _>("same_team_bench")?;
+        let availability = parse_weekly_availability(row.try_get("availability_slots")?);
+        let fit = availability_covers_slot(availability.as_ref(), slot);
+        if fit == Some(false) {
+            continue;
+        }
+        let source = if same_team_bench {
+            "team_bench"
+        } else {
+            "reserve"
+        };
+        let availability_label = if fit == Some(true) {
+            "confirmed"
+        } else {
+            "unknown"
+        };
+        let score = if fit == Some(true) { 100_i64 } else { 0 }
+            + if same_team_bench { 50 } else { 20 }
+            + if discord_user_id.is_some() { 5 } else { 0 };
+        let candidate_data = json!({
+            "source": source,
+            "availability": availability_label,
+            "discord_linked": discord_user_id.is_some(),
+            "slot": slot,
+        });
+        let score_data = json!({
+            "score": score,
+            "source": source,
+            "availability": availability_label,
+        });
+        sqlx::query(
+            r#"
+            INSERT INTO scrim.replacement_candidates(
+                need_id, participant_id, discord_user_id, candidate_data, score_data, status,
+                created_at, updated_at
+            ) VALUES ($1, $2, $3, $4::jsonb, $5::jsonb, 'candidate', now(), now())
+            ON CONFLICT (need_id, participant_id) WHERE participant_id IS NOT NULL
+            DO UPDATE SET
+                discord_user_id = EXCLUDED.discord_user_id,
+                candidate_data = EXCLUDED.candidate_data,
+                score_data = EXCLUDED.score_data,
+                updated_at = now()
+            "#,
+        )
+        .bind(need_id)
+        .bind(participant_id)
+        .bind(discord_user_id)
+        .bind(candidate_data)
+        .bind(score_data)
+        .execute(&mut **tx)
+        .await?;
+    }
+    Ok(())
+}
+
 fn selected_result(row: &sqlx::postgres::PgRow) -> ScrimResult<Option<SelectedMatchResult>> {
     let Some(result_ref_id) = row.try_get::<Option<i64>, _>("result_ref_id")? else {
         return Ok(None);
@@ -4481,8 +5777,10 @@ mod tests {
     use super::{begin_command, complete_command, CommandStart, PgScrimReadRepository};
     use super::{
         blocks_lobby_code_write, is_allowed_lagebild_evidence_url, repairing_role_plan,
-        role_resync, DiscordDispatch, MutationDispatch, RoleOperation, RoleSnapshot,
+        role_resync, scrim_slot_scheduled_at, DiscordDispatch, MutationDispatch, RoleOperation,
+        RoleSnapshot,
     };
+    use crate::model::{ScrimDay, ScrimSlot};
 
     /// Nach einem fehlgeschlagenen Discord-Aufruf traegt die Datenbank schon den Zielzustand.
     /// Ein reiner Vergleich faende dann nichts mehr — die Rolle bliebe dauerhaft fehlend.
@@ -4739,6 +6037,39 @@ mod tests {
     fn lobby_code_stays_correctable_while_the_lobby_is_only_open() {
         assert!(!blocks_lobby_code_write("lobby_open"));
         assert!(!blocks_lobby_code_write("lobby_closed"));
+    }
+
+    #[test]
+    fn scheduled_scrim_uses_berlin_timezone_in_summer_and_winter() {
+        let summer = ScrimSlot {
+            day: ScrimDay::Saturday,
+            date: Some(chrono::NaiveDate::from_ymd_opt(2026, 9, 19).expect("summer date")),
+            from: 20 * 60,
+            to: 22 * 60,
+        };
+        let winter = ScrimSlot {
+            day: ScrimDay::Saturday,
+            date: Some(chrono::NaiveDate::from_ymd_opt(2026, 12, 19).expect("winter date")),
+            from: 20 * 60,
+            to: 22 * 60,
+        };
+
+        assert_eq!(
+            scrim_slot_scheduled_at(&summer)
+                .expect("summer conversion")
+                .expect("summer timestamp")
+                .format("%Y-%m-%dT%H:%M:%SZ")
+                .to_string(),
+            "2026-09-19T18:00:00Z"
+        );
+        assert_eq!(
+            scrim_slot_scheduled_at(&winter)
+                .expect("winter conversion")
+                .expect("winter timestamp")
+                .format("%Y-%m-%dT%H:%M:%SZ")
+                .to_string(),
+            "2026-12-19T19:00:00Z"
+        );
     }
 
     /// Sobald der Bot die Lobby tatsaechlich fuehrt, faesst der Operator sie nicht mehr an.

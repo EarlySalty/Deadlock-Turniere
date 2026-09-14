@@ -1653,7 +1653,7 @@ async fn release_match_request_persists_selected_slot_and_replays_idempotently()
             coach_headers("release:91", "123456789"),
             Method::POST,
             "/internal/turnier/v1/scrims/match-requests/91/release",
-            Some(json!({})),
+            Some(json!({"slot_index":0,"reason":"Test-Freigabe"})),
         )
         .await;
         assert_eq!(status, StatusCode::OK);
@@ -1667,6 +1667,28 @@ async fn release_match_request_persists_selected_slot_and_replays_idempotently()
             .expect("released request");
     assert_eq!(row.get::<Option<i32>, _>("released_slot_index"), Some(0));
     assert_eq!(row.get::<String, _>("status"), "closed");
+
+    let scheduled = sqlx::query(
+        "SELECT COUNT(*) OVER () AS match_count, team_a_id, team_b_id, when_text, \
+                scheduled_at IS NULL AS scheduled_at_missing, status, lobby_state \
+           FROM scrim.matches",
+    )
+    .fetch_one(db.pool())
+    .await
+    .expect("scheduled scrim match");
+    assert_eq!(scheduled.get::<i64, _>("match_count"), 1);
+    assert_eq!(scheduled.get::<Option<i32>, _>("team_a_id"), Some(1));
+    assert_eq!(scheduled.get::<Option<i32>, _>("team_b_id"), Some(2));
+    assert_eq!(
+        scheduled.get::<Option<String>, _>("when_text").as_deref(),
+        Some("Sa 20:00–22:00")
+    );
+    assert!(scheduled.get::<bool, _>("scheduled_at_missing"));
+    assert_eq!(scheduled.get::<String, _>("status"), "scheduled");
+    assert_eq!(
+        scheduled.get::<Option<String>, _>("lobby_state").as_deref(),
+        Some("draft")
+    );
 
     let audit = sqlx::query(
         "SELECT actor_pseudonym, request_id, correlation_id, after_data \
@@ -1778,6 +1800,85 @@ async fn participant_interaction_persists_only_for_own_team_and_original_message
         body["detail"],
         "Diese Scrim-Aktion gehört nicht zu deinem Team"
     );
+}
+
+#[cfg(feature = "testing")]
+#[tokio::test]
+async fn final_attendance_button_updates_replacement_need_after_release() {
+    let db = turnier_db::test_pool().await.expect("central test pool");
+    enable_turniere_runtime(db.pool()).await;
+    seed_teams(db.pool(), &[1, 2]).await;
+    seed_interaction_fixture(db.pool()).await;
+    sqlx::raw_sql(
+        r#"
+        UPDATE scrim.match_requests
+           SET status='closed', released_slot_index=0,
+               released_slot='{"day":"sat","from":1200,"to":1320}'::jsonb,
+               released_at=now() - interval '1 hour',
+               team_status_message_ids='{"2":{"channel_id":66,"message_id":88}}'::jsonb
+         WHERE id=31;
+        INSERT INTO scrim.match_request_responses(
+            request_id, team_id, participant_id, discord_user_id, slot_index,
+            response, source, message_id, channel_id, responded_at, updated_at
+        ) VALUES
+            (31, 1, 990, 99, 0, 'available', 'button', 70, 65, now() - interval '2 hours', now() - interval '2 hours'),
+            (31, 2, 880, 88, 0, 'available', 'button', 77, 66, now() - interval '2 hours', now() - interval '2 hours');
+        "#,
+    )
+    .execute(db.pool())
+    .await
+    .expect("released attendance fixture");
+    let app = app_with_pool(db.pool().clone());
+    let route = "/internal/turnier/v1/scrims/interactions/match-request-response";
+
+    let mut body = interaction();
+    body["event"] = json!("scrimreq:v1:interaction:46");
+    body["idempotency"] = json!("scrimreq:v1:interaction:46");
+    body["interaction"] = json!("46");
+    body["request"] = json!("31");
+    body["team"] = json!("2");
+    body["actor"] = json!("88");
+    body["action"] = json!("none");
+    body["slot"] = Value::Null;
+    body["message"] = json!("88");
+    let (status, response) = send(
+        &app,
+        IpAddr::V4(Ipv4Addr::LOCALHOST),
+        TestHeaders {
+            token: Some("internal-token"),
+            request_id: Some("interaction:final-attendance"),
+            idempotency_key: Some("scrimreq:v1:interaction:46"),
+            ..TestHeaders::default()
+        },
+        Method::POST,
+        route,
+        Some(body),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(response["accepted"], true);
+    assert!(response["message"]
+        .as_str()
+        .is_some_and(|message| message.contains("Ersatzsuche")));
+
+    let responses: Vec<i32> = sqlx::query_scalar(
+        "SELECT slot_index FROM scrim.match_request_responses \
+          WHERE request_id=31 AND team_id=2 AND participant_id=880 ORDER BY slot_index",
+    )
+    .fetch_all(db.pool())
+    .await
+    .expect("final attendance responses");
+    assert_eq!(responses, vec![-1]);
+    let need = sqlx::query(
+        "SELECT participant_id, status, reason FROM scrim.replacement_needs \
+          WHERE match_request_id=31",
+    )
+    .fetch_one(db.pool())
+    .await
+    .expect("replacement need after final absence");
+    assert_eq!(need.get::<Option<i32>, _>("participant_id"), Some(880));
+    assert_eq!(need.get::<String, _>("status"), "open");
+    assert_eq!(need.get::<String, _>("reason"), "no_slot");
 }
 
 #[cfg(feature = "testing")]

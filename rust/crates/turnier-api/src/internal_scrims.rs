@@ -29,8 +29,8 @@ use turnier_scrim::dto::{
 use turnier_scrim::model::{
     AnnouncementPreview, Coach, LobbyStateMutation, MatchMutation, MatchRequest, MatchRequestBatch,
     MatchRequestBatchInput, MatchRequestTemplate, Participant, ReplacementCandidate,
-    ReplacementNeed, ScrimAction, ScrimDay, ScrimMatch, ScrimMe, ScrimReadModel, ScrimSlot, Team,
-    TeamBoard, TeamRef, TeamTimeline,
+    ReplacementNeed, ScrimAction, ScrimDay, ScrimMatch, ScrimMe, ScrimReadModel, ScrimSlot,
+    ScrimSlotSuggestions, Team, TeamBoard, TeamRef, TeamTimeline,
 };
 use turnier_scrim::repository::{
     DiscordRoleSyncPlan, MutationDispatch, PgScrimReadRepository, RoleOperation,
@@ -137,6 +137,10 @@ pub fn router() -> Router<AppState> {
         .route(
             "/internal/turnier/v1/scrims/match-requests/defaults",
             get(read_match_request_defaults),
+        )
+        .route(
+            "/internal/turnier/v1/scrims/match-requests/suggestions/{team_a_id}/{team_b_id}",
+            get(read_match_request_suggestions),
         )
         .route(
             "/internal/turnier/v1/scrims/match-request-batches",
@@ -311,6 +315,10 @@ pub fn spawn_scrim_operational_worker(state: AppState) {
 }
 
 pub async fn process_scrim_operational_once(state: &AppState) -> Result<(), sqlx::Error> {
+    if !turniere_runtime_enabled(&state.pool).await? {
+        return Ok(());
+    }
+    process_scrim_automation_once(state).await;
     let Some(runtime_guard) = begin_turniere_operational_tick(&state.pool).await? else {
         return Ok(());
     };
@@ -322,6 +330,124 @@ pub async fn process_scrim_operational_once(state: &AppState) -> Result<(), sqlx
     }
     runtime_guard.commit().await?;
     Ok(())
+}
+
+async fn turniere_runtime_enabled(pool: &sqlx::PgPool) -> Result<bool, sqlx::Error> {
+    sqlx::query_scalar(
+        "SELECT EXISTS(\
+             SELECT 1 FROM scrim.runtime_control \
+              WHERE control_key='scrim_runtime' \
+                AND mode IN ('draining', 'turniere') \
+                AND operational_writer='turniere'\
+         )",
+    )
+    .fetch_one(pool)
+    .await
+}
+
+async fn process_scrim_automation_once(state: &AppState) {
+    let now = Utc::now();
+    let service = service(state);
+    match service.next_auto_release_request(now).await {
+        Ok(Some(request_id)) => {
+            let body = ReleaseMatchRequest {
+                slot_index: None,
+                reason: None,
+            };
+            let key = format!("scrim-auto-release:{request_id}");
+            let payload = serde_json::json!({
+                "request_id": request_id,
+                "slot_index": null,
+                "reason": null,
+                "source": "scrim_auto",
+            });
+            match service
+                .repository()
+                .release_match_request(
+                    &key,
+                    &key,
+                    &payload,
+                    request_id,
+                    &body,
+                    ("scrim-auto", "Scrim-Automatik"),
+                )
+                .await
+            {
+                Ok(_) => tracing::info!(request_id, "Scrim-Termin automatisch freigegeben"),
+                Err(error) => tracing::debug!(%error, request_id, "Scrim-Autofreigabe ausgelassen"),
+            }
+        }
+        Ok(None) => {}
+        Err(error) => tracing::warn!(%error, "Scrim-Autofreigabe konnte nicht ausgewertet werden"),
+    }
+
+    let repository = PgScrimReadRepository::new(state.pool.clone());
+    match repository
+        .auto_schedule_match_request_reminder_once(now)
+        .await
+    {
+        Ok(true) => tracing::info!("Scrim-Reminder automatisch eingeplant"),
+        Ok(false) => {}
+        Err(error) => tracing::warn!(%error, "Scrim-Reminder-Automatik fehlgeschlagen"),
+    }
+    match repository.auto_schedule_match_confirmation_once(now).await {
+        Ok(true) => tracing::info!("Finale Scrim-Bestätigung automatisch eingeplant"),
+        Ok(false) => {}
+        Err(error) => tracing::warn!(%error, "Scrim-Bestätigungs-Automatik fehlgeschlagen"),
+    }
+
+    match repository.expire_stale_replacement_request_once(now).await {
+        Ok(true) => tracing::info!("Unbeantwortete Ersatzanfrage nach 12 Stunden freigegeben"),
+        Ok(false) => {}
+        Err(error) => tracing::warn!(%error, "Ablauf alter Ersatzanfragen fehlgeschlagen"),
+    }
+
+    match repository.next_auto_replacement_contact().await {
+        Ok(Some(contact)) => {
+            let body = ReplacementRequestCreate {
+                match_id: None,
+                team_id: Some(contact.team_id.to_string()),
+                participant_id: contact.participant_id.to_string(),
+                reason: Some("confirmed_availability".to_string()),
+            };
+            let key = format!(
+                "scrim-auto-replacement:{}:{}",
+                contact.need_id, contact.candidate_id
+            );
+            let payload = serde_json::json!({
+                "replacement_need_id": contact.need_id,
+                "team_id": contact.team_id.to_string(),
+                "participant_id": contact.participant_id.to_string(),
+                "reason": "confirmed_availability",
+                "source": "scrim_auto",
+            });
+            match repository
+                .create_replacement_request(
+                    &key,
+                    &key,
+                    &payload,
+                    contact.need_id,
+                    &body,
+                    ("scrim-auto", "Scrim-Automatik"),
+                )
+                .await
+            {
+                Ok(_) => tracing::info!(
+                    need_id = contact.need_id,
+                    participant_id = contact.participant_id,
+                    "Ersatzanfrage automatisch vorbereitet"
+                ),
+                Err(error) => tracing::debug!(
+                    %error,
+                    need_id = contact.need_id,
+                    participant_id = contact.participant_id,
+                    "Automatische Ersatzanfrage ausgelassen"
+                ),
+            }
+        }
+        Ok(None) => {}
+        Err(error) => tracing::warn!(%error, "Ersatz-Automatik konnte nicht ausgewertet werden"),
+    }
 }
 
 async fn begin_turniere_operational_tick(
@@ -695,7 +821,7 @@ async fn claim_reminder(pool: &sqlx::PgPool) -> Result<Option<ReminderClaim>, sq
     let row = sqlx::query(
         "SELECT r.id, r.request_id, r.team_id, r.template, r.target_participant_ids, \
                 r.target_role_id, r.discord_channel_id, mr.status AS request_status, \
-                t.name AS team_name, effect.id AS effect_id, effect.state AS effect_state \
+                mr.released_at, t.name AS team_name, effect.id AS effect_id, effect.state AS effect_state \
            FROM scrim.match_request_reminders r \
            JOIN scrim.match_requests mr ON mr.id=r.request_id \
            JOIN scrim.teams t ON t.id=r.team_id \
@@ -785,11 +911,18 @@ async fn claim_reminder(pool: &sqlx::PgPool) -> Result<Option<ReminderClaim>, sq
         return Ok(None);
     }
     let request_status = row.try_get::<String, _>("request_status")?;
-    if !matches!(request_status.as_str(), "open" | "post_failed") {
+    let template = row.try_get::<String, _>("template")?;
+    let final_confirmation = template == "bestaetigung_offen";
+    let status_allows_reminder = if final_confirmation {
+        request_status == "closed"
+    } else {
+        matches!(request_status.as_str(), "open" | "post_failed")
+    };
+    if !status_allows_reminder {
         sqlx::query(
             "UPDATE scrim.match_request_reminders \
                 SET status='cancelled', missing_count=0, \
-                    target_discord_user_ids='{}', last_error='Terminabfrage geschlossen', \
+                    target_discord_user_ids='{}', last_error='Terminstatus passt nicht mehr zur Erinnerung', \
                     updated_at=now() WHERE id=$1",
         )
         .bind(reminder_id)
@@ -799,22 +932,49 @@ async fn claim_reminder(pool: &sqlx::PgPool) -> Result<Option<ReminderClaim>, sq
         return Ok(None);
     }
     let participant_ids = row.try_get::<Vec<i32>, _>("target_participant_ids")?;
-    let missing = sqlx::query(
-        "SELECT p.id, p.discord_id \
-           FROM scrim.participants p \
-          WHERE p.id=ANY($1) \
-            AND NOT EXISTS(\
-                SELECT 1 FROM scrim.match_request_responses response \
-                 WHERE response.request_id=$2 AND response.team_id=$3 \
-                   AND response.participant_id=p.id\
-            ) \
-          ORDER BY array_position($1, p.id), p.id",
-    )
-    .bind(&participant_ids)
-    .bind(request_id)
-    .bind(team_id)
-    .fetch_all(&mut *tx)
-    .await?;
+    let missing = if final_confirmation {
+        let released_at = row
+            .try_get::<Option<DateTime<Utc>>, _>("released_at")?
+            .ok_or_else(|| {
+                sqlx::Error::Protocol("Finale Scrim-Bestätigung ohne released_at".to_string())
+            })?;
+        sqlx::query(
+            "SELECT p.id, p.discord_id \
+               FROM scrim.participants p \
+               JOIN scrim.team_members tm ON tm.participant_id=p.id \
+                  AND tm.team_id=$3 AND tm.is_bench=FALSE \
+              WHERE p.id=ANY($1) \
+                AND NOT EXISTS(\
+                    SELECT 1 FROM scrim.match_request_responses response \
+                     WHERE response.request_id=$2 AND response.team_id=$3 \
+                       AND response.participant_id=p.id AND response.responded_at > $4\
+                ) \
+              ORDER BY array_position($1, p.id), p.id",
+        )
+        .bind(&participant_ids)
+        .bind(request_id)
+        .bind(team_id)
+        .bind(released_at)
+        .fetch_all(&mut *tx)
+        .await?
+    } else {
+        sqlx::query(
+            "SELECT p.id, p.discord_id \
+               FROM scrim.participants p \
+              WHERE p.id=ANY($1) \
+                AND NOT EXISTS(\
+                    SELECT 1 FROM scrim.match_request_responses response \
+                     WHERE response.request_id=$2 AND response.team_id=$3 \
+                       AND response.participant_id=p.id\
+                ) \
+              ORDER BY array_position($1, p.id), p.id",
+        )
+        .bind(&participant_ids)
+        .bind(request_id)
+        .bind(team_id)
+        .fetch_all(&mut *tx)
+        .await?
+    };
     if missing.is_empty() {
         sqlx::query(
             "UPDATE scrim.match_request_reminders \
@@ -875,7 +1035,6 @@ async fn claim_reminder(pool: &sqlx::PgPool) -> Result<Option<ReminderClaim>, sq
             .join(", ")
     };
     let team_name = row.try_get::<String, _>("team_name")?;
-    let template = row.try_get::<String, _>("template")?;
     let content = match template.as_str() {
         "antwort_fehlt" => format!(
             "Erinnerung für {team_name}: Es fehlen noch Antworten von {target}.\nBitte stimmt in der Terminabfrage oben ab."
@@ -884,7 +1043,7 @@ async fn claim_reminder(pool: &sqlx::PgPool) -> Result<Option<ReminderClaim>, sq
             "Erinnerung für {team_name}: Die Frist läuft bald ab und es fehlen noch Antworten von {target}.\nBitte stimmt in der Terminabfrage oben ab, damit der Termin stehen kann."
         ),
         "bestaetigung_offen" => format!(
-            "Erinnerung für {team_name}: Es fehlen noch Bestätigungen von {target}.\nBitte gebt oben kurz Bescheid, ob ihr beim Match dabei seid."
+            "Erinnerung für {team_name}: Es fehlen noch finale Bestätigungen von {target}.\nBitte nutzt in der Terminmeldung oben **Dabei** oder **Falle aus**."
         ),
         _ => {
             let error = format!("Unbekannte Scrim-Reminder-Vorlage: {template}");
@@ -1246,6 +1405,22 @@ async fn read_history(
     Ok(Json(service(&state).history().await?))
 }
 
+async fn read_match_request_suggestions(
+    State(state): State<AppState>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    Path((team_a_id, team_b_id)): Path<(String, String)>,
+    headers: HeaderMap,
+) -> WebResult<Json<ScrimSlotSuggestions>> {
+    require_operator(&state, peer, &headers).await?;
+    let team_a_id = parse_db_id(&team_a_id, "team_a_id")?;
+    let team_b_id = parse_db_id(&team_b_id, "team_b_id")?;
+    Ok(Json(
+        service(&state)
+            .suggest_match_slots(team_a_id, team_b_id, 3)
+            .await?,
+    ))
+}
+
 async fn read_match_request_defaults(
     State(state): State<AppState>,
     ConnectInfo(peer): ConnectInfo<SocketAddr>,
@@ -1253,7 +1428,7 @@ async fn read_match_request_defaults(
 ) -> WebResult<Json<MatchRequestDefaults>> {
     require_operator(&state, peer, &headers).await?;
     Ok(Json(MatchRequestDefaults {
-        default_deadline_hours: 48,
+        default_deadline_hours: 72,
         min_slots: 2,
         max_slots: 5,
         templates: vec![
@@ -1264,11 +1439,13 @@ async fn read_match_request_defaults(
         preset_slots: vec![
             ScrimSlot {
                 day: ScrimDay::Saturday,
+                date: None,
                 from: 1_200,
                 to: 1_320,
             },
             ScrimSlot {
                 day: ScrimDay::Sunday,
+                date: None,
                 from: 1_200,
                 to: 1_320,
             },
@@ -3243,6 +3420,7 @@ fn planning_batch(body: PlanningCreateRequest) -> WebResult<MatchRequestBatchInp
             .into_iter()
             .map(|slot| ScrimSlot {
                 day: slot.day,
+                date: slot.date,
                 from: slot.from_minute,
                 to: slot.to_minute,
             })
@@ -3257,6 +3435,7 @@ fn planning_batch(body: PlanningCreateRequest) -> WebResult<MatchRequestBatchInp
                     .into_iter()
                     .map(|slot| ScrimSlot {
                         day: slot.day,
+                        date: slot.date,
                         from: slot.from_minute,
                         to: slot.to_minute,
                     })

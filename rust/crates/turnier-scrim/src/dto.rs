@@ -1,4 +1,4 @@
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, NaiveDate, Utc};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
@@ -102,6 +102,8 @@ pub struct PlanningCreateRequest {
 #[serde(deny_unknown_fields)]
 pub struct PlanningSlot {
     pub day: crate::model::ScrimDay,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub date: Option<NaiveDate>,
     pub from_minute: u16,
     pub to_minute: u16,
 }

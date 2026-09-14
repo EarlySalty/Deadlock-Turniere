@@ -1,10 +1,13 @@
 use std::collections::{BTreeSet, HashMap};
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Datelike, Duration as ChronoDuration, NaiveDate, Utc};
 use serde::Serialize;
 use serde_json::Value;
 
-use crate::decision::{is_scrim_history_entry, validate_match_request_batch};
+use crate::decision::{
+    is_scrim_history_entry, suggest_match_slots as derive_match_slot_suggestions,
+    validate_match_request_batch,
+};
 use crate::dto::{
     ActionReceipt, AnnouncementPublicationRequest, CreateMatchRequest, CreateTeamRequest,
     LobbyCodeRequest, MatchIdPatchRequest, MatchIdsRequest, MatchRequestPatch,
@@ -16,7 +19,8 @@ use crate::dto::{
 use crate::model::{
     wire_id, AnnouncementPreview, AvailabilitySlot, AvailabilityStatus, LagebildSnapshotRef,
     LobbyStateMutation, MatchMutation, MatchRequestBatchInput, ReplacementCandidate, ScrimAction,
-    ScrimDay, ScrimMatch, ScrimReadModel, ScrimSlot, ValidatedMatchRequestBatch,
+    ScrimDay, ScrimMatch, ScrimReadModel, ScrimSlot, ScrimSlotSuggestions,
+    ValidatedMatchRequestBatch,
 };
 use crate::repository::{
     DiscordRoleSyncPlan, MutationDispatch, ParticipantMutation, PgScrimReadRepository,
@@ -46,6 +50,64 @@ impl<R: ScrimReadRepository> ScrimService<R> {
 
     pub async fn lagebild_history(&self, team_id: i32) -> ScrimResult<Vec<LagebildSnapshotRef>> {
         self.repository.lagebild_history(team_id).await
+    }
+
+    pub async fn suggest_match_slots(
+        &self,
+        team_a_id: i32,
+        team_b_id: i32,
+        max_slots: usize,
+    ) -> ScrimResult<ScrimSlotSuggestions> {
+        if team_a_id == team_b_id {
+            return Err(ScrimError::InvalidProposal(
+                "team_a_id and team_b_id must differ".to_string(),
+            ));
+        }
+        let model = self.read_model().await?;
+        let team_a = model
+            .teams
+            .iter()
+            .find(|team| team.id == team_a_id)
+            .ok_or_else(|| ScrimError::NotFound("Team A wurde nicht gefunden.".to_string()))?;
+        let team_b = model
+            .teams
+            .iter()
+            .find(|team| team.id == team_b_id)
+            .ok_or_else(|| ScrimError::NotFound("Team B wurde nicht gefunden.".to_string()))?;
+        let mut suggestions = derive_match_slot_suggestions(team_a, team_b, max_slots);
+        // Die Terminabfrage läuft 72h. Ein weiterer Tag Puffer bleibt für Ersatz,
+        // bevor der vorgeschlagene Spieltag überhaupt erreicht wird.
+        let reference_date = (Utc::now() + ChronoDuration::hours(96))
+            .with_timezone(&chrono_tz::Europe::Berlin)
+            .date_naive();
+        for suggestion in &mut suggestions.suggestions {
+            suggestion.slot.date = Some(next_scrim_date_after(reference_date, suggestion.slot.day));
+        }
+        Ok(suggestions)
+    }
+
+    pub async fn next_auto_release_request(&self, now: DateTime<Utc>) -> ScrimResult<Option<i32>> {
+        let model = self.read_model().await?;
+        let mut candidates = Vec::new();
+        for batch in model.match_request_batches {
+            let deadline_passed = batch.deadline_at <= now;
+            for request in batch.requests {
+                if !matches!(request.status.as_str(), "open" | "post_failed") {
+                    continue;
+                }
+                let eligible = request.facts.ready_slot_index.is_some()
+                    || (deadline_passed && request.facts.safe_release_slot_index.is_some());
+                if eligible {
+                    candidates.push((
+                        if deadline_passed { 0_u8 } else { 1_u8 },
+                        batch.deadline_at,
+                        request.id,
+                    ));
+                }
+            }
+        }
+        candidates.sort_by_key(|candidate| *candidate);
+        Ok(candidates.first().map(|candidate| candidate.2))
     }
 
     pub async fn history(&self) -> ScrimResult<Vec<ScrimMatch>> {
@@ -738,6 +800,7 @@ fn common_window(
     }
     (found && from < to).then_some(ScrimSlot {
         day: requested.day,
+        date: requested.date,
         from,
         to,
     })
@@ -759,10 +822,29 @@ fn slot_window(day: ScrimDay, slot: &AvailabilitySlot) -> Option<ScrimSlot> {
     }
     let window = ScrimSlot {
         day,
+        date: None,
         from: slot.from.unwrap_or(0),
         to: slot.to.unwrap_or(1_440),
     };
     (window.from < window.to && window.to <= 1_440).then_some(window)
+}
+
+fn next_scrim_date_after(reference: NaiveDate, day: ScrimDay) -> NaiveDate {
+    let target = match day {
+        ScrimDay::Monday => 0_i64,
+        ScrimDay::Tuesday => 1,
+        ScrimDay::Wednesday => 2,
+        ScrimDay::Thursday => 3,
+        ScrimDay::Friday => 4,
+        ScrimDay::Saturday => 5,
+        ScrimDay::Sunday => 6,
+    };
+    let current = i64::from(reference.weekday().num_days_from_monday());
+    let mut delta = (target - current).rem_euclid(7);
+    if delta == 0 {
+        delta = 7;
+    }
+    reference + ChronoDuration::days(delta)
 }
 
 fn availability_slot(availability: &WeeklyAvailability, day: ScrimDay) -> &AvailabilitySlot {

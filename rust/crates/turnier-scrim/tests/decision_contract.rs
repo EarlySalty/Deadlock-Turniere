@@ -3,11 +3,12 @@ use std::collections::BTreeSet;
 use chrono::{Duration, TimeZone, Utc};
 use turnier_scrim::decision::{
     derive_match_request_facts, is_scrim_history_entry, rank_replacement_candidates,
-    validate_match_request_batch,
+    suggest_match_slots, validate_match_request_batch,
 };
 use turnier_scrim::model::{
-    MatchRequestBatchInput, MatchRequestPairingInput, MatchRequestResponse, MatchRequestTemplate,
-    ReplacementCandidate, ResponseChoice, RosterMember, ScrimDay, ScrimSlot,
+    AvailabilitySlot, AvailabilityStatus, MatchRequestBatchInput, MatchRequestPairingInput,
+    MatchRequestResponse, MatchRequestTemplate, ReplacementCandidate, ResponseChoice, RosterMember,
+    ScrimDay, ScrimSlot, Team, TeamMember, WeeklyAvailability,
 };
 use turnier_scrim::ScrimError;
 
@@ -18,7 +19,12 @@ fn at(hour: u32) -> chrono::DateTime<Utc> {
 }
 
 fn slot(day: ScrimDay, from: u16, to: u16) -> ScrimSlot {
-    ScrimSlot { day, from, to }
+    ScrimSlot {
+        day,
+        date: None,
+        from,
+        to,
+    }
 }
 
 fn batch(
@@ -175,6 +181,118 @@ fn response(
     }
 }
 
+fn available(from: u16, to: u16) -> AvailabilitySlot {
+    AvailabilitySlot {
+        status: AvailabilityStatus::Available,
+        from: Some(from),
+        to: Some(to),
+    }
+}
+
+fn unavailable() -> AvailabilitySlot {
+    AvailabilitySlot {
+        status: AvailabilityStatus::Unavailable,
+        from: None,
+        to: None,
+    }
+}
+
+fn weekend(sat: Option<(u16, u16)>, sun: Option<(u16, u16)>) -> WeeklyAvailability {
+    WeeklyAvailability {
+        sat: Some(sat.map_or_else(unavailable, |(from, to)| available(from, to))),
+        sun: Some(sun.map_or_else(unavailable, |(from, to)| available(from, to))),
+        ..WeeklyAvailability::default()
+    }
+}
+
+fn scheduling_team(
+    id: i32,
+    member_windows: Vec<WeeklyAvailability>,
+    default_from: Option<i32>,
+    default_to: Option<i32>,
+) -> Team {
+    Team {
+        id,
+        name: format!("Team {id}"),
+        coach: Some("Coach".to_string()),
+        coach_discord_id: None,
+        discord_role_id: None,
+        discord_channel_id: None,
+        default_from,
+        default_to,
+        created_at: at(0),
+        members: member_windows
+            .into_iter()
+            .enumerate()
+            .map(|(index, availability_slots)| TeamMember {
+                team_id: id,
+                participant_id: id * 100 + i32::try_from(index).expect("fixture index"),
+                display_name: format!("P{id}-{index}"),
+                rank: None,
+                discord_id: None,
+                roles: None,
+                availability: None,
+                availability_slots: Some(availability_slots),
+                notes: None,
+                role: None,
+                is_captain: index == 0,
+                is_bench: false,
+                substitute_until: None,
+            })
+            .collect(),
+    }
+}
+
+#[test]
+fn scheduling_suggestions_turn_weekly_availability_into_concrete_slots() {
+    let all_evening = || weekend(Some((18 * 60, 23 * 60)), Some((18 * 60, 23 * 60)));
+    let team_a = scheduling_team(
+        10,
+        (0..6).map(|_| all_evening()).collect(),
+        Some(20 * 60),
+        Some(22 * 60),
+    );
+    let team_b = scheduling_team(
+        20,
+        (0..6).map(|_| all_evening()).collect(),
+        Some(20 * 60),
+        Some(22 * 60),
+    );
+
+    let result = suggest_match_slots(&team_a, &team_b, 3);
+
+    assert_eq!(result.suggestions.len(), 3);
+    assert_eq!(result.suggestions[0].slot.day, ScrimDay::Saturday);
+    assert_eq!(result.suggestions[0].slot.from, 20 * 60);
+    assert_eq!(result.suggestions[0].slot.to, 22 * 60);
+    assert_eq!(result.suggestions[0].available_starters, 12);
+    assert!(result.suggestions[0].match_ready_roster);
+    assert!(result.suggestions[0].full_current_roster);
+}
+
+#[test]
+fn scheduling_prefers_both_complete_teams_over_prime_time_with_a_missing_starter() {
+    let team_a = scheduling_team(
+        10,
+        (0..6)
+            .map(|_| weekend(Some((19 * 60, 23 * 60)), Some((18 * 60, 22 * 60))))
+            .collect(),
+        Some(20 * 60),
+        Some(22 * 60),
+    );
+    let mut team_b_windows = (0..5)
+        .map(|_| weekend(Some((19 * 60, 23 * 60)), Some((18 * 60, 22 * 60))))
+        .collect::<Vec<_>>();
+    team_b_windows.push(weekend(None, Some((18 * 60, 22 * 60))));
+    let team_b = scheduling_team(20, team_b_windows, Some(20 * 60), Some(22 * 60));
+
+    let result = suggest_match_slots(&team_a, &team_b, 3);
+
+    assert_eq!(result.suggestions[0].slot.day, ScrimDay::Sunday);
+    assert_eq!(result.suggestions[0].available_starters, 12);
+    assert_eq!(result.suggestions[0].missing_starters, 0);
+}
+
 #[test]
 fn response_facts_are_derived_from_roster_and_participant_responses() {
     let members = vec![
@@ -198,19 +316,141 @@ fn response_facts_are_derived_from_roster_and_participant_responses() {
     assert_eq!(before.slots[0].starter_available_count, 2);
     assert_eq!(before.slots[0].team_available_count, 2);
     assert_eq!(before.no_slot_count, 1);
+    assert_eq!(before.starter_missing_response_count, 0);
+    assert!(before.ready_slot_index.is_none());
     assert!(before.recommended_slot_index.is_none());
     assert!(before.replacement_needs.is_empty());
 
     let after = derive_match_request_facts(7, 2, &[10, 20], &members, &responses, true, None)
         .expect("deadline facts");
     assert_eq!(after.recommended_slot_index, Some(0));
-    assert_eq!(after.selected_slot_index, Some(0));
-    assert_eq!(after.replacement_needs.len(), 2);
-    assert!(after.replacement_needs.iter().all(|need| !need.is_bench));
+    assert!(after.safe_release_slot_index.is_none());
+    assert!(after.selected_slot_index.is_none());
+    assert!(after.replacement_needs.is_empty());
 }
 
 #[test]
-fn tie_break_is_total_availability_then_starters_then_first_slot() {
+fn ready_slot_ignores_bench_and_requires_all_twelve_starters() {
+    let mut members = Vec::new();
+    for participant_id in 1..=6 {
+        members.push(member(10, participant_id, false));
+    }
+    members.push(member(10, 99, true));
+    for participant_id in 11..=16 {
+        members.push(member(20, participant_id, false));
+    }
+    members.push(member(20, 199, true));
+
+    let mut responses = Vec::new();
+    for participant_id in 1..=6 {
+        responses.push(response(10, participant_id, 0, ResponseChoice::Available));
+    }
+    for participant_id in 11..=16 {
+        responses.push(response(20, participant_id, 0, ResponseChoice::Available));
+    }
+
+    let facts = derive_match_request_facts(7, 2, &[10, 20], &members, &responses, false, None)
+        .expect("facts");
+    assert_eq!(
+        facts.missing_response_count, 2,
+        "die Team-Bank darf noch offen sein"
+    );
+    assert_eq!(facts.starter_missing_response_count, 0);
+    assert_eq!(facts.ready_slot_index, Some(0));
+    assert!(
+        facts.recommended_slot_index.is_none(),
+        "vor Deadline keine erzwungene Empfehlung"
+    );
+
+    responses.pop();
+    let incomplete = derive_match_request_facts(7, 2, &[10, 20], &members, &responses, false, None)
+        .expect("facts");
+    assert_eq!(incomplete.starter_missing_response_count, 1);
+    assert!(incomplete.ready_slot_index.is_none());
+}
+
+#[test]
+fn safe_release_allows_two_replacements_but_not_three_on_one_team() {
+    let mut members = Vec::new();
+    for participant_id in 1..=6 {
+        members.push(member(10, participant_id, false));
+    }
+    for participant_id in 11..=16 {
+        members.push(member(20, participant_id, false));
+    }
+
+    let mut ten_ready = Vec::new();
+    for participant_id in 1..=6 {
+        ten_ready.push(response(10, participant_id, 0, ResponseChoice::Available));
+    }
+    for participant_id in 11..=14 {
+        ten_ready.push(response(20, participant_id, 0, ResponseChoice::Available));
+    }
+    ten_ready.push(response(20, 15, -1, ResponseChoice::Unavailable));
+    ten_ready.push(response(20, 16, -1, ResponseChoice::Unavailable));
+
+    let safe = derive_match_request_facts(7, 2, &[10, 20], &members, &ten_ready, true, None)
+        .expect("safe facts");
+    assert_eq!(safe.recommended_slot_index, Some(0));
+    assert_eq!(safe.safe_release_slot_index, Some(0));
+    assert_eq!(safe.selected_slot_index, Some(0));
+    assert_eq!(safe.replacement_needs.len(), 2);
+
+    let mut nine_ready = Vec::new();
+    for participant_id in 1..=6 {
+        nine_ready.push(response(10, participant_id, 0, ResponseChoice::Available));
+    }
+    for participant_id in 11..=13 {
+        nine_ready.push(response(20, participant_id, 0, ResponseChoice::Available));
+    }
+    for participant_id in 14..=16 {
+        nine_ready.push(response(
+            20,
+            participant_id,
+            -1,
+            ResponseChoice::Unavailable,
+        ));
+    }
+
+    let unsafe_facts =
+        derive_match_request_facts(7, 2, &[10, 20], &members, &nine_ready, true, None)
+            .expect("unsafe facts");
+    assert_eq!(unsafe_facts.recommended_slot_index, Some(0));
+    assert!(unsafe_facts.safe_release_slot_index.is_none());
+    assert!(unsafe_facts.selected_slot_index.is_none());
+    assert!(unsafe_facts.replacement_needs.is_empty());
+}
+
+#[test]
+fn starter_availability_beats_extra_bench_votes() {
+    let members = vec![
+        member(10, 1, false),
+        member(10, 2, false),
+        member(10, 3, true),
+        member(20, 4, false),
+        member(20, 5, false),
+        member(20, 6, true),
+    ];
+    // Slot 0 hat vier Stammspieler. Slot 1 hat nur drei Stammspieler, aber durch
+    // beide Bankspieler insgesamt mehr Zusagen. Der Stammkader muss gewinnen.
+    let responses = vec![
+        response(10, 1, 0, ResponseChoice::Available),
+        response(10, 2, 0, ResponseChoice::Available),
+        response(20, 4, 0, ResponseChoice::Available),
+        response(20, 5, 0, ResponseChoice::Available),
+        response(10, 1, 1, ResponseChoice::Available),
+        response(10, 3, 1, ResponseChoice::Available),
+        response(20, 4, 1, ResponseChoice::Available),
+        response(20, 6, 1, ResponseChoice::Available),
+    ];
+
+    let facts = derive_match_request_facts(7, 2, &[10, 20], &members, &responses, true, None)
+        .expect("facts");
+    assert_eq!(facts.recommended_slot_index, Some(0));
+}
+
+#[test]
+fn tie_break_is_starters_then_total_availability_then_first_slot() {
     let members = vec![
         member(10, 1, false),
         member(10, 2, true),

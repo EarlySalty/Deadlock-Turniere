@@ -1,4 +1,4 @@
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
 
 pub mod wire_id {
@@ -159,8 +159,36 @@ pub enum ScrimDay {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ScrimSlot {
     pub day: ScrimDay,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub date: Option<NaiveDate>,
     pub from: u16,
     pub to: u16,
+}
+
+/// Deterministischer Terminvorschlag aus den gepflegten Wochen-Verfügbarkeiten.
+/// Die Zahlen sind absichtlich Teil des Vertrags: Coaches sollen sehen, warum ein
+/// Slot oben steht, statt einer undurchsichtigen "KI-Empfehlung" zu vertrauen.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ScrimSlotSuggestion {
+    pub slot: ScrimSlot,
+    pub team_a_available_starters: u8,
+    pub team_b_available_starters: u8,
+    pub available_starters: u8,
+    pub total_starters: u8,
+    pub missing_starters: u8,
+    pub unknown_starters: u8,
+    pub full_current_roster: bool,
+    pub match_ready_roster: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ScrimSlotSuggestions {
+    #[serde(serialize_with = "wire_id::i32", deserialize_with = "wire_id::de_i32")]
+    pub team_a_id: i32,
+    #[serde(serialize_with = "wire_id::i32", deserialize_with = "wire_id::de_i32")]
+    pub team_b_id: i32,
+    pub duration_minutes: u16,
+    pub suggestions: Vec<ScrimSlotSuggestion>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -451,6 +479,10 @@ pub struct SlotFacts {
     pub available_count: u32,
     pub starter_available_count: u32,
     pub team_available_count: u32,
+    /// Kleinste Zahl zugesagter Stammspieler eines beteiligten Teams.
+    /// Damit kann die Automatik verhindern, dass z. B. 6+4 durch Bankstimmen gut aussieht.
+    #[serde(default)]
+    pub min_team_starter_available_count: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -496,7 +528,18 @@ pub struct ReplacementCandidate {
 pub struct MatchRequestFacts {
     pub slots: Vec<SlotFacts>,
     pub missing_response_count: u32,
+    #[serde(default)]
+    pub starter_missing_response_count: u32,
     pub no_slot_count: u32,
+    /// Vor Fristende nur gesetzt, wenn beide 6er-Stammkader vollständig sind,
+    /// jeder Stammspieler geantwortet hat und exakt ein angebotener Slot alle 12 trägt.
+    #[serde(default)]
+    pub ready_slot_index: Option<usize>,
+    /// Nach Fristende nur gesetzt, wenn beide Teams einen vollständigen 6er-Stammkader
+    /// haben und der beste Slot mindestens 4/6 Starter je Team sowie 10/12 insgesamt trägt.
+    /// Fehlt diese Freigabe, muss die Orga entscheiden statt dass der Bot rät.
+    #[serde(default)]
+    pub safe_release_slot_index: Option<usize>,
     pub recommended_slot_index: Option<usize>,
     pub selected_slot_index: Option<usize>,
     pub replacement_needs: Vec<ReplacementNeed>,
