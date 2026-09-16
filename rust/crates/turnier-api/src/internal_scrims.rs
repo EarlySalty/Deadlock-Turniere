@@ -89,6 +89,10 @@ struct ReminderClaim {
 pub fn router() -> Router<AppState> {
     Router::new()
         .route(
+            "/internal/turnier/v1/caster/teams",
+            get(read_caster_teams),
+        )
+        .route(
             "/internal/turnier/v1/scrims/command-center",
             get(read_command_center),
         )
@@ -1190,6 +1194,15 @@ async fn read_coaches(
 ) -> WebResult<Json<Vec<Coach>>> {
     require_operator(&state, peer, &headers).await?;
     Ok(Json(service(&state).repository().coaches().await?))
+}
+
+async fn read_caster_teams(
+    State(state): State<AppState>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+) -> WebResult<Json<Vec<Team>>> {
+    require_internal_boundary(peer, &headers, &state)?;
+    Ok(Json(service(&state).read_model().await?.teams))
 }
 
 async fn read_teams(

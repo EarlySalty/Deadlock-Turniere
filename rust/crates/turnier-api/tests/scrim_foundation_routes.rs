@@ -634,6 +634,7 @@ async fn canonical_internal_route_matrix_is_registered_with_exact_methods() {
         ..TestHeaders::default()
     };
     let reads = [
+        "/internal/turnier/v1/caster/teams",
         "/internal/turnier/v1/scrims/command-center",
         "/internal/turnier/v1/scrims/me",
         "/internal/turnier/v1/scrims/pool",
