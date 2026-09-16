@@ -40,20 +40,22 @@ export default function Home() {
       animate="show"
       className="space-y-12 pb-20"
     >
-      {/* Hero Section */}
-      <section className="relative py-20 overflow-hidden rounded-lg">
-        <div className="absolute inset-0 bg-gradient-to-b from-primary/5 to-transparent" />
-        <div className="relative z-10 text-center space-y-4">
-          <motion.div variants={item} className="flex justify-center">
-            <div className="p-4 rounded-full bg-primary/10 border border-primary/20 shadow-[var(--glow-primary)]">
-              <Swords size={48} className="text-primary" />
-            </div>
+      {/* Hero Section – gleiche visuelle Sprache wie die Streamer-Landing */}
+      <section className="relative overflow-hidden rounded-2xl border border-border bg-card/55 px-6 py-16 text-center shadow-[var(--shadow-card-soft)] md:py-20">
+        <div className="absolute inset-0 bg-gradient-to-b from-primary/8 via-transparent to-transparent" />
+        <div className="relative z-10 mx-auto max-w-3xl">
+          <motion.div
+            variants={item}
+            className="inline-flex items-center gap-2 rounded-full border border-border bg-background/70 px-4 py-1.5 text-sm font-medium text-accent"
+          >
+            <Swords size={15} />
+            Turniere der Deutschen Deadlock Community
           </motion.div>
-          <motion.h1 variants={item} className="text-5xl md:text-7xl font-bold tracking-tighter text-foreground font-display">
-            Deadlock <span className="text-primary">Turniere</span>
+          <motion.h1 variants={item} className="mt-6 text-5xl font-bold tracking-tight text-foreground md:text-7xl font-display">
+            Deadlock <span className="bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent">Turniere</span>
           </motion.h1>
-          <motion.p variants={item} className="text-muted text-xl max-w-2xl mx-auto font-light italic">
-            "Wo Legenden geboren werden und Magie auf Blei trifft."
+          <motion.p variants={item} className="mx-auto mt-6 max-w-2xl text-lg leading-relaxed text-muted md:text-xl">
+            Anmeldung, Draft, Spielplan und Rangliste an einem Ort – für Community-Turniere ohne unnötigen Orga-Overhead.
           </motion.p>
         </div>
       </section>
