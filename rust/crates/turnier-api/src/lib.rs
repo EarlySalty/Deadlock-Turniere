@@ -20,6 +20,7 @@ pub mod account;
 pub mod admin;
 pub mod auth;
 pub mod consent;
+pub mod comp;
 pub mod draft;
 pub mod internal_automatik;
 pub mod internal_scrims;

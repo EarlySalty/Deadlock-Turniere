@@ -95,6 +95,7 @@ fn state_with_pool_broker_and_signup_role(
         rank_resolver,
         notifier,
         draft_lobby_creations: Arc::new(Mutex::new(HashMap::new())),
+        comp_rate_limit: Arc::new(Mutex::new(turnier_api::comp::RateLimiter::default())),
         draft_viewers: Arc::new(Mutex::new(HashMap::new())),
         scrim_lobby: Arc::new(turnier_api::scrim_lobby::ScrimLobbyClient::new(
             "http://127.0.0.1:9",

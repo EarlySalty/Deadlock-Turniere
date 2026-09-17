@@ -9,6 +9,7 @@ import Leaderboard from '@/pages/Leaderboard'
 import PlayerProfile from '@/pages/PlayerProfile'
 import DraftLobbyNeu from '@/pages/DraftLobbyNeu'
 import DraftBoard from '@/pages/DraftBoard'
+import CompFinder from '@/pages/CompFinder'
 import ProtectedRoute from '@/components/auth/ProtectedRoute'
 
 export default function App() {
@@ -21,6 +22,8 @@ export default function App() {
             hoeher, aber die Reihenfolge hier macht es fuer den Leser eindeutig. */}
         <Route path="draft" element={<DraftLobbyNeu />} />
         <Route path="draft/:code" element={<DraftBoard />} />
+        <Route path="comp" element={<CompFinder />} />
+        <Route path="comp/:code" element={<CompFinder />} />
         <Route path=":id" element={<Tournament />} />
         <Route path="hilfe" element={<Hilfe />} />
         <Route path="login" element={<Login />} />

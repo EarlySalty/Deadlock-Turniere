@@ -1,0 +1,35 @@
+.comp-page { position: relative; padding-bottom: 1.5rem; }
+.comp-panel { border: 1px solid var(--color-border, #32302b); border-radius: 1rem; background: linear-gradient(145deg, rgba(200,168,107,.035), transparent 55%), var(--color-card, #171715); }
+.comp-best { border-color: rgba(200,168,107,.55); box-shadow: 0 0 30px rgba(200,168,107,.06); }
+.comp-eyebrow { display: inline-flex; align-items: center; gap: .45rem; font-size: .65rem; font-weight: 800; letter-spacing: .18em; color: var(--color-primary, #c8a86b); }
+.comp-button { display: inline-flex; align-items: center; gap: .5rem; min-height: 42px; padding: .7rem 1rem; border: 1px solid rgba(200,168,107,.6); border-radius: .65rem; background: var(--color-primary, #c8a86b); color: #171510; font-size: .8rem; font-weight: 750; cursor: pointer; transition: filter .15s ease, border-color .15s ease; }
+.comp-button:hover:not(:disabled) { filter: brightness(1.12); }
+.comp-button:disabled { opacity: .45; cursor: not-allowed; }
+.comp-button-secondary { background: rgba(200,168,107,.055); color: var(--color-primary, #c8a86b); border-color: rgba(200,168,107,.3); }
+.comp-input { display: block; width: 100%; min-height: 42px; padding: .65rem .8rem; border: 1px solid var(--color-border, #32302b); border-radius: .6rem; background: rgba(0,0,0,.18); color: inherit; font-size: .875rem; }
+.comp-input.pl-9 { padding-left: 2.25rem; }
+.comp-input:focus { outline: 2px solid rgba(200,168,107,.65); outline-offset: 2px; }
+.comp-page button:focus-visible, .comp-page a:focus-visible, .comp-page summary:focus-visible { outline: 2px solid #c8a86b; outline-offset: 3px; }
+.comp-seat { display: flex; min-width: 0; min-height: 76px; flex-direction: column; justify-content: center; gap: .5rem; border: 1px solid var(--color-border, #32302b); border-radius: .75rem; padding: .75rem; background: rgba(255,255,255,.02); font-size: .8rem; }
+.comp-seat-you { border-color: rgba(200,168,107,.5); background: rgba(200,168,107,.06); }
+.comp-seat-empty { align-items: center; flex-direction: row; gap: .5rem; border-style: dashed; color: var(--color-muted, #96938b); opacity: .65; }
+.comp-priority { display: inline-flex; white-space: nowrap; align-items: center; gap: .25rem; border: 1px solid; border-radius: .4rem; padding: .25rem .4rem; font-size: .62rem; line-height: 1.25; font-weight: 700; }
+.comp-priority-0 { color: #c7c9d0; border-color: #616570; background: rgba(140,145,160,.08); }
+.comp-priority-1 { color: #e4c68b; border-color: #a68d58; background: rgba(200,168,107,.09); }
+.comp-priority-2 { color: #dcc1ff; border-color: #a479dc; background: rgba(168,115,228,.13); }
+.comp-hero-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(78px, 1fr)); gap: .5rem; }
+.comp-hero { position: relative; display: flex; flex-direction: column; align-items: center; overflow: hidden; padding: .35rem .25rem .4rem; border: 2px solid rgba(255,255,255,.07); border-radius: .65rem; background: rgba(255,255,255,.018); color: #a09d96; cursor: pointer; transition: border-color .12s, background .12s; }
+.comp-hero:hover { border-color: rgba(200,168,107,.5); background: rgba(200,168,107,.06); }
+.comp-hero:disabled { cursor: wait; }
+.comp-hero .comp-portrait { width: 58px; height: 58px; border-radius: .35rem; opacity: .52; filter: grayscale(.75); }
+.comp-portrait { display: block; width: 100%; height: 100%; object-fit: cover; }
+.comp-portrait-fallback { display: flex; align-items: center; justify-content: center; background: rgba(200,168,107,.12); color: #c8a86b; font-weight: 800; font-size: 1.5rem; }
+.comp-hero-name { margin-top: .35rem; max-width: 100%; font-size: .64rem; font-weight: 650; text-align: center; line-height: 1.2; min-height: 1.6rem; overflow-wrap: anywhere; }
+.comp-hero-value { display: block; min-width: 32px; margin-top: .15rem; border-radius: .25rem; padding: .1rem .2rem; background: rgba(0,0,0,.25); font-size: .6rem; font-weight: 800; }
+.comp-hero-0 { color: #dddfe4; border-color: #777d89; background: rgba(140,145,160,.05); }
+.comp-hero-1 { color: #ecd1a0; border-color: #c8a86b; background: rgba(200,168,107,.08); }
+.comp-hero-2 { color: #e1caff; border-color: #ab7ee7; background: rgba(168,115,228,.12); }
+.comp-hero-0 .comp-portrait, .comp-hero-1 .comp-portrait, .comp-hero-2 .comp-portrait { opacity: 1; filter: none; }
+.comp-savebar { background: var(--color-card, #171715); }
+@media (max-width: 420px) { .comp-hero-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (prefers-reduced-motion: reduce) { .comp-button, .comp-hero { transition: none; } }

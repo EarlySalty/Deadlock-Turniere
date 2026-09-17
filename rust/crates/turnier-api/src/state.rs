@@ -37,6 +37,7 @@ pub struct AppState {
     /// Erstellungszeitpunkte freier Draft-Lobbys je Client-IP.
     pub draft_lobby_creations: Arc<Mutex<HashMap<IpAddr, Vec<Instant>>>>,
     pub draft_viewers: Arc<Mutex<HashMap<String, HashMap<String, Instant>>>>,
+    pub comp_rate_limit: Arc<Mutex<crate::comp::RateLimiter>>,
     pub scrim_lobby: Arc<ScrimLobbyClient>,
 }
 
@@ -87,6 +88,7 @@ impl AppState {
             notifier: Arc::new(notifier),
             draft_lobby_creations: Arc::new(Mutex::new(HashMap::new())),
             draft_viewers: Arc::new(Mutex::new(HashMap::new())),
+            comp_rate_limit: Arc::new(Mutex::new(crate::comp::RateLimiter::default())),
             scrim_lobby,
         })
     }

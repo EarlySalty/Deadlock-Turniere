@@ -36,6 +36,7 @@ pub fn build_router(state: AppState) -> Router {
         .merge(consent::router())
         .merge(leaderboard::router())
         .merge(draft::router())
+        .merge(crate::comp::router())
         .merge(observer::router())
         .merge(internal_automatik::router())
         .merge(internal_scrims::router())

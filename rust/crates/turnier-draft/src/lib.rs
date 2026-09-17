@@ -13,6 +13,7 @@
 //! (`/api/draft/*`) leben in turnier-api (Welle 5) und verdrahten gegen die hier
 //! exportierte pub-API.
 
+pub mod comp;
 pub mod error;
 pub mod heroes;
 pub mod heroes_provider;

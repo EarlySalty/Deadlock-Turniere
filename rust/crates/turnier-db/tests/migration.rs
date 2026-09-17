@@ -29,11 +29,13 @@ async fn zentrale_test_harness_enthaelt_turnier_schema() {
     let tables = turnier_table_names(pool).await;
     assert_eq!(
         tables.len(),
-        37,
-        "erwarte 37 turnier-Tabellen, bekam {}",
+        39,
+        "erwarte 39 turnier-Tabellen, bekam {}",
         tables.len()
     );
     for must in [
+        "comp_lobbies",
+        "comp_members",
         "tournaments",
         "teams",
         "bracket_matches",

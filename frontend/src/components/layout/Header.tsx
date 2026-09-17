@@ -5,10 +5,14 @@ import { useAuth } from '@/hooks/useAuth'
 import { fetchMyProfile } from '@/api/client'
 import LoginButton from '@/components/auth/LoginButton'
 import Button from '@/components/ui/Button'
-import { Trophy, LogOut, Settings, BarChart2, User, Swords, Menu, X } from 'lucide-react'
+import { Trophy, LogOut, Settings, BarChart2, User, Swords, Users, Menu, X } from 'lucide-react'
 
 const navItems = [
   { label: 'Arena', path: '/', icon: Swords },
+  { label: 'Draft', path: '/draft', icon: Swords },
+  { label: 'Comp-Finder', path: '/comp', icon: Users },
+  { label: 'Draft', path: '/draft', icon: Swords },
+  { label: 'Comp-Finder', path: '/comp', icon: Users },
   { label: 'Rangliste', path: '/rangliste', icon: BarChart2 },
   { label: 'Regelwerk', path: '/hilfe', icon: Trophy },
 ]
@@ -55,7 +59,7 @@ export default function Header() {
           <nav className="hidden items-center gap-5 lg:flex" aria-label="Turnier-Navigation">
             {navItems.map((item) => {
               const Icon = item.icon
-              const isActive = location.pathname === item.path
+              const isActive = location.pathname === item.path || (item.path !== '/' && location.pathname.startsWith(`${item.path}/`)) || (item.path !== '/' && location.pathname.startsWith(`${item.path}/`))
               return (
                 <Link
                   key={item.path}
@@ -132,7 +136,7 @@ export default function Header() {
             {!isLoggedIn && <LoginButton className="mb-2 justify-center sm:hidden" />}
             {navItems.map((item) => {
               const Icon = item.icon
-              const isActive = location.pathname === item.path
+              const isActive = location.pathname === item.path || (item.path !== '/' && location.pathname.startsWith(`${item.path}/`)) || (item.path !== '/' && location.pathname.startsWith(`${item.path}/`))
               return (
                 <Link
                   key={item.path}

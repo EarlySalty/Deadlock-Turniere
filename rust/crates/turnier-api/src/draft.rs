@@ -444,7 +444,7 @@ fn validate_team_name(name: String) -> WebResult<String> {
     Ok(name.to_string())
 }
 
-fn client_ip(headers: &HeaderMap, peer_ip: std::net::IpAddr) -> std::net::IpAddr {
+pub(crate) fn client_ip(headers: &HeaderMap, peer_ip: std::net::IpAddr) -> std::net::IpAddr {
     if !peer_ip.is_loopback() {
         return peer_ip;
     }

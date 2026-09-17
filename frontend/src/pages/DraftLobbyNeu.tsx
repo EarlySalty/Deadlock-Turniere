@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import { Play, Swords } from 'lucide-react'
 import DraftHintergrund from '@/components/draft/DraftHintergrund'
+import TeamModeNav from '@/components/draft/TeamModeNav'
 import { BLAU, GOLD, TINTE } from '@/components/draft/farben'
 import { useDraftHeroList, useDraftRaumAnlegen } from '@/hooks/useDraftLobby'
 import { heroImageUrl } from '@/hooks/draftLobbyState'
@@ -114,6 +115,7 @@ export default function DraftLobbyNeu() {
       )}
 
       <div className="relative z-10 mx-auto flex max-w-2xl flex-col items-center px-4 py-10">
+        <TeamModeNav />
         <div className="fade-in-up flex items-center gap-2 text-[#c8a86b]" style={{ animationDelay: '0.05s' }}>
           <Swords size={14} />
           <span className="text-[10px] font-bold uppercase tracking-[0.35em]">Draft</span>
