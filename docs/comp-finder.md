@@ -53,6 +53,37 @@ Tabellen erweitert und separat erfolgreich ausgeführt. Bestehende Clippy-
 Befunde in Observer-Code und älteren Scrim-Testtypen liegen außerhalb dieses
 Features und wurden nicht durch pauschale Lint-Ausnahmen verdeckt.
 
+## Live-Verifikation (18.09.2026)
+
+Der Modus ist unter `https://deutsche-deadlock-community.de/turnier/comp` live.
+Anwendungsrelease: `d71fd5a1dd5d3db47eb87e249fd7adde9d30ceee`;
+zentrale Migration: `e47f88f5a337c5fa808b2989be0c15ea0b6bdcdf`.
+Beide Änderungen wurden auf den jeweiligen Remote-`main` übernommen.
+
+- Neustart ausschließlich mit `bot-restart turniere`; PID wechselte von
+  `488042` auf `1032401`. Das laufende `exe` ist nicht `(deleted)` und sein
+  SHA-256 stimmt mit dem gebauten Release überein.
+- Der einmalige zentrale Migrationslauf hat den Marker erfolgreich entfernt.
+  Öffentliche Health- und Helden-Endpunkte liefern HTTP 200; Comp-Lobbys sind
+  über die neue API erreichbar.
+- Playwright-Live-Test mit sechs isolierten Browser-Sitzungen erfolgreich:
+  Draft-Moduswechsel, Erstellen/Beitreten, Heldenprioritäten speichern,
+  Sitzung nach Reload behalten, sechs eindeutige Helden bei zwölf Wunschpunkten,
+  siebten Beitritt mit HTTP 409 und unautorisiertes Speichern mit HTTP 401
+  ablehnen. Desktop und 390-Pixel-Mobilansicht ohne horizontalen Überlauf;
+  keine Browser-Laufzeitfehler. Alle Testplätze und die Testlobby wurden entfernt.
+- Journal seit Deploy: keine Einträge mit Priorität `err` oder höher.
+  Es gibt jedoch weiterhin eine Anwendungs-ERROR-Meldung aus dem bestehenden
+  Routine-Scheduler: `proposal_publish_failed`, Vorschlag 10,
+  `Interne Authentifizierung fehlt`. Derselbe Fehler wurde unter der alten PID
+  vor dem Deploy 75-mal in den vorherigen drei Tagen gefunden. Er ist kein
+  Comp-Finder-Fehler und wurde durch dieses Deployment nicht behoben.
+
+Release-Backup und maschinenlesbarer Nachweis liegen lokal unter
+`rust/target/deploy-backups/comp-d71fd5a1dd5d/`. Alte Frontend-Assets bleiben für
+bereits offene Tabs verfügbar; `index.html` wurde erst nach gesundem Backend
+atomar veröffentlicht.
+
 ## Deployment
 
 Migration und Anwendung müssen auf dem jeweiligen Remote-`main` liegen.
