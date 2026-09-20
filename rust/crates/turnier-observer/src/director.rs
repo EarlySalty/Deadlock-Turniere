@@ -86,13 +86,19 @@ pub struct DirectorConfig {
 
 impl Default for DirectorConfig {
     fn default() -> Self {
+        Self::from(&turnier_config::ObserverDirectorConfig::default())
+    }
+}
+
+impl From<&turnier_config::ObserverDirectorConfig> for DirectorConfig {
+    fn from(config: &turnier_config::ObserverDirectorConfig) -> Self {
         Self {
-            min_hold: Duration::milliseconds(4_500),
-            normal_switch_delta: 12.0,
-            emergency_switch_delta: 25.0,
-            stale_after: Duration::milliseconds(2_500),
-            minimum_interesting_score: 18.0,
-            player_view_score: 58.0,
+            min_hold: Duration::milliseconds(config.min_hold_milliseconds),
+            stale_after: Duration::milliseconds(config.stale_after_milliseconds),
+            normal_switch_delta: config.normal_switch_delta,
+            emergency_switch_delta: config.emergency_switch_delta,
+            minimum_interesting_score: config.minimum_interesting_score,
+            player_view_score: config.player_view_score,
         }
     }
 }
@@ -448,5 +454,38 @@ mod tests {
         let decision = director.decide(&frame, now);
         assert_eq!(decision.action, CameraAction::Directed);
         assert_eq!(decision.reason, "live_feed_stale");
+    }
+
+    #[test]
+    fn configured_director_values_reach_decision_logic() {
+        let mut file = turnier_config::Config::parse_file(
+            include_str!("../../../../config/bot.example.toml"),
+            std::path::Path::new("/srv/test/config/bot.toml"),
+        )
+        .unwrap();
+        file.observer_director.min_hold_milliseconds = 7000;
+        file.observer_director.stale_after_milliseconds = 5000;
+        file.observer_director.normal_switch_delta = 15.0;
+        file.observer_director.emergency_switch_delta = 28.0;
+        file.observer_director.minimum_interesting_score = 20.0;
+        file.observer_director.player_view_score = 61.0;
+        file.validate().unwrap();
+        let settings = DirectorConfig::from(&file.observer_director);
+        assert_eq!(settings.min_hold, Duration::milliseconds(7000));
+        assert_eq!(settings.stale_after, Duration::milliseconds(5000));
+        assert_eq!(settings.normal_switch_delta, 15.0);
+        assert_eq!(settings.emergency_switch_delta, 28.0);
+        assert_eq!(settings.minimum_interesting_score, 20.0);
+        assert_eq!(settings.player_view_score, 61.0);
+        let now = DateTime::parse_from_rfc3339("2026-09-20T12:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        let frame = MatchFrame {
+            observed_at: now - Duration::seconds(4),
+            players: vec![player(1, 5, 100.0, true)],
+        };
+        let mut configured = Director::new(settings);
+        assert_eq!(configured.decide(&frame, now).account_id, Some(1));
+        assert_eq!(Director::default().decide(&frame, now).account_id, None);
     }
 }

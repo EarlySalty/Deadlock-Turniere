@@ -87,6 +87,7 @@ async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt().with_env_filter(filter).init();
     let settings = Settings::from_config(&config)?;
     let http = reqwest::Client::builder()
+        .no_proxy()
         .timeout(Duration::from_secs(settings.request_timeout_seconds))
         .build()?;
 

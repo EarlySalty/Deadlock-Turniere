@@ -34,6 +34,7 @@ impl ScrimLobbyClient {
 
     fn with_network(base_url: &str, token: &str, network: &turnier_config::NetworkConfig) -> Self {
         let http = reqwest::Client::builder()
+            .no_proxy()
             .timeout(Duration::from_secs(network.lobby_provision_seconds))
             .connect_timeout(Duration::from_secs(network.lobby_connect_seconds))
             .build()

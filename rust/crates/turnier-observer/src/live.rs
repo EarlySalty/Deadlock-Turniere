@@ -39,6 +39,7 @@ impl DeadlockLiveClient {
         network: &turnier_config::NetworkConfig,
     ) -> Result<Self, LiveError> {
         let http = reqwest::Client::builder()
+            .no_proxy()
             // deadlock-api.com akzeptiert normale API-Clients, blockt aber derzeit
             // Requests ohne brauchbaren User-Agent teilweise bereits am Edge mit
             // HTTP 403. Fester, ehrlicher Produkt-UA statt Browser-Imitation.

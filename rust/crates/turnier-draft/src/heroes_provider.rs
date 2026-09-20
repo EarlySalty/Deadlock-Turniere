@@ -89,6 +89,7 @@ pub struct ReqwestHeroFetcher {
 impl ReqwestHeroFetcher {
     pub fn new(url: String, timeout_seconds: u64) -> Self {
         let client = reqwest::Client::builder()
+            .no_proxy()
             .timeout(Duration::from_secs(timeout_seconds))
             .build()
             .expect("HTTP-Client für geprüfte Heldenquelle");

@@ -1,0 +1,31 @@
+{
+  "command": [
+    "/usr/bin/bash",
+    "/home/nathanael/Documents/Deadlock-Bots/rust/scripts/central_test_db.sh",
+    "/home/nathanael/.cargo/bin/cargo",
+    "test",
+    "--manifest-path",
+    "/home/nathanael/.worktrees/turniere-global-toml-abnahme-20260920/rust/Cargo.toml",
+    "--workspace",
+    "--features",
+    "testing",
+    "-j",
+    "2",
+    "--",
+    "--include-ignored"
+  ],
+  "started_utc": "2026-09-20T11:50:21.815867+00:00",
+  "finished_utc": "2026-09-20T11:52:27.082718+00:00",
+  "duration_seconds": 125.27,
+  "head_before": "21b66d2d720ccab1a56cb5b68dcd82f29bccdbe8",
+  "working_diff_sha256": "719f33298e874fa963b993f4be63a36a1496f1f5d0d8fb542743ca1435eab63b",
+  "exit_code": 101,
+  "passed": 20,
+  "failed": 1,
+  "ignored": 0,
+  "test_binaries_reported": 2,
+  "failed_tests": [
+    "invalid_proposal_transition_returns_conflict"
+  ],
+  "log": "test-acceptance.log"
+}

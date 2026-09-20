@@ -237,3 +237,52 @@ fn symlink_uses_the_real_file_directory_for_relative_data_paths() {
     );
     std::fs::remove_dir_all(root).unwrap();
 }
+
+#[test]
+fn observer_director_rejects_nonfinite_scores_and_inconsistent_budgets() {
+    for field in [
+        "normal_switch_delta",
+        "emergency_switch_delta",
+        "minimum_interesting_score",
+        "player_view_score",
+    ] {
+        for value in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY, -1.0, 10001.0] {
+            assert!(set(
+                &format!("observer_director.{field}"),
+                toml::Value::Float(value)
+            )
+            .is_err());
+        }
+    }
+    for field in ["min_hold_milliseconds", "stale_after_milliseconds"] {
+        for value in [0, 60001] {
+            assert!(set(
+                &format!("observer_director.{field}"),
+                toml::Value::Integer(value)
+            )
+            .is_err());
+        }
+    }
+    assert!(set(
+        "observer_director.stale_after_milliseconds",
+        toml::Value::Integer(349)
+    )
+    .is_err());
+    assert!(set(
+        "observer_director.normal_switch_delta",
+        toml::Value::Float(26.0)
+    )
+    .is_err());
+    assert!(set(
+        "observer_director.minimum_interesting_score",
+        toml::Value::Float(59.0)
+    )
+    .is_err());
+    for value in [0, 65537] {
+        assert!(set(
+            "limits.observer_live_queue_rows",
+            toml::Value::Integer(value)
+        )
+        .is_err());
+    }
+}

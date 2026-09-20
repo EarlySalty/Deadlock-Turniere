@@ -7,8 +7,10 @@ use std::collections::BTreeSet;
 
 use serde::{Deserialize, Serialize};
 mod file;
+mod observer;
 mod operational;
 pub use file::*;
+pub use observer::*;
 pub use operational::*;
 
 /// Vollständige, aufgelöste Laufzeit-Konfiguration.
@@ -28,6 +30,7 @@ pub struct Config {
     pub bridge: BridgeConfig,
     pub database: DatabaseConfig,
     pub observer_agent: Option<ObserverAgentConfig>,
+    pub observer_director: ObserverDirectorConfig,
     // --- Discord-OAuth-Delegation via Deadlock-Bots / Master-Broker ---
     pub discord_oauth_internal_api_base_url: String,
     #[serde(skip)]
@@ -250,6 +253,7 @@ impl Default for Config {
             bridge: BridgeConfig::default(),
             database: DatabaseConfig::default(),
             observer_agent: None,
+            observer_director: ObserverDirectorConfig::default(),
             discord_oauth_internal_api_base_url: "http://127.0.0.1:8766".to_string(),
             discord_oauth_internal_api_token: "".to_string(),
             discord_master_broker_base_url: "http://127.0.0.1:8766".to_string(),

@@ -61,6 +61,8 @@ routine_tournament_bracket_delay_minutes = 180
 level = "info"
 
 [network]
+# Direkte HTTP-Verbindungen wie im geprüften Betriebsstand.
+# HTTP_PROXY/HTTPS_PROXY/ALL_PROXY verändern die Clients nicht.
 broker_request_seconds = 20
 broker_connect_seconds = 5
 oauth_request_seconds = 20
@@ -116,6 +118,7 @@ comp_writes_per_minute = 120
 comp_creations_per_hour = 10
 draft_creations_per_hour = 10
 draft_viewer_ttl_seconds = 20
+observer_live_queue_rows = 512
 
 [authorization]
 # Freigaberollen für Vorschläge. Laufende Abstimmungen bleiben in Postgres.
@@ -153,3 +156,12 @@ stale_task_milliseconds = 120000
 # DSN bleibt in Infisical. Keine Migration beim normalen Start.
 max_connections = 8
 acquire_timeout_seconds = 10
+
+# Globale Regie-Grenzen. Matchmodus und manuelle Kamera-Auswahl bleiben in der DB.
+[observer_director]
+min_hold_milliseconds = 4500
+stale_after_milliseconds = 2500
+normal_switch_delta = 12.0
+emergency_switch_delta = 25.0
+minimum_interesting_score = 18.0
+player_view_score = 58.0

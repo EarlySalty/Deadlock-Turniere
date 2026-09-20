@@ -1,0 +1,37 @@
+{
+  "command": [
+    "/usr/bin/bash",
+    "/home/nathanael/Documents/Deadlock-Bots/rust/scripts/central_test_db.sh",
+    "/home/nathanael/.cargo/bin/cargo",
+    "test",
+    "--locked",
+    "--manifest-path",
+    "/home/nathanael/.worktrees/turniere-global-toml-abnahme-20260920/rust/Cargo.toml",
+    "--workspace",
+    "--features",
+    "testing",
+    "--no-fail-fast",
+    "-j",
+    "2",
+    "--",
+    "--include-ignored"
+  ],
+  "started_utc": "2026-09-20T12:22:06.226850+00:00",
+  "finished_utc": "2026-09-20T12:31:03.575613+00:00",
+  "exit_code": 101,
+  "passed": 542,
+  "failed": 6,
+  "ignored": 0,
+  "test_binaries_reported": 77,
+  "failed_tests": [
+    "invalid_proposal_transition_returns_conflict",
+    "fehlende_provision_landet_im_fehler_und_retry_setzt_zurueck",
+    "lobby_post_wird_nur_einmal_gesendet",
+    "lobby_job_bringt_einen_draft_bis_zum_ergebnis",
+    "notifier::tests::mentions_baut_korrekt",
+    "rematch_nach_abschluss_tauscht_die_seiten"
+  ],
+  "source_unchanged_during_tests": true,
+  "secret_environment": "cleared before throwaway harness",
+  "log": "test-final.log"
+}

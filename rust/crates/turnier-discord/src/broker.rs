@@ -30,6 +30,7 @@ impl BrokerClient {
     fn with_network(base_url: &str, token: &str, network: &turnier_config::NetworkConfig) -> Self {
         // Timeouts identisch zum Original: 20 s gesamt, 5 s connect, keine Redirects.
         let http = reqwest::Client::builder()
+            .no_proxy()
             .timeout(std::time::Duration::from_secs(
                 network.broker_request_seconds,
             ))

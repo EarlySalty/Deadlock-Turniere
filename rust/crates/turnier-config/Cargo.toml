@@ -5,8 +5,8 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 
-# Geschichtete Konfiguration: löst Werte aus Secret-Dateien, Credentials-
-# Verzeichnissen und Umgebungsvariablen auf (in dieser Priorität), sonst Default.
+# Betriebseinstellungen aus einer strikt geprüften TOML.
+# Die geschützte Secret-Auflösung bleibt davon getrennt.
 [dependencies]
 tracing.workspace = true
 serde.workspace = true

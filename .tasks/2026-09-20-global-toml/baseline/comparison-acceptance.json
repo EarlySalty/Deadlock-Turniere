@@ -1,0 +1,13 @@
+{
+  "audit": "turnier-legacy-config-comparison-v1",
+  "baseline_sha": "c9fad4346cd0d86fce542dcb2da6f2dc0cadf047",
+  "candidate_fingerprint": "a5495a427fa926715b6ba7e14c12fc6561f2623fedc4b1e1c61ea05cc6095ab8",
+  "database_connections": 0,
+  "implicit_environment_present": [],
+  "logging_matches": true,
+  "mismatched_fields": [],
+  "nonsecret_fields_checked": 42,
+  "secret_values_emitted": 0,
+  "test_mode_matches": true,
+  "tournament_actions": 0
+}

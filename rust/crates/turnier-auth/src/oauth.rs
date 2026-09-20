@@ -31,7 +31,7 @@ const OAUTH_SCOPE: &str = "identify guilds.members.read";
 const REQUESTING_SERVICE: &str = "turnier";
 
 /// Client für den delegierten Discord-OAuth-Flow über den Master-Broker.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct OAuthClient {
     http: reqwest::Client,
     base_url: String,
@@ -40,6 +40,12 @@ pub struct OAuthClient {
     public_url: String,
     /// `<DISCORD_GUILD_ID>` — geht als Metadata an `initiate`.
     guild_id: String,
+}
+
+impl std::fmt::Debug for OAuthClient {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("OAuthClient").finish_non_exhaustive()
+    }
 }
 
 /// Metadata-Block der `initiate`-Anfrage (verschachtelt — daher eigenes Struct
@@ -100,6 +106,7 @@ impl OAuthClient {
     /// „safe": kein Per-Call-Client mehr).
     pub fn new(config: &Config) -> Self {
         let http = reqwest::Client::builder()
+            .no_proxy()
             .timeout(Duration::from_secs(config.network.oauth_request_seconds))
             .connect_timeout(Duration::from_secs(config.network.oauth_connect_seconds))
             .redirect(reqwest::redirect::Policy::none())

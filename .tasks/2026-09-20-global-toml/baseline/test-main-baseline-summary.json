@@ -1,0 +1,37 @@
+{
+  "command": [
+    "/usr/bin/bash",
+    "/home/nathanael/Documents/Deadlock-Bots/rust/scripts/central_test_db.sh",
+    "/home/nathanael/.cargo/bin/cargo",
+    "test",
+    "--locked",
+    "--manifest-path",
+    "/home/nathanael/.worktrees/turniere-toml-baseline-20260920/rust/Cargo.toml",
+    "--workspace",
+    "--features",
+    "testing",
+    "--no-fail-fast",
+    "-j",
+    "2",
+    "--",
+    "--include-ignored"
+  ],
+  "baseline_sha": "c9fad4346cd0d86fce542dcb2da6f2dc0cadf047",
+  "started_utc": "2026-09-20T11:56:49.004366+00:00",
+  "finished_utc": "2026-09-20T12:02:49.755663+00:00",
+  "duration_seconds": 360.75,
+  "exit_code": 101,
+  "passed": 503,
+  "failed": 6,
+  "ignored": 0,
+  "failed_tests": [
+    "invalid_proposal_transition_returns_conflict",
+    "fehlende_provision_landet_im_fehler_und_retry_setzt_zurueck",
+    "lobby_job_bringt_einen_draft_bis_zum_ergebnis",
+    "lobby_post_wird_nur_einmal_gesendet",
+    "notifier::tests::mentions_baut_korrekt",
+    "rematch_nach_abschluss_tauscht_die_seiten"
+  ],
+  "secret_environment": "cleared before throwaway harness",
+  "log": "test-main-baseline.log"
+}

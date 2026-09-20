@@ -76,6 +76,7 @@ impl ReqwestDiscordClient {
             return None;
         }
         let client = reqwest::Client::builder()
+            .no_proxy()
             .timeout(Duration::from_secs(request_seconds))
             .build()
             .ok()?;

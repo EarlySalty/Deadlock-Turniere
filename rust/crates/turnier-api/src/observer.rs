@@ -367,6 +367,7 @@ async fn proxy_bot2_lease(state: &AppState, reserved: Option<bool>) -> WebResult
             .trim_end_matches('/')
     );
     let client = reqwest::Client::builder()
+        .no_proxy()
         .timeout(StdDuration::from_secs(
             state.config.network.observer_request_seconds,
         ))
@@ -699,7 +700,7 @@ async fn run_observer_session(
         &state.config.network,
     )?;
     let broadcast_url = live.resolve_broadcast_url(match_id).await?;
-    let (tx, mut rx) = mpsc::channel(512);
+    let (tx, mut rx) = mpsc::channel(state.config.limits.observer_live_queue_rows);
     let controller = {
         let live = live.clone();
         let url = broadcast_url.clone();
@@ -720,7 +721,9 @@ async fn run_observer_session(
     drop(tx);
 
     let mut accumulator = LiveAccumulator::default();
-    let mut director = Director::default();
+    let mut director = Director::new(turnier_observer::DirectorConfig::from(
+        &state.config.observer_director,
+    ));
     let mut last_action = CameraAction::Directed;
     let started = tokio::time::Instant::now();
     let mut last_row = tokio::time::Instant::now();

@@ -181,6 +181,7 @@ pub struct LimitsConfig {
     pub comp_creations_per_hour: usize,
     pub draft_creations_per_hour: usize,
     pub draft_viewer_ttl_seconds: u64,
+    pub observer_live_queue_rows: usize,
 }
 impl Default for LimitsConfig {
     fn default() -> Self {
@@ -195,6 +196,7 @@ impl Default for LimitsConfig {
             comp_creations_per_hour: 10,
             draft_creations_per_hour: 10,
             draft_viewer_ttl_seconds: 20,
+            observer_live_queue_rows: 512,
         }
     }
 }
@@ -566,6 +568,8 @@ impl Config {
             86400,
             "assets.heroes_fallback_cache_seconds",
         )?;
+        self.observer_director
+            .validate(self.scheduler.observer_evaluate_milliseconds)?;
         let l = &self.limits;
         if !(1..=30).contains(&l.session_lifetime_days)
             || !(1..=16 * 1024 * 1024).contains(&l.avatar_bytes)
@@ -579,6 +583,7 @@ impl Config {
             || !(1..=1000).contains(&l.comp_creations_per_hour)
             || !(1..=1000).contains(&l.draft_creations_per_hour)
             || !(1..=3600).contains(&l.draft_viewer_ttl_seconds)
+            || !(1..=65536).contains(&l.observer_live_queue_rows)
         {
             return Err(ConfigError::Invalid(
                 "limits: außerhalb der dokumentierten Sicherheitsgrenzen",

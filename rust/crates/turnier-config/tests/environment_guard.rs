@@ -75,6 +75,13 @@ impl<'ast> Visit<'ast> for Guard<'_> {
                 .map(|s| s.ident.to_string())
                 .collect();
             let name = parts.join("::");
+            if matches!(
+                name.as_str(),
+                "reqwest::Client::builder" | "reqwest::Client::new" | "reqwest::get"
+            ) {
+                self.violations
+                    .push("HTTP-Client mit implizitem Proxy-ENV-Leser");
+            }
             let cli = self.binary() && name == "std::env::args_os";
             let dsn =
                 self.file == "turnier-db/src/pool.rs" && name == "dl_central_db::dsn_from_env";
@@ -118,6 +125,25 @@ impl<'ast> Visit<'ast> for Guard<'_> {
         visit::visit_macro(self, mac);
     }
     fn visit_expr_method_call(&mut self, call: &'ast syn::ExprMethodCall) {
+        if call.method == "no_proxy" {
+            if let syn::Expr::Call(inner) = &*call.receiver {
+                if let syn::Expr::Path(path) = &*inner.func {
+                    let name = path
+                        .path
+                        .segments
+                        .iter()
+                        .map(|s| s.ident.to_string())
+                        .collect::<Vec<_>>()
+                        .join("::");
+                    if name == "reqwest::Client::builder" {
+                        for arg in &call.args {
+                            self.visit_expr(arg);
+                        }
+                        return;
+                    }
+                }
+            }
+        }
         if !self.secret_module() && forbidden(&call.method.to_string()) {
             self.violations.push("ENV-Methode oder Exportbrücke");
         }
