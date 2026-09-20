@@ -1,14 +1,5 @@
-//! Mehrschichtiger Resolver für Settings/Secrets.
-//!
-//! Priorität (wie im Python-Original `config.py`):
-//! 1. `NAME_FILE` → Inhalt der referenzierten Datei
-//! 2. Secret-Dateien in `CREDENTIALS_DIRECTORY`/`SECRETS_DIRECTORY`/`VAULT_SECRETS_DIR`
-//!    (Dateiname `NAME`, `name`, oder `name-mit-bindestrich`)
-//! 3. Umgebungsvariable `NAME`
-//! 4. Default
-//!
-//! Keyring (Windows/Dev-Fallback im Original) ist auf Headless-Linux bewusst
-//! nicht implementiert — dort liefern Datei/Env alle Werte.
+//! Resolver für echte Secrets aus der bestehenden Infisical-/Credentials-Kette.
+//! Nicht geheime Betriebsschlüssel werden vor jedem dynamischen Dateizugriff abgewiesen.
 
 use std::env;
 use std::fs;
@@ -75,8 +66,27 @@ fn file_backed(name: &str) -> Option<String> {
 }
 
 /// Löst den ersten nicht-leeren Wert aus der Alias-Liste auf (Datei → Env je Name).
+const ALLOWED_SECRET_NAMES: &[&str] = &[
+    "TURNIER_INTERNAL_API_TOKEN",
+    "MASTER_BROKER_TOKEN",
+    "MAIN_BOT_INTERNAL_TOKEN",
+    "TWITCH_INTERNAL_API_TOKEN",
+    "DISCORD_MASTER_BROKER_TOKEN",
+    "DISCORD_BOT_TOKEN",
+    "DISCORD_TOKEN",
+    "BOT_TOKEN",
+    "JWT_SECRET",
+    "DISCORD_WEBHOOK_URL",
+    "STEAM_BOT_INTERNAL_TOKEN",
+    "SCRIM_OBSERVER_AGENT_TOKEN",
+    "OBSERVER_AGENT_TOKEN",
+];
+
 pub fn resolve_first(names: &[&str]) -> Option<String> {
     for name in names {
+        if !ALLOWED_SECRET_NAMES.contains(name) {
+            continue;
+        }
         if let Some(value) = file_backed(name) {
             return Some(value);
         }
@@ -98,30 +108,4 @@ pub fn get_string(name: &str, default: &str) -> String {
 /// Wie [`resolve_first`] über mehrere Aliase, mit Default.
 pub fn get_first_string(names: &[&str], default: &str) -> String {
     resolve_first(names).unwrap_or_else(|| default.to_string())
-}
-
-/// Integer-Setting mit Default; ungültige Werte fallen (mit Warnung) auf Default.
-pub fn get_int(name: &str, default: i64) -> i64 {
-    match resolve_first(&[name]) {
-        Some(raw) => raw.parse::<i64>().unwrap_or_else(|_| {
-            tracing::warn!("Ungültiger Integer für {name}={raw:?}, nutze Default {default}");
-            default
-        }),
-        None => default,
-    }
-}
-
-/// Boolean-Setting mit Default. Akzeptiert `1/true/yes/on` bzw. `0/false/no/off`.
-pub fn get_bool(name: &str, default: bool) -> bool {
-    match resolve_first(&[name]) {
-        Some(raw) => match raw.trim().to_lowercase().as_str() {
-            "1" | "true" | "yes" | "on" => true,
-            "0" | "false" | "no" | "off" => false,
-            other => {
-                tracing::warn!("Ungültiger Boolean für {name}={other:?}, nutze Default {default}");
-                default
-            }
-        },
-        None => default,
-    }
 }

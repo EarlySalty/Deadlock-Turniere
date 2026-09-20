@@ -100,8 +100,8 @@ impl OAuthClient {
     /// „safe": kein Per-Call-Client mehr).
     pub fn new(config: &Config) -> Self {
         let http = reqwest::Client::builder()
-            .timeout(Duration::from_secs(20))
-            .connect_timeout(Duration::from_secs(5))
+            .timeout(Duration::from_secs(config.network.oauth_request_seconds))
+            .connect_timeout(Duration::from_secs(config.network.oauth_connect_seconds))
             .redirect(reqwest::redirect::Policy::none())
             .build()
             .expect("reqwest::Client mit Standard-TLS lässt sich immer bauen");

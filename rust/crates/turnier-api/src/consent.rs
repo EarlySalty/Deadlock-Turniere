@@ -32,8 +32,6 @@ use crate::state::AppState;
 const CURRENT_CONSENT_VERSION: i64 = 2;
 /// Turnierstatus, die eine aktive Teilnahme darstellen (wie `_ACTIVE_TOURNAMENT_STATUSES`).
 const ACTIVE_TOURNAMENT_STATUSES: [&str; 4] = ["registration", "checkin", "group_phase", "bracket"];
-/// Maximale Avatar-Größe in Bytes (2 MB, wie `_MAX_AVATAR_SIZE`).
-const MAX_AVATAR_SIZE: usize = 2 * 1024 * 1024;
 
 /// Router der Consent-/Profil-/Avatar-Endpunkte.
 pub fn router() -> Router<AppState> {
@@ -456,8 +454,11 @@ async fn upload_profile_avatar(
     }
     let data = data.ok_or_else(|| WebError::unprocessable("Feld 'avatar' fehlt"))?;
 
-    if data.len() > MAX_AVATAR_SIZE {
-        return Err(WebError::bad_request("Avatar darf maximal 2 MB groß sein"));
+    if data.len() > state.config.limits.avatar_bytes {
+        return Err(WebError::bad_request(format!(
+            "Avatar darf maximal {} Bytes groß sein",
+            state.config.limits.avatar_bytes
+        )));
     }
 
     let (extension, _media_type) = detect_avatar_format(&data)?;

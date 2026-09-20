@@ -33,7 +33,7 @@ async fn setup() -> TestApp {
     let db = test_pool().await.expect("central test pool");
     let pool = db.pool().clone();
 
-    let mut config = Config::from_env();
+    let mut config = Config::default();
     config.discord_admin_role_ids = "admin-role".to_string();
     config.discord_tournament_admin_role_ids = String::new();
     config.discord_mod_role_ids = "mod-role".to_string();

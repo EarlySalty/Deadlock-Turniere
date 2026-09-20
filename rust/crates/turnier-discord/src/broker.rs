@@ -12,7 +12,7 @@ const INTERNAL_TOKEN_HEADER: &str = "X-Internal-Token";
 /// Client gegen den Discord-Master-Broker. Hält EINEN wiederverwendbaren
 /// `reqwest::Client` (das Python-Original baute pro Request einen neuen
 /// `httpx.AsyncClient`).
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct BrokerClient {
     http: reqwest::Client,
     base_url: String,
@@ -24,10 +24,18 @@ impl BrokerClient {
     /// Original) am Ende von `/` befreit; ob Basis-URL/Token gesetzt sind, wird
     /// erst beim Aufruf geprüft (Lazy-Validierung wie in `_broker_base_url`).
     pub fn new(base_url: &str, token: &str) -> Self {
+        Self::with_network(base_url, token, &turnier_config::NetworkConfig::default())
+    }
+
+    fn with_network(base_url: &str, token: &str, network: &turnier_config::NetworkConfig) -> Self {
         // Timeouts identisch zum Original: 20 s gesamt, 5 s connect, keine Redirects.
         let http = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(20))
-            .connect_timeout(std::time::Duration::from_secs(5))
+            .timeout(std::time::Duration::from_secs(
+                network.broker_request_seconds,
+            ))
+            .connect_timeout(std::time::Duration::from_secs(
+                network.broker_connect_seconds,
+            ))
             .redirect(reqwest::redirect::Policy::none())
             .build()
             .expect("reqwest-Client baut immer (statische Konfiguration)");
@@ -41,9 +49,10 @@ impl BrokerClient {
 
     /// Komfort-Konstruktor aus [`turnier_config::Config`].
     pub fn from_config(config: &turnier_config::Config) -> Self {
-        Self::new(
+        Self::with_network(
             &config.discord_master_broker_base_url,
             &config.discord_master_broker_token,
+            &config.network,
         )
     }
 
@@ -193,5 +202,11 @@ mod tests {
     fn error_detail_leer_gibt_default() {
         assert_eq!(error_detail("   "), "Discord-Broker Fehler");
         assert_eq!(error_detail(""), "Discord-Broker Fehler");
+    }
+}
+
+impl std::fmt::Debug for BrokerClient {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BrokerClient").finish_non_exhaustive()
     }
 }

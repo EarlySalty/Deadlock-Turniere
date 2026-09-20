@@ -47,6 +47,7 @@ pub struct SteamRankResolver {
     cache: RankCache,
     bridge: Option<BridgeReader>,
     discord: Option<Arc<dyn DiscordMemberClient>>,
+    main_rank_role_ids: Vec<i64>,
 }
 
 impl SteamRankResolver {
@@ -60,7 +61,13 @@ impl SteamRankResolver {
             cache,
             bridge,
             discord,
+            main_rank_role_ids: turnier_config::SteamConfig::default().main_rank_role_ids,
         }
+    }
+
+    pub fn with_main_rank_roles(mut self, roles: Vec<i64>) -> Self {
+        self.main_rank_role_ids = roles;
+        self
     }
 
     /// Bequemer Konstruktor über einen App-DB-Pool: legt den Cache an und
@@ -115,7 +122,11 @@ impl SteamRankResolver {
             None => Vec::new(),
         };
 
-        Ok(role_rank::resolve_from_roles(&role_ids, &subrank_roles))
+        Ok(role_rank::resolve_from_roles_with_mapping(
+            &role_ids,
+            &subrank_roles,
+            &self.main_rank_role_ids,
+        ))
     }
 }
 

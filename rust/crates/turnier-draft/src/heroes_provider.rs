@@ -83,15 +83,21 @@ impl<F: HeroFetcher> HeroesProvider<F> {
 /// Produktive HTTP-Quelle der Deadlock Assets API.
 pub struct ReqwestHeroFetcher {
     client: reqwest::Client,
+    url: String,
 }
 
+impl ReqwestHeroFetcher {
+    pub fn new(url: String, timeout_seconds: u64) -> Self {
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(timeout_seconds))
+            .build()
+            .expect("HTTP-Client für geprüfte Heldenquelle");
+        Self { client, url }
+    }
+}
 impl Default for ReqwestHeroFetcher {
     fn default() -> Self {
-        let client = reqwest::Client::builder()
-            .timeout(Duration::from_secs(5))
-            .build()
-            .unwrap_or_else(|_| reqwest::Client::new());
-        Self { client }
+        Self::new(HEROES_URL.to_owned(), 5)
     }
 }
 
@@ -100,7 +106,7 @@ impl HeroFetcher for ReqwestHeroFetcher {
         Box::pin(async move {
             let response = self
                 .client
-                .get(HEROES_URL)
+                .get(&self.url)
                 .send()
                 .await
                 .and_then(reqwest::Response::error_for_status)

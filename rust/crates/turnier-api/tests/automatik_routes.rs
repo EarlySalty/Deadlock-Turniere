@@ -24,7 +24,7 @@ async fn setup() -> (Router, TestDb, Pool, String) {
     let db = test_pool().await.expect("central test pool");
     let pool = db.pool().clone();
 
-    let mut config = Config::from_env();
+    let mut config = Config::default();
     config.discord_admin_role_ids = "admin-role".to_string();
     config.discord_tournament_admin_role_ids = String::new();
     config.discord_mod_role_ids = "mod-role".to_string();
@@ -50,7 +50,7 @@ async fn setup() -> (Router, TestDb, Pool, String) {
 }
 
 async fn create_caster_session(pool: &Pool, discord_id: &str) -> String {
-    let caster_role = Config::from_env().discord_caster_role_id.to_string();
+    let caster_role = Config::default().discord_caster_role_id.to_string();
     turnier_auth::create_session(
         pool,
         discord_id,

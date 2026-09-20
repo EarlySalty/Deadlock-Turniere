@@ -23,8 +23,6 @@ use crate::state::AppState;
 
 /// Name des Session-Cookies (identisch zum Original).
 const SESSION_COOKIE: &str = "session_token";
-/// Cookie-Lebensdauer in Sekunden (7 Tage), wie `SESSION_LIFETIME` im Original.
-const SESSION_MAX_AGE_SECONDS: i64 = 7 * 24 * 60 * 60;
 
 /// Router der Auth-Endpunkte.
 pub fn router() -> Router<AppState> {
@@ -59,17 +57,19 @@ async fn complete(
     let state_id = query.state_id.unwrap_or_default();
     let identity = state.oauth.complete_login(&state_id).await?;
 
-    let token = turnier_auth::create_session(
+    let token = turnier_auth::create_session_with_lifetime(
         &state.pool,
         &identity.discord_id,
         &identity.discord_name,
         &identity.discord_avatar,
         &identity.roles,
+        state.config.limits.session_lifetime_days,
     )
     .await?;
 
+    let session_max_age_seconds = state.config.limits.session_lifetime_days * 24 * 60 * 60;
     let cookie = format!(
-        "{SESSION_COOKIE}={token}; HttpOnly; Secure; SameSite=Lax; Max-Age={SESSION_MAX_AGE_SECONDS}; Path=/"
+        "{SESSION_COOKIE}={token}; HttpOnly; Secure; SameSite=Lax; Max-Age={session_max_age_seconds}; Path=/"
     );
     Ok(redirect(
         StatusCode::FOUND,

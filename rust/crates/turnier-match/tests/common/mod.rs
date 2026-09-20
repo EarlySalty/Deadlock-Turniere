@@ -23,7 +23,7 @@ pub async fn temp_db() -> TestDb {
 /// mit „Bridge nicht verfügbar".
 pub fn manager_without_services(pool: Pool) -> MatchManager {
     // Defaults aus Config (keine echten Tokens nötig für die DB-Pfade).
-    let config = Config::from_env();
+    let config = Config::default();
     MatchManager::new(pool, None, None, &config)
 }
 

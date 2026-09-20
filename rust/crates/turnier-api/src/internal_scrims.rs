@@ -62,9 +62,6 @@ const DISCORD_ROLE_CREATION_FAILED: &str =
 const DM_NO_ACCOUNT: &str = "No linked Discord account; DM not sent.";
 const DM_SUCCESS: &str = "DM sent.";
 const DM_FAILED: &str = "DM delivery failed.";
-const LOBBY_CODE_DISCORD_TIMEOUT: Duration = Duration::from_secs(25);
-const SUBSTITUTE_DISCORD_SYNC_TIMEOUT: Duration = Duration::from_secs(20);
-const SCRIM_OPERATIONAL_POLL_INTERVAL: Duration = Duration::from_secs(15);
 const SCRIM_RUNTIME_LOCK_A: i32 = 724_060_001;
 const SCRIM_RUNTIME_LOCK_B: i32 = 724_060_002;
 const SCRIM_RESULT_SELECTION_LOCK_NAMESPACE: i32 = 20_260_727;
@@ -88,10 +85,7 @@ struct ReminderClaim {
 
 pub fn router() -> Router<AppState> {
     Router::new()
-        .route(
-            "/internal/turnier/v1/caster/teams",
-            get(read_caster_teams),
-        )
+        .route("/internal/turnier/v1/caster/teams", get(read_caster_teams))
         .route(
             "/internal/turnier/v1/scrims/command-center",
             get(read_command_center),
@@ -226,7 +220,8 @@ pub fn spawn_substitute_sweep_worker(state: AppState) {
     tokio::spawn(async move {
         let interval = Duration::from_secs(state.config.scrim_substitute_sweep_interval_seconds);
         loop {
-            let repository = PgScrimReadRepository::new(state.pool.clone());
+            let repository =
+                PgScrimReadRepository::with_guild(state.pool.clone(), state.config.scrim_guild_id);
             let reserve_role_id = positive_config_id(state.config.scrim_reserve_role_id);
             let signup_role_id = positive_config_id(state.config.scrim_signup_role_id);
             let plans = match repository.sweep_expired_substitutes().await {
@@ -264,7 +259,7 @@ pub fn spawn_substitute_sweep_worker(state: AppState) {
                 let subject = delivery.plan.subject.clone();
                 let user_id = delivery.plan.discord_user_id;
                 let status = match tokio::time::timeout(
-                    SUBSTITUTE_DISCORD_SYNC_TIMEOUT,
+                    Duration::from_secs(state.config.network.scrim_role_sync_seconds),
                     sync_discord_roles(&state, vec![delivery.plan.clone()], &sweep_key),
                 )
                 .await
@@ -303,7 +298,9 @@ pub fn spawn_substitute_sweep_worker(state: AppState) {
 
 pub fn spawn_scrim_operational_worker(state: AppState) {
     tokio::spawn(async move {
-        let mut interval = tokio::time::interval(SCRIM_OPERATIONAL_POLL_INTERVAL);
+        let mut interval = tokio::time::interval(Duration::from_secs(
+            state.config.scheduler.scrim_operational_seconds,
+        ));
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         loop {
             interval.tick().await;
@@ -2023,7 +2020,7 @@ async fn distribute_lobby_code_to_channel(
         Sha256::digest(operation.as_bytes())
     );
     match tokio::time::timeout(
-        LOBBY_CODE_DISCORD_TIMEOUT,
+        Duration::from_secs(state.config.network.scrim_lobby_code_seconds),
         state
             .notifier
             .broker()
@@ -2054,7 +2051,7 @@ async fn distribute_lobby_code_to_channel(
                 match_id,
                 channel_id,
                 idempotency_key = request_idempotency_key,
-                timeout_seconds = LOBBY_CODE_DISCORD_TIMEOUT.as_secs(),
+                timeout_seconds = Duration::from_secs(state.config.network.scrim_lobby_code_seconds).as_secs(),
                 "Scrim-Lobbycode-Discord-Versand hat das Zeitlimit erreicht; Zustellung bleibt für einen Retry offen"
             );
             false
@@ -3101,9 +3098,10 @@ async fn dispatch_discord(
             }
         }
     }
-    if let Err(error) = PgScrimReadRepository::new(state.pool.clone())
-        .mark_dispatches_delivered(scope, idempotency_key, &delivered)
-        .await
+    if let Err(error) =
+        PgScrimReadRepository::with_guild(state.pool.clone(), state.config.scrim_guild_id)
+            .mark_dispatches_delivered(scope, idempotency_key, &delivered)
+            .await
     {
         failed = true;
         tracing::warn!(
@@ -3295,7 +3293,10 @@ fn planning_batch(body: PlanningCreateRequest) -> WebResult<MatchRequestBatchInp
 }
 
 fn service(state: &AppState) -> ScrimService<PgScrimReadRepository> {
-    ScrimService::new(PgScrimReadRepository::new(state.pool.clone()))
+    ScrimService::new(PgScrimReadRepository::with_guild(
+        state.pool.clone(),
+        state.config.scrim_guild_id,
+    ))
 }
 
 fn require_internal_boundary(

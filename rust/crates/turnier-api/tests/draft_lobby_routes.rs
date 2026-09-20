@@ -28,7 +28,7 @@ struct TestResponse {
 
 async fn setup() -> TestApp {
     let db = test_pool().await.expect("central test pool");
-    let mut config = Config::from_env();
+    let mut config = Config::default();
     config.discord_bot_token = String::new();
     config.steam_bridge_db_path = String::new();
     config.backend_allowed_hosts = "localhost".to_string();

@@ -9,7 +9,7 @@ pub mod error;
 pub mod pool;
 
 pub use error::{DbError, DbResult};
-pub use pool::{connect_central, run_migrations, Pool};
+pub use pool::{connect_central, connect_central_with_config, run_migrations, Pool};
 #[cfg(feature = "testing")]
 pub use pool::{test_pool, TestDb};
 

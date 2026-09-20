@@ -6,8 +6,8 @@ use serde::Deserialize;
 use tokio::time::MissedTickBehavior;
 use tracing::{info, warn};
 use tracing_subscriber::EnvFilter;
-use turnier_observer::{AgentAck, AgentHeartbeat, CameraAction, CameraCommand};
 use turnier_observer::vconsole::{VConsoleClient, VConsoleError};
+use turnier_observer::{AgentAck, AgentHeartbeat, CameraAction, CameraCommand};
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -19,39 +19,28 @@ struct Settings {
     bot_account_id: i16,
     poll_ms: u64,
     game_control_enabled: bool,
+    request_timeout_seconds: u64,
 }
 
 impl Settings {
-    fn from_env() -> anyhow::Result<Self> {
-        let server = std::env::var("OBSERVER_SERVER_BASE_URL")
-            .context("OBSERVER_SERVER_BASE_URL fehlt")?
-            .trim_end_matches('/')
-            .to_string();
-        let token = std::env::var("OBSERVER_AGENT_TOKEN").context("OBSERVER_AGENT_TOKEN fehlt")?;
+    fn from_config(config: &turnier_config::Config) -> anyhow::Result<Self> {
+        let agent = config
+            .observer_agent
+            .as_ref()
+            .context("observer_agent fehlt in der zentralen TOML")?;
+        let token = turnier_config::secrets::resolve_first(&["OBSERVER_AGENT_TOKEN"])
+            .context("OBSERVER_AGENT_TOKEN fehlt in der Secret-Anbindung")?;
         if token.trim().len() < 24 {
             anyhow::bail!("OBSERVER_AGENT_TOKEN ist zu kurz");
         }
-        let bot_account_id = std::env::var("OBSERVER_BOT_ACCOUNT_ID")
-            .ok()
-            .and_then(|value| value.parse().ok())
-            .unwrap_or(2);
-        if bot_account_id != 2 {
-            anyhow::bail!("dieser Agent ist fuer den Test explizit auf Steam Bot 2 begrenzt");
-        }
         Ok(Self {
-            server,
+            server: agent.server_base_url.trim_end_matches('/').to_owned(),
             token,
-            vconsole_addr: std::env::var("OBSERVER_VCONSOLE_ADDR")
-                .unwrap_or_else(|_| "127.0.0.1:29000".to_string()),
-            bot_account_id,
-            poll_ms: std::env::var("OBSERVER_POLL_MS")
-                .ok()
-                .and_then(|value| value.parse().ok())
-                .map(|value: u64| value.clamp(150, 2_000))
-                .unwrap_or(250),
-            game_control_enabled: std::env::var("OBSERVER_GAME_CONTROL_ENABLED")
-                .map(|value| matches!(value.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on"))
-                .unwrap_or(false),
+            vconsole_addr: agent.vconsole_address.clone(),
+            bot_account_id: agent.bot_account_id,
+            poll_ms: agent.poll_milliseconds,
+            game_control_enabled: agent.game_control_enabled,
+            request_timeout_seconds: agent.request_timeout_seconds,
         })
     }
 
@@ -67,11 +56,27 @@ struct CommandsResponse {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+    let args = turnier_config::ConfigArgs::parse(std::env::args_os().skip(1))?;
+    let config = turnier_config::Config::load_file(&args.path)?;
+    if config.observer_agent.is_none() {
+        anyhow::bail!("observer_agent fehlt in der zentralen TOML");
+    }
+    match args.mode {
+        turnier_config::ConfigMode::Validate | turnier_config::ConfigMode::Check => {
+            println!("{}: gültig", turnier_config::CONFIG_ANCHOR);
+            return Ok(());
+        }
+        turnier_config::ConfigMode::Print => {
+            println!("{}", config.safe_status()?);
+            return Ok(());
+        }
+        _ => {}
+    }
+    let filter = EnvFilter::new(config.logging.level.as_str());
     tracing_subscriber::fmt().with_env_filter(filter).init();
-    let settings = Settings::from_env()?;
+    let settings = Settings::from_config(&config)?;
     let http = reqwest::Client::builder()
-        .timeout(Duration::from_secs(5))
+        .timeout(Duration::from_secs(settings.request_timeout_seconds))
         .build()?;
 
     info!(
@@ -80,7 +85,9 @@ async fn main() -> anyhow::Result<()> {
         "Deadlock Observer Agent startet"
     );
     if !settings.game_control_enabled {
-        info!("Safe Mode aktiv: keine Verbindung zu VConsole und keine automatisierten Spieleingaben");
+        info!(
+            "Safe Mode aktiv: keine Verbindung zu VConsole und keine automatisierten Spieleingaben"
+        );
     }
 
     let mut vconsole = if settings.game_control_enabled {

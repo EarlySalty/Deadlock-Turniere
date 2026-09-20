@@ -1,0 +1,129 @@
+{
+  "discord_oauth_internal_api_base_url": [
+    "DISCORD_OAUTH_INTERNAL_API_BASE_URL"
+  ],
+  "discord_master_broker_base_url": [
+    "DISCORD_MASTER_BROKER_BASE_URL",
+    "DISCORD_OAUTH_INTERNAL_API_BASE_URL"
+  ],
+  "discord_match_channel_category_id": [
+    "DISCORD_MATCH_CHANNEL_CATEGORY_ID"
+  ],
+  "discord_match_channel_delete_delay_seconds": [
+    "DISCORD_MATCH_CHANNEL_DELETE_DELAY_SECONDS"
+  ],
+  "discord_sammelpunkt_channel_id": [
+    "DISCORD_SAMMELPUNKT_CHANNEL_ID"
+  ],
+  "discord_team1_voice_channel_id": [
+    "DISCORD_TEAM1_VOICE_CHANNEL_ID"
+  ],
+  "discord_team2_voice_channel_id": [
+    "DISCORD_TEAM2_VOICE_CHANNEL_ID"
+  ],
+  "discord_tournament_lobby_channel_id": [
+    "DISCORD_TOURNAMENT_LOBBY_CHANNEL_ID"
+  ],
+  "discord_caster_role_id": [
+    "DISCORD_CASTER_ROLE_ID"
+  ],
+  "discord_caster_voice_channel_id": [
+    "DISCORD_CASTER_VOICE_CHANNEL_ID"
+  ],
+  "turnier_public_url": [
+    "TURNIER_PUBLIC_URL"
+  ],
+  "discord_guild_id": [
+    "DISCORD_GUILD_ID"
+  ],
+  "discord_admin_role_ids": [
+    "DISCORD_ADMIN_ROLE_IDS"
+  ],
+  "discord_tournament_admin_role_ids": [
+    "DISCORD_TOURNAMENT_ADMIN_ROLE_IDS"
+  ],
+  "discord_mod_role_ids": [
+    "DISCORD_MOD_ROLE_IDS"
+  ],
+  "scrim_guild_id": [
+    "SCRIM_GUILD_ID"
+  ],
+  "scrim_signup_role_id": [
+    "SCRIM_SIGNUP_ROLE_ID"
+  ],
+  "scrim_reserve_role_id": [
+    "SCRIM_RESERVE_ROLE_ID"
+  ],
+  "scrim_announce_channel_id": [
+    "SCRIM_ANNOUNCE_CHANNEL_ID"
+  ],
+  "scrim_substitute_sweep_interval_seconds": [
+    "SCRIM_SUBSTITUTE_SWEEP_INTERVAL_SECONDS"
+  ],
+  "avatar_dir": [
+    "AVATAR_DIR"
+  ],
+  "steam_bridge_db_path": [
+    "STEAM_BRIDGE_DB_PATH"
+  ],
+  "backend_host": [
+    "BACKEND_HOST"
+  ],
+  "backend_port": [
+    "BACKEND_PORT"
+  ],
+  "backend_allowed_hosts": [
+    "BACKEND_ALLOWED_HOSTS"
+  ],
+  "expose_api_docs": [
+    "EXPOSE_API_DOCS"
+  ],
+  "frontend_url": [
+    "FRONTEND_URL"
+  ],
+  "steam_bot_base_url": [
+    "STEAM_BOT_BASE_URL"
+  ],
+  "observer_enabled": [
+    "SCRIM_OBSERVER_ENABLED"
+  ],
+  "observer_game_control_enabled": [
+    "SCRIM_OBSERVER_GAME_CONTROL_ENABLED"
+  ],
+  "observer_steam_bot2_base_url": [
+    "SCRIM_OBSERVER_STEAM_BOT2_BASE_URL"
+  ],
+  "observer_deadlock_api_base_url": [
+    "SCRIM_OBSERVER_DEADLOCK_API_BASE_URL"
+  ],
+  "observer_controller_query": [
+    "SCRIM_OBSERVER_CONTROLLER_QUERY"
+  ],
+  "observer_pawn_query": [
+    "SCRIM_OBSERVER_PAWN_QUERY"
+  ],
+  "routine_tournaments_enabled": [
+    "ROUTINE_TOURNAMENTS_ENABLED"
+  ],
+  "routine_proposal_channel_id": [
+    "ROUTINE_PROPOSAL_CHANNEL_ID"
+  ],
+  "routine_tournament_preset_id": [
+    "ROUTINE_TOURNAMENT_PRESET_ID"
+  ],
+  "routine_tournament_weekday": [
+    "ROUTINE_TOURNAMENT_WEEKDAY"
+  ],
+  "routine_tournament_time_utc": [
+    "ROUTINE_TOURNAMENT_TIME_UTC"
+  ],
+  "routine_tournament_lead_days": [
+    "ROUTINE_TOURNAMENT_LEAD_DAYS"
+  ],
+  "routine_tournament_checkin_lead_minutes": [
+    "ROUTINE_TOURNAMENT_CHECKIN_LEAD_MINUTES"
+  ],
+  "routine_tournament_bracket_delay_minutes": [
+    "ROUTINE_TOURNAMENT_BRACKET_DELAY_MINUTES"
+  ]
+}

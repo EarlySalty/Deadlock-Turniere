@@ -35,3 +35,7 @@ pub use sequence::{
     COMPETITIVE_1BAN, DEFAULT_SEQUENCE, QUICK_NO_BAN, SEQUENCE_LEN,
 };
 pub use state::{ActionOutcome, DraftAction, DraftSession, DraftState};
+
+pub use repo::{
+    get_state_by_code_with_heroes, take_action_with_heroes, take_lobby_action_with_heroes,
+};

@@ -57,8 +57,10 @@ pub fn router() -> Router<AppState> {
 }
 
 /// `GET /api/draft/heroes` — Live-Heldenliste mit statischem Fallback.
-async fn list_heroes() -> Json<Value> {
-    let heroes = turnier_draft::load_heroes()
+async fn list_heroes(State(state): State<AppState>) -> Json<Value> {
+    let heroes = state
+        .heroes
+        .heroes()
         .await
         .into_iter()
         .map(|hero| {
@@ -215,8 +217,16 @@ async fn submit_lobby_action(
     Json(body): Json<LobbyActionRequest>,
 ) -> WebResult<Json<turnier_draft::DraftState>> {
     let token = captain_token(&headers, body.token.as_deref())?;
-    turnier_draft::take_lobby_action(&state.pool, &code, &token, &body.hero_name).await?;
-    let draft_state = turnier_draft::get_state_by_code(&state.pool, &code).await?;
+    turnier_draft::take_lobby_action_with_heroes(
+        &state.pool,
+        &code,
+        &token,
+        &body.hero_name,
+        &state.heroes,
+    )
+    .await?;
+    let draft_state =
+        turnier_draft::get_state_by_code_with_heroes(&state.pool, &code, &state.heroes).await?;
     Ok(Json(draft_state))
 }
 
@@ -267,7 +277,8 @@ async fn lobby_state(
     token: Option<&str>,
     viewer: Option<&str>,
 ) -> WebResult<Value> {
-    let draft_state = turnier_draft::get_state_by_code(&state.pool, code).await?;
+    let draft_state =
+        turnier_draft::get_state_by_code_with_heroes(&state.pool, code, &state.heroes).await?;
     let mut value = serde_json::to_value(&draft_state).unwrap_or_else(|_| json!({}));
     let Value::Object(map) = &mut value else {
         return Err(WebError::internal(
@@ -366,7 +377,10 @@ fn count_viewers(state: &AppState, code: &str, viewer: Option<&str>) -> i64 {
         .unwrap_or_else(|poisoned| poisoned.into_inner());
     let now = Instant::now();
     let entry = viewers.entry(code.to_string()).or_default();
-    entry.retain(|_, seen| now.duration_since(*seen) < Duration::from_secs(20));
+    entry.retain(|_, seen| {
+        now.duration_since(*seen)
+            < Duration::from_secs(state.config.limits.draft_viewer_ttl_seconds)
+    });
     if let Some(viewer) = viewer {
         entry.insert(viewer.to_string(), now);
     }
@@ -478,10 +492,13 @@ fn enforce_lobby_rate_limit(state: &AppState, ip: std::net::IpAddr) -> WebResult
     // ponytail: Prozesslokal reicht bei einem Prozess; bei mehreren Instanzen neu denken.
     let per_ip = creations.entry(ip).or_default();
     per_ip.retain(|created| now.duration_since(*created) < Duration::from_secs(60 * 60));
-    if per_ip.len() >= 10 {
+    if per_ip.len() >= state.config.limits.draft_creations_per_hour {
         return Err(WebError::new(
             StatusCode::TOO_MANY_REQUESTS,
-            "Du kannst höchstens 10 Draft-Lobbys pro Stunde erstellen.",
+            format!(
+                "Du kannst höchstens {} Draft-Lobbys pro Stunde erstellen.",
+                state.config.limits.draft_creations_per_hour
+            ),
         ));
     }
     per_ip.push(now);
@@ -544,12 +561,13 @@ async fn submit_action(
     Path(session_id): Path<i64>,
     Json(body): Json<DraftActionRequest>,
 ) -> WebResult<Json<Value>> {
-    let outcome = turnier_draft::take_action(
+    let outcome = turnier_draft::take_action_with_heroes(
         &state.pool,
         session_id,
         &body.hero_name,
         &body.taken_by,
         body.force,
+        &state.heroes,
     )
     .await?;
     let draft_state = turnier_draft::get_draft_state(&state.pool, session_id).await?;

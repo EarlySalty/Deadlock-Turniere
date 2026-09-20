@@ -1,0 +1,138 @@
+# Globale Betriebskonfiguration für Deadlock-Turniere.
+# Änderungen benötigen einen geordneten Neustart. Kein Hot-Reload.
+# Secrets gehören in Infisical. Turniere und Anmeldungen bleiben in Postgres.
+# Relative Datenpfade beginnen beim Verzeichnis dieser Datei.
+# WIP: vollständiger Abgleich der produktiven Prioritätskette noch offen.
+schema_version = 1
+turnier_enable_test_mode = true
+cors_extra_origins = ["http://localhost:5173"]
+
+discord_oauth_internal_api_base_url = "http://127.0.0.1:8766"
+discord_master_broker_base_url = "http://127.0.0.1:8770"
+discord_match_channel_category_id = 1412800850580996256
+# Einheit: Sekunden.
+discord_match_channel_delete_delay_seconds = 300
+discord_sammelpunkt_channel_id = 1426160735469174875
+discord_team1_voice_channel_id = 1462434609563173019
+discord_team2_voice_channel_id = 1462434639858897017
+discord_tournament_lobby_channel_id = 1412411665713987635
+discord_caster_role_id = 1495154811799077067
+discord_caster_voice_channel_id = 1495155113772450042
+turnier_public_url = "https://deutsche-deadlock-community.de/turnier"
+discord_guild_id = "1289721245281292288"
+discord_admin_role_ids = "1304169657124782100,1337518124647579661,1411000883155832852,1401891955931222110"
+discord_tournament_admin_role_ids = "1494120177577754747"
+discord_mod_role_ids = "1474210107255554331"
+scrim_guild_id = 1289721245281292288
+scrim_signup_role_id = 1520849762851618817
+scrim_reserve_role_id = 1523803562306703430
+scrim_announce_channel_id = 1521522998199324853
+# Einheit: Sekunden.
+scrim_substitute_sweep_interval_seconds = 600
+avatar_dir = "../backend/data/avatars"
+steam_bridge_db_path = "/home/naniadm/Documents/Deadlock-Bots/data/deadlock.sqlite3"
+backend_host = "127.0.0.1"
+backend_port = 8900
+backend_allowed_hosts = ""
+expose_api_docs = false
+frontend_url = "https://deutsche-deadlock-community.de/turnier"
+steam_bot_base_url = "http://127.0.0.1:8782"
+observer_enabled = true
+observer_game_control_enabled = false
+observer_steam_bot2_base_url = "http://127.0.0.1:8784"
+observer_deadlock_api_base_url = "https://api.deadlock-api.com"
+observer_controller_query = "SELECT * FROM CCitadelPlayerController"
+observer_pawn_query = "SELECT * FROM CCitadelPlayerPawn"
+routine_tournaments_enabled = true
+routine_proposal_channel_id = 1474543558793887937
+routine_tournament_preset_id = 1
+routine_tournament_weekday = "sunday"
+# Uhrzeit HH:MM in UTC.
+routine_tournament_time_utc = "18:00"
+routine_tournament_lead_days = 7
+# Einheit: Minuten.
+routine_tournament_checkin_lead_minutes = 30
+# Einheit: Minuten.
+routine_tournament_bracket_delay_minutes = 180
+
+[logging]
+level = "info"
+
+[network]
+broker_request_seconds = 20
+broker_connect_seconds = 5
+oauth_request_seconds = 20
+oauth_connect_seconds = 5
+steam_discord_request_seconds = 10
+lobby_provision_seconds = 25
+lobby_request_seconds = 10
+lobby_connect_seconds = 5
+scrim_lobby_code_seconds = 25
+scrim_role_sync_seconds = 20
+observer_request_seconds = 5
+observer_connect_seconds = 5
+observer_keepalive_seconds = 30
+heroes_request_seconds = 5
+
+[scheduler]
+tick_seconds = 60
+routine_seconds = 3600
+scrim_operational_seconds = 15
+lobby_tick_seconds = 5
+lobby_reconcile_seconds = 15
+lobby_collect_seconds = 30
+observer_tick_milliseconds = 2000
+observer_evaluate_milliseconds = 350
+observer_stale_seconds = 10
+observer_startup_grace_seconds = 20
+
+# [observer_agent] wird auf einem tatsächlich eingerichteten Agenten ergänzt.
+# Ohne diese Sektion startet der eigenständige Agent nicht.
+
+[assets]
+heroes_url = "https://api.deadlock-api.com/v1/assets/heroes"
+heroes_cache_seconds = 86400
+heroes_fallback_cache_seconds = 60
+
+[limits]
+# Neue Sessions: 1 bis 30 Tage. Bestehende Ablaufzeiten bleiben unverändert.
+session_lifetime_days = 7
+# Upload maximal 16 MiB; API-Nutzlast maximal 1 MiB.
+avatar_bytes = 2097152
+request_body_bytes = 2097152
+comp_body_bytes = 32768
+comp_clients = 10000
+comp_reads_per_minute = 600
+comp_writes_per_minute = 120
+comp_creations_per_hour = 10
+draft_creations_per_hour = 10
+draft_viewer_ttl_seconds = 20
+
+[authorization]
+# Freigaberollen für Vorschläge. Laufende Abstimmungen bleiben in Postgres.
+proposal_approver_role_ids = ["1337518124647579661", "1401891955931222110"]
+
+[steam]
+discord_api_base_url = "https://discord.com/api/v10"
+# Reihenfolge: Initiate, Seeker, Alchemist, Arcanist, Ritualist, Emissary,
+# Archon, Oracle, Phantom, Ascendant, Eternus. Unterrangrollen bleiben in der DB.
+main_rank_role_ids = [
+  1331457571118387210, 1331457652877955072, 1331457699992436829,
+  1331457724848017539, 1331457879345070110, 1331457898781474836,
+  1331457949654319114, 1316966867033653338, 1331458016356208680,
+  1331458049637875785, 1331458087349129296,
+]
+rank_cache_seconds = 86400
+subrank_role_cache_seconds = 300
+
+[bridge]
+# Bestehende externe Steam-Bridge. Keine neue Turnier-Persistenz.
+busy_timeout_seconds = 5
+poll_milliseconds = 500
+stale_task_milliseconds = 120000
+
+
+[database]
+# DSN bleibt in Infisical. Keine Migration beim normalen Start.
+max_connections = 8
+acquire_timeout_seconds = 10

@@ -45,11 +45,15 @@ pub use role_rank::SOURCE_DISCORD_ROLE;
 /// - Der Discord-Client wird erstellt, falls Bot-Token und Guild-ID gesetzt sind;
 ///   sonst entfällt der Discord-Fallback (wie im Original).
 pub async fn build_resolver(pool: Pool, config: &Config) -> SteamResult<SteamRankResolver> {
-    let bridge = BridgeReader::open(&config.steam_bridge_db_path, &config.discord_guild_id).await?;
+    let bridge = BridgeReader::from_config(config).await?;
 
-    let discord: Option<Arc<dyn DiscordMemberClient>> =
-        ReqwestDiscordClient::new(&config.discord_bot_token, &config.discord_guild_id)
-            .map(|c| Arc::new(c) as Arc<dyn DiscordMemberClient>);
+    let discord: Option<Arc<dyn DiscordMemberClient>> = ReqwestDiscordClient::from_config(config)
+        .map(|c| Arc::new(c) as Arc<dyn DiscordMemberClient>);
 
-    Ok(SteamRankResolver::from_pool(pool, bridge, discord))
+    Ok(SteamRankResolver::new(
+        RankCache::with_ttl(pool, config.steam.rank_cache_seconds),
+        bridge,
+        discord,
+    )
+    .with_main_rank_roles(config.steam.main_rank_role_ids.clone()))
 }

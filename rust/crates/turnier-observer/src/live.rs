@@ -31,13 +31,20 @@ pub struct DeadlockLiveClient {
 
 impl DeadlockLiveClient {
     pub fn new(base_url: impl Into<String>) -> Result<Self, LiveError> {
+        Self::with_network(base_url, &turnier_config::NetworkConfig::default())
+    }
+
+    pub fn with_network(
+        base_url: impl Into<String>,
+        network: &turnier_config::NetworkConfig,
+    ) -> Result<Self, LiveError> {
         let http = reqwest::Client::builder()
             // deadlock-api.com akzeptiert normale API-Clients, blockt aber derzeit
             // Requests ohne brauchbaren User-Agent teilweise bereits am Edge mit
             // HTTP 403. Fester, ehrlicher Produkt-UA statt Browser-Imitation.
             .user_agent("DeutscheDeadlockCommunity-Observer/1.0")
-            .connect_timeout(StdDuration::from_secs(5))
-            .tcp_keepalive(StdDuration::from_secs(30))
+            .connect_timeout(StdDuration::from_secs(network.observer_connect_seconds))
+            .tcp_keepalive(StdDuration::from_secs(network.observer_keepalive_seconds))
             .build()?;
         Ok(Self {
             http,
@@ -57,7 +64,13 @@ impl DeadlockLiveClient {
         let value: Value = response.json().await?;
         find_string_recursive(
             &value,
-            &["broadcast_url", "url", "watch_url", "live_url", "spectate_url"],
+            &[
+                "broadcast_url",
+                "url",
+                "watch_url",
+                "live_url",
+                "spectate_url",
+            ],
         )
         .ok_or(LiveError::BroadcastUrlMissing)
     }
@@ -207,17 +220,23 @@ impl LiveAccumulator {
                 .last_stat_change_at
                 .is_some_and(|at| now.signed_duration_since(at).num_seconds() <= 15);
             let kills_recent = if recent_window {
-                (controller.kills - controller.previous_kills).max(0).min(255) as u8
+                (controller.kills - controller.previous_kills)
+                    .max(0)
+                    .min(255) as u8
             } else {
                 0
             };
             let assists_recent = if recent_window {
-                (controller.assists - controller.previous_assists).max(0).min(255) as u8
+                (controller.assists - controller.previous_assists)
+                    .max(0)
+                    .min(255) as u8
             } else {
                 0
             };
             let deaths_recent = if recent_window {
-                (controller.deaths - controller.previous_deaths).max(0).min(255) as u8
+                (controller.deaths - controller.previous_deaths)
+                    .max(0)
+                    .min(255) as u8
             } else {
                 0
             };
@@ -272,10 +291,19 @@ impl LiveAccumulator {
         let value = unwrap_row(raw);
         let entity_index = find_i64(
             value,
-            &["entity_index", "_entity_index", "index", "entity", "entindex"],
+            &[
+                "entity_index",
+                "_entity_index",
+                "index",
+                "entity",
+                "entindex",
+            ],
         );
-        let account_id = find_i64(value, &["account_id", "m_accountID", "m_steamID", "steam_id"])
-            .and_then(normalize_account_id);
+        let account_id = find_i64(
+            value,
+            &["account_id", "m_accountID", "m_steamID", "steam_id"],
+        )
+        .and_then(normalize_account_id);
         let mut state = account_id
             .and_then(|id| self.controllers_by_account.get(&id).cloned())
             .or_else(|| entity_index.and_then(|idx| self.controllers_by_entity.get(&idx).cloned()))
@@ -288,8 +316,8 @@ impl LiveAccumulator {
         state.team = find_i64(value, &["team", "team_num", "m_iTeamNum", "m_nTeamNum"])
             .and_then(|v| u8::try_from(v).ok())
             .or(state.team);
-        state.net_worth = find_i64(value, &["net_worth", "networth", "m_iNetWorth"])
-            .or(state.net_worth);
+        state.net_worth =
+            find_i64(value, &["net_worth", "networth", "m_iNetWorth"]).or(state.net_worth);
 
         let next_kills = find_i64(value, &["kills", "m_iKills", "m_nKills"]);
         let next_assists = find_i64(value, &["assists", "m_iAssists", "m_nAssists"]);
@@ -325,10 +353,14 @@ impl LiveAccumulator {
         let value = unwrap_row(raw);
         let Some(controller_index) = find_i64(
             value,
-            &["controller_index", "m_hController", "controller", "controller_handle"],
+            &[
+                "controller_index",
+                "m_hController",
+                "controller",
+                "controller_handle",
+            ],
         )
-        .map(entity_index_from_handle)
-        else {
+        .map(entity_index_from_handle) else {
             return;
         };
         let mut state = self
@@ -341,15 +373,16 @@ impl LiveAccumulator {
         if let Some(next) = health {
             if let Some(previous) = state.health {
                 if next < previous {
-                    state.damage_taken_recent = (state.damage_taken_recent + (previous - next)).min(10_000.0);
+                    state.damage_taken_recent =
+                        (state.damage_taken_recent + (previous - next)).min(10_000.0);
                     state.last_health_change_at = Some(at);
                 }
             }
             state.previous_health = state.health;
             state.health = Some(next);
         }
-        state.max_health = find_f64(value, &["max_health", "m_iMaxHealth", "m_flMaxHealth"])
-            .or(state.max_health);
+        state.max_health =
+            find_f64(value, &["max_health", "m_iMaxHealth", "m_flMaxHealth"]).or(state.max_health);
         state.position = find_vec3(value).or(state.position);
         self.pawns_by_controller.insert(controller_index, state);
     }
@@ -358,14 +391,18 @@ impl LiveAccumulator {
 fn enrich_proximity(players: &mut [PlayerSnapshot]) {
     let snapshot = players.to_vec();
     for player in players {
-        let Some(position) = player.position else { continue };
+        let Some(position) = player.position else {
+            continue;
+        };
         let mut enemies = 0_u8;
         let mut allies = 0_u8;
         for other in &snapshot {
             if other.account_id == player.account_id || !other.alive {
                 continue;
             }
-            let Some(other_pos) = other.position else { continue };
+            let Some(other_pos) = other.position else {
+                continue;
+            };
             if distance(position, other_pos) > 2_500.0 {
                 continue;
             }
@@ -535,7 +572,10 @@ mod tests {
     #[test]
     fn steam64_is_normalized_to_account_id() {
         let id = 76561198000000000_i64;
-        assert_eq!(normalize_account_id(id), Some((id as u64 & 0xffff_ffff) as u32));
+        assert_eq!(
+            normalize_account_id(id),
+            Some((id as u64 & 0xffff_ffff) as u32)
+        );
     }
 
     #[test]

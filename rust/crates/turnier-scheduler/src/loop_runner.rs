@@ -40,6 +40,7 @@ pub struct Scheduler {
     matchmgr: Arc<MatchManager>,
     notifier: DiscordNotifier,
     routine: RoutineSettings,
+    settings: turnier_config::SchedulerConfig,
 }
 
 impl Scheduler {
@@ -55,6 +56,7 @@ impl Scheduler {
             matchmgr,
             notifier,
             routine: RoutineSettings::from_config(config)?,
+            settings: config.scheduler.clone(),
         })
     }
 
@@ -347,13 +349,18 @@ pub async fn start_scheduler(scheduler: Scheduler, mut shutdown: watch::Receiver
     let now = Utc::now();
     scheduler.run_routine_check(now).await;
     scheduler.run_all_checks(now).await;
+    tracing::info!(
+        anchor = "turnier-scheduler-toml-heartbeat",
+        "Scheduler-Prüflauf beendet"
+    );
 
-    let mut ticker =
-        tokio::time::interval(std::time::Duration::from_secs(SCHEDULER_INTERVAL_SECONDS));
+    let mut ticker = tokio::time::interval(std::time::Duration::from_secs(
+        scheduler.settings.tick_seconds,
+    ));
     // Den sofort feuernden ersten Tick verwerfen — der erste Lauf ist schon erfolgt.
     ticker.tick().await;
     let mut routine_ticker = tokio::time::interval(std::time::Duration::from_secs(
-        ROUTINE_PROPOSAL_INTERVAL_SECONDS,
+        scheduler.settings.routine_seconds,
     ));
     routine_ticker.tick().await;
 
@@ -361,6 +368,7 @@ pub async fn start_scheduler(scheduler: Scheduler, mut shutdown: watch::Receiver
         tokio::select! {
             _ = ticker.tick() => {
                 scheduler.run_all_checks(Utc::now()).await;
+                tracing::info!(anchor = "turnier-scheduler-toml-heartbeat", "Scheduler-Prüflauf beendet");
             }
             _ = routine_ticker.tick() => {
                 scheduler.run_routine_check(Utc::now()).await;

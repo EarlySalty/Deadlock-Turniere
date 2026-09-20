@@ -13,6 +13,7 @@ name = "turnier-observer-agent"
 path = "src/bin/agent.rs"
 
 [dependencies]
+turnier-config = { path = "../turnier-config" }
 serde.workspace = true
 serde_json.workspace = true
 chrono.workspace = true

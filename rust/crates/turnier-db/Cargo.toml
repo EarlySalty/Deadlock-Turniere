@@ -14,6 +14,7 @@ testing = ["dl-central-db/testing"]
 # nutzen den hier bereitgestellten Pool.
 [dependencies]
 turnier-core = { path = "../turnier-core" }
+turnier-config = { path = "../turnier-config" }
 dl-central-db.workspace = true
 sqlx.workspace = true
 tokio.workspace = true

@@ -66,7 +66,7 @@ fn state_with_pool_broker_and_signup_role(
     broker_base_url: Option<&str>,
     signup_role_id: Option<i64>,
 ) -> AppState {
-    let mut config = Config::from_env();
+    let mut config = Config::default();
     config.turnier_internal_api_token = "internal-token".to_string();
     config.discord_bot_token = String::new();
     config.discord_master_broker_base_url = broker_base_url.unwrap_or_default().to_string();
@@ -86,9 +86,18 @@ fn state_with_pool_broker_and_signup_role(
     let match_manager = Arc::new(MatchManager::new(pool.clone(), None, None, &config));
     let notifier = Arc::new(DiscordNotifier::new(broker, pool.clone(), &config));
     let rank_resolver = Arc::new(SteamRankResolver::from_pool(pool.clone(), None, None));
+    let heroes = Arc::new(turnier_draft::HeroesProvider::new(
+        turnier_draft::ReqwestHeroFetcher::new(
+            config.assets.heroes_url.clone(),
+            config.network.heroes_request_seconds,
+        ),
+        std::time::Duration::from_secs(config.assets.heroes_cache_seconds),
+        std::time::Duration::from_secs(config.assets.heroes_fallback_cache_seconds),
+    ));
     AppState {
         pool,
         config,
+        heroes,
         role_sets,
         oauth,
         match_manager,

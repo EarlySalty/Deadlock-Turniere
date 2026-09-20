@@ -60,10 +60,10 @@ const TEST_DISCORD_ID_BASE: i64 = 9_100_000_000_000_000_000;
 const TEST_DISCORD_ID_LIMIT: i64 = TEST_DISCORD_ID_BASE + 1_000_000;
 
 /// Router der Test-Modus-Endpunkte. Liefert einen leeren Router, wenn der
-/// Test-Modus per Env ausgeschaltet ist (`TURNIER_ENABLE_TEST_MODE=0`); Default
+/// Test-Modus in der TOML ausgeschaltet ist (`turnier_enable_test_mode = false`); Default
 /// ist an — wie im Python-Original, das den Router immer mountet.
-pub fn router(_config: &Config) -> Router<AppState> {
-    if !test_mode_enabled() {
+pub fn router(config: &Config) -> Router<AppState> {
+    if !config.turnier_enable_test_mode {
         return Router::new();
     }
     Router::new()
@@ -79,16 +79,6 @@ pub fn router(_config: &Config) -> Router<AppState> {
             post(simulate_test_tournament_round),
         )
         .route("/api/admin/test/wipe", delete(wipe_test_data))
-}
-
-/// Gate-Flag des Test-Modus. Default **an** (= wie Python, das den Router immer
-/// mountet); nur ein explizit „aus"-Wert (`0/false/no/off`) deaktiviert ihn.
-fn test_mode_enabled() -> bool {
-    let raw = turnier_config::secrets::get_first_string(&["TURNIER_ENABLE_TEST_MODE"], "1");
-    !matches!(
-        raw.trim().to_ascii_lowercase().as_str(),
-        "0" | "false" | "no" | "off"
-    )
 }
 
 // ---------------------------------------------------------------------------

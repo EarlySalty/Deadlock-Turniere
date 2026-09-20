@@ -38,6 +38,7 @@ pub struct ReqwestDiscordClient {
     client: reqwest::Client,
     guild_id: String,
     bot_token: String,
+    base_url: String,
 }
 
 impl ReqwestDiscordClient {
@@ -45,17 +46,44 @@ impl ReqwestDiscordClient {
     /// fehlen — dann ist der Discord-Fallback wie im Original deaktiviert
     /// (`if not DISCORD_BOT_TOKEN or not DISCORD_GUILD_ID: return None`).
     pub fn new(bot_token: &str, guild_id: &str) -> Option<Self> {
+        Self::with_timeout(
+            bot_token,
+            guild_id,
+            turnier_config::NetworkConfig::default().steam_discord_request_seconds,
+        )
+    }
+
+    pub fn with_timeout(bot_token: &str, guild_id: &str, request_seconds: u64) -> Option<Self> {
+        Self::with_endpoint(bot_token, guild_id, request_seconds, DISCORD_API)
+    }
+
+    pub fn from_config(config: &turnier_config::Config) -> Option<Self> {
+        Self::with_endpoint(
+            &config.discord_bot_token,
+            &config.discord_guild_id,
+            config.network.steam_discord_request_seconds,
+            &config.steam.discord_api_base_url,
+        )
+    }
+
+    fn with_endpoint(
+        bot_token: &str,
+        guild_id: &str,
+        request_seconds: u64,
+        base_url: &str,
+    ) -> Option<Self> {
         if bot_token.trim().is_empty() || guild_id.trim().is_empty() {
             return None;
         }
         let client = reqwest::Client::builder()
-            .timeout(Duration::from_secs(10))
+            .timeout(Duration::from_secs(request_seconds))
             .build()
             .ok()?;
         Some(Self {
             client,
             guild_id: guild_id.to_string(),
             bot_token: bot_token.to_string(),
+            base_url: base_url.trim_end_matches('/').to_owned(),
         })
     }
 }
@@ -64,8 +92,8 @@ impl ReqwestDiscordClient {
 impl DiscordMemberClient for ReqwestDiscordClient {
     async fn member_role_ids(&self, discord_id: &str) -> SteamResult<Option<Vec<String>>> {
         let url = format!(
-            "{DISCORD_API}/guilds/{}/members/{}",
-            self.guild_id, discord_id
+            "{}/guilds/{}/members/{}",
+            self.base_url, self.guild_id, discord_id
         );
 
         let response = self

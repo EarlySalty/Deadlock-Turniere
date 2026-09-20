@@ -68,9 +68,33 @@ pub async fn create_session(
     discord_avatar: &str,
     roles: &[String],
 ) -> AuthResult<String> {
+    create_session_with_lifetime(
+        pool,
+        discord_id,
+        discord_name,
+        discord_avatar,
+        roles,
+        SESSION_LIFETIME_DAYS,
+    )
+    .await
+}
+
+pub async fn create_session_with_lifetime(
+    pool: &Pool,
+    discord_id: &str,
+    discord_name: &str,
+    discord_avatar: &str,
+    roles: &[String],
+    lifetime_days: i64,
+) -> AuthResult<String> {
+    if !(1..=30).contains(&lifetime_days) {
+        return Err(AuthError::BadRequest(
+            "Session-Lebensdauer außerhalb der Sicherheitsgrenze",
+        ));
+    }
     let token = generate_token();
     let now = Utc::now();
-    let expires_at = now + Duration::days(SESSION_LIFETIME_DAYS);
+    let expires_at = now + Duration::days(lifetime_days);
     let roles_csv = roles.join(",");
     let discord_id = parse_discord_id(discord_id)
         .map_err(|_| AuthError::BadRequest("Discord-ID muss numerisch sein"))?;

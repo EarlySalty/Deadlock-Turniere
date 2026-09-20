@@ -1,27 +1,39 @@
-//! `turnier-config` — zentrale Konfiguration des Turnier-Backends.
-//!
-//! Lädt einmal beim Start aus geschichteten Quellen (siehe [`secrets`]) und wird
-//! danach als unveränderliches `Arc<Config>` durch die App gereicht.
-//!
-//! `DEADLOCK_CENTRAL_DSN` ist Pflicht fuer das Rust-Backend, wird aber bewusst
-//! nicht in [`Config`] gespeichert: `turnier_db::connect_central()` liest die
-//! Umgebungsvariable direkt und gibt beim Fehlen einen Startfehler zurueck, ohne
-//! den Wert zu loggen. `DATABASE_PATH` ist nur noch Python-/SQLite-Legacy und wird
-//! vom Rust-Backend ignoriert.
+//! Zentrale TOML-Konfiguration. Secrets werden nach der Dateiprüfung separat geladen.
+//! Betriebswerte werden als unveränderliche Momentaufnahme weitergegeben.
 
 pub mod secrets;
 
 use std::collections::BTreeSet;
 
-use secrets::{get_bool, get_first_string, get_int, get_string};
+use serde::{Deserialize, Serialize};
+mod file;
+mod operational;
+pub use file::*;
+pub use operational::*;
 
 /// Vollständige, aufgelöste Laufzeit-Konfiguration.
-#[derive(Debug, Clone)]
+#[derive(Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct Config {
+    pub schema_version: u32,
+    pub turnier_enable_test_mode: bool,
+    pub cors_extra_origins: Vec<String>,
+    pub logging: LoggingConfig,
+    pub network: NetworkConfig,
+    pub assets: AssetsConfig,
+    pub limits: LimitsConfig,
+    pub scheduler: SchedulerConfig,
+    pub authorization: AuthorizationConfig,
+    pub steam: SteamConfig,
+    pub bridge: BridgeConfig,
+    pub database: DatabaseConfig,
+    pub observer_agent: Option<ObserverAgentConfig>,
     // --- Discord-OAuth-Delegation via Deadlock-Bots / Master-Broker ---
     pub discord_oauth_internal_api_base_url: String,
+    #[serde(skip)]
     pub discord_oauth_internal_api_token: String,
     pub discord_master_broker_base_url: String,
+    #[serde(skip)]
     pub discord_master_broker_token: String,
 
     // --- Discord-Kanäle / Rollen ---
@@ -33,6 +45,7 @@ pub struct Config {
     pub discord_tournament_lobby_channel_id: i64,
     pub discord_caster_role_id: i64,
     pub discord_caster_voice_channel_id: i64,
+    #[serde(skip)]
     pub discord_bot_token: String,
     pub turnier_public_url: String,
 
@@ -47,6 +60,7 @@ pub struct Config {
     pub scrim_substitute_sweep_interval_seconds: u64,
 
     // --- JWT (im Port effektiv ungenutzt: Sessions sind opake Tokens) ---
+    #[serde(skip)]
     pub jwt_secret: String,
 
     // --- Pfade ---
@@ -61,13 +75,16 @@ pub struct Config {
     pub frontend_url: String,
 
     // --- Benachrichtigungen ---
+    #[serde(skip)]
     pub discord_webhook_url: String,
 
     // --- Scrim cutover ---
+    #[serde(skip)]
     pub turnier_internal_api_token: String,
 
     // --- Steam-Bot (interne HTTP-API, localhost) ---
     pub steam_bot_base_url: String,
+    #[serde(skip)]
     pub steam_bot_internal_token: String,
 
     // --- Auto-Observer / Steam Bot 2 ---
@@ -76,6 +93,7 @@ pub struct Config {
     /// lokalen Deadlock-Client. Default bleibt aus; Shadow/Assist funktionieren
     /// ohne diesen Schalter.
     pub observer_game_control_enabled: bool,
+    #[serde(skip)]
     pub observer_agent_token: String,
     pub observer_steam_bot2_base_url: String,
     pub observer_deadlock_api_base_url: String,
@@ -94,175 +112,6 @@ pub struct Config {
 }
 
 impl Config {
-    /// Lädt die Konfiguration aus den geschichteten Quellen. Defaults entsprechen
-    /// dem Python-Original, soweit die Werte im Rust-Backend noch aktiv sind.
-    pub fn from_env() -> Self {
-        let cfg = Self {
-            discord_oauth_internal_api_base_url: get_string(
-                "DISCORD_OAUTH_INTERNAL_API_BASE_URL",
-                "http://127.0.0.1:8766",
-            ),
-            discord_oauth_internal_api_token: get_first_string(
-                &[
-                    "TURNIER_INTERNAL_API_TOKEN",
-                    "MASTER_BROKER_TOKEN",
-                    "MAIN_BOT_INTERNAL_TOKEN",
-                    "TWITCH_INTERNAL_API_TOKEN",
-                ],
-                "",
-            ),
-            discord_master_broker_base_url: get_first_string(
-                &[
-                    "DISCORD_MASTER_BROKER_BASE_URL",
-                    "DISCORD_OAUTH_INTERNAL_API_BASE_URL",
-                ],
-                "http://127.0.0.1:8766",
-            ),
-            discord_master_broker_token: get_first_string(
-                &[
-                    "DISCORD_MASTER_BROKER_TOKEN",
-                    "TURNIER_INTERNAL_API_TOKEN",
-                    "MASTER_BROKER_TOKEN",
-                    "MAIN_BOT_INTERNAL_TOKEN",
-                    "TWITCH_INTERNAL_API_TOKEN",
-                ],
-                "",
-            ),
-            discord_match_channel_category_id: get_int(
-                "DISCORD_MATCH_CHANNEL_CATEGORY_ID",
-                1412800850580996256,
-            ),
-            discord_match_channel_delete_delay_seconds: get_int(
-                "DISCORD_MATCH_CHANNEL_DELETE_DELAY_SECONDS",
-                300,
-            ),
-            discord_sammelpunkt_channel_id: get_int(
-                "DISCORD_SAMMELPUNKT_CHANNEL_ID",
-                1426160735469174875,
-            ),
-            discord_team1_voice_channel_id: get_int(
-                "DISCORD_TEAM1_VOICE_CHANNEL_ID",
-                1462434609563173019,
-            ),
-            discord_team2_voice_channel_id: get_int(
-                "DISCORD_TEAM2_VOICE_CHANNEL_ID",
-                1462434639858897017,
-            ),
-            discord_tournament_lobby_channel_id: get_int(
-                "DISCORD_TOURNAMENT_LOBBY_CHANNEL_ID",
-                1412411665713987635,
-            ),
-            discord_caster_role_id: get_int("DISCORD_CASTER_ROLE_ID", 1495154811799077067),
-            discord_caster_voice_channel_id: get_int(
-                "DISCORD_CASTER_VOICE_CHANNEL_ID",
-                1495155113772450042,
-            ),
-            discord_bot_token: get_first_string(
-                &["DISCORD_BOT_TOKEN", "DISCORD_TOKEN", "BOT_TOKEN"],
-                "",
-            ),
-            turnier_public_url: get_string(
-                "TURNIER_PUBLIC_URL",
-                "https://deutsche-deadlock-community.de/turnier",
-            ),
-            discord_guild_id: get_string("DISCORD_GUILD_ID", "1289721245281292288"),
-            discord_admin_role_ids: get_string(
-                "DISCORD_ADMIN_ROLE_IDS",
-                "1304169657124782100,1337518124647579661,1411000883155832852,1401891955931222110",
-            ),
-            discord_tournament_admin_role_ids: get_string(
-                "DISCORD_TOURNAMENT_ADMIN_ROLE_IDS",
-                "1494120177577754747",
-            ),
-            discord_mod_role_ids: get_string("DISCORD_MOD_ROLE_IDS", "1474210107255554331"),
-            scrim_guild_id: get_int("SCRIM_GUILD_ID", 1_289_721_245_281_292_288),
-            scrim_signup_role_id: optional_positive_int(
-                "SCRIM_SIGNUP_ROLE_ID",
-                1_520_849_762_851_618_817,
-            ),
-            scrim_reserve_role_id: optional_positive_int(
-                "SCRIM_RESERVE_ROLE_ID",
-                1_523_803_562_306_703_430,
-            ),
-            scrim_announce_channel_id: get_int(
-                "SCRIM_ANNOUNCE_CHANNEL_ID",
-                1_521_522_998_199_324_853,
-            ),
-            scrim_substitute_sweep_interval_seconds: positive_seconds(
-                get_int("SCRIM_SUBSTITUTE_SWEEP_INTERVAL_SECONDS", 600),
-                600,
-            ),
-            jwt_secret: get_string("JWT_SECRET", ""),
-            avatar_dir: get_string("AVATAR_DIR", "data/avatars"),
-            steam_bridge_db_path: get_string(
-                "STEAM_BRIDGE_DB_PATH",
-                r"C:\Users\Nani-Admin\Documents\Deadlock\service\deadlock.sqlite3",
-            ),
-            backend_host: get_string("BACKEND_HOST", "127.0.0.1"),
-            backend_port: get_int("BACKEND_PORT", 8900),
-            backend_allowed_hosts: get_string("BACKEND_ALLOWED_HOSTS", ""),
-            expose_api_docs: get_bool("EXPOSE_API_DOCS", false),
-            frontend_url: get_string(
-                "FRONTEND_URL",
-                "https://deutsche-deadlock-community.de/turnier",
-            ),
-            discord_webhook_url: get_string("DISCORD_WEBHOOK_URL", ""),
-            turnier_internal_api_token: get_string("TURNIER_INTERNAL_API_TOKEN", ""),
-            steam_bot_base_url: get_string("STEAM_BOT_BASE_URL", "http://127.0.0.1:8782"),
-            steam_bot_internal_token: get_first_string(
-                &["STEAM_BOT_INTERNAL_TOKEN", "TURNIER_INTERNAL_API_TOKEN"],
-                "",
-            ),
-            // Shadow/Assist analysieren ausschließlich den externen Live-Matchfeed und
-            // senden keine Eingaben an Deadlock. Daher ist der sichere Observer-Kern
-            // standardmäßig aktiv; echte Game-Control bleibt separat default-off.
-            observer_enabled: get_bool("SCRIM_OBSERVER_ENABLED", true),
-            observer_game_control_enabled: get_bool("SCRIM_OBSERVER_GAME_CONTROL_ENABLED", false),
-            observer_agent_token: get_string("SCRIM_OBSERVER_AGENT_TOKEN", ""),
-            observer_steam_bot2_base_url: get_string(
-                "SCRIM_OBSERVER_STEAM_BOT2_BASE_URL",
-                "http://127.0.0.1:8784",
-            ),
-            observer_deadlock_api_base_url: get_string(
-                "SCRIM_OBSERVER_DEADLOCK_API_BASE_URL",
-                "https://api.deadlock-api.com",
-            ),
-            observer_controller_query: get_string(
-                "SCRIM_OBSERVER_CONTROLLER_QUERY",
-                "SELECT * FROM CCitadelPlayerController",
-            ),
-            observer_pawn_query: get_string(
-                "SCRIM_OBSERVER_PAWN_QUERY",
-                "SELECT * FROM CCitadelPlayerPawn",
-            ),
-            routine_tournaments_enabled: get_bool("ROUTINE_TOURNAMENTS_ENABLED", false),
-            routine_proposal_channel_id: get_int(
-                "ROUTINE_PROPOSAL_CHANNEL_ID",
-                1474543558793887937,
-            ),
-            routine_tournament_preset_id: get_int("ROUTINE_TOURNAMENT_PRESET_ID", 0),
-            routine_tournament_weekday: get_string("ROUTINE_TOURNAMENT_WEEKDAY", "saturday"),
-            routine_tournament_time_utc: get_string("ROUTINE_TOURNAMENT_TIME_UTC", "18:00"),
-            routine_tournament_lead_days: get_int("ROUTINE_TOURNAMENT_LEAD_DAYS", 7),
-            routine_tournament_checkin_lead_minutes: get_int(
-                "ROUTINE_TOURNAMENT_CHECKIN_LEAD_MINUTES",
-                30,
-            ),
-            routine_tournament_bracket_delay_minutes: get_int(
-                "ROUTINE_TOURNAMENT_BRACKET_DELAY_MINUTES",
-                180,
-            ),
-        };
-
-        if cfg.discord_oauth_internal_api_token.is_empty() {
-            tracing::warn!(
-                "Discord-OAuth Internal-API-Token nicht konfiguriert \
-                 (TURNIER_INTERNAL_API_TOKEN/MASTER_BROKER_TOKEN/MAIN_BOT_INTERNAL_TOKEN/TWITCH_INTERNAL_API_TOKEN)"
-            );
-        }
-        cfg
-    }
-
     /// Admin-Rollen-IDs = allgemeine Admin-Rollen ∪ Turnier-Admin-Rollen.
     pub fn admin_role_ids(&self) -> BTreeSet<String> {
         let mut ids = BTreeSet::new();
@@ -283,7 +132,7 @@ impl Config {
     /// Erlaubte CORS-Origins: lokaler Vite-Dev-Server + Frontend-URL.
     pub fn cors_allowed_origins(&self) -> Vec<String> {
         let mut origins = BTreeSet::new();
-        origins.insert("http://localhost:5173".to_string());
+        origins.extend(self.cors_extra_origins.iter().cloned());
         let frontend = self.frontend_url.trim_end_matches('/');
         if !frontend.is_empty() {
             origins.insert(frontend.to_string());
@@ -321,20 +170,6 @@ fn split_csv(raw: &str) -> impl Iterator<Item = String> + '_ {
     raw.split(',')
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
-}
-
-fn optional_positive_int(key: &str, default: i64) -> Option<i64> {
-    match std::env::var(key) {
-        Ok(value) => value.trim().parse().ok().filter(|value| *value > 0),
-        Err(_) => Some(default),
-    }
-}
-
-fn positive_seconds(value: i64, default: u64) -> u64 {
-    u64::try_from(value)
-        .ok()
-        .filter(|value| *value > 0)
-        .unwrap_or(default)
 }
 
 /// Extrahiert den normalisierten Hostnamen aus einer URL oder einem Host:Port-String.
@@ -384,11 +219,87 @@ mod tests {
         let out: Vec<String> = split_csv(" a, b ,, c ").collect();
         assert_eq!(out, vec!["a", "b", "c"]);
     }
+}
 
-    #[test]
-    fn positive_seconds_rejects_non_positive_values() {
-        assert_eq!(positive_seconds(10, 600), 10);
-        assert_eq!(positive_seconds(0, 600), 600);
-        assert_eq!(positive_seconds(-1, 600), 600);
+/// Deterministische Bestandsdefaults für Tests und explizite Konstruktion.
+/// Der Produktionsstart verwendet load_file, nicht Default.
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            schema_version: SCHEMA_VERSION,
+            turnier_enable_test_mode: true,
+            cors_extra_origins: vec!["http://localhost:5173".to_string()],
+            logging: LoggingConfig::default(),
+            network: NetworkConfig::default(),
+            assets: AssetsConfig::default(),
+            limits: LimitsConfig::default(),
+            scheduler: SchedulerConfig::default(),
+            authorization: AuthorizationConfig::default(),
+            steam: SteamConfig::default(),
+            bridge: BridgeConfig::default(),
+            database: DatabaseConfig::default(),
+            observer_agent: None,
+            discord_oauth_internal_api_base_url: "http://127.0.0.1:8766".to_string(),
+            discord_oauth_internal_api_token: "".to_string(),
+            discord_master_broker_base_url: "http://127.0.0.1:8766".to_string(),
+            discord_master_broker_token: "".to_string(),
+            discord_match_channel_category_id: 1412800850580996256,
+            discord_match_channel_delete_delay_seconds: 300,
+            discord_sammelpunkt_channel_id: 1426160735469174875,
+            discord_team1_voice_channel_id: 1462434609563173019,
+            discord_team2_voice_channel_id: 1462434639858897017,
+            discord_tournament_lobby_channel_id: 1412411665713987635,
+            discord_caster_role_id: 1495154811799077067,
+            discord_caster_voice_channel_id: 1495155113772450042,
+            discord_bot_token: "".to_string(),
+            turnier_public_url: "https://deutsche-deadlock-community.de/turnier".to_string(),
+            discord_guild_id: "1289721245281292288".to_string(),
+            discord_admin_role_ids:
+                "1304169657124782100,1337518124647579661,1411000883155832852,1401891955931222110"
+                    .to_string(),
+            discord_tournament_admin_role_ids: "1494120177577754747".to_string(),
+            discord_mod_role_ids: "1474210107255554331".to_string(),
+            scrim_guild_id: 1289721245281292288,
+            scrim_signup_role_id: Some(1520849762851618817),
+            scrim_reserve_role_id: Some(1523803562306703430),
+            scrim_announce_channel_id: 1521522998199324853,
+            scrim_substitute_sweep_interval_seconds: 600,
+            jwt_secret: "".to_string(),
+            avatar_dir: "data/avatars".to_string(),
+            steam_bridge_db_path:
+                "C:\\Users\\Nani-Admin\\Documents\\Deadlock\\service\\deadlock.sqlite3".to_string(),
+            backend_host: "127.0.0.1".to_string(),
+            backend_port: 8900,
+            backend_allowed_hosts: "".to_string(),
+            expose_api_docs: false,
+            frontend_url: "https://deutsche-deadlock-community.de/turnier".to_string(),
+            discord_webhook_url: "".to_string(),
+            turnier_internal_api_token: "".to_string(),
+            steam_bot_base_url: "http://127.0.0.1:8782".to_string(),
+            steam_bot_internal_token: "".to_string(),
+            observer_enabled: true,
+            observer_game_control_enabled: false,
+            observer_agent_token: "".to_string(),
+            observer_steam_bot2_base_url: "http://127.0.0.1:8784".to_string(),
+            observer_deadlock_api_base_url: "https://api.deadlock-api.com".to_string(),
+            observer_controller_query: "SELECT * FROM CCitadelPlayerController".to_string(),
+            observer_pawn_query: "SELECT * FROM CCitadelPlayerPawn".to_string(),
+            routine_tournaments_enabled: false,
+            routine_proposal_channel_id: 1474543558793887937,
+            routine_tournament_preset_id: 0,
+            routine_tournament_weekday: "saturday".to_string(),
+            routine_tournament_time_utc: "18:00".to_string(),
+            routine_tournament_lead_days: 7,
+            routine_tournament_checkin_lead_minutes: 30,
+            routine_tournament_bracket_delay_minutes: 180,
+        }
+    }
+}
+
+impl std::fmt::Debug for Config {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Config")
+            .field("schema_version", &self.schema_version)
+            .finish_non_exhaustive()
     }
 }

@@ -12,26 +12,6 @@ use crate::rank::{self, DEFAULT_SUBRANK};
 /// Source-Wert für aus Discord-Rollen abgeleitete Profile.
 pub const SOURCE_DISCORD_ROLE: &str = "discord_role";
 
-/// Statische Haupt-Tier-Rollen (role_id → (Name, Tier)).
-///
-/// Im Python-Original `MAIN_RANK_ROLE_IDS`. Diese IDs sind deployment-spezifisch
-/// (eine konkrete Guild); sie liegen hier als die EINE Tabelle des Subsystems
-/// statt über mehrere Module verstreut. Reihenfolge/Namen identisch zur
-/// Tier-Tabelle in [`crate::rank`].
-const MAIN_RANK_ROLE_IDS: [(i64, &str, i64); 11] = [
-    (1331457571118387210, "Initiate", 1),
-    (1331457652877955072, "Seeker", 2),
-    (1331457699992436829, "Alchemist", 3),
-    (1331457724848017539, "Arcanist", 4),
-    (1331457879345070110, "Ritualist", 5),
-    (1331457898781474836, "Emissary", 6),
-    (1331457949654319114, "Archon", 7),
-    (1316966867033653338, "Oracle", 8),
-    (1331458016356208680, "Phantom", 9),
-    (1331458049637875785, "Ascendant", 10),
-    (1331458087349129296, "Eternus", 11),
-];
-
 /// Bestimmt aus den Rollen-IDs eines Members das Rang-Profil.
 ///
 /// Reihenfolge wie im Original:
@@ -45,9 +25,22 @@ const MAIN_RANK_ROLE_IDS: [(i64, &str, i64); 11] = [
 /// `role_ids` sind die rohen Discord-Rollen-ID-Strings; nicht-numerische werden
 /// (wie im Original via `.isdigit()`) ignoriert. `subrank_roles` ist das Mapping
 /// `(role_id, tier, subrank)` aus der Bridge-DB.
+#[cfg(test)]
 pub fn resolve_from_roles(
     role_ids: &[String],
     subrank_roles: &[(i64, i64, i64)],
+) -> Option<RankProfile> {
+    resolve_from_roles_with_mapping(
+        role_ids,
+        subrank_roles,
+        &turnier_config::SteamConfig::default().main_rank_role_ids,
+    )
+}
+
+pub fn resolve_from_roles_with_mapping(
+    role_ids: &[String],
+    subrank_roles: &[(i64, i64, i64)],
+    main_rank_role_ids: &[i64],
 ) -> Option<RankProfile> {
     let parsed: Vec<i64> = role_ids
         .iter()
@@ -86,10 +79,13 @@ pub fn resolve_from_roles(
     let main_candidate = parsed
         .iter()
         .filter_map(|role_id| {
-            MAIN_RANK_ROLE_IDS
+            main_rank_role_ids
                 .iter()
-                .find(|(rid, _, _)| rid == role_id)
-                .map(|(_, name, tier)| (*name, *tier))
+                .position(|rid| rid == role_id)
+                .and_then(|index| {
+                    let tier = index as i64 + 1;
+                    rank::rank_name_for_tier(tier).map(|name| (name, tier))
+                })
         })
         .max_by_key(|(_, tier)| *tier);
 

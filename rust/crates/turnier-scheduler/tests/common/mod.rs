@@ -26,7 +26,7 @@ pub async fn temp_db() -> TestDb {
 
 /// Default-Config (keine echten Tokens nötig für die DB-Pfade).
 pub fn test_config() -> Config {
-    Config::from_env()
+    Config::default()
 }
 
 /// No-op-Notifier: unkonfigurierter Broker → kein echter Versand.

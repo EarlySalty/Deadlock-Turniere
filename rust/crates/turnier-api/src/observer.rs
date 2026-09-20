@@ -26,7 +26,10 @@ const COMMAND_TTL_SECONDS: i64 = 4;
 
 pub fn router() -> Router<AppState> {
     Router::new()
-        .route("/api/observer/sessions", post(create_session).get(list_sessions))
+        .route(
+            "/api/observer/sessions",
+            post(create_session).get(list_sessions),
+        )
         .route("/api/observer/sessions/{id}", get(get_session))
         .route("/api/observer/sessions/{id}/mode", post(set_mode))
         .route("/api/observer/sessions/{id}/retry", post(retry_session))
@@ -96,7 +99,9 @@ async fn create_session(
             "Der Auto-Observer ist serverseitig noch nicht freigeschaltet",
         ));
     }
-    if input.scrim_match_id.is_none() && input.draft_code.is_none() && input.steam_match_id.is_none()
+    if input.scrim_match_id.is_none()
+        && input.draft_code.is_none()
+        && input.steam_match_id.is_none()
     {
         return Err(WebError::bad_request(
             "scrim_match_id, draft_code oder steam_match_id ist erforderlich",
@@ -158,11 +163,9 @@ async fn list_sessions(
     State(state): State<AppState>,
     AdminUser(_): AdminUser,
 ) -> WebResult<Json<Value>> {
-    let rows = sqlx::query(
-        "SELECT * FROM scrim.observer_sessions ORDER BY id DESC LIMIT 50",
-    )
-    .fetch_all(&state.pool)
-    .await?;
+    let rows = sqlx::query("SELECT * FROM scrim.observer_sessions ORDER BY id DESC LIMIT 50")
+        .fetch_all(&state.pool)
+        .await?;
     let game_control_enabled = state.config.observer_game_control_enabled;
     let sessions = rows
         .iter()
@@ -244,7 +247,8 @@ async fn set_mode(
         let heartbeat: Option<DateTime<Utc>> = readiness.try_get("last_agent_heartbeat_at")?;
         let vconsole_ok: Option<bool> = readiness.try_get("last_vconsole_ok")?;
         let game_connected: Option<bool> = readiness.try_get("last_game_connected")?;
-        let fresh = heartbeat.is_some_and(|at| Utc::now().signed_duration_since(at) <= Duration::seconds(8));
+        let fresh = heartbeat
+            .is_some_and(|at| Utc::now().signed_duration_since(at) <= Duration::seconds(8));
         if !fresh || vconsole_ok != Some(true) || game_connected != Some(true) {
             return Err(WebError::conflict(
                 "Auto-Modus bleibt gesperrt, bis der lokale Observer-Agent frisch verbunden, VConsole bereit und die Deadlock-Spectator-Session bestätigt ist",
@@ -269,14 +273,7 @@ async fn set_mode(
         return Err(WebError::not_found("Observer-Session nicht gefunden"));
     };
     if previous_mode == "auto" && !matches!(input.mode, ObserverMode::Auto) {
-        enqueue_command(
-            &state,
-            id,
-            &CameraAction::Directed,
-            "mode_left_auto",
-            None,
-        )
-        .await?;
+        enqueue_command(&state, id, &CameraAction::Directed, "mode_left_auto", None).await?;
     }
     let row = sqlx::query(
         "UPDATE scrim.observer_sessions SET mode=$2, updated_at=now() \
@@ -350,7 +347,9 @@ async fn bot2_lease_set(
     AdminUser(_): AdminUser,
     Json(input): Json<Bot2LeaseRequest>,
 ) -> WebResult<Json<Value>> {
-    proxy_bot2_lease(&state, Some(input.reserved)).await.map(Json)
+    proxy_bot2_lease(&state, Some(input.reserved))
+        .await
+        .map(Json)
 }
 
 async fn proxy_bot2_lease(state: &AppState, reserved: Option<bool>) -> WebResult<Value> {
@@ -361,10 +360,15 @@ async fn proxy_bot2_lease(state: &AppState, reserved: Option<bool>) -> WebResult
     }
     let url = format!(
         "{}/observer/v1/lease",
-        state.config.observer_steam_bot2_base_url.trim_end_matches('/')
+        state
+            .config
+            .observer_steam_bot2_base_url
+            .trim_end_matches('/')
     );
     let client = reqwest::Client::builder()
-        .timeout(StdDuration::from_secs(5))
+        .timeout(StdDuration::from_secs(
+            state.config.network.observer_request_seconds,
+        ))
         .build()
         .map_err(|err| WebError::internal(format!("Steam-Bot-2-Client: {err}")))?;
     let mut request = match reserved {
@@ -375,10 +379,12 @@ async fn proxy_bot2_lease(state: &AppState, reserved: Option<bool>) -> WebResult
         "X-Internal-Token",
         state.config.steam_bot_internal_token.as_str(),
     );
-    let response = request
-        .send()
-        .await
-        .map_err(|err| WebError::new(axum::http::StatusCode::BAD_GATEWAY, format!("Steam Bot 2 nicht erreichbar: {err}")))?;
+    let response = request.send().await.map_err(|err| {
+        WebError::new(
+            axum::http::StatusCode::BAD_GATEWAY,
+            format!("Steam Bot 2 nicht erreichbar: {err}"),
+        )
+    })?;
     let status = response.status();
     let body: Value = response.json().await.unwrap_or_else(|_| json!({}));
     if !status.is_success() {
@@ -455,7 +461,9 @@ async fn agent_command_ack(
     .fetch_optional(&state.pool)
     .await?;
     let Some(row) = updated else {
-        return Err(WebError::not_found("Observer-Kommando nicht gefunden oder bereits bestätigt"));
+        return Err(WebError::not_found(
+            "Observer-Kommando nicht gefunden oder bereits bestätigt",
+        ));
     };
     let session_id: i64 = row.try_get("observer_session_id")?;
     if !ack.ok {
@@ -477,7 +485,9 @@ async fn agent_heartbeat(
 ) -> WebResult<Json<Value>> {
     require_agent(&state, &headers)?;
     if heartbeat.bot_account_id != BOT2_ACCOUNT_ID {
-        return Err(WebError::forbidden("Nur Steam Bot 2 ist fuer den Observer freigegeben"));
+        return Err(WebError::forbidden(
+            "Nur Steam Bot 2 ist fuer den Observer freigegeben",
+        ));
     }
     sqlx::query(
         "UPDATE scrim.observer_sessions SET last_agent_heartbeat_at=now(), last_agent_version=$1, \
@@ -500,7 +510,9 @@ pub fn spawn_observer_worker(state: AppState) {
     }
     let active = Arc::new(Mutex::new(HashSet::<i64>::new()));
     tokio::spawn(async move {
-        let mut tick = tokio::time::interval(StdDuration::from_secs(2));
+        let mut tick = tokio::time::interval(StdDuration::from_millis(
+            state.config.scheduler.observer_tick_milliseconds,
+        ));
         loop {
             tick.tick().await;
             if let Err(err) = discover_draft_observers(&state).await {
@@ -543,7 +555,9 @@ pub fn spawn_observer_worker(state: AppState) {
                 let state_clone = state.clone();
                 let active_clone = Arc::clone(&active);
                 tokio::spawn(async move {
-                    if let Err(err) = run_observer_session(state_clone.clone(), id, match_id as u64).await {
+                    if let Err(err) =
+                        run_observer_session(state_clone.clone(), id, match_id as u64).await
+                    {
                         tracing::warn!(observer_session_id = id, error = %err, "Observer-Live-Session beendet");
                         let _ = mark_degraded(&state_clone, id, &err.to_string()).await;
                     }
@@ -665,7 +679,11 @@ async fn finish_completed_draft_observers(state: &AppState) -> Result<(), sqlx::
     Ok(())
 }
 
-async fn run_observer_session(state: AppState, session_id: i64, match_id: u64) -> anyhow::Result<()> {
+async fn run_observer_session(
+    state: AppState,
+    session_id: i64,
+    match_id: u64,
+) -> anyhow::Result<()> {
     sqlx::query(
         "UPDATE scrim.observer_sessions SET state='pairing', fallback_reason=NULL, updated_at=now() WHERE id=$1",
     )
@@ -673,7 +691,10 @@ async fn run_observer_session(state: AppState, session_id: i64, match_id: u64) -
     .execute(&state.pool)
     .await?;
 
-    let live = DeadlockLiveClient::new(&state.config.observer_deadlock_api_base_url)?;
+    let live = DeadlockLiveClient::with_network(
+        &state.config.observer_deadlock_api_base_url,
+        &state.config.network,
+    )?;
     let broadcast_url = live.resolve_broadcast_url(match_id).await?;
     let (tx, mut rx) = mpsc::channel(512);
     let controller = {
@@ -681,7 +702,10 @@ async fn run_observer_session(state: AppState, session_id: i64, match_id: u64) -
         let url = broadcast_url.clone();
         let query = state.config.observer_controller_query.clone();
         let tx = tx.clone();
-        tokio::spawn(async move { live.stream_rows(&url, &query, LiveRowKind::Controller, tx).await })
+        tokio::spawn(async move {
+            live.stream_rows(&url, &query, LiveRowKind::Controller, tx)
+                .await
+        })
     };
     let pawn = {
         let live = live.clone();
@@ -697,7 +721,9 @@ async fn run_observer_session(state: AppState, session_id: i64, match_id: u64) -
     let mut last_action = CameraAction::Directed;
     let started = tokio::time::Instant::now();
     let mut last_row = tokio::time::Instant::now();
-    let mut evaluate = tokio::time::interval(StdDuration::from_millis(350));
+    let mut evaluate = tokio::time::interval(StdDuration::from_millis(
+        state.config.scheduler.observer_evaluate_milliseconds,
+    ));
 
     loop {
         tokio::select! {
@@ -745,7 +771,7 @@ async fn run_observer_session(state: AppState, session_id: i64, match_id: u64) -
                     }
                 }
 
-                if last_row.elapsed() > StdDuration::from_secs(10) && started.elapsed() > StdDuration::from_secs(20) {
+                if last_row.elapsed() > StdDuration::from_secs(state.config.scheduler.observer_stale_seconds) && started.elapsed() > StdDuration::from_secs(state.config.scheduler.observer_startup_grace_seconds) {
                     if mode == "auto" && last_action != CameraAction::Directed {
                         enqueue_command(&state, session_id, &CameraAction::Directed, "live_feed_stale", None).await?;
                     }
@@ -849,13 +875,12 @@ async fn enqueue_directed_if_needed(
     session_id: i64,
     reason: &str,
 ) -> WebResult<()> {
-    let auto_was_active: bool = sqlx::query_scalar(
-        "SELECT mode='auto' FROM scrim.observer_sessions WHERE id=$1",
-    )
-    .bind(session_id)
-    .fetch_optional(&state.pool)
-    .await?
-    .unwrap_or(false);
+    let auto_was_active: bool =
+        sqlx::query_scalar("SELECT mode='auto' FROM scrim.observer_sessions WHERE id=$1")
+            .bind(session_id)
+            .fetch_optional(&state.pool)
+            .await?
+            .unwrap_or(false);
     if auto_was_active {
         enqueue_command(state, session_id, &CameraAction::Directed, reason, None).await?;
     }
@@ -883,7 +908,9 @@ async fn resolve_steam_match_id(
             .parse::<i64>()
             .ok()
             .filter(|value| *value > 0)
-            .ok_or_else(|| WebError::bad_request("steam_match_id muss eine positive Dezimalzahl sein"))?;
+            .ok_or_else(|| {
+                WebError::bad_request("steam_match_id muss eine positive Dezimalzahl sein")
+            })?;
         return Ok(Some(parsed));
     }
     if let Some(id) = input.scrim_match_id {
@@ -896,14 +923,15 @@ async fn resolve_steam_match_id(
         .flatten());
     }
     if let Some(code) = input.draft_code.as_deref() {
-        let raw: Option<String> = sqlx::query_scalar(
-            "SELECT lobby_match_id FROM turnier.draft_sessions WHERE code=$1",
-        )
-        .bind(code.trim().to_uppercase())
-        .fetch_optional(&state.pool)
-        .await?
-        .flatten();
-        return Ok(raw.and_then(|value| value.parse::<i64>().ok()).filter(|value| *value > 0));
+        let raw: Option<String> =
+            sqlx::query_scalar("SELECT lobby_match_id FROM turnier.draft_sessions WHERE code=$1")
+                .bind(code.trim().to_uppercase())
+                .fetch_optional(&state.pool)
+                .await?
+                .flatten();
+        return Ok(raw
+            .and_then(|value| value.parse::<i64>().ok())
+            .filter(|value| *value > 0));
     }
     Ok(None)
 }
@@ -913,25 +941,23 @@ async fn resolve_lobby_party_id(
     input: &CreateSessionRequest,
 ) -> WebResult<Option<i64>> {
     if let Some(code) = input.draft_code.as_deref() {
-        let raw: Option<String> = sqlx::query_scalar(
-            "SELECT lobby_party_id FROM turnier.draft_sessions WHERE code=$1",
-        )
-        .bind(code.trim().to_uppercase())
-        .fetch_optional(&state.pool)
-        .await?
-        .flatten();
+        let raw: Option<String> =
+            sqlx::query_scalar("SELECT lobby_party_id FROM turnier.draft_sessions WHERE code=$1")
+                .bind(code.trim().to_uppercase())
+                .fetch_optional(&state.pool)
+                .await?
+                .flatten();
         return Ok(raw
             .and_then(|value| value.parse::<i64>().ok())
             .filter(|value| *value > 0));
     }
     if let Some(id) = input.scrim_match_id {
-        let raw: Option<String> = sqlx::query_scalar(
-            "SELECT party_id FROM scrim.matches WHERE id=$1",
-        )
-        .bind(id)
-        .fetch_optional(&state.pool)
-        .await?
-        .flatten();
+        let raw: Option<String> =
+            sqlx::query_scalar("SELECT party_id FROM scrim.matches WHERE id=$1")
+                .bind(id)
+                .fetch_optional(&state.pool)
+                .await?
+                .flatten();
         return Ok(raw
             .and_then(|value| value.parse::<i64>().ok())
             .filter(|value| *value > 0));
@@ -956,15 +982,23 @@ fn session_from_row(
         session_key: row.try_get("session_key")?,
         scrim_match_id: row.try_get("scrim_match_id")?,
         draft_code: row.try_get("draft_code")?,
-        steam_match_id: row.try_get::<Option<i64>, _>("steam_match_id")?.map(|v| v.to_string()),
-        lobby_party_id: row.try_get::<Option<i64>, _>("lobby_party_id")?.map(|v| v.to_string()),
+        steam_match_id: row
+            .try_get::<Option<i64>, _>("steam_match_id")?
+            .map(|v| v.to_string()),
+        lobby_party_id: row
+            .try_get::<Option<i64>, _>("lobby_party_id")?
+            .map(|v| v.to_string()),
         bot_account_id: row.try_get("bot_account_id")?,
         mode: row.try_get("mode")?,
         state: row.try_get("state")?,
         enabled: row.try_get("enabled")?,
-        current_account_id: row.try_get::<Option<i64>, _>("current_account_id")?.map(|v| v.to_string()),
+        current_account_id: row
+            .try_get::<Option<i64>, _>("current_account_id")?
+            .map(|v| v.to_string()),
         current_score: row.try_get("current_score")?,
-        recommended_account_id: row.try_get::<Option<i64>, _>("recommended_account_id")?.map(|v| v.to_string()),
+        recommended_account_id: row
+            .try_get::<Option<i64>, _>("recommended_account_id")?
+            .map(|v| v.to_string()),
         recommended_score: row.try_get("recommended_score")?,
         fallback_reason: row.try_get("fallback_reason")?,
         last_live_event_at: row.try_get("last_live_event_at")?,
@@ -1017,11 +1051,9 @@ fn mode_str(mode: ObserverMode) -> &'static str {
 
 fn action_parts(action: &CameraAction) -> (&'static str, Option<i64>, Option<i64>) {
     match action {
-        CameraAction::SpectateLobby { lobby_id } => (
-            "spectate_lobby",
-            None,
-            i64::try_from(*lobby_id).ok(),
-        ),
+        CameraAction::SpectateLobby { lobby_id } => {
+            ("spectate_lobby", None, i64::try_from(*lobby_id).ok())
+        }
         CameraAction::Directed => ("directed", None, None),
         CameraAction::HeroChase { account_id } => {
             ("hero_chase", Some(i64::from(*account_id)), None)

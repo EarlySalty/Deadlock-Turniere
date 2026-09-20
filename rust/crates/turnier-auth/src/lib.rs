@@ -23,6 +23,6 @@ pub use error::{AuthError, AuthResult};
 pub use oauth::{DiscordIdentity, OAuthClient};
 pub use roles::{RoleFlags, RoleSets};
 pub use session::{
-    cleanup_expired, create_session, delete_session, generate_token, resolve_session,
-    SESSION_LIFETIME_DAYS,
+    cleanup_expired, create_session, create_session_with_lifetime, delete_session, generate_token,
+    resolve_session, SESSION_LIFETIME_DAYS,
 };

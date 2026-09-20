@@ -47,7 +47,7 @@ async fn request(
 #[tokio::test]
 async fn public_comp_flow_enforces_capabilities_capacity_and_preferences() {
     let db = turnier_db::test_pool().await.unwrap();
-    let mut config = Config::from_env();
+    let mut config = Config::default();
     config.backend_allowed_hosts = "localhost".into();
     config.discord_bot_token.clear();
     config.steam_bridge_db_path.clear();

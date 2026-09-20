@@ -26,7 +26,6 @@ use crate::model::{
 };
 use crate::{ScrimError, ScrimResult};
 
-const MAIN_GUILD_ID: &str = "1289721245281292288";
 const ACTIVE_REQUEST_STATUSES: &[&str] = &["draft", "posting", "open", "post_failed"];
 const TEAM_LOCK_NAMESPACE: i32 = 20260725;
 const ID_LOCK_NAMESPACE: i32 = 20260726;
@@ -54,6 +53,7 @@ pub trait ScrimReadRepository: Send + Sync {
 #[derive(Debug, Clone)]
 pub struct PgScrimReadRepository {
     pool: Pool,
+    guild_id: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -217,7 +217,14 @@ pub struct MutationDispatch {
 
 impl PgScrimReadRepository {
     pub fn new(pool: Pool) -> Self {
-        Self { pool }
+        Self::with_guild(pool, turnier_config::Config::default().scrim_guild_id)
+    }
+
+    pub fn with_guild(pool: Pool, guild_id: i64) -> Self {
+        Self {
+            pool,
+            guild_id: guild_id.to_string(),
+        }
     }
 
     pub async fn runtime_control(&self) -> ScrimResult<RuntimeControl> {
@@ -2860,12 +2867,12 @@ impl ScrimReadRepository for PgScrimReadRepository {
             teams: load_teams(&self.pool).await?,
             matches: load_matches(&self.pool).await?,
             match_request_batches: load_match_request_batches(&self.pool).await?,
-            lagebild_refs: load_lagebild_refs(&self.pool, None).await?,
+            lagebild_refs: load_lagebild_refs(&self.pool, None, &self.guild_id).await?,
         })
     }
 
     async fn lagebild_history(&self, team_id: i32) -> ScrimResult<Vec<LagebildSnapshotRef>> {
-        load_lagebild_refs(&self.pool, Some(team_id)).await
+        load_lagebild_refs(&self.pool, Some(team_id), &self.guild_id).await
     }
 
     async fn coaches(&self) -> ScrimResult<Vec<Coach>> {
@@ -3899,13 +3906,16 @@ async fn load_match_request_batches(pool: &Pool) -> ScrimResult<Vec<MatchRequest
 async fn load_lagebild_refs(
     pool: &Pool,
     team_id: Option<i32>,
+    guild_id: &str,
 ) -> ScrimResult<Vec<LagebildSnapshotRef>> {
     // Evidenzen nur zu den Snapshots, die auch zurueckgehen. Ohne diesen Filter
     // waechst der Join mit jedem je erzeugten Lagebild weiter.
     let snapshot_scope = match team_id {
         Some(_) => "SELECT id FROM scrim.lagebild_snapshots WHERE team_id = $1",
-        None => "SELECT DISTINCT ON (team_id) id FROM scrim.lagebild_snapshots \
-                  ORDER BY team_id ASC, generated_at DESC, id DESC",
+        None => {
+            "SELECT DISTINCT ON (team_id) id FROM scrim.lagebild_snapshots \
+                  ORDER BY team_id ASC, generated_at DESC, id DESC"
+        }
     };
     let evidence_sql = format!(
         "SELECT e.id, e.snapshot_id, e.evidence_type, e.label, e.url, e.reference_id, e.occurred_at \
@@ -3931,7 +3941,7 @@ async fn load_lagebild_refs(
                 label: row.try_get("label")?,
                 url: row
                     .try_get::<Option<String>, _>("url")?
-                    .filter(|url| is_allowed_lagebild_evidence_url(url)),
+                    .filter(|url| is_allowed_lagebild_evidence_url_for_guild(url, guild_id)),
                 reference_id: row.try_get("reference_id")?,
                 occurred_at: row.try_get("occurred_at")?,
             });
@@ -4462,13 +4472,21 @@ fn parse_optional_slot(value: Option<Value>) -> ScrimResult<Option<ScrimSlot>> {
         .transpose()
 }
 
+#[cfg(test)]
 fn is_allowed_lagebild_evidence_url(value: &str) -> bool {
+    is_allowed_lagebild_evidence_url_for_guild(
+        value,
+        &turnier_config::Config::default().scrim_guild_id.to_string(),
+    )
+}
+
+fn is_allowed_lagebild_evidence_url_for_guild(value: &str, guild_id: &str) -> bool {
     let Some(path) = value.strip_prefix("https://discord.com/channels/") else {
         return false;
     };
     let segments = path.split('/').collect::<Vec<_>>();
     segments.len() == 3
-        && segments[0] == MAIN_GUILD_ID
+        && segments[0] == guild_id
         && segments[1].parse::<u64>().is_ok_and(|id| id > 0)
         && segments[2].parse::<u64>().is_ok_and(|id| id > 0)
 }

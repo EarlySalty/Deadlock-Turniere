@@ -17,7 +17,6 @@ use crate::error::SteamResult;
 use crate::rank;
 
 /// TTL des Subrank-Rollen-Caches: 5 Minuten (wie `_discord_subrank_role_cache`).
-const SUBRANK_ROLE_CACHE_TTL: Duration = Duration::from_secs(300);
 
 /// Eine Zeile aus `steam_links` der Bridge-DB.
 #[derive(Debug, FromRow)]
@@ -58,6 +57,7 @@ pub struct BridgeReader {
     pool: SqlitePool,
     guild_id: String,
     subrank_role_cache: Mutex<Option<CachedSubrankRoles>>,
+    subrank_role_cache_ttl: Duration,
 }
 
 impl BridgeReader {
@@ -68,6 +68,31 @@ impl BridgeReader {
     /// Pfad darf den Turnier-Boot nicht abbrechen, sondern deaktiviert nur die
     /// Rang-Anreicherung über die Bridge.
     pub async fn open(db_path: &str, guild_id: &str) -> SteamResult<Option<Self>> {
+        Self::with_settings(
+            db_path,
+            guild_id,
+            &turnier_config::BridgeConfig::default(),
+            turnier_config::SteamConfig::default().subrank_role_cache_seconds,
+        )
+        .await
+    }
+
+    pub async fn from_config(config: &turnier_config::Config) -> SteamResult<Option<Self>> {
+        Self::with_settings(
+            &config.steam_bridge_db_path,
+            &config.discord_guild_id,
+            &config.bridge,
+            config.steam.subrank_role_cache_seconds,
+        )
+        .await
+    }
+
+    async fn with_settings(
+        db_path: &str,
+        guild_id: &str,
+        settings: &turnier_config::BridgeConfig,
+        cache_seconds: u64,
+    ) -> SteamResult<Option<Self>> {
         if db_path.trim().is_empty() {
             tracing::warn!("Steam-Bridge-DB-Pfad nicht konfiguriert — Bridge-Lookup übersprungen");
             return Ok(None);
@@ -84,7 +109,7 @@ impl BridgeReader {
             .unwrap_or_else(|_| SqliteConnectOptions::new().filename(db_path))
             .read_only(true)
             .create_if_missing(false)
-            .busy_timeout(Duration::from_secs(5));
+            .busy_timeout(Duration::from_secs(settings.busy_timeout_seconds));
 
         let pool = match SqlitePoolOptions::new()
             .max_connections(2)
@@ -106,6 +131,7 @@ impl BridgeReader {
             pool,
             guild_id: guild_id.to_string(),
             subrank_role_cache: Mutex::new(None),
+            subrank_role_cache_ttl: Duration::from_secs(cache_seconds),
         }))
     }
 
@@ -189,7 +215,7 @@ impl BridgeReader {
     fn cached_roles(&self) -> Option<Vec<(i64, i64, i64)>> {
         let guard = self.subrank_role_cache.lock().ok()?;
         let cached = guard.as_ref()?;
-        if cached.fetched_at.elapsed() < SUBRANK_ROLE_CACHE_TTL {
+        if cached.fetched_at.elapsed() < self.subrank_role_cache_ttl {
             Some(cached.roles.clone())
         } else {
             None

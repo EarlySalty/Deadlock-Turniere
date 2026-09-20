@@ -23,7 +23,7 @@ use turnier_db::Pool;
 
 use crate::error::{DraftError, DraftResult};
 use crate::heroes::is_valid_hero;
-use crate::heroes_provider::{load_heroes, Hero};
+use crate::heroes_provider::{load_heroes, Hero, HeroesProvider, ReqwestHeroFetcher};
 use crate::sequence::SequenceStep;
 use crate::sequence::{self, sequence_for_bans, DEFAULT_SEQUENCE, SEQUENCE_LEN};
 use crate::state::{ActionOutcome, DraftAction, DraftSession, DraftState};
@@ -660,7 +660,34 @@ pub async fn take_action(
     if !is_valid_hero(hero_name) {
         return Err(DraftError::UnknownHero(hero_name.to_string()));
     }
+    take_action_validated(pool, session_id, hero_name, taken_by, force).await
+}
 
+pub async fn take_action_with_heroes(
+    pool: &Pool,
+    session_id: i64,
+    hero_name: &str,
+    taken_by: &str,
+    force: bool,
+    provider: &HeroesProvider<ReqwestHeroFetcher>,
+) -> DraftResult<ActionOutcome> {
+    let valid = provider
+        .cached()
+        .map(|heroes| heroes.iter().any(|hero| hero.name == hero_name))
+        .unwrap_or_else(|| crate::heroes::DEADLOCK_HEROES.contains(&hero_name));
+    if !valid {
+        return Err(DraftError::UnknownHero(hero_name.to_string()));
+    }
+    take_action_validated(pool, session_id, hero_name, taken_by, force).await
+}
+
+async fn take_action_validated(
+    pool: &Pool,
+    session_id: i64,
+    hero_name: &str,
+    taken_by: &str,
+    force: bool,
+) -> DraftResult<ActionOutcome> {
     let now = now_utc();
     let taken_by = parse_numeric_id(taken_by)?;
     let mut tx = pool.begin().await?;
@@ -760,6 +787,22 @@ pub async fn take_action(
 /// Lädt eine freie Lobby per Code und löst vorher alle abgelaufenen Züge auf.
 pub async fn get_state_by_code(pool: &Pool, code: &str) -> DraftResult<DraftState> {
     let heroes = load_heroes().await;
+    get_state_by_code_loaded(pool, code, heroes).await
+}
+
+pub async fn get_state_by_code_with_heroes(
+    pool: &Pool,
+    code: &str,
+    provider: &HeroesProvider<ReqwestHeroFetcher>,
+) -> DraftResult<DraftState> {
+    get_state_by_code_loaded(pool, code, provider.heroes().await).await
+}
+
+async fn get_state_by_code_loaded(
+    pool: &Pool,
+    code: &str,
+    heroes: Vec<Hero>,
+) -> DraftResult<DraftState> {
     let mut tx = pool.begin().await?;
     let mut session = load_lobby_for_update(&mut tx, code).await?;
     let mut rng = StdRng::from_entropy();
@@ -776,7 +819,26 @@ pub async fn take_lobby_action(
     token: &str,
     hero_name: &str,
 ) -> DraftResult<ActionOutcome> {
-    let heroes = load_heroes().await;
+    take_lobby_action_loaded(pool, code, token, hero_name, load_heroes().await).await
+}
+
+pub async fn take_lobby_action_with_heroes(
+    pool: &Pool,
+    code: &str,
+    token: &str,
+    hero_name: &str,
+    provider: &HeroesProvider<ReqwestHeroFetcher>,
+) -> DraftResult<ActionOutcome> {
+    take_lobby_action_loaded(pool, code, token, hero_name, provider.heroes().await).await
+}
+
+async fn take_lobby_action_loaded(
+    pool: &Pool,
+    code: &str,
+    token: &str,
+    hero_name: &str,
+    heroes: Vec<Hero>,
+) -> DraftResult<ActionOutcome> {
     if !heroes.iter().any(|hero| hero.name == hero_name) {
         return Err(DraftError::UnknownHero(hero_name.to_string()));
     }

@@ -25,9 +25,6 @@ use crate::error::SteamResult;
 /// Cache-TTL: 24 Stunden (entspricht `RANK_CACHE_TTL_SECONDS`).
 pub const RANK_CACHE_TTL_SECONDS: i64 = 60 * 60 * 24;
 
-/// L1-TTL als `Duration` für die In-Memory-Ebene.
-const L1_TTL: Duration = Duration::from_secs(RANK_CACHE_TTL_SECONDS as u64);
-
 /// Eine Zeile aus `turnier.rank_cache` (Spalten 1:1 zum Schema).
 #[derive(Debug, FromRow)]
 struct RankCacheRow {
@@ -64,14 +61,20 @@ struct MemoryEntry {
 pub struct RankCache {
     pool: Pool,
     memory: Mutex<HashMap<String, MemoryEntry>>,
+    ttl: Duration,
 }
 
 impl RankCache {
     /// Erstellt den Cache über dem App-DB-Pool (`turnier.rank_cache`-Tabelle).
     pub fn new(pool: Pool) -> Self {
+        Self::with_ttl(pool, RANK_CACHE_TTL_SECONDS as u64)
+    }
+
+    pub fn with_ttl(pool: Pool, seconds: u64) -> Self {
         Self {
             pool,
             memory: Mutex::new(HashMap::new()),
+            ttl: Duration::from_secs(seconds),
         }
     }
 
@@ -86,9 +89,10 @@ impl RankCache {
         let row: Option<RankCacheRow> = sqlx::query_as(
             "SELECT source, steam_id, rank, rank_tier, subrank, rank_score \
              FROM turnier.\"rank_cache\" \
-             WHERE discord_id = $1 AND cached_at > now() - interval '24 hours'",
+             WHERE discord_id = $1 AND cached_at > now() - ($2::bigint * interval '1 second')",
         )
         .bind(discord_id_db)
+        .bind(self.ttl.as_secs() as i64)
         .fetch_optional(&self.pool)
         .await?;
 
@@ -157,7 +161,7 @@ impl RankCache {
             guard.insert(
                 discord_id.to_string(),
                 MemoryEntry {
-                    expires_at: Instant::now() + L1_TTL,
+                    expires_at: Instant::now() + self.ttl,
                     profile: profile.clone(),
                 },
             );

@@ -11,10 +11,6 @@ use crate::state::AppState;
 
 const OPERATIONS_PATH: &str = "/scrims/v1/operations";
 const CONTRACT_VERSION: &str = "scrim-steam.v1";
-const PROVISION_TIMEOUT: Duration = Duration::from_secs(25);
-const OTHER_TIMEOUT: Duration = Duration::from_secs(10);
-const RECONCILE_EVERY: Duration = Duration::from_secs(15);
-const COLLECT_EVERY: Duration = Duration::from_secs(30);
 
 #[derive(Clone)]
 pub struct ScrimLobbyClient {
@@ -25,11 +21,23 @@ pub struct ScrimLobbyClient {
 
 impl ScrimLobbyClient {
     pub fn new(base_url: &str, token: &str) -> Self {
+        Self::with_network(base_url, token, &turnier_config::NetworkConfig::default())
+    }
+
+    pub fn from_config(config: &turnier_config::Config) -> Self {
+        Self::with_network(
+            &config.steam_bot_base_url,
+            &config.steam_bot_internal_token,
+            &config.network,
+        )
+    }
+
+    fn with_network(base_url: &str, token: &str, network: &turnier_config::NetworkConfig) -> Self {
         let http = reqwest::Client::builder()
-            .timeout(PROVISION_TIMEOUT)
-            .connect_timeout(Duration::from_secs(5))
+            .timeout(Duration::from_secs(network.lobby_provision_seconds))
+            .connect_timeout(Duration::from_secs(network.lobby_connect_seconds))
             .build()
-            .unwrap_or_else(|_| reqwest::Client::new());
+            .expect("HTTP-Client für geprüfte Lobby-Konfiguration");
         Self {
             http,
             base_url: base_url.trim_end_matches('/').to_string(),
@@ -240,7 +248,9 @@ static WORKER_CADENCE: Lazy<LobbyCadence> = Lazy::new(|| LobbyCadence {
 
 pub fn spawn_scrim_lobby_worker(state: AppState) {
     tokio::spawn(async move {
-        let mut interval = tokio::time::interval(Duration::from_secs(5));
+        let mut interval = tokio::time::interval(Duration::from_secs(
+            state.config.scheduler.lobby_tick_seconds,
+        ));
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         loop {
             interval.tick().await;
@@ -316,7 +326,14 @@ async fn handle_provision(state: &AppState, row: &ScrimLobbyRow) -> Result<(), S
             lobby_code: Some(row.code.clone()),
         }),
     };
-    let response = match state.scrim_lobby.send(&request, PROVISION_TIMEOUT).await {
+    let response = match state
+        .scrim_lobby
+        .send(
+            &request,
+            Duration::from_secs(state.config.network.lobby_provision_seconds),
+        )
+        .await
+    {
         Ok(response) => response,
         Err(error) => {
             mark_failed(&state.pool, &row.code, &error).await;
@@ -371,7 +388,11 @@ async fn handle_reconcile(
     cadence: Option<&LobbyCadence>,
 ) -> Result<(), String> {
     if let Some(cadence) = cadence {
-        if !LobbyCadence::due(&cadence.last_reconcile, row.id, RECONCILE_EVERY) {
+        if !LobbyCadence::due(
+            &cadence.last_reconcile,
+            row.id,
+            Duration::from_secs(state.config.scheduler.lobby_reconcile_seconds),
+        ) {
             return Ok(());
         }
     }
@@ -393,7 +414,14 @@ async fn handle_reconcile(
             match_id: row.lobby_match_id.clone(),
         }),
     };
-    let response = match state.scrim_lobby.send(&request, OTHER_TIMEOUT).await {
+    let response = match state
+        .scrim_lobby
+        .send(
+            &request,
+            Duration::from_secs(state.config.network.lobby_request_seconds),
+        )
+        .await
+    {
         Ok(response) => response,
         Err(error) => {
             // Nur der Fehler selbst, kein Statuswechsel: ein Transportfehler
@@ -430,7 +458,11 @@ async fn handle_collect(
     cadence: Option<&LobbyCadence>,
 ) -> Result<(), String> {
     if let Some(cadence) = cadence {
-        if !LobbyCadence::due(&cadence.last_collect, row.id, COLLECT_EVERY) {
+        if !LobbyCadence::due(
+            &cadence.last_collect,
+            row.id,
+            Duration::from_secs(state.config.scheduler.lobby_collect_seconds),
+        ) {
             return Ok(());
         }
     }
@@ -451,7 +483,14 @@ async fn handle_collect(
             finality_hint: "final",
         }),
     };
-    let response = match state.scrim_lobby.send(&request, OTHER_TIMEOUT).await {
+    let response = match state
+        .scrim_lobby
+        .send(
+            &request,
+            Duration::from_secs(state.config.network.lobby_request_seconds),
+        )
+        .await
+    {
         Ok(response) => response,
         Err(error) => {
             // Wie Reconcile: kein Statuswechsel aus einem Transportfehler,
@@ -538,7 +577,14 @@ async fn release_lobby(state: &AppState, row: &ScrimLobbyRow) {
             reason: Some("draft-abgeschlossen".to_string()),
         }),
     };
-    if let Ok(response) = state.scrim_lobby.send(&request, OTHER_TIMEOUT).await {
+    if let Ok(response) = state
+        .scrim_lobby
+        .send(
+            &request,
+            Duration::from_secs(state.config.network.lobby_request_seconds),
+        )
+        .await
+    {
         if let Some(OperationData::LobbyReleased(released)) = response.data {
             if !released.released {
                 tracing::warn!(code = %row.code, "Scrim-Draft-Lobby wurde nicht freigegeben");

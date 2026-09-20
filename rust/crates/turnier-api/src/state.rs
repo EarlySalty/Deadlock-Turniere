@@ -24,6 +24,7 @@ pub struct AppState {
     pub pool: Pool,
     /// Aufgelöste Laufzeit-Konfiguration.
     pub config: Arc<Config>,
+    pub heroes: Arc<turnier_draft::HeroesProvider<turnier_draft::ReqwestHeroFetcher>>,
     /// Beim Start materialisierte Admin-/Mod-Rollen-Mengen (RBAC).
     pub role_sets: turnier_auth::RoleSets,
     /// Client für den delegierten Discord-OAuth-Flow.
@@ -47,6 +48,17 @@ impl AppState {
     /// Discord-Notifier und Steam-Bridge degradieren sauber, wenn nicht
     /// konfiguriert (kein Token / keine Bridge-DB), exakt wie in den Crates.
     pub async fn build(pool: Pool, config: Arc<Config>) -> Result<Self, BuildError> {
+        let heroes = Arc::new(turnier_draft::HeroesProvider::new(
+            turnier_draft::ReqwestHeroFetcher::new(
+                config.assets.heroes_url.clone(),
+                config.network.heroes_request_seconds,
+            ),
+            std::time::Duration::from_secs(config.assets.heroes_cache_seconds),
+            std::time::Duration::from_secs(config.assets.heroes_fallback_cache_seconds),
+        ));
+        let comp_rate_limit = Arc::new(Mutex::new(crate::comp::RateLimiter::from_config(
+            &config.limits,
+        )));
         let role_sets = turnier_auth::RoleSets::from_config(&config);
         let oauth = turnier_auth::OAuthClient::new(&config);
 
@@ -56,7 +68,9 @@ impl AppState {
         let notifier_for_match = DiscordNotifier::new(broker.clone(), pool.clone(), &config);
         let notifier = DiscordNotifier::new(broker, pool.clone(), &config);
 
-        let bridge = match SteamBridge::open(&config.steam_bridge_db_path).await {
+        let bridge = match SteamBridge::with_settings(&config.steam_bridge_db_path, &config.bridge)
+            .await
+        {
             Ok(bridge) => bridge,
             Err(err) => {
                 tracing::warn!(error = %err, "Steam-Bridge konnte nicht geöffnet werden — Steam-Tasks deaktiviert");
@@ -73,14 +87,12 @@ impl AppState {
 
         let rank_resolver: Arc<dyn RankResolver> =
             Arc::new(turnier_steam::build_resolver(pool.clone(), &config).await?);
-        let scrim_lobby = Arc::new(ScrimLobbyClient::new(
-            &config.steam_bot_base_url,
-            &config.steam_bot_internal_token,
-        ));
+        let scrim_lobby = Arc::new(ScrimLobbyClient::from_config(&config));
 
         Ok(Self {
             pool,
             config,
+            heroes,
             role_sets,
             oauth,
             match_manager,
@@ -88,7 +100,7 @@ impl AppState {
             notifier: Arc::new(notifier),
             draft_lobby_creations: Arc::new(Mutex::new(HashMap::new())),
             draft_viewers: Arc::new(Mutex::new(HashMap::new())),
-            comp_rate_limit: Arc::new(Mutex::new(crate::comp::RateLimiter::default())),
+            comp_rate_limit,
             scrim_lobby,
         })
     }

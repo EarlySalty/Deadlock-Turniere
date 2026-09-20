@@ -14,7 +14,7 @@ use turnier_api::{
     scrim_lobby::spawn_scrim_lobby_worker,
     AppState,
 };
-use turnier_config::Config;
+use turnier_config::{Config, ConfigArgs, ConfigMode, CONFIG_ANCHOR};
 use turnier_discord::{BrokerClient, DiscordNotifier};
 use turnier_scheduler::{start_scheduler, Scheduler};
 
@@ -46,15 +46,31 @@ async fn verify_central_draft_schema(pool: &turnier_db::Pool) -> anyhow::Result<
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    init_tracing();
-
-    let check_only = std::env::args().any(|a| a == "--check");
-    let config = Arc::new(Config::from_env());
+    let args = ConfigArgs::parse(std::env::args_os().skip(1))?;
+    let parsed = Config::load_file(&args.path)?;
+    match args.mode {
+        ConfigMode::Validate => {
+            println!(
+                "{CONFIG_ANCHOR}: gültig; Neustart erforderlich; fingerprint={}",
+                parsed.fingerprint()?
+            );
+            return Ok(());
+        }
+        ConfigMode::Print => {
+            println!("{}", parsed.safe_status()?);
+            return Ok(());
+        }
+        _ => {}
+    }
+    init_tracing(&parsed);
+    tracing::info!(anchor = CONFIG_ANCHOR, fingerprint = %parsed.fingerprint()?, "Globale TOML-Konfiguration geprüft");
+    let check_only = args.mode == ConfigMode::Check;
+    let config = Arc::new(parsed.with_secrets());
 
     ensure_dirs(&config);
 
     // Zentrale PG-DB: DSN kommt aus DEADLOCK_CENTRAL_DSN; Wert niemals loggen.
-    let pool = turnier_db::connect_central().await?;
+    let pool = turnier_db::connect_central_with_config(&config.database).await?;
     verify_central_draft_schema(&pool).await?;
     tracing::info!("central DB pool opened; Draft-Schema verifiziert");
 
@@ -80,8 +96,14 @@ async fn main() -> anyhow::Result<()> {
     spawn_scrim_lobby_worker(state.clone());
     turnier_api::observer::spawn_observer_worker(state);
 
-    let addr = format!("{}:{}", config.backend_host, config.backend_port);
-    let listener = tokio::net::TcpListener::bind(&addr).await?;
+    let addr = std::net::SocketAddr::new(
+        config
+            .backend_host
+            .parse()
+            .context("geprüfte Listener-Adresse")?,
+        config.backend_port as u16,
+    );
+    let listener = tokio::net::TcpListener::bind(addr).await?;
     tracing::info!(%addr, "Turnier-Backend lauscht");
 
     axum::serve(
@@ -109,9 +131,9 @@ fn ensure_dirs(config: &Config) {
 }
 
 /// Initialisiert das Tracing-Subscriber (Env-Filter, Default `info`).
-fn init_tracing() {
+fn init_tracing(config: &Config) {
     use tracing_subscriber::{fmt, EnvFilter};
-    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+    let filter = EnvFilter::new(config.logging.level.as_str());
     fmt().with_env_filter(filter).init();
 }
 

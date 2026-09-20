@@ -16,7 +16,7 @@ use turnier_draft::comp::{self, CompError, Preference, Room};
 use crate::error::{WebError, WebResult};
 use crate::state::AppState;
 
-pub fn router() -> Router<AppState> {
+pub fn router(config: &turnier_config::Config) -> Router<AppState> {
     Router::new()
         .route("/api/comp/lobbies", post(create))
         .route("/api/comp/lobbies/{code}", get(read))
@@ -24,7 +24,7 @@ pub fn router() -> Router<AppState> {
         .route("/api/comp/lobbies/{code}/preferences", post(save))
         .route("/api/comp/lobbies/{code}/leave", post(leave))
         .route("/api/comp/lobbies/{code}/remove", post(remove))
-        .layer(DefaultBodyLimit::max(32 * 1024))
+        .layer(DefaultBodyLimit::max(config.limits.comp_body_bytes))
         .layer(axum::middleware::from_fn(no_store))
 }
 
@@ -77,8 +77,10 @@ struct RoomResponse {
     unavailable_heroes: Vec<String>,
 }
 
-async fn reply(room: Room) -> WebResult<Json<RoomResponse>> {
-    let allowed: HashSet<String> = turnier_draft::load_heroes()
+async fn reply(state: &AppState, room: Room) -> WebResult<Json<RoomResponse>> {
+    let allowed: HashSet<String> = state
+        .heroes
+        .heroes()
         .await
         .into_iter()
         .map(|h| h.name)
@@ -136,7 +138,11 @@ async fn create(
     Json(body): Json<NameRequest>,
 ) -> WebResult<Json<RoomResponse>> {
     rate_limit(&state, &headers, peer, Access::Create)?;
-    reply(comp::create(&state.pool, &body.name, token(&headers)?).await?).await
+    reply(
+        &state,
+        comp::create(&state.pool, &body.name, token(&headers)?).await?,
+    )
+    .await
 }
 
 async fn read(
@@ -146,7 +152,11 @@ async fn read(
     headers: HeaderMap,
 ) -> WebResult<Json<RoomResponse>> {
     rate_limit(&state, &headers, peer, Access::Read)?;
-    reply(comp::get(&state.pool, &code, optional_token(&headers)?).await?).await
+    reply(
+        &state,
+        comp::get(&state.pool, &code, optional_token(&headers)?).await?,
+    )
+    .await
 }
 
 async fn join(
@@ -157,7 +167,11 @@ async fn join(
     Json(body): Json<NameRequest>,
 ) -> WebResult<Json<RoomResponse>> {
     rate_limit(&state, &headers, peer, Access::Write)?;
-    reply(comp::join(&state.pool, &code, &body.name, token(&headers)?).await?).await
+    reply(
+        &state,
+        comp::join(&state.pool, &code, &body.name, token(&headers)?).await?,
+    )
+    .await
 }
 
 async fn save(
@@ -169,12 +183,15 @@ async fn save(
 ) -> WebResult<Json<RoomResponse>> {
     rate_limit(&state, &headers, peer, Access::Write)?;
     let token = token(&headers)?;
-    let allowed = turnier_draft::load_heroes()
+    let allowed = state
+        .heroes
+        .heroes()
         .await
         .into_iter()
         .map(|h| h.name)
         .collect();
     reply(
+        &state,
         comp::save_preferences(
             &state.pool,
             &code,
@@ -207,7 +224,11 @@ async fn remove(
     Json(body): Json<RemoveRequest>,
 ) -> WebResult<Json<RoomResponse>> {
     rate_limit(&state, &headers, peer, Access::Write)?;
-    reply(comp::remove_member(&state.pool, &code, token(&headers)?, &body.member_id).await?).await
+    reply(
+        &state,
+        comp::remove_member(&state.pool, &code, token(&headers)?, &body.member_id).await?,
+    )
+    .await
 }
 
 #[derive(Clone, Copy)]
@@ -230,13 +251,21 @@ struct Budget {
 #[derive(Default)]
 pub struct RateLimiter {
     clients: HashMap<IpAddr, Budget>,
+    limits: turnier_config::LimitsConfig,
 }
 
 impl RateLimiter {
+    pub fn from_config(limits: &turnier_config::LimitsConfig) -> Self {
+        Self {
+            clients: HashMap::new(),
+            limits: limits.clone(),
+        }
+    }
+
     fn check(&mut self, ip: IpAddr, access: Access, now: Instant) -> WebResult<()> {
         self.clients
             .retain(|_, budget| now.duration_since(budget.last_seen) < Duration::from_secs(3600));
-        if self.clients.len() >= 10_000 && !self.clients.contains_key(&ip) {
+        if self.clients.len() >= self.limits.comp_clients && !self.clients.contains_key(&ip) {
             return Err(WebError::new(
                 StatusCode::TOO_MANY_REQUESTS,
                 "Der Comp-Finder ist gerade ausgelastet. Bitte später versuchen.",
@@ -259,8 +288,8 @@ impl RateLimiter {
             .creations
             .retain(|t| now.duration_since(*t) < Duration::from_secs(3600));
         let (count, limit) = match access {
-            Access::Read => (&mut budget.reads, 600),
-            _ => (&mut budget.writes, 120),
+            Access::Read => (&mut budget.reads, self.limits.comp_reads_per_minute),
+            _ => (&mut budget.writes, self.limits.comp_writes_per_minute),
         };
         if *count >= limit {
             return Err(WebError::new(
@@ -270,10 +299,13 @@ impl RateLimiter {
         }
         *count += 1;
         if matches!(access, Access::Create) {
-            if budget.creations.len() >= 10 {
+            if budget.creations.len() >= self.limits.comp_creations_per_hour {
                 return Err(WebError::new(
                     StatusCode::TOO_MANY_REQUESTS,
-                    "Du kannst höchstens 10 Comp-Lobbys pro Stunde erstellen.",
+                    format!(
+                        "Du kannst höchstens {} Comp-Lobbys pro Stunde erstellen.",
+                        self.limits.comp_creations_per_hour
+                    ),
                 ));
             }
             budget.creations.push(now);

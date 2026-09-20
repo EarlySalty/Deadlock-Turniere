@@ -26,6 +26,7 @@ use sqlx::Row;
 use thiserror::Error;
 
 /// 120s — ab wann ein RUNNING-Task als hängend gilt (`STALE_RUNNING_TASK_TIMEOUT_MS`).
+#[cfg(test)]
 const STALE_RUNNING_TASK_TIMEOUT_MS: i64 = 120_000;
 
 /// Task-Typ für Spieler-Einladungen (`GC_LOBBY_INVITE_PLAYER`).
@@ -76,6 +77,7 @@ pub enum TaskOutcome {
 /// Read+Write-Handle auf die `steam_tasks`-Queue.
 pub struct SteamBridge {
     pool: SqlitePool,
+    settings: turnier_config::BridgeConfig,
 }
 
 impl SteamBridge {
@@ -86,6 +88,13 @@ impl SteamBridge {
     /// `aiosqlite.connect`; hier vorab gefangen). Die DB wird NICHT angelegt
     /// (`create_if_missing(false)`): sie gehört dem Steam-Worker.
     pub async fn open(db_path: &str) -> Result<Option<Self>, BridgeError> {
+        Self::with_settings(db_path, &turnier_config::BridgeConfig::default()).await
+    }
+
+    pub async fn with_settings(
+        db_path: &str,
+        settings: &turnier_config::BridgeConfig,
+    ) -> Result<Option<Self>, BridgeError> {
         if db_path.trim().is_empty() {
             tracing::warn!("Steam-Bridge-DB-Pfad nicht konfiguriert — Steam-Tasks übersprungen");
             return Ok(None);
@@ -100,17 +109,23 @@ impl SteamBridge {
         let options = SqliteConnectOptions::from_str(db_path)
             .unwrap_or_else(|_| SqliteConnectOptions::new().filename(db_path))
             .create_if_missing(false)
-            .busy_timeout(Duration::from_secs(5));
+            .busy_timeout(Duration::from_secs(settings.busy_timeout_seconds));
         let pool = SqlitePoolOptions::new()
             .max_connections(4)
             .connect_with(options)
             .await?;
-        Ok(Some(Self { pool }))
+        Ok(Some(Self {
+            pool,
+            settings: settings.clone(),
+        }))
     }
 
     /// Konstruktor aus einem bereits geöffneten Pool (für Tests mit Temp-DB).
     pub fn from_pool(pool: SqlitePool) -> Self {
-        Self { pool }
+        Self {
+            pool,
+            settings: turnier_config::BridgeConfig::default(),
+        }
     }
 
     /// Legt einen Steam-Task an und gibt seine ID zurück.
@@ -158,7 +173,7 @@ impl SteamBridge {
         timeout_s: f64,
     ) -> Result<TaskOutcome, BridgeError> {
         let deadline = Instant::now() + Duration::from_secs_f64(timeout_s.max(0.0));
-        let poll_interval = Duration::from_millis(500);
+        let poll_interval = Duration::from_millis(self.settings.poll_milliseconds);
         loop {
             if Instant::now() >= deadline {
                 return Ok(TaskOutcome::TimedOut { task_id, timeout_s });
@@ -334,7 +349,7 @@ impl SteamBridge {
     /// Portiert `_fail_stale_running_tasks`.
     async fn fail_stale_running_tasks(&self) -> Result<(), BridgeError> {
         let now = now_ms();
-        let stale_before = now - STALE_RUNNING_TASK_TIMEOUT_MS;
+        let stale_before = now - self.settings.stale_task_milliseconds;
         sqlx::query(
             "UPDATE steam_tasks \
              SET status = 'FAILED', \

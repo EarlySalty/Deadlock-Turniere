@@ -173,7 +173,7 @@ async fn serve(app: Router) -> (SocketAddr, tokio::task::JoinHandle<()>) {
 }
 
 async fn build_state(steam_url: &str, broker_url: &str, db: &TestDb) -> AppState {
-    let mut config = Config::from_env();
+    let mut config = Config::default();
     config.discord_bot_token = String::new();
     config.steam_bridge_db_path = String::new();
     config.backend_allowed_hosts = "localhost".to_string();

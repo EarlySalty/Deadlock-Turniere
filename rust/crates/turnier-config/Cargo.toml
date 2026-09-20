@@ -9,6 +9,12 @@ license.workspace = true
 # Verzeichnissen und Umgebungsvariablen auf (in dieser Priorität), sonst Default.
 [dependencies]
 tracing.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+toml = "0.8"
+url = "2"
+sha2 = "0.10"
 
 [lints]
 workspace = true

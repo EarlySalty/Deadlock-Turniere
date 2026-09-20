@@ -18,7 +18,6 @@ use crate::proposal_lock::{self, ProposalLock};
 use crate::state::AppState;
 
 const INTERNAL_TOKEN_HEADER: &str = "X-Internal-Token";
-const APPROVER_ROLE_IDS: [&str; 2] = ["1337518124647579661", "1401891955931222110"];
 
 pub fn router() -> Router<AppState> {
     Router::new()
@@ -116,15 +115,17 @@ fn require_internal(headers: &HeaderMap, state: &AppState) -> WebResult<()> {
     Ok(())
 }
 
-fn require_approver(role_ids: &[String]) -> WebResult<()> {
-    if role_ids
-        .iter()
-        .any(|role| APPROVER_ROLE_IDS.contains(&role.as_str()))
-    {
+fn require_approver(role_ids: &[String], config: &turnier_config::Config) -> WebResult<()> {
+    if role_ids.iter().any(|role| {
+        config
+            .authorization
+            .proposal_approver_role_ids
+            .contains(role)
+    }) {
         return Ok(());
     }
     Err(WebError::forbidden(
-        "Nur Mods und Community-Mods duerfen abstimmen",
+        "Für diese Abstimmung fehlt die Freigaberolle",
     ))
 }
 
@@ -196,7 +197,7 @@ async fn vote(
     Json(body): Json<VoteBody>,
 ) -> WebResult<Json<Value>> {
     require_internal(&headers, &state)?;
-    require_approver(&body.role_ids)?;
+    require_approver(&body.role_ids, &state.config)?;
     let (proposal_id, _lock) = lock_active_proposal(&state, proposal_id).await?;
     let proposal = proposals::get_proposal(&state.pool, proposal_id)
         .await?
@@ -251,7 +252,7 @@ async fn revise(
     Json(body): Json<RevisionBody>,
 ) -> WebResult<Json<Value>> {
     require_internal(&headers, &state)?;
-    require_approver(&body.role_ids)?;
+    require_approver(&body.role_ids, &state.config)?;
     let (proposal_id, _lock) = lock_active_proposal(&state, proposal_id).await?;
     let revised_id =
         proposals::prepare_revision(&state.pool, proposal_id, &body.config_json).await?;
@@ -265,7 +266,7 @@ async fn activate_revision(
     Json(body): Json<ActivateRevisionBody>,
 ) -> WebResult<Json<Value>> {
     require_internal(&headers, &state)?;
-    require_approver(&body.role_ids)?;
+    require_approver(&body.role_ids, &state.config)?;
     let _lock = proposal_lock::acquire(&state.pool, proposal_id).await?;
     let active_id = resolve_active_id(&state, proposal_id).await?;
     if active_id == revised_id {
@@ -304,7 +305,7 @@ async fn announcement_rendered(
     Json(body): Json<AnnouncementRenderedBody>,
 ) -> WebResult<Json<Value>> {
     require_internal(&headers, &state)?;
-    require_approver(&body.role_ids)?;
+    require_approver(&body.role_ids, &state.config)?;
     let proposal_id = resolve_active_id(&state, proposal_id).await?;
     let proposal = proposals::get_proposal(&state.pool, proposal_id)
         .await?
@@ -331,7 +332,7 @@ async fn announcement_planned(
     Json(body): Json<AnnouncementPlannedBody>,
 ) -> WebResult<Json<Value>> {
     require_internal(&headers, &state)?;
-    require_approver(&body.role_ids)?;
+    require_approver(&body.role_ids, &state.config)?;
     let proposal_id = resolve_active_id(&state, proposal_id).await?;
     proposals::store_announcement_draft(&state.pool, proposal_id, &body.draft).await?;
     Ok(Json(proposal_payload(&state, proposal_id).await?))

@@ -1,7 +1,7 @@
 //! Zusammenbau des HTTP-Routers: alle Router-Module mergen, die Querschnitt-
 //! Middleware (CORS, TrustedHost) anlegen und den `AppState` anhängen.
 
-use axum::extract::{Request, State};
+use axum::extract::{DefaultBodyLimit, Request, State};
 use axum::http::header::HOST;
 use axum::http::HeaderValue;
 use axum::middleware::Next;
@@ -36,7 +36,7 @@ pub fn build_router(state: AppState) -> Router {
         .merge(consent::router())
         .merge(leaderboard::router())
         .merge(draft::router())
-        .merge(crate::comp::router())
+        .merge(crate::comp::router(&state.config))
         .merge(observer::router())
         .merge(internal_automatik::router())
         .merge(internal_scrims::router())
@@ -46,6 +46,9 @@ pub fn build_router(state: AppState) -> Router {
             host_guard,
         ))
         .layer(cors)
+        .layer(DefaultBodyLimit::max(
+            state.config.limits.request_body_bytes,
+        ))
         .with_state(state)
 }
 
@@ -55,8 +58,13 @@ async fn me(AuthUser(user): AuthUser) -> Json<UserSession> {
 }
 
 /// `GET /api/health` — Health-Check.
-async fn health() -> Json<serde_json::Value> {
-    Json(json!({ "status": "ok", "service": "deadlock-turniere" }))
+async fn health(State(state): State<AppState>) -> Json<serde_json::Value> {
+    Json(json!({ "status": "ok", "service": "deadlock-turniere",
+        "config_schema": state.config.schema_version,
+        "config_anchor": turnier_config::CONFIG_ANCHOR,
+        "config_fingerprint": state.config.fingerprint().ok(),
+        "config_reload": "restart_required"
+    }))
 }
 
 /// Baut den CORS-Layer aus den konfigurierten Origins. Mit `allow_credentials`

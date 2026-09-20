@@ -6,6 +6,7 @@ rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
+turnier-config = { path = "../turnier-config" }
 turnier-db = { path = "../turnier-db" }
 
 async-trait.workspace = true
