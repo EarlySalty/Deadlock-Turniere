@@ -22,6 +22,12 @@ Die isolierte Prüfung verwendet einen ausdrücklich dokumentierten Binary-Stub 
 
 ## Baseline der Fachtests
 
-Die Gesamtsuite des Kern-Worktrees wurde ohne ausgelassene Tests im vorhandenen isolierten PostgreSQL-Harness ausgeführt. Sechs Tests in vier Targets schlagen fehl. Der identische Lauf gegen den unveränderten Produktions-SHA `c9fad4346cd0d86fce542dcb2da6f2dc0cadf047` läuft in einem eigenen detached Worktree. Erst dieser Vergleich erlaubt eine Einordnung als Altfehler. Die Rohlogs enthalten keine absichtlich ausgegebenen Produktiv-Secrets und werden nicht als Ersatz für ein Gate behandelt.
+Beide Gesamtsuiten wurden ohne ausgelassene Tests im vorhandenen isolierten PostgreSQL-Harness ausgeführt. Der unveränderte Produktions-SHA `c9fad4346cd0d86fce542dcb2da6f2dc0cadf047` hat 503 bestandene und sechs fehlgeschlagene Tests. Der erste TOML-Zwischenstand hat 535 bestandene und dieselben sechs fehlgeschlagenen Tests. Die sechs Assertion-Paare stimmen exakt überein. Beide Prozesse endeten mit Exit 101, null Tests wurden ignoriert. Das ist ein belegter roter Altbestand, keine vollständig grüne Suite.
 
-Logorte: `.tasks/2026-09-20-global-toml/test-postgres-resume.log` im Kern-Worktree und `.tasks/2026-09-20-global-toml/test-main-baseline.log` im Ergänzungs-Worktree. Das abschließende Vergleichsergebnis wird separat festgehalten.
+Der TOML-Lauf entstand im noch nicht unveränderlich festgehaltenen gemeinsamen Worktree. Er ersetzt daher ausdrücklich nicht den erneuten Lauf am finalen Abnahme-Commit. Der Baseline-Lauf erfolgte in einem eigenen sauberen detached Worktree. Die Produktionsdatenbank wurde nicht für Tests verwendet.
+
+`baseline-test-comparison.json` hält Zähler, Fehler und SHA-256 der beiden Rohlogs fest. Logorte: `.tasks/2026-09-20-global-toml/test-postgres-resume.log` im Kern-Worktree und `.tasks/2026-09-20-global-toml/test-main-baseline.log` im Ergänzungs-Worktree.
+
+## Koordinationsgrenze
+
+Die zweite Sitzung hat inzwischen einen eigenen Abnahme-Worktree `/home/nathanael/.worktrees/turniere-global-toml-abnahme-20260920` auf `feat/turniere-global-toml-abnahme-20260920` angelegt. Dieser Ergänzungsbranch startet keinen konkurrierenden Main-Merge oder Produktionsdeploy. Die Startpfade und Prüfnachweise sind gepusht und können in dem Abnahmestand zusammengeführt werden. Der ursprüngliche gemeinsame Worktree bleibt erhalten.
