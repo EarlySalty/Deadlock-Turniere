@@ -1,3 +1,7 @@
+# Vorlage für eine systemd-User-Unit. Installationspfade bewusst anpassen.
+# Globale Betriebswerte stehen in config/bot.toml. Kein EnvironmentFile für sie.
+# Den bereits eingerichteten geschützten Infisical-Bootstrap weiterverwenden.
+# Sein vorhandenes LoadCredential-Drop-in gehört nicht in diese Vorlage.
 [Unit]
 Description=Deadlock Turniere Backend
 After=network-online.target
@@ -5,26 +9,13 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=deadlock
-Group=deadlock
-WorkingDirectory=/opt/deadlock-turniere/backend
-Environment=BACKEND_PORT=8900
-Environment=FRONTEND_URL=https://deutsche-deadlock-community.de/turnier
-Environment=DATABASE_PATH=/opt/deadlock-turniere/backend/data/tournament.db
-Environment=DISCORD_OAUTH_INTERNAL_API_BASE_URL=http://127.0.0.1:8766
-
-# Option A: read credential files through systemd credentials.
-LoadCredential=TURNIER_INTERNAL_API_TOKEN:/etc/deadlock-turniere/secrets/turnier_internal_api_token
-LoadCredential=JWT_SECRET:/etc/deadlock-turniere/secrets/jwt_secret
-
-# Option B: if Vault Agent renders files, use *_FILE variables instead.
-# Environment=TURNIER_INTERNAL_API_TOKEN_FILE=/run/deadlock-turniere-secrets/TURNIER_INTERNAL_API_TOKEN
-# Environment=JWT_SECRET_FILE=/run/deadlock-turniere-secrets/JWT_SECRET
-# Environment=STEAM_BRIDGE_DB_PATH_FILE=/run/deadlock-turniere-secrets/STEAM_BRIDGE_DB_PATH
-
-ExecStart=/opt/deadlock-turniere/rust/target/release/turnier-bot
+WorkingDirectory=/opt/deadlock-turniere
+ExecStart=/opt/deadlock-turniere/scripts/run_turniere_backend_rust.sh --config /opt/deadlock-turniere/config/bot.toml
+# Änderungen werden vor einem geordneten Neustart separat geprüft:
+# /opt/deadlock-turniere/scripts/run_turniere_backend_rust.sh --config /opt/deadlock-turniere/config/bot.toml --check-config
+# Kein ExecReload: Clients, Listener und Scheduler werden beim Neustart aufgebaut.
 Restart=on-failure
 RestartSec=5
 
 [Install]
-WantedBy=multi-user.target
+WantedBy=default.target
