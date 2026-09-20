@@ -1,0 +1,75 @@
+{
+  "baseline_sha": "c9fad4346cd0d86fce542dcb2da6f2dc0cadf047",
+  "candidate_parent_sha": "a7216930b8226ac2e608c4829a1184c407f1a2f3",
+  "candidate_tree": "uncommitted; parallel changes; final immutable commit must be tested again",
+  "command": "central_test_db.sh cargo test --workspace --features testing --no-fail-fast -j 2 -- --include-ignored",
+  "production_database_used": false,
+  "tests_skipped": false,
+  "baseline": {
+    "passed": 503,
+    "failed": 6,
+    "ignored": 0,
+    "exit_code": 101,
+    "failures": {
+      "invalid_proposal_transition_returns_conflict": [
+        "400",
+        "409"
+      ],
+      "lobby_post_wird_nur_einmal_gesendet": [
+        "0",
+        "1"
+      ],
+      "lobby_job_bringt_einen_draft_bis_zum_ergebnis": [
+        "\"keine\"",
+        "\"angefordert\""
+      ],
+      "fehlende_provision_landet_im_fehler_und_retry_setzt_zurueck": [
+        "\"keine\"",
+        "\"fehler\""
+      ],
+      "notifier::tests::mentions_baut_korrekt": [
+        "\"keine\"",
+        "\"—\""
+      ],
+      "rematch_nach_abschluss_tauscht_die_seiten": [
+        "\"keine\"",
+        "\"angefordert\""
+      ]
+    },
+    "log_sha256": "a847e81dd4f3fe34c016b646abba630ecabbbbc0c138d78421fced5e9219acef"
+  },
+  "candidate_initial": {
+    "passed": 535,
+    "failed": 6,
+    "ignored": 0,
+    "exit_code": 101,
+    "failures": {
+      "invalid_proposal_transition_returns_conflict": [
+        "400",
+        "409"
+      ],
+      "lobby_post_wird_nur_einmal_gesendet": [
+        "0",
+        "1"
+      ],
+      "fehlende_provision_landet_im_fehler_und_retry_setzt_zurueck": [
+        "\"keine\"",
+        "\"fehler\""
+      ],
+      "lobby_job_bringt_einen_draft_bis_zum_ergebnis": [
+        "\"keine\"",
+        "\"angefordert\""
+      ],
+      "notifier::tests::mentions_baut_korrekt": [
+        "\"keine\"",
+        "\"—\""
+      ],
+      "rematch_nach_abschluss_tauscht_die_seiten": [
+        "\"keine\"",
+        "\"angefordert\""
+      ]
+    },
+    "log_sha256": "50f19966ded90cf4c4c1e1685517b532177e214c5edde382d7843cf86eea52bd"
+  },
+  "same_failure_assertions": true
+}

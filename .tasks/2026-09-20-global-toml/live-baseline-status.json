@@ -1,0 +1,56 @@
+{
+  "phase": "read-only status, no deployment performed by this session",
+  "service": {
+    "MainPID": "1109",
+    "NRestarts": "0",
+    "ExecMainStartTimestamp": "Sun 2026-09-20 02:13:39 CEST",
+    "ActiveState": "active"
+  },
+  "executed_binary": "/home/nathanael/repos/Deadlock-Turniere/rust/target/release/turnier-bot",
+  "http": {
+    "http://127.0.0.1:8900/api/health": {
+      "status": 200,
+      "content_type": "application/json",
+      "bytes": 45,
+      "health": {
+        "status": "ok",
+        "service": "deadlock-turniere"
+      }
+    },
+    "https://deutsche-deadlock-community.de/turnier/api/health": {
+      "status": 200,
+      "content_type": "application/json",
+      "bytes": 45,
+      "health": {
+        "status": "ok",
+        "service": "deadlock-turniere"
+      }
+    },
+    "https://deutsche-deadlock-community.de/turnier/": {
+      "status": 200,
+      "content_type": "text/html",
+      "bytes": 1183,
+      "root_mount": true,
+      "module_assets": [
+        "/turnier/assets/index-DU50ILhV.js",
+        "https://static.cloudflareinsights.com/beacon.min.js"
+      ]
+    },
+    "https://deutsche-deadlock-community.de/turnier/api/tournaments": {
+      "status": 500
+    },
+    "https://deutsche-deadlock-community.de/turnier/api/me": {
+      "status": 401
+    },
+    "https://deutsche-deadlock-community.de/turnier/assets/index-DU50ILhV.js": {
+      "status": 200,
+      "content_type": "text/javascript",
+      "bytes": 643590
+    },
+    "http://127.0.0.1:8900/api/tournaments": {
+      "status": 500,
+      "confirmation": "separate read-only GET after public probe"
+    }
+  },
+  "recorded_at_utc": "2026-09-20T11:48:55.840878+00:00"
+}
