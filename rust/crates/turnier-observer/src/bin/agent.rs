@@ -20,6 +20,10 @@ struct Settings {
     poll_ms: u64,
     game_control_enabled: bool,
     request_timeout_seconds: u64,
+    heartbeat_every_polls: u8,
+    game_connection_attempts: u32,
+    game_connection_poll_milliseconds: u64,
+    vconsole_ack_milliseconds: u64,
 }
 
 impl Settings {
@@ -41,6 +45,10 @@ impl Settings {
             poll_ms: agent.poll_milliseconds,
             game_control_enabled: agent.game_control_enabled,
             request_timeout_seconds: agent.request_timeout_seconds,
+            heartbeat_every_polls: agent.heartbeat_every_polls,
+            game_connection_attempts: agent.game_connection_attempts,
+            game_connection_poll_milliseconds: agent.game_connection_poll_milliseconds,
+            vconsole_ack_milliseconds: agent.vconsole_ack_milliseconds,
         })
     }
 
@@ -69,6 +77,9 @@ async fn main() -> anyhow::Result<()> {
         turnier_config::ConfigMode::Print => {
             println!("{}", config.safe_status()?);
             return Ok(());
+        }
+        turnier_config::ConfigMode::BrokerCheck => {
+            anyhow::bail!("--check-broker ist nur beim Backend verfügbar")
         }
         _ => {}
     }
@@ -105,7 +116,7 @@ async fn main() -> anyhow::Result<()> {
     loop {
         ticker.tick().await;
         heartbeat_counter = heartbeat_counter.wrapping_add(1);
-        if heartbeat_counter % 20 == 0 {
+        if heartbeat_counter % settings.heartbeat_every_polls == 0 {
             game_connected = match vconsole.as_ref() {
                 Some(client) => match client.probe_game_connected().await {
                     Ok(connected) => connected,
@@ -191,7 +202,7 @@ async fn main() -> anyhow::Result<()> {
                     CameraAction::SpectateLobby { .. } => {
                         match client.apply_camera_action(&command.action).await {
                             Ok(()) => {
-                                game_connected = wait_for_game_connection(client).await;
+                                game_connected = wait_for_game_connection(client, &settings).await;
                                 if game_connected {
                                     Ok(())
                                 } else {
@@ -253,20 +264,28 @@ async fn main() -> anyhow::Result<()> {
     }
 }
 
-async fn wait_for_game_connection(client: &VConsoleClient) -> bool {
-    for _ in 0..20 {
+async fn wait_for_game_connection(client: &VConsoleClient, settings: &Settings) -> bool {
+    for _ in 0..settings.game_connection_attempts {
         match client.probe_game_connected().await {
             Ok(true) => return true,
             Ok(false) => {}
             Err(err) => warn!(error = %err, "Observer wartet auf aktive Game-Session"),
         }
-        tokio::time::sleep(Duration::from_secs(1)).await;
+        tokio::time::sleep(Duration::from_millis(
+            settings.game_connection_poll_milliseconds,
+        ))
+        .await;
     }
     false
 }
 
 async fn connect_vconsole(settings: &Settings) -> Option<VConsoleClient> {
-    match VConsoleClient::connect(&settings.vconsole_addr).await {
+    match VConsoleClient::with_ack_timeout(
+        &settings.vconsole_addr,
+        Duration::from_millis(settings.vconsole_ack_milliseconds),
+    )
+    .await
+    {
         Ok(client) => {
             info!(addr = %settings.vconsole_addr, "VConsole verbunden");
             Some(client)

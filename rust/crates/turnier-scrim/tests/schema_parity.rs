@@ -233,10 +233,16 @@ async fn typed_read_model_matches_the_current_scrim_schema() {
         .await
         .expect("lagebild history");
     assert_eq!(
-        history.iter().map(|snapshot| snapshot.id).collect::<Vec<_>>(),
+        history
+            .iter()
+            .map(|snapshot| snapshot.id)
+            .collect::<Vec<_>>(),
         vec![810040, 810039]
     );
-    assert_eq!(history[1].error.as_deref(), Some("LLM provider error: HTTP 400"));
+    assert_eq!(
+        history[1].error.as_deref(),
+        Some("LLM provider error: HTTP 400")
+    );
 }
 
 #[tokio::test]

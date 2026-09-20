@@ -55,3 +55,14 @@ Prüfung: cargo check --workspace --all-targets -j 2 erfolgreich (check-r2.log, 
 Ein isolierter Rust-Inspektor hat die bisherige Konfiguration über die bestehende produktive Bootstrap-Reihenfolge aufgelöst. Der Inspektor öffnet keine Datenbank und startet keine Clients oder Scheduler. Die Bootstrap-Ausgabe wurde unterdrückt; ausgegeben wurden nur Vergleichsergebnisse und ein nicht geheimer Fingerabdruck. 42 Alt-Felder sowie Testmodus und Logging stimmen mit dem damaligen TOML-Kandidaten überein. Beleg: baseline/comparison.json. Dessen Fingerabdruck gehört zum Zwischenstand, nicht zum noch ausstehenden Release. Die zusätzliche temporäre Bootstrap-Datei wurde entfernt. Der Inspektorquelltext ist nur Audit-Material unter baseline/, kein produktiver ENV-Lader.
 
 Noch offen: vollständige Inventarmatrix und Grenzprüfungen, weitere Verbraucher-/Fachtests, Prüfer-Gate, endgültiger Statusvergleich, Produktionsintegration, Release-Build, Unit-Umstellung, Live-Prüfung von API/UI/Broker und Scheduler, Dokumentation sowie Cleanup. Insbesondere ist dieser Branch nicht produktiv abgenommen.
+
+
+## Fortsetzung: Operator-Datei und Abnahmetests
+
+Die aktive `config/bot.toml` ist jetzt gezielt gitignoriert. Die versionierte `config/bot.example.toml` ist eine Vorlage, kein zweiter Laufzeit-Lader und kein automatischer Fallback. Grund: Der produktive Deploy-Preflight verlangt einen sauberen Git-Baum; eine bearbeitete getrackte Betriebsdatei hätte spätere Neustarts blockiert. Bei der Erstinstallation wird die aktive Datei kontrolliert und ohne Überschreiben eingerichtet. Der Produktionscheckout wurde noch nicht verändert.
+
+Der Parser begrenzt Dateien auf 1 MiB, verlangt kanonische positive String-IDs und echte zweistellige UTC-Uhrzeiten. Ein zusätzlicher syntaxbasierter Wächter prüft den Rust-Laufzeitcode auch hinter Testmodulen, einschließlich ENV-Alias-Imports und dynamischer Schlüssel.
+
+Neue Nachweise: `cargo test -p turnier-config -j 2` bestand mit 23 Tests und 0 ignorierten Tests. Anschließend bestanden `cargo test -p turnier-config -p turnier-bot --test validation_matrix --test config_cli -j 2` mit 12 Tests und 0 ignorierten Tests. Die CLI-Tests starten das echte Binary ohne Secrets und belegen nebenwirkungsfreie Dateiprüfung, ENV-Isolation, Parser-Redaction und fehlenden automatischen Dateischreibpfad. Die Gesamtsuite, Verbrauchertests, Merge-Gates und Live-Abnahme stehen weiter aus.
+
+Installierte Merge-Schleuse: `/home/nathanael/Documents/.claude/gpt-workers/gate_hook.py`. Der ältere Verweis auf `claude-config/hooks/gate_hook.py` ist auf diesem Host nicht mehr gültig. Graphify war über die CLI nicht verfügbar; Code und Verbraucher wurden direkt geprüft.

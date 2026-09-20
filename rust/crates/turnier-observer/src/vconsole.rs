@@ -13,7 +13,8 @@ use crate::protocol::CameraAction;
 const HEADER_SIZE: usize = 12;
 const CMND_VERSION: u32 = 0x00D4_0000;
 const MAX_PACKET: usize = u16::MAX as usize;
-const COMMAND_ACK_TIMEOUT: Duration = Duration::from_millis(1_500);
+const COMMAND_ACK_TIMEOUT: Duration =
+    Duration::from_millis(turnier_config::VCONSOLE_ACK_MILLISECONDS);
 static COMMAND_SEQ: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Debug, thiserror::Error)]
@@ -32,10 +33,18 @@ pub enum VConsoleError {
 pub struct VConsoleClient {
     writer: Arc<Mutex<OwnedWriteHalf>>,
     prints: broadcast::Sender<String>,
+    ack_timeout: Duration,
 }
 
 impl VConsoleClient {
     pub async fn connect(addr: &str) -> Result<Self, VConsoleError> {
+        Self::with_ack_timeout(addr, COMMAND_ACK_TIMEOUT).await
+    }
+
+    pub async fn with_ack_timeout(
+        addr: &str,
+        ack_timeout: Duration,
+    ) -> Result<Self, VConsoleError> {
         let stream = TcpStream::connect(addr).await?;
         stream.set_nodelay(true)?;
         let (reader, writer) = stream.into_split();
@@ -49,6 +58,7 @@ impl VConsoleClient {
         Ok(Self {
             writer: Arc::new(Mutex::new(writer)),
             prints,
+            ack_timeout,
         })
     }
 
@@ -103,7 +113,7 @@ impl VConsoleClient {
                 }
             }
         };
-        let lines = tokio::time::timeout(COMMAND_ACK_TIMEOUT, collect)
+        let lines = tokio::time::timeout(self.ack_timeout, collect)
             .await
             .map_err(|_| VConsoleError::AckTimeout)??;
         reject_visible_command_error(command, &lines)?;
@@ -119,7 +129,8 @@ impl VConsoleClient {
                     .await?;
             }
             CameraAction::Directed => {
-                self.send_checked("citadel_spec_lock_to_accountid 0").await?;
+                self.send_checked("citadel_spec_lock_to_accountid 0")
+                    .await?;
                 self.send_checked("citadel_spectator_mode 0").await?;
                 self.send_checked("spec_autodirector 1").await?;
             }
@@ -238,7 +249,10 @@ fn parse_prnt_message(body: &[u8]) -> Option<String> {
         return None;
     }
     let message = &body[28..];
-    let end = message.iter().position(|byte| *byte == 0).unwrap_or(message.len());
+    let end = message
+        .iter()
+        .position(|byte| *byte == 0)
+        .unwrap_or(message.len());
     let filtered = message[..end]
         .iter()
         .copied()
@@ -256,7 +270,10 @@ mod tests {
         let packet = build_command_packet("echo observer").unwrap();
         assert_eq!(&packet[..4], b"CMND");
         assert_eq!(&packet[4..8], &[0x00, 0xD4, 0x00, 0x00]);
-        assert_eq!(u16::from_be_bytes([packet[8], packet[9]]) as usize, packet.len());
+        assert_eq!(
+            u16::from_be_bytes([packet[8], packet[9]]) as usize,
+            packet.len()
+        );
         assert_eq!(&packet[10..12], &[0, 0]);
         assert_eq!(packet.last(), Some(&0));
     }

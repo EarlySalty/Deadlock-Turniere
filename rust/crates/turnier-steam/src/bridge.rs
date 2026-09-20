@@ -112,7 +112,7 @@ impl BridgeReader {
             .busy_timeout(Duration::from_secs(settings.busy_timeout_seconds));
 
         let pool = match SqlitePoolOptions::new()
-            .max_connections(2)
+            .max_connections(settings.read_connections)
             .connect_with(options)
             .await
         {

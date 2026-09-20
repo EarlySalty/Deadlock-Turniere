@@ -9,5 +9,7 @@ pub mod live;
 pub mod protocol;
 pub mod vconsole;
 
-pub use director::{Director, DirectorConfig, DirectorDecision, MatchFrame, PlayerSnapshot, ScoreBreakdown};
+pub use director::{
+    Director, DirectorConfig, DirectorDecision, MatchFrame, PlayerSnapshot, ScoreBreakdown,
+};
 pub use protocol::{AgentAck, AgentHeartbeat, CameraAction, CameraCommand, ObserverMode};

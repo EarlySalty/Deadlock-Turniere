@@ -156,7 +156,7 @@ impl Config {
                 hosts.insert(host);
             }
         }
-        hosts.extend(split_csv(&self.backend_allowed_hosts).map(|s| s.to_lowercase()));
+        hosts.extend(split_csv(&self.backend_allowed_hosts).filter_map(|s| hostname_of(&s)));
         hosts.into_iter().collect()
     }
 
@@ -174,6 +174,17 @@ fn split_csv(raw: &str) -> impl Iterator<Item = String> + '_ {
 
 /// Extrahiert den normalisierten Hostnamen aus einer URL oder einem Host:Port-String.
 fn hostname_of(value: &str) -> Option<String> {
+    if let Ok(ip) = value.parse::<std::net::IpAddr>() {
+        return Some(ip.to_string());
+    }
+    if let Ok(url) = url::Url::parse(value) {
+        if let Some(host) = url.host_str() {
+            return Some(host.trim_matches(['[', ']']).to_lowercase());
+        }
+    }
+    if let Ok(host) = url::Host::parse(value) {
+        return Some(host.to_string().trim_matches(['[', ']']).to_string());
+    }
     let candidate = value.trim();
     if candidate.is_empty() {
         return None;

@@ -5,7 +5,7 @@ use std::sync::{
 };
 use turnier_config::{Config, ConfigArgs, ConfigError, ConfigMode};
 
-const VALID: &str = include_str!("../../../../config/bot.toml");
+const VALID: &str = include_str!("../../../../config/bot.example.toml");
 const BASE: &str = "/srv/turniere/config/bot.toml";
 static COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -357,7 +357,7 @@ fn runtime_environment_reads_are_limited_to_secrets_and_throwaway_guards() {
 #[test]
 fn observer_agent_is_optional_but_strict_when_configured() {
     assert!(parse(VALID).unwrap().observer_agent.is_none());
-    let agent = "\n[observer_agent]\nserver_base_url = \"http://127.0.0.1:8900\"\nvconsole_address = \"127.0.0.1:29000\"\nbot_account_id = 2\npoll_milliseconds = 250\ngame_control_enabled = false\nrequest_timeout_seconds = 5\n";
+    let agent = "\n[observer_agent]\nheartbeat_every_polls = 20\ngame_connection_attempts = 20\ngame_connection_poll_milliseconds = 1000\nvconsole_ack_milliseconds = 1500\nserver_base_url = \"http://127.0.0.1:8900\"\nvconsole_address = \"127.0.0.1:29000\"\nbot_account_id = 2\npoll_milliseconds = 250\ngame_control_enabled = false\nrequest_timeout_seconds = 5\n";
     assert!(parse(&format!("{VALID}{agent}")).is_ok());
     assert!(parse(&format!(
         "{VALID}{}",

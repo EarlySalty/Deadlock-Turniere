@@ -136,7 +136,11 @@ impl Director {
         self.current_account_id
     }
 
-    pub fn release_to_directed(&mut self, now: DateTime<Utc>, reason: impl Into<String>) -> DirectorDecision {
+    pub fn release_to_directed(
+        &mut self,
+        now: DateTime<Utc>,
+        reason: impl Into<String>,
+    ) -> DirectorDecision {
         let switched = self.current_account_id.take().is_some();
         self.current_since = Some(now);
         DirectorDecision {
@@ -170,17 +174,15 @@ impl Director {
             .iter()
             .filter(|p| p.alive)
             .map(|p| {
-                let breakdown = score_player(
-                    p,
-                    self.current_account_id == Some(p.account_id),
-                    hold,
-                );
+                let breakdown =
+                    score_player(p, self.current_account_id == Some(p.account_id), hold);
                 (p, breakdown, breakdown.total())
             })
             .collect::<Vec<_>>();
         ranked.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap_or(Ordering::Equal));
 
-        let Some((candidate, candidate_breakdown, candidate_score)) = ranked.first().copied() else {
+        let Some((candidate, candidate_breakdown, candidate_score)) = ranked.first().copied()
+        else {
             let mut decision = self.release_to_directed(now, "no_alive_players");
             decision.frame_age_ms = age.num_milliseconds();
             return decision;

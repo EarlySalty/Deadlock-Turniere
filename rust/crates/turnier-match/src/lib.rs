@@ -72,6 +72,7 @@ pub struct MatchManager {
     pub(crate) guild_id: i64,
     /// `DISCORD_MATCH_CHANNEL_DELETE_DELAY_SECONDS` für das verzögerte Löschen.
     pub(crate) channel_delete_delay_seconds: i64,
+    pub(crate) bridge_settings: turnier_config::BridgeConfig,
 }
 
 impl MatchManager {
@@ -89,6 +90,7 @@ impl MatchManager {
             caster_voice_channel_id: config.discord_caster_voice_channel_id,
             guild_id: config.discord_guild_id.parse().unwrap_or(0),
             channel_delete_delay_seconds: config.discord_match_channel_delete_delay_seconds,
+            bridge_settings: config.bridge.clone(),
         }
     }
 

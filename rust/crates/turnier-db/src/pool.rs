@@ -18,14 +18,15 @@ pub async fn connect_central() -> DbResult<Pool> {
 pub async fn connect_central_with_config(
     config: &turnier_config::DatabaseConfig,
 ) -> DbResult<Pool> {
-    let dsn = dl_central_db::dsn_from_env()?;
+    let dsn = dl_central_db::dsn_from_env().map_err(|_| crate::error::DbError::MissingDsn)?;
     let pool = sqlx::postgres::PgPoolOptions::new()
         .max_connections(config.max_connections)
         .acquire_timeout(std::time::Duration::from_secs(
             config.acquire_timeout_seconds,
         ))
         .connect(&dsn)
-        .await?;
+        .await
+        .map_err(|_| crate::error::DbError::Connect)?;
     Ok(pool)
 }
 

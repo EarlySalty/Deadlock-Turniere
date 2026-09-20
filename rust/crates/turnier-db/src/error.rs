@@ -5,6 +5,10 @@ use thiserror::Error;
 /// Fehler beim zentralen DB-Zugriff.
 #[derive(Debug, Error)]
 pub enum DbError {
+    #[error("Zentrale Datenbank: erforderliche Secret-Anbindung fehlt oder ist ungültig")]
+    MissingDsn,
+    #[error("Zentrale Datenbankverbindung fehlgeschlagen; Zugangsdaten werden nicht ausgegeben")]
+    Connect,
     /// Ein Fehler aus der zentralen DB-Infrastruktur.
     #[error(transparent)]
     Central(#[from] dl_central_db::CentralDbError),

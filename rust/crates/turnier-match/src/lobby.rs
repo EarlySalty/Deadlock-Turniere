@@ -50,7 +50,7 @@ impl MatchManager {
             "Scrim-Ergebnis abrufen",
             "GC_GET_MATCH_RESULT",
             &Value::Object(payload),
-            45.0,
+            self.bridge_settings.result_timeout_seconds as f64,
         )
         .await
     }
@@ -87,7 +87,7 @@ impl MatchManager {
             "Spectator-Slot setzen",
             "GC_LOBBY_SET_SPECTATOR",
             &json!({ "party_id": party_id }),
-            20.0,
+            self.bridge_settings.control_timeout_seconds as f64,
         )
         .await
     }
@@ -102,7 +102,7 @@ impl MatchManager {
             "Ready-Status setzen",
             "GC_LOBBY_READY",
             &json!({ "party_id": party_id }),
-            20.0,
+            self.bridge_settings.control_timeout_seconds as f64,
         )
         .await
     }
@@ -175,7 +175,7 @@ impl MatchManager {
                 "Match-Ergebnis abrufen",
                 "GC_GET_MATCH_RESULT",
                 &build_match_result_payload(&m),
-                45.0,
+                self.bridge_settings.result_timeout_seconds as f64,
             )
             .await?;
 
@@ -257,7 +257,7 @@ impl MatchManager {
                     "tournament_id": tournament_id,
                     "match_id": match_id,
                 }),
-                30.0,
+                self.bridge_settings.convars_timeout_seconds as f64,
             )
             .await?;
         let mut out = as_object(result);
@@ -345,7 +345,7 @@ impl MatchManager {
                 "Lobby-Erstellung",
                 "GC_CREATE_CUSTOM_LOBBY",
                 &Value::Object(create_payload),
-                45.0,
+                self.bridge_settings.create_timeout_seconds as f64,
             )
             .await?;
 
@@ -540,14 +540,14 @@ impl MatchManager {
             "Spectator-Slot setzen",
             "GC_LOBBY_SET_SPECTATOR",
             &json!({ "party_id": party_id }),
-            20.0,
+            self.bridge_settings.control_timeout_seconds as f64,
         )
         .await?;
         self.run_steam_task(
             "Ready-Status setzen",
             "GC_LOBBY_READY",
             &json!({ "party_id": party_id }),
-            20.0,
+            self.bridge_settings.control_timeout_seconds as f64,
         )
         .await?;
         let result = self
@@ -555,7 +555,7 @@ impl MatchManager {
                 "Match-Start",
                 "GC_LOBBY_START_MATCH",
                 &json!({ "party_id": party_id, "match_type": kind.as_str(), "match_id": match_id }),
-                45.0,
+                self.bridge_settings.start_timeout_seconds as f64,
             )
             .await?;
 
@@ -651,7 +651,7 @@ impl MatchManager {
                 "Lobby verlassen",
                 "GC_LOBBY_LEAVE",
                 &json!({ "party_id": party_id }),
-                20.0,
+                self.bridge_settings.control_timeout_seconds as f64,
             )
             .await?;
         let mut out = as_object(result);

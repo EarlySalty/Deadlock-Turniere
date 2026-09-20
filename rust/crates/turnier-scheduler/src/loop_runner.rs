@@ -22,8 +22,9 @@ use turnier_discord::DiscordNotifier;
 use turnier_match::MatchManager;
 
 use crate::reminders::{
-    check_and_send_match_reminders, check_and_send_registration_reminders,
-    check_and_send_start_reminders, load_all_profile_ids, load_tournament_participant_ids,
+    check_and_send_match_reminders, check_and_send_registration_reminders_with_config,
+    check_and_send_start_reminders_with_config, load_all_profile_ids,
+    load_tournament_participant_ids,
 };
 use crate::transition::{advance_tournament_status, get_due_next_status, DueStatusRow};
 use crate::{RoutineDecision, RoutineSettings, SchedulerResult};
@@ -66,12 +67,24 @@ impl Scheduler {
         if let Err(err) = self.check_and_advance_tournaments(now).await {
             tracing::error!(error = %err, "Phasen-Kaskade fehlgeschlagen");
         }
-        if let Err(err) =
-            check_and_send_registration_reminders(&self.pool, &self.notifier, now).await
+        if let Err(err) = check_and_send_registration_reminders_with_config(
+            &self.pool,
+            &self.notifier,
+            now,
+            &self.settings,
+        )
+        .await
         {
             tracing::error!(error = %err, "Registrierungs-Reminder-Check fehlgeschlagen");
         }
-        if let Err(err) = check_and_send_start_reminders(&self.pool, &self.notifier, now).await {
+        if let Err(err) = check_and_send_start_reminders_with_config(
+            &self.pool,
+            &self.notifier,
+            now,
+            &self.settings,
+        )
+        .await
+        {
             tracing::error!(error = %err, "Start-Reminder-Check fehlgeschlagen");
         }
         if let Err(err) = check_and_send_match_reminders(&self.pool, &self.notifier).await {

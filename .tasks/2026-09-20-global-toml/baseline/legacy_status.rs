@@ -71,7 +71,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .map(|value| matches!(value.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on"))
         .unwrap_or(true);
     let logging_matches = std::env::var("RUST_LOG").map(|level| level.trim() == candidate.logging.level.as_str()).unwrap_or(candidate.logging.level.as_str() == "info");
+    let implicit_environment = ["HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy", "PGHOST", "PGPORT", "PGSSLMODE", "PGSSLROOTCERT", "SSL_CERT_FILE", "SSL_CERT_DIR"]
+        .into_iter()
+        .filter(|name| std::env::var_os(name).is_some_and(|value| !value.is_empty()))
+        .collect::<Vec<_>>();
     println!("{}", serde_json::to_string_pretty(&json!({
+        "implicit_environment_present": implicit_environment,
         "audit": "turnier-legacy-config-comparison-v1",
         "baseline_sha": "c9fad4346cd0d86fce542dcb2da6f2dc0cadf047",
         "nonsecret_fields_checked": old_values.len(),

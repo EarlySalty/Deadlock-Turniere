@@ -8,17 +8,25 @@ use chrono::{DateTime, Duration, Utc};
 use serde_json::Value;
 
 /// Default-Reminder-Offsets (Minuten), abwärts sortiert — wie im Original.
-pub const DEFAULT_REMINDER_OFFSETS: [i64; 3] = [1440, 120, 15];
+pub use turnier_config::DEFAULT_REMINDER_OFFSETS;
 
 /// Breite des Reminder-Toleranzfensters (Minuten). Im Original fest 5 Minuten
 /// (`reminder_at + timedelta(minutes=5)`). Siehe `bugs_preserved`: zur 60-s-Loop-
 /// Kadenz überdimensioniert, holt verpasste Fenster nicht nach — bewusst 1:1.
-pub const REMINDER_WINDOW_MINUTES: i64 = 5;
+pub use turnier_config::REMINDER_WINDOW_MINUTES;
 
 /// Ist `now` im Reminder-Fenster `reminder_at <= now <= reminder_at + 5min`?
 /// Portiert die inline-Bedingung der drei Reminder-Tasks (Z.316/409).
 pub fn is_within_window(reminder_at: DateTime<Utc>, now: DateTime<Utc>) -> bool {
-    reminder_at <= now && now <= reminder_at + Duration::minutes(REMINDER_WINDOW_MINUTES)
+    is_within_configured_window(reminder_at, now, REMINDER_WINDOW_MINUTES)
+}
+
+pub fn is_within_configured_window(
+    reminder_at: DateTime<Utc>,
+    now: DateTime<Utc>,
+    minutes: i64,
+) -> bool {
+    reminder_at <= now && now <= reminder_at + Duration::minutes(minutes)
 }
 
 /// Ist der Wert fällig (`parsed <= now`)? Portiert `_is_due` (Z.45-47).
@@ -35,16 +43,20 @@ pub fn is_due(value: Option<&DateTime<Utc>>, now: DateTime<Utc>) -> bool {
 /// einzelne nicht-konvertierbare Elemente werden übersprungen statt die ganze
 /// Schleife abzubrechen (das Original hätte bei `int("x")` geworfen).
 pub fn parse_reminder_offsets(value: Option<&Value>) -> Vec<i64> {
+    parse_reminder_offsets_with_default(value, &DEFAULT_REMINDER_OFFSETS)
+}
+
+pub fn parse_reminder_offsets_with_default(value: Option<&Value>, defaults: &[i64]) -> Vec<i64> {
     let Some(value) = value else {
-        return DEFAULT_REMINDER_OFFSETS.to_vec();
+        return defaults.to_vec();
     };
     let items = match value {
         Value::Array(items) => items.clone(),
         Value::String(s) if !s.trim().is_empty() => match serde_json::from_str::<Value>(s.trim()) {
             Ok(Value::Array(items)) => items,
-            _ => return DEFAULT_REMINDER_OFFSETS.to_vec(),
+            _ => return defaults.to_vec(),
         },
-        _ => return DEFAULT_REMINDER_OFFSETS.to_vec(),
+        _ => return defaults.to_vec(),
     };
 
     let mut offsets: Vec<i64> = items
@@ -54,7 +66,7 @@ pub fn parse_reminder_offsets(value: Option<&Value>) -> Vec<i64> {
         .collect();
 
     if offsets.is_empty() {
-        return DEFAULT_REMINDER_OFFSETS.to_vec();
+        return defaults.to_vec();
     }
 
     // Dedupliziert, absteigend sortiert — wie `sorted({...}, reverse=True)`.
