@@ -26,7 +26,7 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
 
       - name: Release-Gate mit Negativfällen prüfen
-        run: node --test .github/ci/pr-release-gate.test.cjs
+        run: node --test .github/ci/pr-release-gate.test.cjs .github/ci/npm-audit-regression.test.mjs
 
       - name: Install dependencies
         working-directory: frontend
