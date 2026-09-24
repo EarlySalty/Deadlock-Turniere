@@ -49,17 +49,56 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
 
       - name: Set up Node.js
         uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
         with:
           node-version: "24"
 
-      - name: npm audit (frontend)
+      - name: Install frontend dependencies
         working-directory: frontend
+        run: npm ci
+
+      - name: Audit head
+        id: head_audit
+        shell: bash
         run: |
+          set +e
+          cd frontend
+          npm audit --audit-level=high --json > "$RUNNER_TEMP/head-audit.json"
+          status=$?
+          set -e
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+
+      - name: Audit main baseline when head has findings
+        if: steps.head_audit.outputs.status != '0' && github.event_name == 'pull_request'
+        id: base_audit
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        shell: bash
+        run: |
+          git worktree add --detach "$RUNNER_TEMP/base-tree" "$BASE_SHA"
+          cd "$RUNNER_TEMP/base-tree/frontend"
           npm ci
-          npm audit --audit-level=high
+          set +e
+          npm audit --audit-level=high --json > "$RUNNER_TEMP/base-audit.json"
+          status=$?
+          set -e
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+
+      - name: Reject new HIGH or CRITICAL advisories
+        if: steps.head_audit.outputs.status != '0' && github.event_name == 'pull_request'
+        run: >
+          node .github/ci/npm-audit-regression.mjs
+          "$RUNNER_TEMP/base-audit.json"
+          "$RUNNER_TEMP/head-audit.json"
+
+      - name: Keep scheduled and main audits strict
+        if: steps.head_audit.outputs.status != '0' && github.event_name != 'pull_request'
+        run: exit 1
 
   semgrep-sast:
     name: "Semgrep SAST"
