@@ -173,15 +173,17 @@ async fn serve(app: Router) -> (SocketAddr, tokio::task::JoinHandle<()>) {
 }
 
 async fn build_state(steam_url: &str, broker_url: &str, db: &TestDb) -> AppState {
-    let mut config = Config::default();
-    config.discord_bot_token = String::new();
-    config.steam_bridge_db_path = String::new();
-    config.backend_allowed_hosts = "localhost".to_string();
-    config.steam_bot_base_url = steam_url.to_string();
-    config.steam_bot_internal_token = "test-token".to_string();
-    config.discord_master_broker_base_url = broker_url.to_string();
-    config.discord_master_broker_token = "broker-token".to_string();
-    config.scrim_announce_channel_id = 555;
+    let config = Config {
+        discord_bot_token: String::new(),
+        steam_bridge_db_path: String::new(),
+        backend_allowed_hosts: "localhost".to_string(),
+        steam_bot_base_url: steam_url.to_string(),
+        steam_bot_internal_token: "test-token".to_string(),
+        discord_master_broker_base_url: broker_url.to_string(),
+        discord_master_broker_token: "broker-token".to_string(),
+        scrim_announce_channel_id: 555,
+        ..Config::default()
+    };
     AppState::build(db.pool().clone(), Arc::new(config))
         .await
         .expect("state build")
