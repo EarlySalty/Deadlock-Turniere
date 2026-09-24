@@ -33,7 +33,6 @@ jobs:
           repository: EarlySalty/Deadlock-Bots
           ref: main
           path: Deadlock-Bots
-          ssh-key: ${{ secrets.CENTRAL_DB_DEPLOY_KEY }}
           persist-credentials: false
 
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87
