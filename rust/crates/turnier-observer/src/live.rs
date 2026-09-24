@@ -221,23 +221,17 @@ impl LiveAccumulator {
                 .last_stat_change_at
                 .is_some_and(|at| now.signed_duration_since(at).num_seconds() <= 15);
             let kills_recent = if recent_window {
-                (controller.kills - controller.previous_kills)
-                    .max(0)
-                    .min(255) as u8
+                (controller.kills - controller.previous_kills).clamp(0, 255) as u8
             } else {
                 0
             };
             let assists_recent = if recent_window {
-                (controller.assists - controller.previous_assists)
-                    .max(0)
-                    .min(255) as u8
+                (controller.assists - controller.previous_assists).clamp(0, 255) as u8
             } else {
                 0
             };
             let deaths_recent = if recent_window {
-                (controller.deaths - controller.previous_deaths)
-                    .max(0)
-                    .min(255) as u8
+                (controller.deaths - controller.previous_deaths).clamp(0, 255) as u8
             } else {
                 0
             };
