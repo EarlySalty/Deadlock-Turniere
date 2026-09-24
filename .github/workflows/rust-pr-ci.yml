@@ -1,0 +1,69 @@
+name: "Rust PR CI"
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "rust/**"
+      - ".github/workflows/rust-pr-ci.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: turniere-rust-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  rust:
+    name: "Rust workspace and isolated PostgreSQL"
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - name: Checkout Turniere
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: Deadlock-Turniere
+          persist-credentials: false
+
+      - name: Checkout central DB dependency
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: EarlySalty/Deadlock-Bots
+          ref: main
+          path: Deadlock-Bots
+          ssh-key: ${{ secrets.CENTRAL_DB_DEPLOY_KEY }}
+          persist-credentials: false
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy,rustfmt
+
+      - name: PostgreSQL client for isolated DB readiness
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends postgresql-client
+
+      - name: Format
+        working-directory: Deadlock-Turniere/rust
+        run: cargo fmt --all -- --check
+
+      - name: Clippy
+        working-directory: Deadlock-Turniere/rust
+        env:
+          SQLX_OFFLINE: "true"
+        run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
+
+      - name: Full tests against throwaway central PostgreSQL
+        run: >
+          Deadlock-Bots/rust/scripts/central_test_db.sh
+          cargo test
+          --manifest-path
+          ${{ github.workspace }}/Deadlock-Turniere/rust/Cargo.toml
+          --workspace
+          --features
+          testing
+          --locked
+          --
+          --include-ignored
