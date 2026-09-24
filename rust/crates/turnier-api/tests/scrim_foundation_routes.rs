@@ -66,18 +66,20 @@ fn state_with_pool_broker_and_signup_role(
     broker_base_url: Option<&str>,
     signup_role_id: Option<i64>,
 ) -> AppState {
-    let mut config = Config::default();
-    config.turnier_internal_api_token = "internal-token".to_string();
-    config.discord_bot_token = String::new();
-    config.discord_master_broker_base_url = broker_base_url.unwrap_or_default().to_string();
-    config.discord_master_broker_token = broker_base_url
-        .map(|_| "broker-token".to_string())
-        .unwrap_or_default();
-    config.scrim_signup_role_id = signup_role_id;
-    config.scrim_reserve_role_id = None;
-    config.steam_bridge_db_path = String::new();
-    config.backend_allowed_hosts = "localhost".to_string();
-    config.discord_mod_role_ids = "99".to_string();
+    let config = Config {
+        turnier_internal_api_token: "internal-token".to_string(),
+        discord_bot_token: String::new(),
+        discord_master_broker_base_url: broker_base_url.unwrap_or_default().to_string(),
+        discord_master_broker_token: broker_base_url
+            .map(|_| "broker-token".to_string())
+            .unwrap_or_default(),
+        scrim_signup_role_id: signup_role_id,
+        scrim_reserve_role_id: None,
+        steam_bridge_db_path: String::new(),
+        backend_allowed_hosts: "localhost".to_string(),
+        discord_mod_role_ids: "99".to_string(),
+        ..Config::default()
+    };
     let config = Arc::new(config);
 
     let role_sets = turnier_auth::RoleSets::from_config(&config);

@@ -589,11 +589,21 @@ async fn invalid_proposal_transition_returns_conflict() {
         &caster_token,
         Method::POST,
         &format!("/api/admin/proposals/{proposal_id}/event"),
-        Some(json!({ "event": "approve" })),
+        // Expire is a supported event, but Draft -> Expired is not permitted.
+        // Approve is rejected earlier by the separate human-approval gate.
+        Some(json!({ "event": "expire" })),
     )
     .await;
     assert_eq!(status, StatusCode::CONFLICT);
     assert_eq!(body["detail"], "Dieser Statuswechsel ist nicht möglich");
+    let unchanged = turnier_automatik::proposals::get_proposal(&pool, proposal_id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        unchanged.state,
+        turnier_automatik::proposals::ProposalState::Draft
+    );
 }
 
 #[tokio::test]

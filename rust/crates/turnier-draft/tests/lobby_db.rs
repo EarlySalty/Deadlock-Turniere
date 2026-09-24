@@ -98,28 +98,16 @@ async fn spiele_raum_zu_ende(pool: &Pool, code: &str) {
             Some(2) => &slot2_token,
             other => panic!("unerwarteter Team-Slot nach {runde} Zügen: {other:?}"),
         };
-        let held = HELDEN[runde % HELDEN.len()];
+        let held = turnier_draft::DEADLOCK_HEROES
+            .get(runde)
+            .copied()
+            .expect("genügend unterschiedliche Helden für Bans und Picks");
         take_lobby_action(pool, code, token, held)
             .await
             .expect("gültiger Zug");
     }
     panic!("Draft nach 24 Zügen nicht abgeschlossen");
 }
-
-const HELDEN: [&str; 12] = [
-    "Abrams",
-    "Bebop",
-    "Calico",
-    "Dynamo",
-    "Grey Talon",
-    "Haze",
-    "Holliday",
-    "Infernus",
-    "Ivy",
-    "Kelvin",
-    "Lady Geist",
-    "Lash",
-];
 
 async fn expire_at(pool: &Pool, code: &str, deadline: chrono::DateTime<Utc>) {
     sqlx::query("UPDATE turnier.draft_sessions SET deadline_at = $1 WHERE code = $2")
@@ -220,6 +208,10 @@ async fn quick_lobby_laeuft_mit_captain_tokens_bis_completed() {
     );
     assert_eq!(state.picks_team1.len(), 6);
     assert_eq!(state.picks_team2.len(), 6);
+    // A legacy draft without claimed, ready captains must not provision a lobby.
+    assert_eq!(state.session.lobby_status, "keine");
+    assert!(!state.session.team1_claimed);
+    assert!(!state.session.team2_claimed);
 }
 
 #[tokio::test]

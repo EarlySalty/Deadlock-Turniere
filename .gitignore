@@ -39,3 +39,6 @@ scripts/run_turniere_backend.sh
 
 # Aktive Admin-Konfiguration: nicht durch Git/Deploy überschreiben.
 /config/bot.toml
+
+# Isolated CI verification logs and scratch space
+/.ci-local/

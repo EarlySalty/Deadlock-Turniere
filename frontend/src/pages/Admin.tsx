@@ -23,8 +23,8 @@ import AutomatikPanel from '@/components/admin/automatik/AutomatikPanel'
 import ObserverPanel from '@/components/admin/ObserverPanel'
 import { AUTOMATIK_COPY } from '@/components/admin/automatik/copy'
 import Leitstand from '@/components/admin/Leitstand'
+import { defaultPhaseFor } from '@/components/admin/adminPhase'
 import AdminPhaseNav, {
-  defaultPhaseFor,
   type AdminPhase,
 } from '@/components/admin/AdminPhaseNav'
 import GroupStandings from '@/components/groups/GroupStandings'
@@ -412,7 +412,7 @@ export default function Admin() {
                     <section className="space-y-4">
                       <header>
                         <h2 className="text-lg font-semibold text-foreground">
-                          Voice & Caster
+                          Voice &amp; Caster
                         </h2>
                         <p className="mt-1 text-sm text-muted">
                           Caster-Liste fürs gesamte Turnier pflegen und Voice-Channel-Splits

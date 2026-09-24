@@ -213,28 +213,6 @@ fn hostname_of(value: &str) -> Option<String> {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn hostname_extraction() {
-        assert_eq!(
-            hostname_of("https://example.com/path"),
-            Some("example.com".to_string())
-        );
-        assert_eq!(hostname_of("127.0.0.1:8900"), Some("127.0.0.1".to_string()));
-        assert_eq!(hostname_of("localhost"), Some("localhost".to_string()));
-        assert_eq!(hostname_of(""), None);
-    }
-
-    #[test]
-    fn csv_splitting_trims_and_drops_empty() {
-        let out: Vec<String> = split_csv(" a, b ,, c ").collect();
-        assert_eq!(out, vec!["a", "b", "c"]);
-    }
-}
-
 /// Deterministische Bestandsdefaults für Tests und explizite Konstruktion.
 /// Der Produktionsstart verwendet load_file, nicht Default.
 impl Default for Config {
@@ -316,5 +294,27 @@ impl std::fmt::Debug for Config {
         f.debug_struct("Config")
             .field("schema_version", &self.schema_version)
             .finish_non_exhaustive()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn hostname_extraction() {
+        assert_eq!(
+            hostname_of("https://example.com/path"),
+            Some("example.com".to_string())
+        );
+        assert_eq!(hostname_of("127.0.0.1:8900"), Some("127.0.0.1".to_string()));
+        assert_eq!(hostname_of("localhost"), Some("localhost".to_string()));
+        assert_eq!(hostname_of(""), None);
+    }
+
+    #[test]
+    fn csv_splitting_trims_and_drops_empty() {
+        let out: Vec<String> = split_csv(" a, b ,, c ").collect();
+        assert_eq!(out, vec!["a", "b", "c"]);
     }
 }

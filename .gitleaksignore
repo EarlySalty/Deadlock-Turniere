@@ -1,0 +1,24 @@
+# Reviewed 2026-09-24. Exact historical commit/path/rule/line fingerprints only.
+# No file, directory, rule, future commit or real credential is globally exempted.
+
+# Explicit LOCAL_TEST_SENTINEL_NOT_A_SECRET sent exclusively to a test HTTP server.
+8b3f8023ba032d7adce4d7f8b1dd002d617afeab:rust/crates/turnier-api/tests/http_environment.rs:discord-client-secret:66
+
+# SHA256 source-integrity checksums in historical test evidence, not credentials.
+8b3f8023ba032d7adce4d7f8b1dd002d617afeab:.tasks/2026-09-20-global-toml/test-source-snapshot.json:generic-api-key:43
+8b3f8023ba032d7adce4d7f8b1dd002d617afeab:.tasks/2026-09-20-global-toml/test-source-snapshot.json:generic-api-key:105
+8b3f8023ba032d7adce4d7f8b1dd002d617afeab:.tasks/2026-09-20-global-toml/test-source-snapshot.json:generic-api-key:167
+8b3f8023ba032d7adce4d7f8b1dd002d617afeab:.tasks/2026-09-20-global-toml/test-source-snapshot.json:discord-api-token:124
+8b3f8023ba032d7adce4d7f8b1dd002d617afeab:.tasks/2026-09-20-global-toml/test-final-source-snapshot.json:generic-api-key:44
+8b3f8023ba032d7adce4d7f8b1dd002d617afeab:.tasks/2026-09-20-global-toml/test-final-source-snapshot.json:generic-api-key:106
+8b3f8023ba032d7adce4d7f8b1dd002d617afeab:.tasks/2026-09-20-global-toml/test-final-source-snapshot.json:generic-api-key:168
+8b3f8023ba032d7adce4d7f8b1dd002d617afeab:.tasks/2026-09-20-global-toml/test-final-source-snapshot.json:discord-api-token:125
+
+# Public client-side Cloudflare Web Analytics beacon identifier in delivered HTML.
+1e3344774969bcce83b2288e896eff9ee1f16731:frontend/index.html:generic-api-key:15
+
+# Numerical Discord IDs in database/API test fixtures, not authentication secrets.
+0594c84758332f7d23fd427add09454e7c4ca9dc:rust/crates/turnier-auth/tests/session_db.rs:discord-client-id:44
+32eb81a0fc5aa5b9b4fe6830bcf75cbaaba0a5c4:rust/crates/turnier-discord/tests/notifier_optout.rs:discord-client-id:56
+32eb81a0fc5aa5b9b4fe6830bcf75cbaaba0a5c4:rust/crates/turnier-discord/tests/notifier_optout.rs:discord-client-id:79
+23a400a663ef8e03a22e0deb5c4bb513dcdbbe83:backend/tests/test_profile_routes.py:discord-client-id:40
