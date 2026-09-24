@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import Card from '@/components/ui/Card'
 import Badge from '@/components/ui/Badge'
 import Button from '@/components/ui/Button'
@@ -111,10 +111,7 @@ export default function TournamentManager({
   const [successMessage, setSuccessMessage] = useState('')
   const [deleteConfirmed, setDeleteConfirmed] = useState(false)
 
-  // Reset delete confirmation when tournament changes
-  useEffect(() => {
-    setDeleteConfirmed(false)
-  }, [tournament.id])
+  // Admin keys this component by tournament ID and revision; remount resets confirmation.
 
   const action = STATUS_ACTIONS[tournament.status]
   const isLoading =

@@ -25,7 +25,7 @@ export default tseslint.config(
     ...reactRefresh.configs.vite,
   },
   {
-    files: ['vite.config.ts'],
+    files: ['vite.config.ts', 'tests/**/*.mjs'],
     languageOptions: {
       globals: globals.node,
     },

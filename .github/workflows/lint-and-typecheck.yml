@@ -1,11 +1,7 @@
-name: "Frontend CI"
+name: Frontend CI
 
-# Kein Push-Trigger, das lief bei jedem Commit und war praktisch immer gruen. Auf
-# Pull Requests bleibt er an: sonst waere ein Dependabot-npm-Bump mergebar, ohne
-# dass das Frontend je gebaut hat.
 on:
-  pull_request:
-    branches: [ "main", "master", "develop" ]
+  workflow_call:
   workflow_dispatch:
 
 permissions:
@@ -13,30 +9,35 @@ permissions:
 
 jobs:
   frontend-ci:
-    name: "Frontend CI"
-    runs-on: ubuntu-latest
+    name: Frontend CI
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
       - name: Set up Node.js
         uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
         with:
-          node-version: "24"
-          cache: "npm"
-          cache-dependency-path: frontend/package-lock.json
-
-      - name: Install dependencies
+          node-version: '24.14.1'
+      - name: Install locked dependencies
         working-directory: frontend
         run: npm ci
-
-      - name: Run ESLint
+      - name: ESLint
         working-directory: frontend
-        run: npm run lint
-
-      - name: TypeScript type check
+        run: npm run lint -- --max-warnings=0
+      - name: Additional typecheck script when defined
         working-directory: frontend
-        run: npx tsc --noEmit
-
-      - name: Build frontend
+        run: |
+          if jq -e '.scripts | has("typecheck")' package.json >/dev/null; then
+            npm run typecheck
+          else
+            echo 'No separate typecheck script: the mandatory build runs tsc -b.'
+          fi
+      - name: Functional contract tests
+        working-directory: frontend
+        run: npm test
+      - name: TypeScript project build and Vite bundle
         working-directory: frontend
         run: npm run build

@@ -1,160 +1,400 @@
-name: "Security Scan"
+name: Security Scan
 
-# Der Wochenlauf faengt neue Advisories, die ohne Push aufkommen; Push und
-# Pull Request pruefen den Stand, der tatsaechlich hereinkommt.
+# Required PR Gate must exist even for documentation-only and non-main PRs.
 on:
-  push:
-    branches: [ "main", "master", "develop" ]
   pull_request:
-    branches: [ "main", "master", "develop" ]
+  merge_group:
+  push:
+    branches: [main, master, develop]
   schedule:
-    - cron: "17 4 * * 0"
+    - cron: '17 4 * * 0'
   workflow_dispatch:
 
 permissions:
   contents: read
 
+concurrency:
+  group: security-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  secret-detection:
-    name: "Secret Detection"
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
+  frontend:
+    name: Frontend
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
     steps:
       - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - name: Set up Node.js
+        uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
+        with:
+          node-version: '24.14.1'
+      - name: Install locked dependencies
+        working-directory: frontend
+        run: npm ci
+      - name: ESLint
+        working-directory: frontend
+        run: npm run lint -- --max-warnings=0
+      - name: Additional typecheck script when defined
+        working-directory: frontend
+        run: |
+          if jq -e '.scripts | has("typecheck")' package.json >/dev/null; then
+            npm run typecheck
+          else
+            echo 'No separate typecheck script: the mandatory build runs tsc -b.'
+          fi
+      - name: Functional contract tests
+        working-directory: frontend
+        run: npm test
+      - name: TypeScript project build and Vite bundle
+        working-directory: frontend
+        run: npm run build
+
+  rust:
+    name: Rust workspace and isolated PostgreSQL tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    env:
+      CARGO_BUILD_JOBS: '2'
+      SQLX_OFFLINE: 'true'
+      TURNIER_TEST_DB_CONFIRM: throwaway-only
+    services:
+      postgres:
+        image: timescale/timescaledb@sha256:d592c3111392bf8f6ea82651cc581c5dc650ecb543eef6637c2bf19eeb7e37a2 # 2.17.2-pg16, linux/amd64
+        env:
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: throwaway-only
+          POSTGRES_DB: turniere_ci
+        ports:
+          - 5432/tcp
+        options: >-
+          --health-cmd "pg_isready -U ci -d turniere_ci"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    steps:
+      - name: Checkout Turniere
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          path: Deadlock-Turniere
+          persist-credentials: false
+      - name: Read pinned private dependency revision
+        id: dependency
+        shell: bash
+        run: |
+          revision=$(cat Deadlock-Turniere/.github/ci/central-db-revision.txt)
+          [[ "$revision" =~ ^[0-9a-f]{40}$ ]]
+          printf 'revision=%s\n' "$revision" >> "$GITHUB_OUTPUT"
+      # No privileged token, deploy key or production secret is exposed to PR code.
+      # A missing private-repository entitlement MUST fail, never become a skip.
+      - name: Checkout mandatory database implementation
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: EarlySalty/Deadlock-Bots
+          ref: ${{ steps.dependency.outputs.revision }}
+          path: Deadlock-Bots
+          persist-credentials: false
+      - name: Install pinned Rust toolchain
+        run: rustup toolchain install 1.97.1 --profile minimal --component rustfmt,clippy
+      - name: Format
+        working-directory: Deadlock-Turniere/rust
+        run: cargo +1.97.1 fmt --all -- --check
+      - name: Clippy
+        working-directory: Deadlock-Turniere/rust
+        run: cargo +1.97.1 clippy --workspace --all-targets --locked -- -D warnings
+      - name: Build all targets
+        working-directory: Deadlock-Turniere/rust
+        run: cargo +1.97.1 build --workspace --all-targets --locked
+      - name: All functional and database tests, including ignored tests
+        env:
+          CENTRAL_TEST_DSN: postgres://ci:throwaway-only@127.0.0.1:${{ job.services.postgres.ports['5432'] }}/turniere_ci
+          DEADLOCK_CENTRAL_DSN: postgres://ci:throwaway-only@127.0.0.1:${{ job.services.postgres.ports['5432'] }}/turniere_ci
+        working-directory: Deadlock-Turniere/rust
+        run: cargo +1.97.1 test --workspace --features testing --locked --no-fail-fast -- --include-ignored --test-threads=2
+
+  rust-dependencies:
+    name: Rust dependency audit
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - name: Install verified cargo-audit
+        run: |
+          rustc --edition=2021 .github/ci/install-tool.rs -o "$RUNNER_TEMP/install-tool"
+          "$RUNNER_TEMP/install-tool" cargo-audit "$RUNNER_TEMP/bin"
+      - name: Audit every locked Rust dependency
+        run: '"$RUNNER_TEMP/bin/cargo-audit" audit --file rust/Cargo.lock'
+
+  secret-detection:
+    name: Secret Detection
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout full history
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           fetch-depth: 0
-
+          persist-credentials: false
+      - name: Install verified Gitleaks and counterprobe
+        run: |
+          rustc --edition=2021 .github/ci/install-tool.rs -o "$RUNNER_TEMP/install-tool"
+          "$RUNNER_TEMP/install-tool" gitleaks "$RUNNER_TEMP/bin"
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+          rustc --edition=2021 .github/ci/scanner-probe.rs -o "$RUNNER_TEMP/scanner-probe"
+      - name: Positive, finding and scanner-error controls
+        run: '"$RUNNER_TEMP/scanner-probe" gitleaks'
       - name: Block tracked secret material files
+        shell: bash
         run: |
           forbidden=$(git ls-files | grep -E '(^|/)(\.env(\..*)?|id_rsa|id_dsa|.*\.pem|.*\.key)$' | grep -vE '\.(example|sample|template|dist)$' || true)
           if [ -n "$forbidden" ]; then
-            echo "::error::Tracked secret material files detected:"
-            echo "$forbidden"
+            printf '::error::Tracked secret material files detected:\n%s\n' "$forbidden"
             exit 1
           fi
-
-      - name: Run Gitleaks
-        uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2.3.9
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITLEAKS_ENABLE_SUMMARY: true
+      - name: Scan complete reachable history
+        run: gitleaks git --redact --exit-code 1 --log-opts='--all' --report-format sarif --report-path "$RUNNER_TEMP/gitleaks.sarif" .
+      - name: Upload report only
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: security-gitleaks
+          path: ${{ runner.temp }}/gitleaks.sarif
+          retention-days: 7
 
   javascript-security:
-    name: "JavaScript Dependency Audit"
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
+    name: JavaScript Dependency Audit
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-
+        with:
+          persist-credentials: false
       - name: Set up Node.js
         uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
         with:
-          node-version: "24"
-
-      - name: npm audit (frontend)
+          node-version: '24.14.1'
+      - name: Install complete locked dependency tree
         working-directory: frontend
-        run: |
-          npm ci
-          npm audit --audit-level=high
+        run: npm ci
+      - name: Block HIGH and CRITICAL dependencies, including development tools
+        working-directory: frontend
+        run: npm audit --audit-level=high
 
   semgrep-sast:
-    name: "Semgrep SAST"
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      security-events: write
-    container:
-      image: semgrep/semgrep:1.151.0
+    name: Semgrep SAST
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-
-      - name: Run Semgrep
-        run: |
-          semgrep scan \
-            --config p/default \
-            --exclude node_modules \
-            --exclude .venv \
-            --exclude venv \
-            --output semgrep.sarif \
-            --sarif
-
-      - name: Upload Semgrep SARIF
-        if: always() && hashFiles('semgrep.sarif') != ''
-        uses: github/codeql-action/upload-sarif@95e58e9a2cdfd71adc6e0353d5c52f41a045d225 # v4
         with:
-          sarif_file: semgrep.sarif
-          category: semgrep
+          persist-credentials: false
+      - name: Prepare isolated pinned Semgrep
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/bin"
+          docker pull semgrep/semgrep@sha256:44dd022c29d4f881a939f7281b4ba8855cb940a2dd272883908d8947325a4ba7
+          cat > "$RUNNER_TEMP/bin/semgrep" <<'WRAPPER'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          exec docker run --rm --network none --user "$(id -u):$(id -g)" \
+            -e HOME=/tmp -e SEMGREP_SEND_METRICS=off \
+            -v "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE:ro" \
+            -v "$RUNNER_TEMP:$RUNNER_TEMP" -w "$GITHUB_WORKSPACE" \
+            --entrypoint semgrep \
+            semgrep/semgrep@sha256:44dd022c29d4f881a939f7281b4ba8855cb940a2dd272883908d8947325a4ba7 "$@"
+          WRAPPER
+          chmod +x "$RUNNER_TEMP/bin/semgrep"
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+          rustc --edition=2021 .github/ci/scanner-probe.rs -o "$RUNNER_TEMP/scanner-probe"
+      - name: Positive, finding and malformed-rule controls
+        env:
+          TMPDIR: ${{ runner.temp }}
+        run: '"$RUNNER_TEMP/scanner-probe" semgrep'
+      - name: Block ERROR findings and scanner errors
+        run: |
+          semgrep scan --config .github/ci/semgrep-default.yml \
+            --error --strict --severity ERROR --metrics=off --disable-version-check \
+            --exclude node_modules --exclude target --exclude dist --exclude .ci-local \
+            --exclude .github/ci/semgrep-default.yml \
+            --sarif --output "$RUNNER_TEMP/semgrep.sarif" .
+      - name: Upload report only
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: security-semgrep
+          path: ${{ runner.temp }}/semgrep.sarif
+          retention-days: 7
 
   codeql:
-    name: "CodeQL Analysis"
-    runs-on: ubuntu-latest
-    permissions:
-      security-events: write
-      contents: read
-      actions: read
-    strategy:
-      fail-fast: false
-      matrix:
-        language: [javascript-typescript]
+    name: CodeQL Analysis
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-
-      - name: Set up Node.js
-        if: matrix.language == 'javascript-typescript'
-        uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
         with:
-          node-version: "24"
-
+          persist-credentials: false
       - name: Initialize CodeQL
         uses: github/codeql-action/init@c10b8064de6f491fea524254123dbe5e09572f13 # v4
         with:
-          languages: ${{ matrix.language }}
+          languages: javascript-typescript
           build-mode: none
-
-      - name: Perform CodeQL Analysis
+          queries: security-extended
+      - name: Analyze without privileged reporting
         uses: github/codeql-action/analyze@c10b8064de6f491fea524254123dbe5e09572f13 # v4
         with:
-          category: "/language:${{ matrix.language }}"
+          category: /language:javascript-typescript
+          upload: false
+          output: ${{ runner.temp }}/codeql
+      - name: Block HIGH and CRITICAL CodeQL findings
+        shell: bash
+        run: |
+          test -s "$RUNNER_TEMP/codeql/javascript.sarif"
+          jq -e '
+            (.runs | length > 0) and
+            all(.runs[];
+              .tool.driver.rules as $rules |
+              all(.results[]?;
+                .ruleIndex as $i |
+                (($rules[$i].properties["security-severity"] // "0" | tonumber) < 7.0)))
+          ' "$RUNNER_TEMP/codeql/javascript.sarif"
+      - name: Upload report only
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: security-codeql
+          path: ${{ runner.temp }}/codeql/*.sarif
+          retention-days: 7
 
   trivy-scan:
-    name: "Trivy Filesystem Scan"
-    runs-on: ubuntu-latest
+    name: Trivy Filesystem Scan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - name: Install verified Trivy and counterprobe
+        run: |
+          rustc --edition=2021 .github/ci/install-tool.rs -o "$RUNNER_TEMP/install-tool"
+          "$RUNNER_TEMP/install-tool" trivy "$RUNNER_TEMP/bin"
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+          rustc --edition=2021 .github/ci/scanner-probe.rs -o "$RUNNER_TEMP/scanner-probe"
+      - name: Positive, HIGH finding and scanner-error controls
+        run: '"$RUNNER_TEMP/scanner-probe" trivy'
+      - name: Block HIGH and CRITICAL vulnerabilities, misconfigurations and secrets
+        run: |
+          trivy fs --scanners vuln,misconfig,secret --severity HIGH,CRITICAL --include-dev-deps \
+            --exit-code 1 --format sarif --output "$RUNNER_TEMP/trivy.sarif" \
+            --skip-dirs .git,frontend/node_modules,rust/target,frontend/dist,.ci-local .
+      - name: Upload report only
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: security-trivy
+          path: ${{ runner.temp }}/trivy.sarif
+          retention-days: 7
+
+  workflow-policy:
+    name: Workflow policy and gate counterprobes
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - name: Install verified workflow linters
+        run: |
+          rustc --edition=2021 .github/ci/install-tool.rs -o "$RUNNER_TEMP/install-tool"
+          "$RUNNER_TEMP/install-tool" actionlint "$RUNNER_TEMP/bin"
+          "$RUNNER_TEMP/install-tool" zizmor "$RUNNER_TEMP/bin"
+      - name: actionlint
+        run: '"$RUNNER_TEMP/bin/actionlint" -color'
+      - name: zizmor
+        run: '"$RUNNER_TEMP/bin/zizmor" --offline --min-severity low .github/workflows'
+      - name: Test exact gate decision, including missing and skipped results
+        run: |
+          rustc --edition=2021 --test .github/ci/gate.rs -o "$RUNNER_TEMP/gate-tests"
+          "$RUNNER_TEMP/gate-tests"
+          rustc --edition=2021 .github/ci/gate.rs -o "$RUNNER_TEMP/gate"
+          if env -i "$RUNNER_TEMP/gate"; then
+            echo '::error::Gate accepted absent mandatory results'
+            exit 1
+          fi
+      - name: Verify active project inventory
+        shell: bash
+        run: |
+          mapfile -t manifests < <(git ls-files 'package.json' '**/package.json')
+          [[ "${manifests[*]}" == 'frontend/package.json' ]] || {
+            echo '::error::npm project inventory changed; add its mandatory CI before merging'
+            exit 1
+          }
+          test -s frontend/package-lock.json
+          test -s rust/Cargo.lock
+          test -s rust/Cargo.toml
+
+  required-pr-gate:
+    name: Required PR Gate
+    if: ${{ always() }}
+    needs: [frontend, rust, rust-dependencies, secret-detection, javascript-security, semgrep-sast, codeql, trivy-scan, workflow-policy]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Checkout gate implementation
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - name: Reject workflow cancellation
+        id: cancellation
+        if: ${{ cancelled() }}
+        run: exit 1
+      - name: Require every mandatory result to be success
+        if: ${{ always() }}
+        env:
+          FRONTEND_RESULT: ${{ needs.frontend.result }}
+          RUST_RESULT: ${{ needs.rust.result }}
+          RUST_DEPS_RESULT: ${{ needs.rust-dependencies.result }}
+          GITLEAKS_RESULT: ${{ needs.secret-detection.result }}
+          NPM_RESULT: ${{ needs.javascript-security.result }}
+          SEMGREP_RESULT: ${{ needs.semgrep-sast.result }}
+          CODEQL_RESULT: ${{ needs.codeql.result }}
+          TRIVY_RESULT: ${{ needs.trivy-scan.result }}
+          WORKFLOWS_RESULT: ${{ needs.workflow-policy.result }}
+          WORKFLOW_CANCELLED: ${{ steps.cancellation.outcome != 'skipped' }}
+        run: |
+          rustc --edition=2021 .github/ci/gate.rs -o "$RUNNER_TEMP/gate"
+          "$RUNNER_TEMP/gate"
+
+  reporting:
+    name: Advisory SARIF reporting
+    if: ${{ always() && !cancelled() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
+    needs: [secret-detection, semgrep-sast, codeql, trivy-scan]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
     permissions:
       contents: read
       security-events: write
     steps:
-      - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-
-      - name: Trivy filesystem scan
-        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # master
+      # No checkout, install scripts or PR executables in the privileged reporting job.
+      - name: Download scanner reports
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
-          scan-type: 'fs'
-          scan-ref: '.'
-          format: 'sarif'
-          output: 'trivy-fs.sarif'
-          severity: 'HIGH,CRITICAL'
-          exit-code: 0
-
-      - name: Upload Trivy SARIF
-        if: always() && hashFiles('trivy-fs.sarif') != ''
-        continue-on-error: true
-        uses: github/codeql-action/upload-sarif@e46ed2cbd01164d986452f91f178727624ae40d7 # v4
+          pattern: security-*
+          path: reports
+          merge-multiple: true
+      - name: Publish SARIF independently of blocking decisions
+        uses: github/codeql-action/upload-sarif@c10b8064de6f491fea524254123dbe5e09572f13 # v4
         with:
-          sarif_file: 'trivy-fs.sarif'
-          category: 'trivy-filesystem'
-
-      - name: Upload Trivy artifact
-        if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: trivy-report
-          path: trivy-fs.sarif
-          if-no-files-found: ignore
-          retention-days: 30
+          sarif_file: reports
+          wait-for-processing: true

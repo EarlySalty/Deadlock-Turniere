@@ -210,9 +210,8 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore = "braucht die migrierte Wegwerf-DB aus central_test_db.sh"]
     async fn migrierte_zentrale_db_erfuellt_den_draft_schema_vertrag() {
-        let pool = turnier_db::connect_central()
+        let pool = turnier_db::test_pool()
             .await
             .expect("Wegwerf-DB verbinden");
         verify_central_draft_schema(&pool)
