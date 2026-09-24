@@ -35,7 +35,7 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
           mapfile -t changed < <(
-            git diff --name-only "$BASE_SHA" HEAD -- frontend |
+            git diff --name-only --diff-filter=ACMR "$BASE_SHA" HEAD -- frontend |
               grep -E '\.(cjs|mjs|js|jsx|ts|tsx)$' || true
           )
           if [ "${#changed[@]}" -eq 0 ]; then
