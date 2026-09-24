@@ -24,14 +24,16 @@ async fn setup() -> (Router, TestDb, Pool, String) {
     let db = test_pool().await.expect("central test pool");
     let pool = db.pool().clone();
 
-    let mut config = Config::default();
-    config.discord_admin_role_ids = "admin-role".to_string();
-    config.discord_tournament_admin_role_ids = String::new();
-    config.discord_mod_role_ids = "mod-role".to_string();
-    config.discord_bot_token = String::new();
-    config.steam_bridge_db_path = String::new();
-    config.backend_allowed_hosts = "localhost".to_string();
-    config.discord_oauth_internal_api_token = "internal-token".to_string();
+    let config = Config {
+        discord_admin_role_ids: "admin-role".to_string(),
+        discord_tournament_admin_role_ids: String::new(),
+        discord_mod_role_ids: "mod-role".to_string(),
+        discord_bot_token: String::new(),
+        steam_bridge_db_path: String::new(),
+        backend_allowed_hosts: "localhost".to_string(),
+        discord_oauth_internal_api_token: "internal-token".to_string(),
+        ..Config::default()
+    };
 
     let state = AppState::build(pool.clone(), Arc::new(config))
         .await
