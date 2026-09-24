@@ -29,7 +29,7 @@ Workflow-Pfadfilter und keine geheimnisabhängig übersprungenen Pflichtjobs.
 | Semgrep SAST | Semgrep 1.173.0 mit `--error --strict --severity ERROR`; ERROR-Findings und Scannerfehler blockieren |
 | CodeQL Analysis | JavaScript/TypeScript mit `security-extended`; Analysefehler und Findings mit Security-Severity mindestens 7.0 blockieren |
 | Trivy Filesystem Scan | Trivy 0.73.0, `vuln,misconfig,secret`, HIGH/CRITICAL, Entwicklungsabhängigkeiten eingeschlossen, `--exit-code 1`; auch Scanner-/Downloadfehler blockieren |
-| Workflow policy | actionlint 1.7.12, zizmor 1.30.1 ab LOW, Projektinventar und negative Gate-Gegenproben |
+| Workflow policy | actionlint 1.7.12, zizmor 1.30.1 ab LOW mit `--strict-collection`, expliziter `regular`-Persona und Plain-Ausgabe, Projektinventar und negative Gate-Gegenproben |
 
 Das Frontend definiert `lint`, `test` und `build`, aber derzeit kein separates
 `typecheck`. Der verpflichtende Build führt tatsächlich `tsc -b && vite build`
@@ -130,6 +130,15 @@ Cargo-Audit-Warnungen zu Wartungsstatus, Yank oder Unsoundness ohne als
 Vulnerability klassifizierten Eintrag. Diese Grenzen sind keine Behauptung,
 dass entsprechende Befunde harmlos wären.
 
+zizmor läuft offline mit der expliziten Standard-Persona `regular`, Plain-Ausgabe
+und Mindestschweregrad LOW. INFO sowie Befunde, die nur zu `pedantic` oder
+`auditor` gehören, sind damit nicht blockierend; netzwerkabhängige Audits laufen
+nicht. Der lokale Standardlauf meldete zwei gefilterte Hinweise. Das ist kein
+Nachweis eines ungefilterten Auditor-Laufs. Es gibt keine repo-spezifische
+zizmor-Allowlist. `--strict-collection` verhindert, dass ein nicht lesbarer oder
+fehlerhaft geparster Workflow als bloße Warnung durchgeht. Die Plain-Ausgabe
+bewahrt die Finding-Exit-Codes; zizmor-SARIF ist nicht die Gate-Entscheidung.
+
 `.gitleaksignore` enthält 14 einzeln geprüfte historische Fingerprints, jeweils
 begrenzt auf Commit, Datei, Regel und Zeile: acht SHA256-Dateiprüfsummen aus
 Testnachweisen, vier numerische Discord-Test-IDs, einen expliziten lokalen
@@ -174,6 +183,44 @@ die externen Pfadabhängigkeiten und deren fremden Workspace einbeziehen würde.
 CI-Scratch werden nicht als zusätzlicher Quellcode gescannt; ihre Lockfiles bleiben
 im Scan. Der minimale Namensfilter für erlaubte `.env.example`-Dateien erlaubt
 keine darin enthaltenen echten Secrets.
+
+## Funktionale Regressionen aus dem vollständigen Testlauf
+
+Der erste isolierte Gesamtlauf führte 548 Rust-Tests aus: 542 bestanden,
+sechs schlugen fehl, kein Test wurde ignoriert. Die Ursachen wurden nicht durch
+Skips oder gelockerte Statusprüfungen versteckt. Der API-Konflikttest verwendet
+jetzt ein zulässiges Ereignis (`expire`) im unzulässigen Zustand `Draft` und
+verlangt weiterhin HTTP 409 sowie einen unveränderten Datenbankzustand. Die
+separate Sperre für direkte Freigaben über `approve` bleibt bestehen.
+
+Ein gemeinsamer Draft-Fehler betraf drei Lobby-Ablauftests: Neue Warteräume haben
+wie Legacy-Drafts zunächst `lobby_status = 'keine'`. Dieser Standardwert durfte
+deshalb nicht als alleinige Unterscheidung der beiden Abläufe dienen. Der
+Abschluss merkt die Erstellung jetzt nur für freie Räume mit beiden belegten,
+bereiten Captain-Plätzen und noch nicht angeforderter Lobby vor. Legacy-Drafts
+bleiben ausgeschlossen; dies wird zusätzlich am abgeschlossenen Legacy-Draft
+assertiert. Die Tests verwenden ausschließlich lokale Steam-/Discord-Doubles.
+
+Der Rematch-Testhelfer wählt für Bans und Picks unterschiedliche gültige Helden,
+statt nach zwölf Aktionen bereits verwendete Helden zu wiederholen. Der
+Discord-Texttest prüft den bestehenden Leerwert `keine` statt eines veralteten
+Gedankenstrichs und prüft weiterhin die Ausgabe nicht leerer Listen. Hier wurde
+kein Produkttext umgestellt.
+
+Der erneute vollständige lokale Lauf mit Rust 1.97.1 war erfolgreich:
+`cargo fmt -- --check`, Clippy mit `--workspace --all-targets --locked -- -D warnings`,
+`cargo build --workspace --all-targets --locked` und
+`cargo test --workspace --features testing --locked --no-fail-fast -- --include-ignored --test-threads=2`
+endeten jeweils mit Exit 0. Die vier korrigierten Rust-Dateien waren dabei im
+getesteten Worktree enthalten. Die Datenbank war eine eigens angelegte,
+ressourcenbegrenzte Wegwerf-Instanz ohne Daten-Volume oder Produktionsdaten.
+
+Frontend-Installation, Lint, 29 Tests, TypeScript/Vite-Build und npm audit waren
+lokal ebenfalls erfolgreich. Dieser lokale Node-Lauf verwendete 22.23.2; der
+maßgebliche GitHub-Frontendjob verwendet die gepinnte Version 24.14.1 und war am
+Head `076e4015243c2ef147c2b7c6c1ec554c040a066e` ebenfalls erfolgreich.
+Dieser lokale Nachweis ersetzt den weiterhin fehlgeschlagenen GitHub-Zugriff
+auf die private Datenbankbibliothek nicht.
 
 ## GitHub-Schutzstatus und Abnahme
 

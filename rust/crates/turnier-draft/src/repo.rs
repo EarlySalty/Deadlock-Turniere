@@ -1032,7 +1032,11 @@ async fn advance_lobby_session(
              status = CASE WHEN $2 THEN 'completed' ELSE status END, \
              completed_at = CASE WHEN $2 THEN $3 ELSE completed_at END, \
              team1_reserve_left = $4, team2_reserve_left = $5, deadline_at = $6, \
-             lobby_status = CASE WHEN $2 AND lobby_status <> 'keine' \
+             lobby_status = CASE WHEN $2 AND bracket_match_id IS NULL \
+                                  AND team1_claimed_at IS NOT NULL \
+                                  AND team2_claimed_at IS NOT NULL \
+                                  AND team1_ready AND team2_ready \
+                                  AND lobby_status = 'keine' \
                             THEN 'angefordert' ELSE lobby_status END \
          WHERE id = $7 AND current_action_index = $8 AND status = 'in_progress'",
     )

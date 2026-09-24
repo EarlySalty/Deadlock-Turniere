@@ -334,7 +334,7 @@ jobs:
       - name: actionlint
         run: '"$RUNNER_TEMP/bin/actionlint" -color'
       - name: zizmor
-        run: '"$RUNNER_TEMP/bin/zizmor" --offline --min-severity low .github/workflows'
+        run: '"$RUNNER_TEMP/bin/zizmor" --offline --strict-collection --persona=regular --format=plain --min-severity low .github/workflows'
       - name: Test exact gate decision, including missing and skipped results
         run: |
           rustc --edition=2021 --test .github/ci/gate.rs -o "$RUNNER_TEMP/gate-tests"
