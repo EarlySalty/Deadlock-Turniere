@@ -3,9 +3,6 @@ name: "Frontend CI"
 on:
   pull_request:
     branches: [ "main", "master", "develop" ]
-    paths:
-      - "frontend/**"
-      - ".github/workflows/lint-and-typecheck.yml"
   workflow_dispatch:
 
 permissions:
