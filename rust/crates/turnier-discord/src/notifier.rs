@@ -897,7 +897,7 @@ fn routine_announcement_payload(tournament_id: i64, channel_id: i64, content: &s
     })
 }
 
-/// Wie [`mentions`], aber leere Liste → `"—"` (für die Team-Felder).
+/// Wie [`mentions`], aber leere Liste → `"keine"` (für die Team-Felder).
 fn mentions_or_dash(ids: &[String]) -> String {
     let raw: Vec<String> = ids.iter().map(|id| format!("<@{id}>")).collect();
     if raw.is_empty() {
@@ -972,7 +972,13 @@ mod tests {
     fn mentions_baut_korrekt() {
         assert_eq!(mentions(&["1".into(), "2".into()]), "<@1> <@2>");
         assert_eq!(mentions(&[]), "");
-        assert_eq!(mentions_or_dash(&[]), "—");
+        assert_eq!(mentions_or_dash(&[]), "keine");
+        assert_eq!(mentions_or_dash(&["1".into(), "2".into()]), "<@1> <@2>");
+        assert_eq!(list_or_dash(&[]), "keine");
+        assert_eq!(
+            list_or_dash(&["Team Eins".into(), "Team Zwei".into()]),
+            "Team Eins, Team Zwei"
+        );
     }
 
     #[test]
