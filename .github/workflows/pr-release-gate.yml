@@ -96,9 +96,19 @@ jobs:
                 filename.startsWith(".github/") ||
                 filename.startsWith("scripts/ci/") ||
                 /^rust\/scripts\/(?:central_ci|central_fresh_schema|central_test_db|check)\.sh$/.test(filename);
-              const protectedChanges = changedFiles
-                .map((file) => file.filename)
-                .filter(protectedPolicyPath);
+              const incompleteFileData = changedFiles.some((file) =>
+                typeof file.filename !== "string" || !file.filename ||
+                (file.status === "renamed" &&
+                  (typeof file.previous_filename !== "string" || !file.previous_filename)),
+              );
+              if (incompleteFileData) {
+                core.notice(`PR #${pull_number}: incomplete file or rename metadata requires manual review.`);
+                continue;
+              }
+              // A rename removes policy from its old path even when the new path is ordinary code.
+              const protectedChanges = [...new Set(changedFiles
+                .flatMap((file) => [file.filename, file.previous_filename])
+                .filter((filename) => typeof filename === "string" && protectedPolicyPath(filename)))];
               if (protectedChanges.length) {
                 core.notice(
                   `PR #${pull_number}: trusted manual bootstrap required for CI/release-policy files: ${protectedChanges.join(", ")}`,

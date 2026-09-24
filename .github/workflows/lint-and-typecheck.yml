@@ -25,6 +25,9 @@ jobs:
           cache: "npm"
           cache-dependency-path: frontend/package-lock.json
 
+      - name: Release-Gate mit Negativfällen prüfen
+        run: node --test .github/ci/pr-release-gate.test.cjs
+
       - name: Install dependencies
         working-directory: frontend
         run: npm ci
