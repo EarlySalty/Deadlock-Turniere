@@ -155,10 +155,18 @@ Die gefundenen Schwachstellen in quinn-proto und rustls wurden durch kompatible
 Lockfile-Updates beseitigt. Auch die gemeldeten anyhow-/event-listener-Probleme
 wurden aktualisiert, nicht ausgeblendet.
 
-Die CodeQL-Entscheidung steht in `ci/codeql-policy.jq` und wird gegen 15 synthetische
-SARIF-Eingaben getestet. Fehlende Runs, fehlende Ergebnisse, unbekannte Regeln,
-fehlende oder ungültige Severity, Scannerfehler und kaputtes JSON sind Fehler.
-Ein fehlender Severity-Wert wird nicht als Null interpretiert.
+Die CodeQL-Entscheidung steht in `.github/ci/codeql-policy.jq` und wird gegen 36
+synthetische SARIF-Eingaben getestet. Die Regelauflösung berücksichtigt sowohl
+`tool.driver.rules` als auch die von CodeQL verwendeten Query-Packs in
+`tool.extensions[].rules`. Der echte Bericht aus Run `35945224276` enthält
+102 Regeln in einem Query-Pack, keine Driver-Regeln und keine Findings.
+
+Fehlende Runs, Ergebnisse oder erfolgreiche Scanner-Aufrufe, unbekannte oder
+mehrdeutige Regeln, fehlende oder ungültige Severity, Fehlerbenachrichtigungen
+und kaputtes JSON blockieren. `jq --slurp --exit-status` verlangt genau ein
+JSON-Dokument; ein nachgestelltes sauberes Dokument kann einen fehlgeschlagenen
+Bericht nicht überdecken. Ein fehlender Severity-Wert wird nicht als Null
+interpretiert. Sechs positive und 30 negative Gegenproben prüfen diesen Vertrag.
 
 Rust-Formatierung prüft die 16 Mitglieder des aktuellen virtuellen Workspaces mit
 `cargo fmt -- --check`. `--all` wird hier bewusst nicht verwendet, weil es auch
