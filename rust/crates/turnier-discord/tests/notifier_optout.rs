@@ -10,9 +10,11 @@ async fn fresh_db() -> TestDb {
 }
 
 fn notifier(pool: Pool) -> DiscordNotifier {
-    let mut config = Config::default();
-    config.discord_master_broker_base_url = String::new();
-    config.discord_master_broker_token = String::new();
+    let config = Config {
+        discord_master_broker_base_url: String::new(),
+        discord_master_broker_token: String::new(),
+        ..Config::default()
+    };
     DiscordNotifier::new(BrokerClient::from_config(&config), pool, &config)
 }
 

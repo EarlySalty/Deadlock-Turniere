@@ -180,7 +180,6 @@ async fn valid_result_ref_retry_becomes_worker_eligible() {
             match_id,
             ResultFetchRequest {
                 match_id_ref: Some(result_ref_id.to_string()),
-                ..ResultFetchRequest::default()
             },
         )
         .await

@@ -47,10 +47,12 @@ async fn request(
 #[tokio::test]
 async fn public_comp_flow_enforces_capabilities_capacity_and_preferences() {
     let db = turnier_db::test_pool().await.unwrap();
-    let mut config = Config::default();
-    config.backend_allowed_hosts = "localhost".into();
-    config.discord_bot_token.clear();
-    config.steam_bridge_db_path.clear();
+    let config = Config {
+        backend_allowed_hosts: "localhost".into(),
+        discord_bot_token: String::new(),
+        steam_bridge_db_path: String::new(),
+        ..Config::default()
+    };
     let state = AppState::build(db.pool().clone(), Arc::new(config))
         .await
         .unwrap();
