@@ -125,7 +125,7 @@ keine Credentials. Es gibt kein `pull_request_target`, keine produktiven Secrets
 keinen Self-hosted Runner und kein LLM-/Copilot-Merge-Gate.
 
 Bewusst nicht blockierend sind SARIF-/Artefakt-Verfügbarkeit, Semgrep WARNING/INFO,
-CodeQL-Findings unter 7.0, npm-/Trivy-Schweregrade unter HIGH und die regulären
+CodeQL-Findings mit gültigem Schweregrad unter 7.0, npm-/Trivy-Schweregrade unter HIGH und die regulären
 Cargo-Audit-Warnungen zu Wartungsstatus, Yank oder Unsoundness ohne als
 Vulnerability klassifizierten Eintrag. Diese Grenzen sind keine Behauptung,
 dass entsprechende Befunde harmlos wären.
@@ -141,8 +141,28 @@ Weitere enge Ausnahme: Semgrep scannt sein eigenes versioniertes Regel-Datenbund
 als Anwendungsquellcode. Vier dort enthaltene Erkennungsmuster für Reverse Shells
 wurden sonst als ausführbare Reverse Shells gemeldet. Die Datei wird weiterhin als
 Regelkonfiguration geladen und strikt validiert. Es gibt keine pauschale Ausnahme
-für den Anwendungscode, keine Vulnerability-ID-Allowlist und keine ausgeschaltete
-Scannerfehlerbehandlung. Generierte Abhängigkeiten, Build-Ausgaben und lokaler
+für den Anwendungscode und keine ausgeschaltete Scannerfehlerbehandlung.
+
+Eine befristete Cargo-Audit-Ausnahme betrifft ausschließlich `RUSTSEC-2023-0071`
+(Marvin/RSA, im Lockfile `rsa 0.9.10`). Der Eintrag stammt aus der optionalen
+SQLx/MySQL-Auflösung und ist in keinem ausgeführten Rust-Target vorhanden:
+`cargo tree --workspace --all-features --target all --locked --invert rsa` liefert
+keine Abhängigkeitskette. Der Pflichtjob prüft genau diese Bedingung erneut und
+blockiert bei jeder Aktivierung von RSA. Der Audit-Job blockiert außerdem ab
+1. Dezember 2026, bis die Ausnahme erneut geprüft oder entfernt wurde. Das ist
+keine Behauptung, RSA sei repariert; alle anderen Advisory-IDs bleiben blockierend.
+Die gefundenen Schwachstellen in quinn-proto und rustls wurden durch kompatible
+Lockfile-Updates beseitigt. Auch die gemeldeten anyhow-/event-listener-Probleme
+wurden aktualisiert, nicht ausgeblendet.
+
+Die CodeQL-Entscheidung steht in `ci/codeql-policy.jq` und wird gegen 15 synthetische
+SARIF-Eingaben getestet. Fehlende Runs, fehlende Ergebnisse, unbekannte Regeln,
+fehlende oder ungültige Severity, Scannerfehler und kaputtes JSON sind Fehler.
+Ein fehlender Severity-Wert wird nicht als Null interpretiert.
+
+Rust-Formatierung prüft die 16 Mitglieder des aktuellen virtuellen Workspaces mit
+`cargo fmt -- --check`. `--all` wird hier bewusst nicht verwendet, weil es auch
+die externen Pfadabhängigkeiten und deren fremden Workspace einbeziehen würde. Generierte Abhängigkeiten, Build-Ausgaben und lokaler
 CI-Scratch werden nicht als zusätzlicher Quellcode gescannt; ihre Lockfiles bleiben
 im Scan. Der minimale Namensfilter für erlaubte `.env.example`-Dateien erlaubt
 keine darin enthaltenen echten Secrets.

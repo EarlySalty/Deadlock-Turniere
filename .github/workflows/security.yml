@@ -98,7 +98,17 @@ jobs:
         run: rustup toolchain install 1.97.1 --profile minimal --component rustfmt,clippy
       - name: Format
         working-directory: Deadlock-Turniere/rust
-        run: cargo +1.97.1 fmt --all -- --check
+        run: cargo +1.97.1 fmt -- --check
+      - name: Prove the narrowly excepted RSA lockfile entry is not executable
+        working-directory: Deadlock-Turniere/rust
+        shell: bash
+        run: |
+          cargo +1.97.1 tree --workspace --all-features --target all --locked --invert rsa --prefix none > "$RUNNER_TEMP/rsa-tree.txt"
+          if [ -s "$RUNNER_TEMP/rsa-tree.txt" ]; then
+            cat "$RUNNER_TEMP/rsa-tree.txt"
+            echo '::error::RSA is now executable: remove the RUSTSEC-2023-0071 exception and assess the dependency'
+            exit 1
+          fi
       - name: Clippy
         working-directory: Deadlock-Turniere/rust
         run: cargo +1.97.1 clippy --workspace --all-targets --locked -- -D warnings
@@ -126,7 +136,16 @@ jobs:
           rustc --edition=2021 .github/ci/install-tool.rs -o "$RUNNER_TEMP/install-tool"
           "$RUNNER_TEMP/install-tool" cargo-audit "$RUNNER_TEMP/bin"
       - name: Audit every locked Rust dependency
-        run: '"$RUNNER_TEMP/bin/cargo-audit" audit --file rust/Cargo.lock'
+        shell: bash
+        run: |
+          # Inactive optional SQLx/MySQL RSA entry, proven absent from all executable
+          # feature/target graphs in the mandatory Rust job. Re-review by 2026-12-01.
+          today=$(date -u +%Y-%m-%d)
+          if [[ "$today" > '2026-11-30' ]]; then
+            echo '::error::The narrowly scoped RUSTSEC-2023-0071 exception has expired'
+            exit 1
+          fi
+          "$RUNNER_TEMP/bin/cargo-audit" audit --file rust/Cargo.lock --ignore RUSTSEC-2023-0071
 
   secret-detection:
     name: Secret Detection
@@ -257,14 +276,7 @@ jobs:
         shell: bash
         run: |
           test -s "$RUNNER_TEMP/codeql/javascript.sarif"
-          jq -e '
-            (.runs | length > 0) and
-            all(.runs[];
-              .tool.driver.rules as $rules |
-              all(.results[]?;
-                .ruleIndex as $i |
-                (($rules[$i].properties["security-severity"] // "0" | tonumber) < 7.0)))
-          ' "$RUNNER_TEMP/codeql/javascript.sarif"
+          jq -e -f .github/ci/codeql-policy.jq "$RUNNER_TEMP/codeql/javascript.sarif"
       - name: Upload report only
         if: always()
         continue-on-error: true
@@ -332,6 +344,10 @@ jobs:
             echo '::error::Gate accepted absent mandatory results'
             exit 1
           fi
+      - name: CodeQL report-policy counterprobes
+        run: |
+          rustc --edition=2021 .github/ci/codeql-policy-probe.rs -o "$RUNNER_TEMP/codeql-policy-probe"
+          "$RUNNER_TEMP/codeql-policy-probe"
       - name: Verify active project inventory
         shell: bash
         run: |
