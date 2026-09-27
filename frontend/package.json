@@ -23,7 +23,6 @@
     "react-dom": "19.2.4",
     "react-markdown": "^10.1.0",
     "react-router-dom": "^7.18.4",
-    "recharts": "^3.7.0",
     "tailwindcss": "^4.2.1"
   },
   "devDependencies": {
