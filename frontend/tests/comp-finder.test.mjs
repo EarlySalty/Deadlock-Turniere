@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
+import { URL } from 'node:url'
 import { normalizeCompCode, compTokenKey, compShareUrl, nextPriority, preferenceList, preferenceMap, newestRoom, compositionText } from '../src/hooks/compState.ts'
 
 test('Comp-Codes und Einladungslinks werden ohne Token normalisiert', () => {

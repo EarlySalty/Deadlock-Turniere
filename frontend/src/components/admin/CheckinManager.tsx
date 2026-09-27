@@ -41,7 +41,10 @@ export default function CheckinManager({
   const [allowedTeams, setAllowedTeams] = useState<Record<number, boolean>>({})
   const [feedback, setFeedback] = useState('')
 
-  const checkedInNames = new Set(checkinStatus?.checked_in_names ?? [])
+  const checkedInNames = useMemo(
+    () => new Set(checkinStatus?.checked_in_names ?? []),
+    [checkinStatus?.checked_in_names],
+  )
 
   const participants = useMemo(() => {
     const rows = new Map<string, ParticipantRow>()

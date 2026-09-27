@@ -24,7 +24,7 @@ import {
   Trophy, Users, LayoutGrid, GitBranch, Shield, X, Info, Book,
   ScrollText, CheckCircle2, ClipboardCheck, Mail, BarChart2, User,
 } from 'lucide-react'
-import type { TeamPublic, BracketMatch, GroupMatch, TournamentGameMode } from '@/types/tournament'
+import type { TeamPublic, BracketMatch, GroupMatch, TournamentDetailPublic, TournamentGameMode } from '@/types/tournament'
 
 const GAME_MODE_LABEL: Record<TournamentGameMode, string> = {
   standard: 'Standard',
@@ -191,7 +191,7 @@ export default function Tournament() {
   const { data: tournament, isLoading } = useTournament(tournamentId)
   const { data: checkinStatus } = useCheckinStatus(tournamentId)
   const { isLoggedIn } = useAuth()
-  const [activeTab, setActiveTab] = useState<Tab>('übersicht')
+  const [selectedTab, setActiveTab] = useState<Tab>('übersicht')
   const [showCreateTeam, setShowCreateTeam] = useState(false)
   const [teamName, setTeamName] = useState('')
   const [successMsg, setSuccessMsg] = useState<string | null>(null)
@@ -225,16 +225,9 @@ export default function Tournament() {
   const availableTabs = ALL_TABS.filter(
     (tab) => showResultsTab || (tab.key !== 'ergebnisse' && tab.key !== 'rangliste')
   )
-
-  useEffect(() => {
-    if (!tournament) return
-    const allowedTabs = ALL_TABS.filter(
-      (tab) => showResultsTab || (tab.key !== 'ergebnisse' && tab.key !== 'rangliste')
-    )
-    if (!allowedTabs.some((tab) => tab.key === activeTab)) {
-      setActiveTab('übersicht')
-    }
-  }, [activeTab, showResultsTab, tournament])
+  const activeTab = availableTabs.some((tab) => tab.key === selectedTab)
+    ? selectedTab
+    : 'übersicht'
 
   if (isLoading) return <LoadingSpinner />
   if (!tournament) {
@@ -965,7 +958,7 @@ export default function Tournament() {
   )
 }
 
-function TournamentRangliste({ tournament }: { tournament: any }) {
+function TournamentRangliste({ tournament }: { tournament: TournamentDetailPublic }) {
   const bracketEntries = deriveBracketPlacements(tournament.bracket_matches, tournament.teams)
   const hasGroups = tournament.groups.length > 0
 
@@ -1039,9 +1032,9 @@ function TournamentRangliste({ tournament }: { tournament: any }) {
               </thead>
               <tbody>
                 {tournament.groups
-                  .flatMap((g: any) => g.teams.map((t: any) => ({ ...t, groupName: g.name })))
-                  .sort((a: any, b: any) => b.points !== a.points ? b.points - a.points : b.wins - a.wins)
-                  .map((team: any, idx: number) => (
+                  .flatMap((group) => group.teams.map((team) => ({ ...team, groupName: group.name })))
+                  .sort((a, b) => b.points !== a.points ? b.points - a.points : b.wins - a.wins)
+                  .map((team, idx) => (
                     <tr key={`${team.team_id}-${team.groupName}`} className="border-b border-white/5 last:border-0 hover:bg-white/[0.02] transition-colors">
                       <td className="px-6 py-4 text-center text-muted font-bold">{idx + 1}</td>
                       <td className="px-6 py-4 font-bold text-foreground uppercase tracking-wide">{team.team_name}</td>

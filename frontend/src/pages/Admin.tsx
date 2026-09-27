@@ -23,10 +23,8 @@ import AutomatikPanel from '@/components/admin/automatik/AutomatikPanel'
 import ObserverPanel from '@/components/admin/ObserverPanel'
 import { AUTOMATIK_COPY } from '@/components/admin/automatik/copy'
 import Leitstand from '@/components/admin/Leitstand'
-import AdminPhaseNav, {
-  defaultPhaseFor,
-  type AdminPhase,
-} from '@/components/admin/AdminPhaseNav'
+import AdminPhaseNav from '@/components/admin/AdminPhaseNav'
+import { defaultPhaseFor, type AdminPhase } from '@/components/admin/adminPhase'
 import GroupStandings from '@/components/groups/GroupStandings'
 import BracketView from '@/components/bracket/BracketView'
 import MiniGroupPanel from '@/components/bracket/MiniGroupPanel'

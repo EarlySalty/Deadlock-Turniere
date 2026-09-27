@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import Card from '@/components/ui/Card'
 import Badge from '@/components/ui/Badge'
 import Button from '@/components/ui/Button'
@@ -109,12 +109,8 @@ export default function TournamentManager({
     rules: tournament.rules ?? '',
   })
   const [successMessage, setSuccessMessage] = useState('')
-  const [deleteConfirmed, setDeleteConfirmed] = useState(false)
-
-  // Reset delete confirmation when tournament changes
-  useEffect(() => {
-    setDeleteConfirmed(false)
-  }, [tournament.id])
+  const [deleteConfirmationId, setDeleteConfirmationId] = useState<number | null>(null)
+  const deleteConfirmed = deleteConfirmationId === tournament.id
 
   const action = STATUS_ACTIONS[tournament.status]
   const isLoading =
@@ -221,16 +217,16 @@ export default function TournamentManager({
   const handleDelete = () => {
     if (!deleteConfirmed) {
       if (window.confirm(`Turnier "${tournament.name}" unwiderruflich löschen?\n\nDiese Aktion kann nicht rückgängig gemacht werden!`)) {
-        setDeleteConfirmed(true)
+        setDeleteConfirmationId(tournament.id)
       }
     } else {
       deleteMutation.mutate(tournament.id, {
         onSuccess: () => {
-          setDeleteConfirmed(false)
+          setDeleteConfirmationId(null)
           setSuccessMessage('Turnier wurde gelöscht.')
         },
         onError: () => {
-          setDeleteConfirmed(false)
+          setDeleteConfirmationId(null)
         }
       })
     }
