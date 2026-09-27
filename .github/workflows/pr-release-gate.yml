@@ -54,7 +54,7 @@ jobs:
                 continue;
               }
               if (pr.head.repo?.full_name !== `${owner}/${repo}`) {
-                core.notice(`PR #${pull_number}: automatic merge is limited to same-repository branches.`);
+                core.notice(`PR #${pull_number}: fork branch needs independent manual review; this audit covers same-repository branches only.`);
                 continue;
               }
 
