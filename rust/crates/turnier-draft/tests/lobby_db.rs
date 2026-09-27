@@ -220,6 +220,10 @@ async fn quick_lobby_laeuft_mit_captain_tokens_bis_completed() {
     );
     assert_eq!(state.picks_team1.len(), 6);
     assert_eq!(state.picks_team2.len(), 6);
+    assert_eq!(
+        state.session.lobby_status, "keine",
+        "Ein reiner Token-Draft ohne Warteraum-Bestätigung darf keinen Steam-Auftrag auslösen"
+    );
 }
 
 #[tokio::test]

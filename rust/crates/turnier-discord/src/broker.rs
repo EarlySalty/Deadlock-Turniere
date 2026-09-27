@@ -158,6 +158,12 @@ fn error_detail(body_text: &str) -> String {
     }
 }
 
+impl std::fmt::Debug for BrokerClient {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BrokerClient").finish_non_exhaustive()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -203,11 +209,5 @@ mod tests {
     fn error_detail_leer_gibt_default() {
         assert_eq!(error_detail("   "), "Discord-Broker Fehler");
         assert_eq!(error_detail(""), "Discord-Broker Fehler");
-    }
-}
-
-impl std::fmt::Debug for BrokerClient {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("BrokerClient").finish_non_exhaustive()
     }
 }

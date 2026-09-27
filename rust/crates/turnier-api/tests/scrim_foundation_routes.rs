@@ -28,6 +28,10 @@ use tower::ServiceExt;
 
 use turnier_api::{build_router, AppState};
 use turnier_config::Config;
+
+type BrokerRequests = Arc<Mutex<Vec<Value>>>;
+type SelectionLockState = (BrokerRequests, PgPool, i32);
+type SelectionCommitState = (BrokerRequests, Option<(PgPool, i32)>);
 use turnier_discord::{BrokerClient, DiscordNotifier};
 use turnier_match::MatchManager;
 #[cfg(feature = "testing")]
@@ -66,19 +70,20 @@ fn state_with_pool_broker_and_signup_role(
     broker_base_url: Option<&str>,
     signup_role_id: Option<i64>,
 ) -> AppState {
-    let mut config = Config::default();
-    config.turnier_internal_api_token = "internal-token".to_string();
-    config.discord_bot_token = String::new();
-    config.discord_master_broker_base_url = broker_base_url.unwrap_or_default().to_string();
-    config.discord_master_broker_token = broker_base_url
-        .map(|_| "broker-token".to_string())
-        .unwrap_or_default();
-    config.scrim_signup_role_id = signup_role_id;
-    config.scrim_reserve_role_id = None;
-    config.steam_bridge_db_path = String::new();
-    config.backend_allowed_hosts = "localhost".to_string();
-    config.discord_mod_role_ids = "99".to_string();
-    let config = Arc::new(config);
+    let config = Arc::new(Config {
+        turnier_internal_api_token: "internal-token".to_string(),
+        discord_bot_token: String::new(),
+        discord_master_broker_base_url: broker_base_url.unwrap_or_default().to_string(),
+        discord_master_broker_token: broker_base_url
+            .map(|_| "broker-token".to_string())
+            .unwrap_or_default(),
+        scrim_signup_role_id: signup_role_id,
+        scrim_reserve_role_id: None,
+        steam_bridge_db_path: String::new(),
+        backend_allowed_hosts: "localhost".to_string(),
+        discord_mod_role_ids: "99".to_string(),
+        ..Config::default()
+    });
 
     let role_sets = turnier_auth::RoleSets::from_config(&config);
     let oauth = turnier_auth::OAuthClient::new(&config);
@@ -155,7 +160,7 @@ async fn record_and_accept_message(
 
 #[cfg(feature = "testing")]
 async fn record_and_accept_message_under_selection_lock(
-    State((requests, pool, match_id)): State<(Arc<Mutex<Vec<Value>>>, PgPool, i32)>,
+    State((requests, pool, match_id)): State<SelectionLockState>,
     Json(payload): Json<Value>,
 ) -> Json<Value> {
     let mut tx = pool.begin().await.expect("selection lock check");
@@ -282,7 +287,7 @@ async fn fail_once_then_send_message(
 
 #[cfg(feature = "testing")]
 async fn record_and_fail_second_channel_once(
-    State((requests, selection)): State<(Arc<Mutex<Vec<Value>>>, Option<(PgPool, i32)>)>,
+    State((requests, selection)): State<SelectionCommitState>,
     Json(payload): Json<Value>,
 ) -> Result<Json<Value>, StatusCode> {
     if let Some((pool, match_id)) = selection {

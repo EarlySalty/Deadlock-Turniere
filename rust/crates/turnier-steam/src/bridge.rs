@@ -16,8 +16,6 @@ use sqlx::FromRow;
 use crate::error::SteamResult;
 use crate::rank;
 
-/// TTL des Subrank-Rollen-Caches: 5 Minuten (wie `_discord_subrank_role_cache`).
-
 /// Eine Zeile aus `steam_links` der Bridge-DB.
 #[derive(Debug, FromRow)]
 struct SteamLinkRow {
