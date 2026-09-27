@@ -24,6 +24,14 @@ const script = new vm.Script(`(async () => {\n${scriptLines.join("\n")}\n})()`, 
   filename: "pr-release-gate.yml",
 });
 
+test("Audit hat nur Leserechte und keinen Schreibpfad", () => {
+  assert.match(workflow, /^  contents: read$/m);
+  assert.match(workflow, /^  pull-requests: read$/m);
+  assert.doesNotMatch(workflow, /github\.rest\.pulls\.(?:merge|updateBranch|update)\s*\(/);
+  assert.doesNotMatch(workflow, /github\.rest\.git\.(?:updateRef|createCommit)\s*\(/);
+  assert.doesNotMatch(workflow, /github\.graphql\s*\(/);
+});
+
 const HEAD = "a".repeat(40);
 const BASE = "b".repeat(40);
 const REQUIRED_CHECKS = [
@@ -64,22 +72,9 @@ async function reconcile(change = () => {}) {
     behindBy: 0,
     mainBefore: BASE,
     mainAfter: BASE,
-    protection: {
-      required_status_checks: { strict: true, contexts: REQUIRED_CHECKS },
-      enforce_admins: { enabled: true },
-    },
-    protectionError: null,
-    mainAtMerge: BASE,
-    headAtMerge: HEAD,
-    draftAtMerge: false,
-    closedAtMerge: false,
-    checksAtMerge: true,
     finalPr: null,
   };
   change(fixture);
-  const merges = [];
-  const mergeCalls = [];
-  const updates = [];
   const notices = [];
   let reads = 0;
   let mainReads = 0;
@@ -91,16 +86,8 @@ async function reconcile(change = () => {}) {
     listFiles: async ({ page, per_page }) => ({
       data: fixture.files.slice((page - 1) * per_page, page * per_page),
     }),
-    updateBranch: async (request) => { updates.push(request); return { data: {} }; },
-    merge: async (request) => {
-      mergeCalls.push(request);
-      if (fixture.mainAtMerge !== BASE || fixture.headAtMerge !== request.sha ||
-          fixture.draftAtMerge || fixture.closedAtMerge || !fixture.checksAtMerge) {
-        throw new Error("native eligibility changed");
-      }
-      merges.push(request);
-      return { data: { merged: true } };
-    },
+    updateBranch: async () => { throw new Error("read-only audit attempted branch update"); },
+    merge: async () => { throw new Error("read-only audit attempted merge"); },
   };
   const github = {
     paginate: async (method, args) => {
@@ -117,10 +104,7 @@ async function reconcile(change = () => {}) {
     rest: {
       pulls,
       repos: {
-        getBranchProtection: async () => {
-          if (fixture.protectionError) throw fixture.protectionError;
-          return { data: fixture.protection };
-        },
+        getBranchProtection: async () => { throw new Error("read-only audit queried merge protection"); },
         getCollaboratorPermissionLevel: async () => ({ data: { permission: fixture.permission } }),
         listCommitStatusesForRef: async ({ page, per_page }) => ({
           data: fixture.statuses.slice((page - 1) * per_page, page * per_page),
@@ -145,24 +129,20 @@ async function reconcile(change = () => {}) {
     github,
     context: { repo: { owner: "test", repo: "repository" } },
     core: { notice: (message) => notices.push(message), warning: (message) => notices.push(message) },
-    process: { env: { INPUT_PR_NUMBER: "" } },
   }, { timeout: 1000 });
-  return { merges, mergeCalls, updates, notices };
+  return { notices, ready: notices.some((notice) => notice.includes("independent manual review and merge are required")) };
 }
 
 async function blocked(change) {
   const result = await reconcile(change);
-  assert.equal(result.merges.length, 0, "Ohne vollständige Freigabe darf kein Merge angefordert werden");
+  assert.equal(result.ready, false, "Unvollständige Gates dürfen keine manuelle Bereitschaft melden");
   return result;
 }
 
-test("Aktueller Head mit vollständigen grünen Gates wird genau einmal SHA-gebunden gemergt", async () => {
+test("Aktueller Head mit vollständigen grünen Gates wird nur für manuelle Abnahme gemeldet", async () => {
   const result = await reconcile();
-  assert.equal(result.merges.length, 1);
-  assert.deepEqual({ ...result.merges[0] }, {
-    owner: "test", repo: "repository", pull_number: 10,
-    merge_method: "squash", sha: HEAD,
-  });
+  assert.equal(result.ready, true);
+  assert.match(result.notices.at(-1), new RegExp(HEAD));
 });
 
 for (const name of REQUIRED_CHECKS) {
@@ -205,7 +185,7 @@ test("999 Check-Suites bleiben vollständig auswertbar", async () => {
   const result = await reconcile((f) => {
     f.suites = Array.from({ length: 999 }, (_, index) => ({ id: index + 1 }));
   });
-  assert.equal(result.merges.length, 1);
+  assert.equal(result.ready, true);
 });
 test("Ein roter Commit-Status blockiert", async () => {
   await blocked((f) => { f.statuses = [{ context: "external", state: "failure", created_at: "2026-09-24T00:00:00Z" }]; });
@@ -226,10 +206,9 @@ test("Aktueller Status derselben Context nach Seite 1 gewinnt", async () => {
     f.statuses.push({ context: "green-0", state: "failure", created_at: "2026-09-24T00:01:00Z" });
   });
 });
-test("Bewegte Basis aktualisiert nur den Branch und verlangt neue Gates", async () => {
+test("Bewegte Basis verlangt manuelles Branch-Update und neue Gates", async () => {
   const result = await blocked((f) => { f.behindBy = 1; });
-  assert.equal(result.updates.length, 1);
-  assert.equal(result.updates[0].expected_head_sha, HEAD);
+  assert.match(result.notices.at(-1), /update it and rerun all checks/);
 });
 test("Während der Prüfung geänderter Head blockiert", async () => {
   await blocked((f) => { f.finalPr = structuredClone(f.pr); f.finalPr.head.sha = "c".repeat(40); });
@@ -243,38 +222,11 @@ test("Vor der Prüfung verschobener main-Ref blockiert", async () => {
 test("Nach der Prüfung verschobener main-Ref blockiert auch bei unveränderter PR-Antwort", async () => {
   await blocked((f) => { f.mainAfter = "c".repeat(40); });
 });
-test("Vor dem nativen Merge verschobene Basis blockiert serverseitig", async () => {
-  const result = await blocked((f) => { f.mainAtMerge = HEAD; });
-  assert.equal(result.mergeCalls.length, 1);
+test("Während der Prüfung geschlossener PR bekommt keine Bereitschaftsmeldung", async () => {
+  await blocked((f) => { f.finalPr = structuredClone(f.pr); f.finalPr.state = "closed"; });
 });
-test("Vor dem nativen Merge geänderter Head blockiert durch SHA-Bindung", async () => {
-  const result = await blocked((f) => { f.headAtMerge = "c".repeat(40); });
-  assert.equal(result.mergeCalls[0].sha, HEAD);
-});
-test("Nach der letzten PR-Antwort zum Draft gewordener PR blockiert nativ", async () => {
-  const result = await blocked((f) => { f.draftAtMerge = true; });
-  assert.equal(result.mergeCalls.length, 1);
-});
-test("Nach der letzten PR-Antwort geschlossener PR blockiert nativ", async () => {
-  const result = await blocked((f) => { f.closedAtMerge = true; });
-  assert.equal(result.mergeCalls.length, 1);
-});
-test("Nach der letzten Abfrage gekippter Pflichtcheck blockiert nativ", async () => {
-  const result = await blocked((f) => { f.checksAtMerge = false; });
-  assert.equal(result.mergeCalls.length, 1);
-});
-test("Ungeschütztes main blockiert Auto-Merge ohne nativen Mergeversuch", async () => {
-  const result = await blocked((f) => { f.protectionError = new Error("404 Branch not protected"); });
-  assert.equal(result.mergeCalls.length, 0);
-});
-test("Nicht strikte Branch Protection blockiert", async () => {
-  await blocked((f) => { f.protection.required_status_checks.strict = false; });
-});
-test("Fehlender serverseitiger Pflichtcheck blockiert", async () => {
-  await blocked((f) => { f.protection.required_status_checks.contexts = REQUIRED_CHECKS.slice(1); });
-});
-test("Admin-Bypass in Branch Protection blockiert", async () => {
-  await blocked((f) => { f.protection.enforce_admins.enabled = false; });
+test("Während der Prüfung zum Draft gewordener PR bekommt keine Bereitschaftsmeldung", async () => {
+  await blocked((f) => { f.finalPr = structuredClone(f.pr); f.finalPr.draft = true; });
 });
 test("Drafts blockieren", async () => {
   await blocked((f) => { f.pr.draft = true; });
@@ -317,9 +269,9 @@ test("GitHubs 3000-Dateien-Kappung blockiert PR mit 3001 Dateien", async () => {
 test("Fehlende Gesamtzahl geänderter Dateien blockiert", async () => {
   await blocked((f) => { delete f.pr.changed_files; });
 });
-test("Gewöhnliche Umbenennung bleibt mit vollständigen Gates mergefähig", async () => {
+test("Gewöhnliche Umbenennung bleibt mit vollständigen Gates prüfbereit", async () => {
   const result = await reconcile((f) => {
     f.files = [{ filename: "src/new.rs", previous_filename: "src/old.rs", status: "renamed" }];
   });
-  assert.equal(result.merges.length, 1);
+  assert.equal(result.ready, true);
 });

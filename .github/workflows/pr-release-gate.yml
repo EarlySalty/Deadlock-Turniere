@@ -1,41 +1,31 @@
-name: "PR Release Gate"
+name: "PR Manual Review Audit"
 
 on:
   pull_request_target:
     types: [opened, synchronize, reopened, ready_for_review]
-  schedule:
-    - cron: "*/5 * * * *"
   workflow_dispatch:
-    inputs:
-      pr_number:
-        description: "Optional pull request number. Empty reconciles all open pull requests."
-        required: false
-        type: string
 
 permissions:
-  contents: write
-  pull-requests: write
+  contents: read
+  pull-requests: read
   checks: read
   statuses: read
 
 concurrency:
-  group: pr-release-gate-${{ github.repository }}
+  group: pr-manual-review-audit-${{ github.repository }}
   cancel-in-progress: false
 
 jobs:
-  reconcile:
-    name: "Auto merge after gates"
+  audit:
+    name: "Read-only PR audit"
     runs-on: ubuntu-latest
     steps:
-      - name: Reconcile eligible pull requests
+      - name: Audit pull requests for manual review
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
-        env:
-          INPUT_PR_NUMBER: ${{ inputs.pr_number || '' }}
         with:
           script: |
             const owner = context.repo.owner;
             const repo = context.repo.repo;
-            const requested = Number.parseInt(process.env.INPUT_PR_NUMBER || "", 10);
 
             const requiredChecks = [
               "Semantic review",
@@ -48,17 +38,12 @@ jobs:
               "Trivy Filesystem Scan",
             ];
 
-            let pulls;
-            if (Number.isInteger(requested) && requested > 0) {
-              pulls = [(await github.rest.pulls.get({ owner, repo, pull_number: requested })).data];
-            } else {
-              pulls = await github.paginate(github.rest.pulls.list, {
-                owner,
-                repo,
-                state: "open",
-                per_page: 100,
-              });
-            }
+            const pulls = await github.paginate(github.rest.pulls.list, {
+              owner,
+              repo,
+              state: "open",
+              per_page: 100,
+            });
 
             for (const listed of pulls) {
               const pull_number = listed.number;
@@ -140,17 +125,7 @@ jobs:
               );
 
               if ((comparison.data.behind_by || 0) > 0) {
-                try {
-                  await github.rest.pulls.updateBranch({
-                    owner,
-                    repo,
-                    pull_number,
-                    expected_head_sha: evaluatedSha,
-                  });
-                  core.notice(`PR #${pull_number}: base moved. Branch update requested, all gates must run again.`);
-                } catch (error) {
-                  core.warning(`PR #${pull_number}: branch update failed: ${String(error?.message || error)}`);
-                }
+                core.notice(`PR #${pull_number}: branch is behind main; update it and rerun all checks before manual review.`);
                 continue;
               }
 
@@ -249,36 +224,10 @@ jobs:
                 core.notice(`PR #${pull_number}: PR, head or base changed after gate evaluation. Re-evaluation required.`);
                 continue;
               }
-              try {
-                // Without server-enforced up-to-date required checks, the native
-                // merge endpoint cannot bind the base SHA atomically. Stay closed.
-                const protection = (await github.rest.repos.getBranchProtection({
-                  owner, repo, branch: "main",
-                })).data;
-                const protectedChecks = new Set([
-                  ...(protection.required_status_checks?.contexts || []),
-                  ...(protection.required_status_checks?.checks || []).map((check) => check.context),
-                ]);
-                if (protection.required_status_checks?.strict !== true ||
-                    protection.enforce_admins?.enabled !== true ||
-                    requiredChecks.some((name) => !protectedChecks.has(name))) {
-                  core.notice(`PR #${pull_number}: main lacks strict server-enforced required checks; manual merge required.`);
-                  continue;
-                }
-                const finalMainRef = await github.rest.git.getRef({ owner, repo, ref: "heads/main" });
-                if (finalMainRef.data.object.sha !== evaluatedBaseSha) {
-                  core.notice(`PR #${pull_number}: main moved before native merge.`);
-                  continue;
-                }
-                const merged = await github.rest.pulls.merge({
-                  owner, repo, pull_number, merge_method: "squash", sha: evaluatedSha,
-                });
-                if (merged.data.merged) {
-                  core.notice(`PR #${pull_number}: merged through GitHub's protected PR path.`);
-                } else {
-                  core.warning(`PR #${pull_number}: GitHub did not merge: ${merged.data.message || "unknown reason"}`);
-                }
-              } catch (error) {
-                core.warning(`PR #${pull_number}: protected native merge unavailable; manual merge required: ${String(error?.message || error)}`);
+              const finalMainRef = await github.rest.git.getRef({ owner, repo, ref: "heads/main" });
+              if (finalMainRef.data.object.sha !== evaluatedBaseSha) {
+                core.notice(`PR #${pull_number}: main moved during the audit. Re-evaluation required.`);
+                continue;
               }
+              core.notice(`PR #${pull_number}: recorded gates are green at ${evaluatedSha}; independent manual review and merge are required.`);
             }
