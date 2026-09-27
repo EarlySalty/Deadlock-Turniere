@@ -225,30 +225,63 @@ jobs:
 
               pr = (await github.rest.pulls.get({ owner, repo, pull_number })).data;
               if (pr.state !== "open" || pr.draft || pr.base.ref !== "main" ||
-                  pr.head.sha !== evaluatedSha || pr.base.sha !== evaluatedBaseSha) {
+                  pr.head.sha !== evaluatedSha || pr.base.sha !== evaluatedBaseSha ||
+                  pr.head.repo?.full_name !== `${owner}/${repo}`) {
                 core.notice(`PR #${pull_number}: PR, head or base changed after gate evaluation. Re-evaluation required.`);
                 continue;
               }
-              const finalMainRef = await github.rest.git.getRef({ owner, repo, ref: "heads/main" });
-              if (finalMainRef.data.object.sha !== evaluatedBaseSha) {
-                core.notice(`PR #${pull_number}: main moved after gate evaluation. Re-evaluation required.`);
+              if (!pr.merge_commit_sha) {
+                core.notice(`PR #${pull_number}: GitHub has not prepared a merge commit for this head and base.`);
                 continue;
               }
 
               try {
-                const merged = await github.rest.pulls.merge({
+                const prepared = await github.rest.git.getCommit({
                   owner,
                   repo,
-                  pull_number,
-                  merge_method: "squash",
-                  sha: evaluatedSha,
+                  commit_sha: pr.merge_commit_sha,
                 });
-                if (merged.data.merged) {
-                  core.notice(`PR #${pull_number}: merged after fresh base, semantic review, and required CI.`);
-                } else {
-                  core.warning(`PR #${pull_number}: GitHub did not merge: ${merged.data.message || "unknown reason"}`);
+                const parents = prepared.data.parents || [];
+                if (parents.length !== 2 || parents[0].sha !== evaluatedBaseSha ||
+                    parents[1].sha !== evaluatedSha || !prepared.data.tree?.sha) {
+                  core.notice(`PR #${pull_number}: prepared merge does not match the evaluated base and head.`);
+                  continue;
                 }
+                // The merge tree is only accepted when GitHub prepared it for this exact pair.
+                const mergeCommit = await github.rest.git.createCommit({
+                  owner,
+                  repo,
+                  message: `Merge pull request #${pull_number} after required checks`,
+                  tree: prepared.data.tree.sha,
+                  parents: [evaluatedBaseSha, evaluatedSha],
+                });
+                const finalHeadRef = await github.rest.git.getRef({
+                  owner, repo, ref: `heads/${pr.head.ref}`,
+                });
+                const finalMainRef = await github.rest.git.getRef({ owner, repo, ref: "heads/main" });
+                if (finalHeadRef.data.object.sha !== evaluatedSha ||
+                    finalMainRef.data.object.sha !== evaluatedBaseSha) {
+                  core.notice(`PR #${pull_number}: head or main moved before the atomic ref update.`);
+                  continue;
+                }
+                const repository = await github.rest.repos.get({ owner, repo });
+                // Both beforeOid comparisons happen in one server-side transaction. The
+                // no-op head update is a compare-only guard against a new PR commit.
+                await github.graphql(`
+                  mutation($input: UpdateRefsInput!) {
+                    updateRefs(input: $input) { clientMutationId }
+                  }
+                `, { input: {
+                  repositoryId: repository.data.node_id,
+                  refUpdates: [
+                    { name: "refs/heads/main", beforeOid: evaluatedBaseSha,
+                      afterOid: mergeCommit.data.sha, force: false },
+                    { name: `refs/heads/${pr.head.ref}`, beforeOid: evaluatedSha,
+                      afterOid: evaluatedSha, force: false },
+                  ],
+                } });
+                core.notice(`PR #${pull_number}: merged with exact base and head after required checks.`);
               } catch (error) {
-                core.warning(`PR #${pull_number}: merge rejected by GitHub: ${String(error?.message || error)}`);
+                core.warning(`PR #${pull_number}: merge ref update rejected by GitHub: ${String(error?.message || error)}`);
               }
             }
