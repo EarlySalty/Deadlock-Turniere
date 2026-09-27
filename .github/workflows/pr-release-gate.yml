@@ -117,12 +117,18 @@ jobs:
               }
 
               const evaluatedSha = pr.head.sha;
+              const evaluatedBaseSha = pr.base.sha;
+              const mainRef = await github.rest.git.getRef({ owner, repo, ref: "heads/main" });
+              if (mainRef.data.object.sha !== evaluatedBaseSha) {
+                core.notice(`PR #${pull_number}: main moved before gate evaluation. Re-evaluation required.`);
+                continue;
+              }
               const comparison = await github.request(
                 "GET /repos/{owner}/{repo}/compare/{basehead}",
                 {
                   owner,
                   repo,
-                  basehead: `${pr.base.sha}...${evaluatedSha}`,
+                  basehead: `${evaluatedBaseSha}...${evaluatedSha}`,
                 },
               );
 
@@ -146,14 +152,14 @@ jobs:
                 continue;
               }
 
-              const checkResponse = await github.rest.checks.listForRef({
+              const checkRuns = await github.paginate(github.rest.checks.listForRef, {
                 owner,
                 repo,
                 ref: evaluatedSha,
                 filter: "latest",
                 per_page: 100,
               });
-              const trustedActionChecks = (checkResponse.data.check_runs || []).filter(
+              const trustedActionChecks = checkRuns.filter(
                 (check) =>
                   check.head_sha === evaluatedSha &&
                   check.app?.slug === "github-actions",
@@ -175,7 +181,7 @@ jobs:
               }
 
               const acceptedAncillaryConclusions = new Set(["success", "neutral", "skipped"]);
-              const blockingCheckRuns = (checkResponse.data.check_runs || []).filter(
+              const blockingCheckRuns = checkRuns.filter(
                 (check) =>
                   check.head_sha === evaluatedSha &&
                   (
@@ -190,14 +196,14 @@ jobs:
                 continue;
               }
 
-              const statusResponse = await github.rest.repos.getCombinedStatusForRef({
+              const statuses = await github.paginate(github.rest.repos.listCommitStatusesForRef, {
                 owner,
                 repo,
                 ref: evaluatedSha,
                 per_page: 100,
               });
               const latestStatusByContext = new Map();
-              for (const status of statusResponse.data.statuses || []) {
+              for (const status of statuses) {
                 const previous = latestStatusByContext.get(status.context);
                 if (
                   !previous ||
@@ -218,12 +224,14 @@ jobs:
               }
 
               pr = (await github.rest.pulls.get({ owner, repo, pull_number })).data;
-              if (pr.head.sha !== evaluatedSha) {
-                core.notice(`PR #${pull_number}: head changed after gate evaluation. Re-evaluation required.`);
+              if (pr.state !== "open" || pr.draft || pr.base.ref !== "main" ||
+                  pr.head.sha !== evaluatedSha || pr.base.sha !== evaluatedBaseSha) {
+                core.notice(`PR #${pull_number}: PR, head or base changed after gate evaluation. Re-evaluation required.`);
                 continue;
               }
-              if (pr.base.sha !== listed.base.sha && listed.base?.sha) {
-                core.notice(`PR #${pull_number}: base changed during reconciliation. Re-evaluation required.`);
+              const finalMainRef = await github.rest.git.getRef({ owner, repo, ref: "heads/main" });
+              if (finalMainRef.data.object.sha !== evaluatedBaseSha) {
+                core.notice(`PR #${pull_number}: main moved after gate evaluation. Re-evaluation required.`);
                 continue;
               }
 

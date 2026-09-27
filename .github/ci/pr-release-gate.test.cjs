@@ -61,6 +61,8 @@ async function reconcile(change = () => {}) {
     statuses: [],
     permission: "write",
     behindBy: 0,
+    mainBefore: BASE,
+    mainAfter: BASE,
     finalPr: null,
   };
   change(fixture);
@@ -68,6 +70,7 @@ async function reconcile(change = () => {}) {
   const updates = [];
   const notices = [];
   let reads = 0;
+  let mainReads = 0;
   const pulls = {
     list: async () => ({ data: [structuredClone(fixture.pr)] }),
     get: async () => ({
@@ -78,15 +81,28 @@ async function reconcile(change = () => {}) {
     merge: async (request) => { merges.push(request); return { data: { merged: true } }; },
   };
   const github = {
-    paginate: async (method, args) => (await method(args)).data,
+    paginate: async (method, args) => {
+      const results = [];
+      for (let page = 1; ; page++) {
+        const response = await method({ ...args, page });
+        const items = Array.isArray(response.data) ? response.data : response.data.check_runs;
+        results.push(...items);
+        if (items.length < args.per_page) return results;
+      }
+    },
     request: async () => ({ data: { behind_by: fixture.behindBy } }),
     rest: {
       pulls,
       repos: {
         getCollaboratorPermissionLevel: async () => ({ data: { permission: fixture.permission } }),
-        getCombinedStatusForRef: async () => ({ data: { statuses: fixture.statuses } }),
+        listCommitStatusesForRef: async ({ page, per_page }) => ({
+          data: fixture.statuses.slice((page - 1) * per_page, page * per_page),
+        }),
       },
-      checks: { listForRef: async () => ({ data: { check_runs: fixture.checks } }) },
+      git: { getRef: async () => ({ data: { object: { sha: ++mainReads > 1 ? fixture.mainAfter : fixture.mainBefore } } }) },
+      checks: { listForRef: async ({ page, per_page }) => ({ data: {
+        check_runs: fixture.checks.slice((page - 1) * per_page, page * per_page),
+      } }) },
     },
   };
   // Nur In-Memory-API-Doubles: kein GitHub-Token, Netzwerk oder echter Merge.
@@ -135,8 +151,32 @@ test("Gleichnamige Checks einer anderen App ersetzen keine Actions-Prüfungen", 
 test("Ein fehlgeschlagener zusätzlicher Check blockiert", async () => {
   await blocked((f) => { f.checks.push({ ...f.checks[0], name: "Additional check", conclusion: "failure" }); });
 });
+test("Ein fehlgeschlagener Check auf Seite 2 blockiert", async () => {
+  await blocked((f) => {
+    f.checks.push(...Array.from({ length: 92 }, (_, index) => ({
+      ...f.checks[0], name: `Additional green ${index}`,
+    })));
+    f.checks.push({ ...f.checks[0], name: "Hidden failure", conclusion: "failure" });
+  });
+});
 test("Ein roter Commit-Status blockiert", async () => {
   await blocked((f) => { f.statuses = [{ context: "external", state: "failure", created_at: "2026-09-24T00:00:00Z" }]; });
+});
+test("Ein roter Commit-Status auf Seite 2 blockiert", async () => {
+  await blocked((f) => {
+    f.statuses = Array.from({ length: 100 }, (_, index) => ({
+      context: `green-${index}`, state: "success", created_at: "2026-09-24T00:00:00Z",
+    }));
+    f.statuses.push({ context: "hidden-failure", state: "failure", created_at: "2026-09-24T00:00:00Z" });
+  });
+});
+test("Aktueller Status derselben Context nach Seite 1 gewinnt", async () => {
+  await blocked((f) => {
+    f.statuses = Array.from({ length: 100 }, (_, index) => ({
+      context: `green-${index}`, state: "success", created_at: "2026-09-24T00:00:00Z",
+    }));
+    f.statuses.push({ context: "green-0", state: "failure", created_at: "2026-09-24T00:01:00Z" });
+  });
 });
 test("Bewegte Basis aktualisiert nur den Branch und verlangt neue Gates", async () => {
   const result = await blocked((f) => { f.behindBy = 1; });
@@ -148,6 +188,12 @@ test("Während der Prüfung geänderter Head blockiert", async () => {
 });
 test("Während der Prüfung geänderte Basis blockiert", async () => {
   await blocked((f) => { f.finalPr = structuredClone(f.pr); f.finalPr.base.sha = "c".repeat(40); });
+});
+test("Vor der Prüfung verschobener main-Ref blockiert", async () => {
+  await blocked((f) => { f.mainBefore = "c".repeat(40); });
+});
+test("Nach der Prüfung verschobener main-Ref blockiert auch bei unveränderter PR-Antwort", async () => {
+  await blocked((f) => { f.mainAfter = "c".repeat(40); });
 });
 test("Drafts blockieren", async () => {
   await blocked((f) => { f.pr.draft = true; });
