@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import Card from '@/components/ui/Card'
 import Button from '@/components/ui/Button'
 import {
@@ -66,16 +66,6 @@ export default function MatchEventPanel({
 
   const selectedMatch = liveMatches.find((match) => match.id === selectedMatchId) ?? liveMatches[0] ?? null
   const selectedMatchLive = selectedMatch ? isLiveMatch(selectedMatch) : false
-
-  useEffect(() => {
-    if (!selectedMatch && liveMatches[0]) {
-      setSelectedMatchId(liveMatches[0].id)
-      return
-    }
-    if (selectedMatch && !liveMatches.some((match) => match.id === selectedMatch.id)) {
-      setSelectedMatchId(liveMatches[0]?.id ?? 0)
-    }
-  }, [liveMatches, selectedMatch])
 
   const presetsQuery = useMatchEventPresets(
     tournamentId,
