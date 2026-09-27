@@ -61,6 +61,7 @@ async function reconcile(change = () => {}) {
       conclusion: "success",
       app: { slug: "github-actions" },
     })),
+    suites: [{ id: 1 }],
     statuses: [],
     permission: "write",
     behindBy: 0,
@@ -85,7 +86,9 @@ async function reconcile(change = () => {}) {
     get: async () => ({
       data: structuredClone(++reads > 1 && fixture.finalPr ? fixture.finalPr : fixture.pr),
     }),
-    listFiles: async () => ({ data: fixture.files }),
+    listFiles: async ({ page, per_page }) => ({
+      data: fixture.files.slice((page - 1) * per_page, page * per_page),
+    }),
     updateBranch: async (request) => { updates.push(request); return { data: {} }; },
   };
   const github = {
@@ -103,7 +106,8 @@ async function reconcile(change = () => {}) {
       const results = [];
       for (let page = 1; ; page++) {
         const response = await method({ ...args, page });
-        const items = Array.isArray(response.data) ? response.data : response.data.check_runs;
+        const items = Array.isArray(response.data) ? response.data
+          : response.data.check_runs || response.data.check_suites;
         results.push(...items);
         if (items.length < args.per_page) return results;
       }
@@ -127,9 +131,14 @@ async function reconcile(change = () => {}) {
         } }),
         createCommit: async (request) => { commits.push(request); return { data: { sha: MERGED } }; },
       },
-      checks: { listForRef: async ({ page, per_page }) => ({ data: {
-        check_runs: fixture.checks.slice((page - 1) * per_page, page * per_page),
-      } }) },
+      checks: {
+        listSuitesForRef: async ({ page, per_page }) => ({ data: {
+          check_suites: fixture.suites.slice((page - 1) * per_page, page * per_page),
+        } }),
+        listForRef: async ({ page, per_page }) => ({ data: {
+          check_runs: fixture.checks.slice((page - 1) * per_page, page * per_page),
+        } }),
+      },
     },
   };
   // Nur In-Memory-API-Doubles: kein GitHub-Token, Netzwerk oder echter Merge.
@@ -192,6 +201,17 @@ test("Ein fehlgeschlagener Check auf Seite 2 blockiert", async () => {
     })));
     f.checks.push({ ...f.checks[0], name: "Hidden failure", conclusion: "failure" });
   });
+});
+test("1000 Check-Suites blockieren trotz sichtbarer grüner Runs", async () => {
+  await blocked((f) => {
+    f.suites = Array.from({ length: 1000 }, (_, index) => ({ id: index + 1 }));
+  });
+});
+test("999 Check-Suites bleiben vollständig auswertbar", async () => {
+  const result = await reconcile((f) => {
+    f.suites = Array.from({ length: 999 }, (_, index) => ({ id: index + 1 }));
+  });
+  assert.equal(result.merges.length, 1);
 });
 test("Ein roter Commit-Status blockiert", async () => {
   await blocked((f) => { f.statuses = [{ context: "external", state: "failure", created_at: "2026-09-24T00:00:00Z" }]; });
@@ -274,6 +294,20 @@ for (const protectedPath of [
 }
 test("Unvollständige Umbenennungsdaten werden nicht automatisch freigegeben", async () => {
   await blocked((f) => { f.files = [{ filename: "src/renamed.rs", status: "renamed" }]; });
+});
+test("Unvollständige Dateiliste blockiert ohne sichtbare Policy-Datei", async () => {
+  await blocked((f) => { f.pr.changed_files = 2; });
+});
+test("GitHubs 3000-Dateien-Kappung blockiert PR mit 3001 Dateien", async () => {
+  await blocked((f) => {
+    f.pr.changed_files = 3001;
+    f.files = Array.from({ length: 3000 }, (_, index) => ({
+      filename: `src/file-${index}.rs`, status: "modified",
+    }));
+  });
+});
+test("Fehlende Gesamtzahl geänderter Dateien blockiert", async () => {
+  await blocked((f) => { delete f.pr.changed_files; });
 });
 test("Gewöhnliche Umbenennung bleibt mit vollständigen Gates mergefähig", async () => {
   const result = await reconcile((f) => {

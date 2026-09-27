@@ -92,6 +92,13 @@ jobs:
                 pull_number,
                 per_page: 100,
               });
+              // GitHub truncates listFiles after 3,000 entries. Never decide the
+              // policy-path rule from a partial file list.
+              if (!Number.isSafeInteger(pr.changed_files) || pr.changed_files < 1 ||
+                  changedFiles.length !== pr.changed_files) {
+                core.notice(`PR #${pull_number}: changed-file list is incomplete or inconsistent.`);
+                continue;
+              }
               const protectedPolicyPath = (filename) =>
                 filename.startsWith(".github/") ||
                 filename.startsWith("scripts/ci/") ||
@@ -152,6 +159,18 @@ jobs:
                 continue;
               }
 
+              // listForRef only searches the 1,000 most recent check suites.
+              // Count all suites first and require a margin below that boundary.
+              const checkSuites = await github.paginate(github.rest.checks.listSuitesForRef, {
+                owner,
+                repo,
+                ref: evaluatedSha,
+                per_page: 100,
+              });
+              if (checkSuites.length >= 1000) {
+                core.notice(`PR #${pull_number}: too many check suites for complete check-run evaluation.`);
+                continue;
+              }
               const checkRuns = await github.paginate(github.rest.checks.listForRef, {
                 owner,
                 repo,
