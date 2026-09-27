@@ -26,8 +26,6 @@ const script = new vm.Script(`(async () => {\n${scriptLines.join("\n")}\n})()`, 
 
 const HEAD = "a".repeat(40);
 const BASE = "b".repeat(40);
-const PREPARED = "d".repeat(40);
-const MERGED = "e".repeat(40);
 const REQUIRED_CHECKS = [
   "Semantic review",
   "Frontend CI",
@@ -48,7 +46,6 @@ async function reconcile(change = () => {}) {
       changed_files: 1,
       base: { ref: "main", sha: BASE },
       head: { ref: "feature", sha: HEAD, repo: { full_name: "test/repository" } },
-      merge_commit_sha: PREPARED,
       user: { login: "maintainer" },
       mergeable: true,
       mergeable_state: "clean",
@@ -67,18 +64,23 @@ async function reconcile(change = () => {}) {
     behindBy: 0,
     mainBefore: BASE,
     mainAfter: BASE,
-    headAfter: HEAD,
-    mainAtMutation: BASE,
-    headAtMutation: HEAD,
-    preparedParents: [BASE, HEAD],
+    protection: {
+      required_status_checks: { strict: true, contexts: REQUIRED_CHECKS },
+      enforce_admins: { enabled: true },
+    },
+    protectionError: null,
+    mainAtMerge: BASE,
+    headAtMerge: HEAD,
+    draftAtMerge: false,
+    closedAtMerge: false,
+    checksAtMerge: true,
     finalPr: null,
   };
   change(fixture);
   const merges = [];
+  const mergeCalls = [];
   const updates = [];
   const notices = [];
-  const commits = [];
-  const attemptedUpdates = [];
   let reads = 0;
   let mainReads = 0;
   const pulls = {
@@ -90,18 +92,17 @@ async function reconcile(change = () => {}) {
       data: fixture.files.slice((page - 1) * per_page, page * per_page),
     }),
     updateBranch: async (request) => { updates.push(request); return { data: {} }; },
+    merge: async (request) => {
+      mergeCalls.push(request);
+      if (fixture.mainAtMerge !== BASE || fixture.headAtMerge !== request.sha ||
+          fixture.draftAtMerge || fixture.closedAtMerge || !fixture.checksAtMerge) {
+        throw new Error("native eligibility changed");
+      }
+      merges.push(request);
+      return { data: { merged: true } };
+    },
   };
   const github = {
-    graphql: async (_query, { input }) => {
-      attemptedUpdates.push(input);
-      const [main, head] = input.refUpdates;
-      if (main.beforeOid !== fixture.mainAtMutation ||
-          head.beforeOid !== fixture.headAtMutation) {
-        throw new Error("beforeOid mismatch");
-      }
-      merges.push(input);
-      return { updateRefs: { clientMutationId: null } };
-    },
     paginate: async (method, args) => {
       const results = [];
       for (let page = 1; ; page++) {
@@ -116,20 +117,18 @@ async function reconcile(change = () => {}) {
     rest: {
       pulls,
       repos: {
-        get: async () => ({ data: { node_id: "repository-node-id" } }),
+        getBranchProtection: async () => {
+          if (fixture.protectionError) throw fixture.protectionError;
+          return { data: fixture.protection };
+        },
         getCollaboratorPermissionLevel: async () => ({ data: { permission: fixture.permission } }),
         listCommitStatusesForRef: async ({ page, per_page }) => ({
           data: fixture.statuses.slice((page - 1) * per_page, page * per_page),
         }),
       },
       git: {
-        getRef: async ({ ref }) => ({ data: { object: { sha: ref === "heads/main"
-          ? (++mainReads > 1 ? fixture.mainAfter : fixture.mainBefore)
-          : fixture.headAfter } } }),
-        getCommit: async () => ({ data: {
-          parents: fixture.preparedParents.map((sha) => ({ sha })), tree: { sha: PREPARED },
-        } }),
-        createCommit: async (request) => { commits.push(request); return { data: { sha: MERGED } }; },
+        getRef: async () => ({ data: { object: { sha: ++mainReads > 1
+          ? fixture.mainAfter : fixture.mainBefore } } }),
       },
       checks: {
         listSuitesForRef: async ({ page, per_page }) => ({ data: {
@@ -148,7 +147,7 @@ async function reconcile(change = () => {}) {
     core: { notice: (message) => notices.push(message), warning: (message) => notices.push(message) },
     process: { env: { INPUT_PR_NUMBER: "" } },
   }, { timeout: 1000 });
-  return { merges, updates, notices, commits, attemptedUpdates };
+  return { merges, mergeCalls, updates, notices };
 }
 
 async function blocked(change) {
@@ -160,14 +159,9 @@ async function blocked(change) {
 test("Aktueller Head mit vollständigen grünen Gates wird genau einmal SHA-gebunden gemergt", async () => {
   const result = await reconcile();
   assert.equal(result.merges.length, 1);
-  assert.deepEqual(Array.from(result.commits[0].parents), [BASE, HEAD]);
-  const [main, head] = result.merges[0].refUpdates;
-  assert.equal(result.merges[0].repositoryId, "repository-node-id");
-  assert.deepEqual({ ...main }, {
-    name: "refs/heads/main", beforeOid: BASE, afterOid: MERGED, force: false,
-  });
-  assert.deepEqual({ ...head }, {
-    name: "refs/heads/feature", beforeOid: HEAD, afterOid: HEAD, force: false,
+  assert.deepEqual({ ...result.merges[0] }, {
+    owner: "test", repo: "repository", pull_number: 10,
+    merge_method: "squash", sha: HEAD,
   });
 });
 
@@ -249,24 +243,38 @@ test("Vor der Prüfung verschobener main-Ref blockiert", async () => {
 test("Nach der Prüfung verschobener main-Ref blockiert auch bei unveränderter PR-Antwort", async () => {
   await blocked((f) => { f.mainAfter = "c".repeat(40); });
 });
-test("Während der atomaren Mutation verschobene Basis blockiert serverseitig", async () => {
-  const result = await blocked((f) => { f.mainAtMutation = HEAD; });
-  assert.equal(result.attemptedUpdates.length, 1);
-  assert.equal(result.attemptedUpdates[0].refUpdates[0].beforeOid, BASE);
+test("Vor dem nativen Merge verschobene Basis blockiert serverseitig", async () => {
+  const result = await blocked((f) => { f.mainAtMerge = HEAD; });
+  assert.equal(result.mergeCalls.length, 1);
 });
-test("Während der atomaren Mutation geänderter Head blockiert serverseitig", async () => {
-  const result = await blocked((f) => { f.headAtMutation = "c".repeat(40); });
-  assert.equal(result.attemptedUpdates.length, 1);
-  assert.equal(result.attemptedUpdates[0].refUpdates[1].beforeOid, HEAD);
+test("Vor dem nativen Merge geänderter Head blockiert durch SHA-Bindung", async () => {
+  const result = await blocked((f) => { f.headAtMerge = "c".repeat(40); });
+  assert.equal(result.mergeCalls[0].sha, HEAD);
 });
-test("Nach der PR-Antwort geänderter Head-Ref blockiert vor der Mutation", async () => {
-  await blocked((f) => { f.headAfter = "c".repeat(40); });
+test("Nach der letzten PR-Antwort zum Draft gewordener PR blockiert nativ", async () => {
+  const result = await blocked((f) => { f.draftAtMerge = true; });
+  assert.equal(result.mergeCalls.length, 1);
 });
-test("GitHubs vorbereiteter Merge mit fremder Basis blockiert", async () => {
-  await blocked((f) => { f.preparedParents[0] = "c".repeat(40); });
+test("Nach der letzten PR-Antwort geschlossener PR blockiert nativ", async () => {
+  const result = await blocked((f) => { f.closedAtMerge = true; });
+  assert.equal(result.mergeCalls.length, 1);
 });
-test("GitHubs vorbereiteter Merge mit fremdem Head blockiert", async () => {
-  await blocked((f) => { f.preparedParents[1] = "c".repeat(40); });
+test("Nach der letzten Abfrage gekippter Pflichtcheck blockiert nativ", async () => {
+  const result = await blocked((f) => { f.checksAtMerge = false; });
+  assert.equal(result.mergeCalls.length, 1);
+});
+test("Ungeschütztes main blockiert Auto-Merge ohne nativen Mergeversuch", async () => {
+  const result = await blocked((f) => { f.protectionError = new Error("404 Branch not protected"); });
+  assert.equal(result.mergeCalls.length, 0);
+});
+test("Nicht strikte Branch Protection blockiert", async () => {
+  await blocked((f) => { f.protection.required_status_checks.strict = false; });
+});
+test("Fehlender serverseitiger Pflichtcheck blockiert", async () => {
+  await blocked((f) => { f.protection.required_status_checks.contexts = REQUIRED_CHECKS.slice(1); });
+});
+test("Admin-Bypass in Branch Protection blockiert", async () => {
+  await blocked((f) => { f.protection.enforce_admins.enabled = false; });
 });
 test("Drafts blockieren", async () => {
   await blocked((f) => { f.pr.draft = true; });
