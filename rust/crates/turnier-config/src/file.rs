@@ -2,6 +2,7 @@
 //! Relative Datenpfade beziehen sich auf das Verzeichnis der TOML, nicht auf cwd.
 
 use std::ffi::OsString;
+use std::io::Read;
 use std::path::{Component, Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -10,6 +11,11 @@ use sha2::{Digest, Sha256};
 use crate::Config;
 
 pub const SCHEMA_VERSION: u32 = 1;
+/// Sicherheitsgrenze, keine Betriebseinstellung.
+pub const MAX_CONFIG_BYTES: u64 = 1024 * 1024;
+pub const DEFAULT_REMINDER_OFFSETS: [i64; 3] = [1440, 120, 15];
+pub const REMINDER_WINDOW_MINUTES: i64 = 5;
+pub const VCONSOLE_ACK_MILLISECONDS: u64 = 1500;
 pub const CONFIG_ANCHOR: &str = "turnier-global-toml-v1";
 
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
@@ -22,7 +28,7 @@ pub enum ConfigError {
     Parse,
     #[error("Konfiguration ungültig: {0}")]
     Invalid(&'static str),
-    #[error("Aufruf ungültig: --config /absoluter/pfad/bot.toml erforderlich; optional --check, --check-config oder --print-config")]
+    #[error("Aufruf ungültig: --config /absoluter/pfad/bot.toml erforderlich; optional --check, --check-broker, --check-config oder --print-config")]
     Arguments,
 }
 
@@ -104,6 +110,13 @@ impl Default for NetworkConfig {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct SchedulerConfig {
+    pub observer_agent_fresh_seconds: i64,
+    pub observer_bootstrap_cooldown_seconds: i64,
+    pub observer_spectate_ttl_seconds: i64,
+    pub observer_command_ttl_seconds: i64,
+
+    pub default_reminder_offsets_minutes: Vec<i64>,
+    pub reminder_window_minutes: i64,
     pub tick_seconds: u64,
     pub routine_seconds: u64,
     pub scrim_operational_seconds: u64,
@@ -118,6 +131,12 @@ pub struct SchedulerConfig {
 impl Default for SchedulerConfig {
     fn default() -> Self {
         Self {
+            default_reminder_offsets_minutes: DEFAULT_REMINDER_OFFSETS.to_vec(),
+            reminder_window_minutes: REMINDER_WINDOW_MINUTES,
+            observer_agent_fresh_seconds: 8,
+            observer_bootstrap_cooldown_seconds: 30,
+            observer_spectate_ttl_seconds: 30,
+            observer_command_ttl_seconds: 4,
             tick_seconds: 60,
             routine_seconds: 3600,
             scrim_operational_seconds: 15,
@@ -183,6 +202,11 @@ impl Default for LimitsConfig {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ObserverAgentConfig {
+    pub heartbeat_every_polls: u8,
+    pub game_connection_attempts: u32,
+    pub game_connection_poll_milliseconds: u64,
+    pub vconsole_ack_milliseconds: u64,
+
     pub server_base_url: String,
     pub vconsole_address: String,
     pub bot_account_id: i16,
@@ -195,6 +219,7 @@ pub struct ObserverAgentConfig {
 pub enum ConfigMode {
     Run,
     Check,
+    BrokerCheck,
     Validate,
     Print,
 }
@@ -230,6 +255,7 @@ fn for_arg(
             }
             *mode = match arg.to_str() {
                 Some("--check") => ConfigMode::Check,
+                Some("--check-broker") => ConfigMode::BrokerCheck,
                 Some("--check-config") => ConfigMode::Validate,
                 Some("--print-config") => ConfigMode::Print,
                 _ => return Err(ConfigError::Arguments),
@@ -246,13 +272,28 @@ impl Config {
             return Err(ConfigError::AbsolutePath);
         }
         let canonical = path.canonicalize().map_err(|_| ConfigError::Read)?;
-        let text = std::fs::read_to_string(&canonical).map_err(|_| ConfigError::Read)?;
+        let file = std::fs::File::open(&canonical).map_err(|_| ConfigError::Read)?;
+        let metadata = file.metadata().map_err(|_| ConfigError::Read)?;
+        if !metadata.is_file() || metadata.len() > MAX_CONFIG_BYTES {
+            return Err(ConfigError::Invalid(
+                "reguläre TOML-Datei bis 1 MiB erforderlich",
+            ));
+        }
+        let mut text = String::new();
+        file.take(MAX_CONFIG_BYTES + 1)
+            .read_to_string(&mut text)
+            .map_err(|_| ConfigError::Read)?;
         Self::parse_file(&text, &canonical)
     }
 
     pub fn parse_file(text: &str, path: &Path) -> Result<Self, ConfigError> {
         if !path.is_absolute() {
             return Err(ConfigError::AbsolutePath);
+        }
+        if text.len() as u64 > MAX_CONFIG_BYTES {
+            return Err(ConfigError::Invalid(
+                "TOML-Datei darf höchstens 1 MiB enthalten",
+            ));
         }
         // Den Parserfehler bewusst verwerfen: Display und Debug können Eingaben enthalten.
         let mut config: Self = toml::from_str(text).map_err(|_| ConfigError::Parse)?;
@@ -353,6 +394,15 @@ impl Config {
         }
         for origin in &self.cors_extra_origins {
             validate_url(origin, "cors_extra_origins")?;
+            if url::Url::parse(origin)
+                .map_err(|_| ConfigError::Invalid("cors_extra_origins"))?
+                .path()
+                != "/"
+            {
+                return Err(ConfigError::Invalid(
+                    "cors_extra_origins: Origin ohne Unterpfad erforderlich",
+                ));
+            }
         }
         for (id, field) in [
             (
@@ -415,6 +465,34 @@ impl Config {
                 validate_id(id.trim(), field)?;
             }
         }
+        if !self.backend_allowed_hosts.is_empty() {
+            for host in self.backend_allowed_hosts.split(',').map(str::trim) {
+                if host.is_empty()
+                    || host.contains('*')
+                    || host.chars().any(char::is_whitespace)
+                    || (host.parse::<std::net::IpAddr>().is_err()
+                        && url::Host::parse(host).is_err())
+                {
+                    return Err(ConfigError::Invalid(
+                        "backend_allowed_hosts: reine Hostnamen oder IP-Adressen erforderlich",
+                    ));
+                }
+            }
+        }
+        for path in [&self.avatar_dir, &self.steam_bridge_db_path] {
+            if path.chars().any(char::is_control) || path.contains("://") {
+                return Err(ConfigError::Invalid(
+                    "Datenpfade dürfen keine Steuerzeichen oder URLs enthalten",
+                ));
+            }
+        }
+        for query in [&self.observer_controller_query, &self.observer_pawn_query] {
+            if query.trim().is_empty() || query.len() > 4096 {
+                return Err(ConfigError::Invalid(
+                    "Observer-Abfrage muss 1 bis 4096 Bytes enthalten",
+                ));
+            }
+        }
         if self.avatar_dir.trim().is_empty() {
             return Err(ConfigError::Invalid("avatar_dir"));
         }
@@ -457,6 +535,11 @@ impl Config {
             ))?;
         if time.0.len() != 2
             || time.1.len() != 2
+            || !time
+                .0
+                .bytes()
+                .chain(time.1.bytes())
+                .all(|c| c.is_ascii_digit())
             || time.0.parse::<u8>().map_or(true, |v| v > 23)
             || time.1.parse::<u8>().map_or(true, |v| v > 59)
         {
@@ -528,12 +611,38 @@ impl Config {
         if n.broker_connect_seconds > n.broker_request_seconds
             || n.oauth_connect_seconds > n.oauth_request_seconds
             || n.lobby_connect_seconds > n.lobby_request_seconds
+            || n.lobby_connect_seconds > n.lobby_provision_seconds
+            || n.observer_connect_seconds > n.observer_request_seconds
         {
             return Err(ConfigError::Invalid(
                 "network: Verbindungsfrist über Gesamtfrist",
             ));
         }
         let s = &self.scheduler;
+        if !(1..=60).contains(&s.observer_agent_fresh_seconds)
+            || !(1..=600).contains(&s.observer_bootstrap_cooldown_seconds)
+            || !(1..=300).contains(&s.observer_spectate_ttl_seconds)
+            || !(1..=30).contains(&s.observer_command_ttl_seconds)
+            || s.observer_bootstrap_cooldown_seconds < s.observer_spectate_ttl_seconds
+        {
+            return Err(ConfigError::Invalid(
+                "scheduler: unvereinbare Observer-Zeitgrenzen",
+            ));
+        }
+        if !(1..=60).contains(&s.reminder_window_minutes)
+            || s.default_reminder_offsets_minutes.is_empty()
+            || s.default_reminder_offsets_minutes.len() > 64
+            || s.default_reminder_offsets_minutes
+                .iter()
+                .any(|n| !(0..=525600).contains(n))
+            || s.default_reminder_offsets_minutes
+                .windows(2)
+                .any(|pair| pair[0] <= pair[1])
+        {
+            return Err(ConfigError::Invalid(
+                "scheduler: ungültige Reminder-Vorgaben",
+            ));
+        }
         for value in [
             s.tick_seconds,
             s.routine_seconds,
@@ -564,6 +673,19 @@ impl Config {
             "scheduler.observer_evaluate_milliseconds",
         )?;
         if let Some(a) = &self.observer_agent {
+            if a.heartbeat_every_polls == 0
+                || !(1..=100).contains(&a.game_connection_attempts)
+                || !(100..=5000).contains(&a.game_connection_poll_milliseconds)
+                || !(100..=60000).contains(&a.vconsole_ack_milliseconds)
+                || a.poll_milliseconds
+                    .saturating_mul(u64::from(a.heartbeat_every_polls))
+                    >= self.scheduler.observer_agent_fresh_seconds as u64 * 1000
+                || a.poll_milliseconds > self.scheduler.observer_command_ttl_seconds as u64 * 1000
+            {
+                return Err(ConfigError::Invalid(
+                    "observer_agent: unvereinbare Prüf- und Zeitbudgets",
+                ));
+            }
             validate_url(&a.server_base_url, "observer_agent.server_base_url")?;
             if a.bot_account_id != 2 {
                 return Err(ConfigError::Invalid(
@@ -596,8 +718,11 @@ impl Config {
     }
 }
 
-fn validate_id(value: &str, field: &'static str) -> Result<(), ConfigError> {
-    if value.parse::<i64>().is_ok_and(|v| v > 0) {
+pub(crate) fn validate_id(value: &str, field: &'static str) -> Result<(), ConfigError> {
+    if value
+        .parse::<i64>()
+        .is_ok_and(|v| v > 0 && v.to_string() == value)
+    {
         Ok(())
     } else {
         Err(ConfigError::Invalid(field))
@@ -618,6 +743,10 @@ pub(crate) fn validate_url(value: &str, field: &'static str) -> Result<(), Confi
         || url.password().is_some()
         || url.query().is_some()
         || url.fragment().is_some()
+        || url.port() == Some(0)
+        || value.trim() != value
+        || value.chars().any(char::is_control)
+        || url.path().to_ascii_lowercase().contains("/webhooks/")
     {
         return Err(ConfigError::Invalid(field));
     }

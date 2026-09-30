@@ -66,6 +66,9 @@ async fn main() -> anyhow::Result<()> {
     tracing::info!(anchor = CONFIG_ANCHOR, fingerprint = %parsed.fingerprint()?, "Globale TOML-Konfiguration geprüft");
     let check_only = args.mode == ConfigMode::Check;
     let config = Arc::new(parsed.with_secrets());
+    if args.mode == ConfigMode::BrokerCheck {
+        return check_broker_readonly(&config).await;
+    }
 
     ensure_dirs(&config);
 
@@ -88,14 +91,6 @@ async fn main() -> anyhow::Result<()> {
         return Ok(());
     }
 
-    // Scheduler-Loop (Phasenübergänge + Reminder) als Hintergrund-Task.
-    let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
-    let scheduler_handle = tokio::spawn(start_scheduler(scheduler, shutdown_rx));
-    spawn_substitute_sweep_worker(state.clone());
-    spawn_scrim_operational_worker(state.clone());
-    spawn_scrim_lobby_worker(state.clone());
-    turnier_api::observer::spawn_observer_worker(state);
-
     let addr = std::net::SocketAddr::new(
         config
             .backend_host
@@ -105,6 +100,14 @@ async fn main() -> anyhow::Result<()> {
     );
     let listener = tokio::net::TcpListener::bind(addr).await?;
     tracing::info!(%addr, "Turnier-Backend lauscht");
+
+    // Scheduler-Loop (Phasenübergänge + Reminder) als Hintergrund-Task.
+    let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
+    let scheduler_handle = tokio::spawn(start_scheduler(scheduler, shutdown_rx));
+    spawn_substitute_sweep_worker(state.clone());
+    spawn_scrim_operational_worker(state.clone());
+    spawn_scrim_lobby_worker(state.clone());
+    turnier_api::observer::spawn_observer_worker(state);
 
     axum::serve(
         listener,
@@ -139,9 +142,61 @@ fn init_tracing(config: &Config) {
 
 /// Wartet auf Ctrl-C und signalisiert dann den Shutdown an den Scheduler.
 async fn shutdown_signal(shutdown_tx: tokio::sync::watch::Sender<bool>) {
-    let _ = tokio::signal::ctrl_c().await;
+    let interrupt = tokio::signal::ctrl_c();
+    #[cfg(unix)]
+    let terminate = async {
+        match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
+            Ok(mut signal) => {
+                signal.recv().await;
+            }
+            Err(_) => std::future::pending::<()>().await,
+        }
+    };
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
+    tokio::select! {
+        _ = interrupt => {},
+        _ = terminate => {},
+    }
     tracing::info!("Shutdown-Signal empfangen");
     let _ = shutdown_tx.send(true);
+}
+
+async fn check_broker_readonly(config: &Config) -> anyhow::Result<()> {
+    let body: serde_json::Value = BrokerClient::from_config(config)
+        .post_internal(
+            "/internal/master/v1/discord/voice-channel/members",
+            &serde_json::json!({"channel_id": config.discord_sammelpunkt_channel_id}),
+        )
+        .await
+        .map_err(|_| {
+            anyhow::anyhow!("Broker-Leseprobe fehlgeschlagen; keine Antwortdetails ausgegeben")
+        })?;
+    if body
+        .get("ok")
+        .is_some_and(|value| value.as_bool() != Some(true))
+    {
+        anyhow::bail!("Broker-Leseprobe meldet keinen Erfolg");
+    }
+    let result = body.get("result").unwrap_or(&body);
+    let members = result
+        .get("members")
+        .and_then(serde_json::Value::as_array)
+        .context("Broker-Leseprobe: Mitgliederliste fehlt")?;
+    if result.get("channel_id").and_then(serde_json::Value::as_i64)
+        != Some(config.discord_sammelpunkt_channel_id)
+        || members
+            .iter()
+            .any(|member| !member.is_object() || member.get("user_id").is_none())
+    {
+        anyhow::bail!("Broker-Leseprobe: Antwort passt nicht zum Vertrag");
+    }
+    println!(
+        "broker-readonly-check: ok; members={}; fingerprint={}",
+        members.len(),
+        config.fingerprint()?
+    );
+    Ok(())
 }
 
 #[cfg(test)]

@@ -1,25 +1,22 @@
-# Deadlock Turniere — Rust Backend starten
+# Deadlock Turniere: Rust-Backend mit expliziter zentraler TOML starten.
+# Secrets müssen über die bestehende geschützte Infisical-Anbindung vorliegen.
+param([string]$Config = (Join-Path $PSScriptRoot "config\bot.toml"))
 $ErrorActionPreference = "Stop"
 
-$ProjectDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$BackendDir = Join-Path $ProjectDir "backend"
-$RustDir = Join-Path $ProjectDir "rust"
+$ConfigFile = (Resolve-Path -LiteralPath $Config).Path
+$RustDir = Join-Path $PSScriptRoot "rust"
 $Binary = Join-Path $RustDir "target\release\turnier-bot.exe"
-$DataDir = Join-Path $BackendDir "data"
 
-# Data-Verzeichnis erstellen falls nötig
-if (-not (Test-Path $DataDir)) {
-    New-Item -ItemType Directory -Path $DataDir -Force | Out-Null
-    Write-Host "Data-Verzeichnis erstellt: $DataDir"
+if (-not (Test-Path -LiteralPath $Binary)) {
+    Write-Host "Baue Rust-Backend."
+    & cargo build --manifest-path (Join-Path $RustDir "Cargo.toml") --release -p turnier-bot -j 2
+    if ($LASTEXITCODE -ne 0) { throw "Rust-Build fehlgeschlagen." }
 }
 
-if (-not (Test-Path $Binary)) {
-    Write-Host "Baue Rust Backend..."
-    Set-Location $RustDir
-    cargo build --release -p turnier-bot
-}
+# Keine Verzeichnisse oder Clients vor der Konfigurationsprüfung anlegen.
+& $Binary --config $ConfigFile --check-config
+if ($LASTEXITCODE -ne 0) { throw "Konfigurationsprüfung fehlgeschlagen. Kein Start." }
 
-# Starten
-Write-Host "Starte Deadlock Turniere Backend auf Port 8900..."
-Set-Location $BackendDir
-& $Binary
+Write-Host "Starte Deadlock Turniere mit der geprüften Konfiguration."
+& $Binary --config $ConfigFile
+exit $LASTEXITCODE

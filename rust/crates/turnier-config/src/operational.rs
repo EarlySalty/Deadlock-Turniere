@@ -24,10 +24,9 @@ impl Default for AuthorizationConfig {
 impl AuthorizationConfig {
     pub(crate) fn validate(&self) -> Result<(), ConfigError> {
         if self.proposal_approver_role_ids.is_empty()
-            || self
-                .proposal_approver_role_ids
-                .iter()
-                .any(|id| id.parse::<i64>().map_or(true, |id| id <= 0))
+            || self.proposal_approver_role_ids.iter().any(|id| {
+                crate::file::validate_id(id, "authorization.proposal_approver_role_ids").is_err()
+            })
             || self
                 .proposal_approver_role_ids
                 .iter()
@@ -103,6 +102,15 @@ impl SteamConfig {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct BridgeConfig {
+    pub read_connections: u32,
+    pub task_connections: u32,
+    pub invite_timeout_seconds: u64,
+    pub result_timeout_seconds: u64,
+    pub create_timeout_seconds: u64,
+    pub start_timeout_seconds: u64,
+    pub control_timeout_seconds: u64,
+    pub convars_timeout_seconds: u64,
+
     pub busy_timeout_seconds: u64,
     pub poll_milliseconds: u64,
     pub stale_task_milliseconds: i64,
@@ -111,6 +119,14 @@ pub struct BridgeConfig {
 impl Default for BridgeConfig {
     fn default() -> Self {
         Self {
+            read_connections: 2,
+            task_connections: 4,
+            invite_timeout_seconds: 30,
+            result_timeout_seconds: 45,
+            create_timeout_seconds: 45,
+            start_timeout_seconds: 45,
+            control_timeout_seconds: 20,
+            convars_timeout_seconds: 30,
             busy_timeout_seconds: 5,
             poll_milliseconds: 500,
             stale_task_milliseconds: 120000,
@@ -120,6 +136,27 @@ impl Default for BridgeConfig {
 
 impl BridgeConfig {
     pub(crate) fn validate(&self) -> Result<(), ConfigError> {
+        let timeouts = [
+            self.invite_timeout_seconds,
+            self.result_timeout_seconds,
+            self.create_timeout_seconds,
+            self.start_timeout_seconds,
+            self.control_timeout_seconds,
+            self.convars_timeout_seconds,
+        ];
+        if !(1..=32).contains(&self.read_connections)
+            || !(1..=32).contains(&self.task_connections)
+            || timeouts.iter().any(|seconds| {
+                !(1..=3600).contains(seconds)
+                    || (*seconds * 1000) as i64 > self.stale_task_milliseconds
+                    || self.poll_milliseconds > *seconds * 1000
+            })
+        {
+            return Err(ConfigError::Invalid(
+                "bridge: unvereinbare Verbindungs- oder Aufgabenbudgets",
+            ));
+        }
+
         if !(1..=3600).contains(&self.busy_timeout_seconds)
             || !(10..=60000).contains(&self.poll_milliseconds)
             || !(1000..=3600000).contains(&self.stale_task_milliseconds)

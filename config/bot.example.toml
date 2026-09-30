@@ -1,4 +1,6 @@
-# Globale Betriebskonfiguration für Deadlock-Turniere.
+# Vorlage für die globale Betriebskonfiguration von Deadlock-Turniere.
+# Laufzeit liest ausschließlich den expliziten --config-Pfad, nie diese Vorlage.
+# config/bot.toml wird einmal kontrolliert eingerichtet und bleibt lokal editierbar.
 # Änderungen benötigen einen geordneten Neustart. Kein Hot-Reload.
 # Secrets gehören in Infisical. Turniere und Anmeldungen bleiben in Postgres.
 # Relative Datenpfade beginnen beim Verzeichnis dieser Datei.
@@ -75,6 +77,13 @@ observer_keepalive_seconds = 30
 heroes_request_seconds = 5
 
 [scheduler]
+observer_agent_fresh_seconds = 8
+observer_bootstrap_cooldown_seconds = 30
+observer_spectate_ttl_seconds = 30
+observer_command_ttl_seconds = 4
+# Nur Fallback bei fehlenden/ungültigen DB-Offsets, keine Änderung gespeicherter Regeln.
+default_reminder_offsets_minutes = [1440, 120, 15]
+reminder_window_minutes = 5
 tick_seconds = 60
 routine_seconds = 3600
 scrim_operational_seconds = 15
@@ -97,7 +106,7 @@ heroes_fallback_cache_seconds = 60
 [limits]
 # Neue Sessions: 1 bis 30 Tage. Bestehende Ablaufzeiten bleiben unverändert.
 session_lifetime_days = 7
-# Upload maximal 16 MiB; API-Nutzlast maximal 1 MiB.
+# Grenzen: Upload 16 MiB, gesamte API-Nutzlast 32 MiB, Comp-Nutzlast 1 MiB.
 avatar_bytes = 2097152
 request_body_bytes = 2097152
 comp_body_bytes = 32768
@@ -126,6 +135,14 @@ rank_cache_seconds = 86400
 subrank_role_cache_seconds = 300
 
 [bridge]
+read_connections = 2
+task_connections = 4
+invite_timeout_seconds = 30
+result_timeout_seconds = 45
+create_timeout_seconds = 45
+start_timeout_seconds = 45
+control_timeout_seconds = 20
+convars_timeout_seconds = 30
 # Bestehende externe Steam-Bridge. Keine neue Turnier-Persistenz.
 busy_timeout_seconds = 5
 poll_milliseconds = 500

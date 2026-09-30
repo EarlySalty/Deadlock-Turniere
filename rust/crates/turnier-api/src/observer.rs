@@ -22,7 +22,6 @@ use crate::extract::AdminUser;
 use crate::state::AppState;
 
 const BOT2_ACCOUNT_ID: i16 = 2;
-const COMMAND_TTL_SECONDS: i64 = 4;
 
 pub fn router() -> Router<AppState> {
     Router::new()
@@ -247,8 +246,10 @@ async fn set_mode(
         let heartbeat: Option<DateTime<Utc>> = readiness.try_get("last_agent_heartbeat_at")?;
         let vconsole_ok: Option<bool> = readiness.try_get("last_vconsole_ok")?;
         let game_connected: Option<bool> = readiness.try_get("last_game_connected")?;
-        let fresh = heartbeat
-            .is_some_and(|at| Utc::now().signed_duration_since(at) <= Duration::seconds(8));
+        let fresh = heartbeat.is_some_and(|at| {
+            Utc::now().signed_duration_since(at)
+                <= Duration::seconds(state.config.scheduler.observer_agent_fresh_seconds)
+        });
         if !fresh || vconsole_ok != Some(true) || game_connected != Some(true) {
             return Err(WebError::conflict(
                 "Auto-Modus bleibt gesperrt, bis der lokale Observer-Agent frisch verbunden, VConsole bereit und die Deadlock-Spectator-Session bestätigt ist",
@@ -604,17 +605,19 @@ async fn ensure_spectate_lobby_bootstrap(state: &AppState) -> Result<(), String>
           WHERE os.enabled=TRUE AND os.finished_at IS NULL \
             AND os.state IN ('waiting','pairing','live') \
             AND os.lobby_party_id IS NOT NULL \
-            AND os.last_agent_heartbeat_at > now() - interval '8 seconds' \
+            AND os.last_agent_heartbeat_at > now() - ($1::bigint * interval '1 second') \
             AND os.last_vconsole_ok=TRUE \
             AND COALESCE(os.last_game_connected, FALSE)=FALSE \
             AND NOT EXISTS ( \
                 SELECT 1 FROM scrim.observer_commands c \
                  WHERE c.observer_session_id=os.id \
                    AND c.action='spectate_lobby' \
-                   AND c.issued_at > now() - interval '30 seconds' \
+                   AND c.issued_at > now() - ($2::bigint * interval '1 second') \
             ) \
           ORDER BY os.id",
     )
+    .bind(state.config.scheduler.observer_agent_fresh_seconds)
+    .bind(state.config.scheduler.observer_bootstrap_cooldown_seconds)
     .fetch_all(&state.pool)
     .await
     .map_err(|err| err.to_string())?;
@@ -754,7 +757,7 @@ async fn run_observer_session(
                     let vconsole_ok: Option<bool> = control.try_get("last_vconsole_ok")?;
                     let game_connected: Option<bool> = control.try_get("last_game_connected")?;
                     let agent_fresh = heartbeat.is_some_and(|at| {
-                        Utc::now().signed_duration_since(at) <= Duration::seconds(8)
+                        Utc::now().signed_duration_since(at) <= Duration::seconds(state.config.scheduler.observer_agent_fresh_seconds)
                     });
                     if !agent_fresh || vconsole_ok != Some(true) || game_connected != Some(true) {
                         if last_action != CameraAction::Directed {
@@ -849,9 +852,9 @@ async fn enqueue_command(
     score: Option<f64>,
 ) -> Result<i64, sqlx::Error> {
     let ttl_seconds = if matches!(action, CameraAction::SpectateLobby { .. }) {
-        30
+        state.config.scheduler.observer_spectate_ttl_seconds
     } else {
-        COMMAND_TTL_SECONDS
+        state.config.scheduler.observer_command_ttl_seconds
     };
     let expires_at = Utc::now() + Duration::seconds(ttl_seconds);
     let (action_name, account_id, lobby_id) = action_parts(action);

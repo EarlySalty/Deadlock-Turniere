@@ -10,7 +10,7 @@ INFISICAL_CONFIG_FILE="$HOME/.config/deadlock-bots/infisical.conf"
 INFISICAL_LOADER="$HOME/.local/bin/dl-infisical-env"
 
 if [[ "$#" -lt 2 || "$1" != "--config" || "$2" != /* ]]; then
-  echo "Aufruf: run_turniere_backend_rust.sh --config /absoluter/pfad/config/bot.toml [--check|--check-config|--print-config]" >&2
+  echo "Aufruf: run_turniere_backend_rust.sh --config /absoluter/pfad/config/bot.toml [--check|--check-broker|--check-config|--print-config]" >&2
   exit 64
 fi
 CONFIG_FILE="$2"
@@ -21,7 +21,7 @@ if [[ "$#" -gt 1 ]]; then
   exit 64
 fi
 case "$MODE" in
-  ""|--check) ;;
+  ""|--check|--check-broker) ;;
   --check-config|--print-config)
     exec "$BIN" --config "$CONFIG_FILE" "$MODE"
     ;;
@@ -67,7 +67,7 @@ elif [[ -x "$DEPLOY_PREFLIGHT" ]]; then
   "$DEPLOY_PREFLIGHT" "$ROOT_DIR" main "deadlock-turniere"
 fi
 
-if [[ -z "${DEADLOCK_CENTRAL_DSN:-}" ]]; then
+if [[ "$MODE" != "--check-broker" && -z "${DEADLOCK_CENTRAL_DSN:-}" ]]; then
   echo "DEADLOCK_CENTRAL_DSN fehlt in der Secret-Anbindung." >&2
   exit 1
 fi
@@ -76,7 +76,7 @@ fi
 # nicht. Keine neue Turnier-/Anmeldungs-/Benachrichtigungsaktion beim Start.
 CENTRAL_MIGRATION_MARKER="${XDG_RUNTIME_DIR:-/tmp}/deadlock-turniere-apply-central-migrations-once"
 CENTRAL_MIGRATOR_BIN="$(dirname "$ROOT_DIR")/Deadlock-Bots/rust/target/release/dl-central-migrate"
-if [[ -f "$CENTRAL_MIGRATION_MARKER" ]]; then
+if [[ -z "$MODE" && -f "$CENTRAL_MIGRATION_MARKER" ]]; then
   if [[ ! -x "$CENTRAL_MIGRATOR_BIN" ]]; then
     echo "Zentraler Migrator fehlt oder ist nicht ausführbar." >&2
     exit 1

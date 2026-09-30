@@ -111,7 +111,7 @@ impl SteamBridge {
             .create_if_missing(false)
             .busy_timeout(Duration::from_secs(settings.busy_timeout_seconds));
         let pool = SqlitePoolOptions::new()
-            .max_connections(4)
+            .max_connections(settings.task_connections)
             .connect_with(options)
             .await?;
         Ok(Some(Self {
@@ -307,7 +307,10 @@ impl SteamBridge {
                 "party_id": normalized_party_id,
             });
             let task_id = self.create_task(GC_LOBBY_INVITE_PLAYER, &payload).await?;
-            match self.poll_task_result(task_id, 30.0).await? {
+            match self
+                .poll_task_result(task_id, self.settings.invite_timeout_seconds as f64)
+                .await?
+            {
                 TaskOutcome::TimedOut { timeout_s, .. } => {
                     result.failed.push(InviteFailed {
                         steam_id: steam_id.clone(),

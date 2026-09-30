@@ -19,7 +19,7 @@ use turnier_core::{discord_id_to_string, now_utc};
 use turnier_db::{dynamic_sql::ReminderDedupeTable, Pool};
 use turnier_discord::{DiscordNotifier, NotificationEvent};
 
-use crate::time::{is_within_window, offset_label, parse_reminder_offsets};
+use crate::time::{is_within_configured_window, offset_label, parse_reminder_offsets_with_default};
 
 /// Lädt alle Teilnehmer-Discord-IDs eines Turniers: Solo-Signups UNION
 /// Teammitglieder. Portiert `_load_tournament_participant_ids` (Z.113-121).
@@ -103,6 +103,21 @@ pub async fn check_and_send_registration_reminders(
     notifier: &DiscordNotifier,
     now: DateTime<Utc>,
 ) -> sqlx::Result<()> {
+    check_and_send_registration_reminders_with_config(
+        pool,
+        notifier,
+        now,
+        &turnier_config::SchedulerConfig::default(),
+    )
+    .await
+}
+
+pub async fn check_and_send_registration_reminders_with_config(
+    pool: &Pool,
+    notifier: &DiscordNotifier,
+    now: DateTime<Utc>,
+    settings: &turnier_config::SchedulerConfig,
+) -> sqlx::Result<()> {
     let tournaments: Vec<RegistrationReminderRow> = sqlx::query_as(
         "SELECT id, name, registration_end, reminder_offsets, is_test FROM turnier.tournaments \
          WHERE (status = 'registration' OR (status = 'draft' AND source <> 'routine')) \
@@ -126,9 +141,12 @@ pub async fn check_and_send_registration_reminders(
             continue;
         };
 
-        for offset in parse_reminder_offsets(reminder_offsets.as_ref()) {
+        for offset in parse_reminder_offsets_with_default(
+            reminder_offsets.as_ref(),
+            &settings.default_reminder_offsets_minutes,
+        ) {
             let reminder_at = end_at - Duration::minutes(offset);
-            if !is_within_window(reminder_at, now) {
+            if !is_within_configured_window(reminder_at, now, settings.reminder_window_minutes) {
                 continue;
             }
             if reminder_already_sent(pool, ReminderDedupeTable::Tournament, id, offset).await? {
@@ -169,6 +187,21 @@ pub async fn check_and_send_start_reminders(
     notifier: &DiscordNotifier,
     now: DateTime<Utc>,
 ) -> sqlx::Result<()> {
+    check_and_send_start_reminders_with_config(
+        pool,
+        notifier,
+        now,
+        &turnier_config::SchedulerConfig::default(),
+    )
+    .await
+}
+
+pub async fn check_and_send_start_reminders_with_config(
+    pool: &Pool,
+    notifier: &DiscordNotifier,
+    now: DateTime<Utc>,
+    settings: &turnier_config::SchedulerConfig,
+) -> sqlx::Result<()> {
     let rows: Vec<StartReminderRow> = sqlx::query_as(
         "SELECT id, name, tournament_mode, group_phase_start, bracket_start, \
                 start_reminder_offsets, is_test FROM turnier.tournaments \
@@ -185,9 +218,12 @@ pub async fn check_and_send_start_reminders(
             continue;
         };
 
-        for offset in parse_reminder_offsets(row.start_reminder_offsets.as_ref()) {
+        for offset in parse_reminder_offsets_with_default(
+            row.start_reminder_offsets.as_ref(),
+            &settings.default_reminder_offsets_minutes,
+        ) {
             let reminder_at = start_at - Duration::minutes(offset);
-            if !is_within_window(reminder_at, now) {
+            if !is_within_configured_window(reminder_at, now, settings.reminder_window_minutes) {
                 continue;
             }
             if reminder_already_sent(pool, ReminderDedupeTable::Start, row.id, offset).await? {
