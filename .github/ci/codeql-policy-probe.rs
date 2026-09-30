@@ -37,6 +37,15 @@ fn run() -> Result<(), Box<dyn Error>> {
     let medium = clean.replace("\"results\":[]", "\"results\":[{\"ruleId\":\"js/test\"}]");
     check("complete clean report", clean, true)?;
     check("documented below-HIGH finding", &medium, true)?;
+    let extension = clean.replace(
+        "\"driver\":{\"rules\":[{\"id\":\"js/test\",\"properties\":{\"security-severity\":\"6.9\"}}]}",
+        "\"driver\":{\"rules\":[]},\"extensions\":[{\"name\":\"query-pack\",\"rules\":[{\"id\":\"js/test\",\"properties\":{\"security-severity\":\"6.9\"}}]},{\"name\":\"library\"}]",
+    );
+    assert_ne!(extension, clean, "extension fixture must move the rule catalog");
+    let extension_medium = extension.replace("\"results\":[]", "\"results\":[{\"ruleId\":\"js/test\"}]");
+    check("CodeQL query-pack clean report", &extension, true)?;
+    check("query-pack below-HIGH finding", &extension_medium, true)?;
+    check("query-pack HIGH finding", &extension_medium.replace("6.9", "7.0"), false)?;
     for (name, report) in [
         ("HIGH finding", medium.replace("6.9", "7.0")),
         ("CRITICAL finding", medium.replace("6.9", "9.8")),

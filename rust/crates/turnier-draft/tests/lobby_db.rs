@@ -447,3 +447,17 @@ async fn rematch_nach_abschluss_tauscht_die_seiten() {
     let fremd = rematch_room(db.pool(), &code, "falsch").await.unwrap_err();
     assert!(matches!(fremd, DraftError::InvalidToken));
 }
+
+#[tokio::test]
+async fn legacy_draft_fordert_nach_abschluss_keine_steam_lobby_an() {
+    let db = temp_db().await;
+    let lobby = create_lobby(db.pool(), options(None, None)).await.unwrap();
+    spiele_raum_zu_ende(db.pool(), &lobby.code).await;
+
+    let (status, claim1, claim2, ready1, ready2, lobby_status, _) =
+        spalten(db.pool(), &lobby.code).await;
+    assert_eq!(status, "completed");
+    assert!(claim1.is_none() && claim2.is_none());
+    assert!(!ready1 && !ready2);
+    assert_eq!(lobby_status, "keine");
+}

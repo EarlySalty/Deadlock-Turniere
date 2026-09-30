@@ -15,11 +15,16 @@ def finding_passes($rules):
       (try ($score | tonumber | . >= 0 and . < 7.0) catch false)
     end
   end;
+# CodeQL query-pack rules live in tool.extensions; driver.rules can legitimately
+# be empty. Libraries without their own rules are normal, absent catalogs are not.
+def catalog:
+  .tool.driver.rules + ([.tool.extensions[]? | (.rules // [])[]] // []);
 (type == "object") and (.version == "2.1.0") and
 (.runs | type == "array" and length > 0) and
 all(.runs[];
   (type == "object") and
-  (.tool.driver.rules | rules_valid) and
+  (.tool.driver.rules | type == "array") and
+  (catalog | rules_valid) and
   (.results | type == "array") and
   all(.invocations[]?; .executionSuccessful == true) and
-  (.tool.driver.rules as $rules | all(.results[]; finding_passes($rules))))
+  (catalog as $rules | all(.results[]; finding_passes($rules))))

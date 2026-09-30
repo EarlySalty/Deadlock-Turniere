@@ -589,7 +589,9 @@ async fn invalid_proposal_transition_returns_conflict() {
         &caster_token,
         Method::POST,
         &format!("/api/admin/proposals/{proposal_id}/event"),
-        Some(json!({ "event": "approve" })),
+        // Reject is a recognized event, but invalid while the proposal is a draft.
+        // Direct approval is deliberately rejected earlier by the human-vote guard.
+        Some(json!({ "event": "reject" })),
     )
     .await;
     assert_eq!(status, StatusCode::CONFLICT);

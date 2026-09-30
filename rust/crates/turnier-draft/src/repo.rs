@@ -998,6 +998,9 @@ fn consume_reserve(session: &LobbySessionRow, team: i64, now: DateTime<Utc>) -> 
     Some((i64::from(reserve) - used).max(0) as i32)
 }
 
+// A room may request Steam provisioning only after both captains claimed and
+// confirmed it. Both legacy drafts and new rooms start with lobby_status='keine',
+// so that default value cannot distinguish their authorization to provision.
 async fn advance_lobby_session(
     tx: &mut Transaction<'_, Postgres>,
     session: &mut LobbySessionRow,
@@ -1032,7 +1035,10 @@ async fn advance_lobby_session(
              status = CASE WHEN $2 THEN 'completed' ELSE status END, \
              completed_at = CASE WHEN $2 THEN $3 ELSE completed_at END, \
              team1_reserve_left = $4, team2_reserve_left = $5, deadline_at = $6, \
-             lobby_status = CASE WHEN $2 AND lobby_status <> 'keine' \
+             lobby_status = CASE WHEN $2 \
+                                  AND team1_claimed_at IS NOT NULL \
+                                  AND team2_claimed_at IS NOT NULL \
+                                  AND team1_ready AND team2_ready \
                             THEN 'angefordert' ELSE lobby_status END \
          WHERE id = $7 AND current_action_index = $8 AND status = 'in_progress'",
     )
