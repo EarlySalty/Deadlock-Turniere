@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { AnimatePresence, motion } from 'framer-motion'
+import { AnimatePresence, motion, MotionConfig } from 'framer-motion'
 import { Eye } from 'lucide-react'
 import LoadingSpinner from '@/components/ui/LoadingSpinner'
 import DraftHintergrund from '@/components/draft/DraftHintergrund'
@@ -560,8 +560,9 @@ export default function DraftBoard() {
   }
 
   return (
-    <div className="relative">
-      <AnimatePresence mode="wait">
+    <MotionConfig reducedMotion="user">
+      <div className="relative">
+        <AnimatePresence mode="wait">
         {zustand.phase === 'warteraum' && (
           <motion.div
             key="warteraum"
