@@ -11,7 +11,7 @@ use base64::Engine;
 use chrono::{DateTime, Duration, Utc};
 use rand::RngCore;
 use turnier_core::{discord_id_to_string, parse_discord_id, UserSession};
-use turnier_db::Pool;
+use turnier_db::{bearer, Pool};
 
 use crate::error::{AuthError, AuthResult};
 use crate::roles::RoleSets;
@@ -104,7 +104,7 @@ pub async fn create_session_with_lifetime(
          (token, discord_id, discord_name, discord_avatar, discord_roles, expires_at, created_at) \
          VALUES ($1, $2, $3, $4, $5, $6, $7)",
     )
-    .bind(&token)
+    .bind(bearer::lookup(&token))
     .bind(discord_id)
     .bind(discord_name)
     .bind(discord_avatar)
@@ -137,7 +137,7 @@ pub async fn resolve_session(
         "SELECT discord_id, discord_name, discord_avatar, discord_roles, expires_at \
          FROM turnier.sessions WHERE token = $1",
     )
-    .bind(token)
+    .bind(bearer::lookup(token))
     .fetch_optional(pool)
     .await?;
 
@@ -181,7 +181,7 @@ fn parse_expires_at(raw: &str) -> AuthResult<DateTime<Utc>> {
 /// Löscht die Session-Zeile zu einem Token (Logout / Opportunistic-Cleanup).
 pub async fn delete_session(pool: &Pool, token: &str) -> AuthResult<()> {
     sqlx::query("DELETE FROM turnier.sessions WHERE token = $1")
-        .bind(token)
+        .bind(bearer::lookup(token))
         .execute(pool)
         .await?;
     Ok(())

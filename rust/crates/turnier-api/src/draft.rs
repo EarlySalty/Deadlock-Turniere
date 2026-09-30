@@ -361,7 +361,7 @@ async fn token_to_team(pool: &turnier_db::Pool, code: &str, token: &str) -> WebR
          FROM turnier.draft_sessions WHERE code = $1",
     )
     .bind(code)
-    .bind(token)
+    .bind(turnier_db::bearer::lookup(token))
     .fetch_optional(pool)
     .await?
     .flatten();

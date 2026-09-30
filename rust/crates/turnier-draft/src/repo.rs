@@ -19,7 +19,7 @@ use rand::{Rng, SeedableRng};
 use sqlx::types::Json;
 use sqlx::{Postgres, QueryBuilder, Transaction};
 use turnier_core::{discord_id_to_string, now_utc, parse_discord_id};
-use turnier_db::Pool;
+use turnier_db::{bearer, Pool};
 
 use crate::error::{DraftError, DraftResult};
 use crate::heroes::is_valid_hero;
@@ -259,8 +259,8 @@ pub async fn create_lobby(pool: &Pool, opts: CreateLobbyOptions) -> DraftResult<
     .bind(&code)
     .bind(slot1_name)
     .bind(slot2_name)
-    .bind(slot1_token)
-    .bind(slot2_token)
+    .bind(bearer::lookup(slot1_token))
+    .bind(bearer::lookup(slot2_token))
     .bind(Json(&opts.sequence))
     .bind(opts.round_seconds)
     .bind(reserve)
@@ -333,8 +333,8 @@ pub async fn create_room(pool: &Pool, opts: CreateRoomOptions) -> DraftResult<St
     .bind(&code)
     .bind(slot1_name)
     .bind(slot2_name)
-    .bind(slot1_token)
-    .bind(slot2_token)
+    .bind(bearer::lookup(slot1_token))
+    .bind(bearer::lookup(slot2_token))
     .bind(Json(&opts.sequence))
     .bind(opts.bans_per_team)
     .bind(opts.round_seconds)
@@ -347,32 +347,34 @@ pub async fn create_room(pool: &Pool, opts: CreateRoomOptions) -> DraftResult<St
     Ok(code)
 }
 
+/// Ein unbesetzter Slot erhält sein Token erst bei der atomaren Übernahme.
+/// Dadurch muss kein wieder auslesbarer Tokenrohwert in der Datenbank liegen.
 pub async fn claim_room(pool: &Pool, code: &str, team: i64) -> DraftResult<ClaimOutcome> {
     let now = now_utc();
+    let (column, token_column) = match team {
+        1 => ("team1_claimed_at", "team1_token"),
+        2 => ("team2_claimed_at", "team2_token"),
+        _ => return Err(DraftError::InvalidTeam),
+    };
     let mut tx = pool.begin().await?;
-    let (status, team1_token, team2_token): (String, String, String) = sqlx::query_as(
-        "SELECT status, team1_token, team2_token FROM turnier.draft_sessions \
-         WHERE code = $1 FOR UPDATE",
-    )
-    .bind(code)
-    .fetch_optional(&mut *tx)
-    .await?
-    .ok_or(DraftError::LobbyNotFound)?;
+    let status: String =
+        sqlx::query_scalar("SELECT status FROM turnier.draft_sessions WHERE code = $1 FOR UPDATE")
+            .bind(code)
+            .fetch_optional(&mut *tx)
+            .await?
+            .ok_or(DraftError::LobbyNotFound)?;
     if status != "warteraum" {
         return Err(DraftError::RoomNotOpen);
     }
-    let (column, token) = match team {
-        1 => ("team1_claimed_at", team1_token),
-        2 => ("team2_claimed_at", team2_token),
-        _ => return Err(DraftError::InvalidTeam),
-    };
+    let token = random_string(&mut StdRng::from_entropy(), 48);
     let query = format!(
-        "UPDATE turnier.draft_sessions SET {column} = $1 \
+        "UPDATE turnier.draft_sessions SET {column} = $1, {token_column} = $3 \
          WHERE code = $2 AND {column} IS NULL AND status = 'warteraum'"
     );
     let result = sqlx::query(&query)
         .bind(now)
         .bind(code)
+        .bind(bearer::lookup(&token))
         .execute(&mut *tx)
         .await?;
     if result.rows_affected() != 1 {
@@ -401,9 +403,9 @@ pub async fn room_ready(pool: &Pool, code: &str, token: &str) -> DraftResult<Rea
     if status != "warteraum" {
         return Err(DraftError::RoomNotOpen);
     }
-    let team = if token == team1_token {
+    let team = if bearer::matches(token, &team1_token) {
         1
-    } else if token == team2_token {
+    } else if bearer::matches(token, &team2_token) {
         2
     } else {
         return Err(DraftError::InvalidToken);
@@ -478,9 +480,9 @@ pub async fn leave_room(pool: &Pool, code: &str, token: &str) -> DraftResult<()>
     if status != "warteraum" {
         return Err(DraftError::RoomNotOpen);
     }
-    let (claimed_column, ready_column, token_column) = if token == team1_token {
+    let (claimed_column, ready_column, token_column) = if bearer::matches(token, &team1_token) {
         ("team1_claimed_at", "team1_ready", "team1_token")
-    } else if token == team2_token {
+    } else if bearer::matches(token, &team2_token) {
         ("team2_claimed_at", "team2_ready", "team2_token")
     } else {
         return Err(DraftError::InvalidToken);
@@ -498,7 +500,7 @@ pub async fn leave_room(pool: &Pool, code: &str, token: &str) -> DraftResult<()>
     );
     let result = sqlx::query(&query)
         .bind(code)
-        .bind(neues_token)
+        .bind(bearer::lookup(&neues_token))
         .execute(&mut *tx)
         .await?;
     if result.rows_affected() != 1 {
@@ -542,7 +544,7 @@ pub async fn rematch_room(pool: &Pool, code: &str, token: &str) -> DraftResult<S
         bans_per_team,
         round_seconds,
     } = source;
-    if token != team1_token && token != team2_token {
+    if !bearer::matches(token, &team1_token) && !bearer::matches(token, &team2_token) {
         return Err(DraftError::InvalidToken);
     }
     if status != "completed" {
@@ -571,8 +573,8 @@ pub async fn rematch_room(pool: &Pool, code: &str, token: &str) -> DraftResult<S
     .bind(&new_code)
     .bind(&team2_name)
     .bind(&team1_name)
-    .bind(&new_team1_token)
-    .bind(&new_team2_token)
+    .bind(bearer::lookup(&new_team1_token))
+    .bind(bearer::lookup(&new_team2_token))
     .bind(Json(&sequence))
     .bind(bans_per_team)
     .bind(round_seconds)
@@ -596,7 +598,7 @@ pub async fn retry_lobby_request(pool: &Pool, code: &str, token: &str) -> DraftR
     .fetch_optional(&mut *tx)
     .await?
     .ok_or(DraftError::LobbyNotFound)?;
-    if token != team1_token && token != team2_token {
+    if !bearer::matches(token, &team1_token) && !bearer::matches(token, &team2_token) {
         return Err(DraftError::InvalidToken);
     }
     match lobby_status.as_str() {
@@ -851,9 +853,9 @@ async fn take_lobby_action_loaded(
         return Err(DraftError::SessionNotActive);
     }
 
-    let token_team = if token == session.team1_token {
+    let token_team = if bearer::matches(token, &session.team1_token) {
         1
-    } else if token == session.team2_token {
+    } else if bearer::matches(token, &session.team2_token) {
         2
     } else {
         return Err(DraftError::InvalidToken);

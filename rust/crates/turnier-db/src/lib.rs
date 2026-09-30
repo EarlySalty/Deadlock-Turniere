@@ -16,3 +16,6 @@ pub use pool::{test_pool, TestDb};
 // sqlx wird re-exportiert, damit Domänen-Crates dieselbe Version nutzen, ohne
 // sie einzeln deklarieren zu müssen.
 pub use sqlx;
+
+// Ein gemeinsamer Hash-Vertrag für eigene Bearer-Tokens.
+pub use dl_central_db::bearer;

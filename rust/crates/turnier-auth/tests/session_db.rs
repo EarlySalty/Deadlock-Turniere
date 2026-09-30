@@ -37,6 +37,13 @@ async fn anlegen_und_aufloesen_mit_admin_rolle() {
     .await
     .expect("Session anlegen");
 
+    let stored: String = sqlx::query_scalar("SELECT token FROM turnier.sessions WHERE token=$1")
+        .bind(turnier_db::bearer::lookup(&token))
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    assert_ne!(stored, token);
+    assert!(resolve_session(pool, &stored, &sets).await.is_err());
     let session = resolve_session(pool, &token, &sets)
         .await
         .expect("Session auflösen");
@@ -88,7 +95,7 @@ async fn abgelaufene_session_ist_401_und_wird_geloescht() {
              (token, discord_id, discord_roles, expires_at, created_at) \
          VALUES ($1, $2, $3, $4, $5)",
     )
-    .bind("alt")
+    .bind(turnier_db::bearer::lookup("alt"))
     .bind(123456789012345680_i64)
     .bind("admin1")
     .bind(parse_utc("2000-01-01T00:00:00Z"))
@@ -102,7 +109,7 @@ async fn abgelaufene_session_ist_401_und_wird_geloescht() {
 
     // Opportunistic-Cleanup: die Zeile ist nach dem Auflösen weg.
     let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM turnier.sessions WHERE token = $1")
-        .bind("alt")
+        .bind(turnier_db::bearer::lookup("alt"))
         .fetch_one(pool)
         .await
         .unwrap();
@@ -134,7 +141,7 @@ async fn cleanup_entfernt_nur_abgelaufene() {
         "INSERT INTO turnier.sessions (token, discord_id, expires_at, created_at) \
          VALUES ($1, $2, $3, $4)",
     )
-    .bind("alt")
+    .bind(turnier_db::bearer::lookup("alt"))
     .bind(123456789012345682_i64)
     .bind(parse_utc("2000-01-01T00:00:00Z"))
     .bind(parse_utc("2000-01-01T00:00:00Z"))

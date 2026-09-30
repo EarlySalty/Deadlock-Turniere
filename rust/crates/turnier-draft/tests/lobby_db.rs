@@ -3,8 +3,9 @@
 use chrono::{Duration, Utc};
 use turnier_db::{test_pool, Pool, TestDb};
 use turnier_draft::{
-    claim_room, create_lobby, create_room, get_state_by_code, leave_room, rematch_room, room_ready,
-    take_lobby_action, CreateLobbyOptions, CreateRoomOptions, DraftError, QUICK_NO_BAN,
+    claim_room as real_claim_room, create_lobby as real_create_lobby, create_room,
+    get_state_by_code, leave_room, rematch_room, room_ready, take_lobby_action, CreateLobbyOptions,
+    CreateRoomOptions, DraftError, QUICK_NO_BAN,
 };
 
 async fn temp_db() -> TestDb {
@@ -21,12 +22,58 @@ fn options(round_seconds: Option<i32>, reserve_seconds: Option<i32>) -> CreateLo
     }
 }
 
+// Tests retain only credentials actually returned by the public service path.
+// They must never authenticate with a value taken from the database.
+fn issued_tokens() -> &'static std::sync::Mutex<std::collections::HashMap<String, Vec<String>>> {
+    static TOKENS: std::sync::OnceLock<
+        std::sync::Mutex<std::collections::HashMap<String, Vec<String>>>,
+    > = std::sync::OnceLock::new();
+    TOKENS.get_or_init(Default::default)
+}
+async fn create_lobby(
+    pool: &Pool,
+    opts: CreateLobbyOptions,
+) -> Result<turnier_draft::LobbyCredentials, DraftError> {
+    let result = real_create_lobby(pool, opts).await?;
+    issued_tokens().lock().unwrap().insert(
+        result.code.clone(),
+        vec![result.team1_token.clone(), result.team2_token.clone()],
+    );
+    Ok(result)
+}
+async fn claim_room(
+    pool: &Pool,
+    code: &str,
+    team: i64,
+) -> Result<turnier_draft::ClaimOutcome, DraftError> {
+    let result = real_claim_room(pool, code, team).await?;
+    issued_tokens()
+        .lock()
+        .unwrap()
+        .entry(code.to_owned())
+        .or_default()
+        .push(result.token.clone());
+    Ok(result)
+}
 async fn slot_tokens(pool: &Pool, code: &str) -> (String, String) {
-    sqlx::query_as("SELECT team1_token, team2_token FROM turnier.draft_sessions WHERE code = $1")
-        .bind(code)
-        .fetch_one(pool)
-        .await
-        .expect("Slot-Tokens laden")
+    let (first, second): (String, String) =
+        sqlx::query_as("SELECT team1_token,team2_token FROM turnier.draft_sessions WHERE code=$1")
+            .bind(code)
+            .fetch_one(pool)
+            .await
+            .expect("Slot-Hashes laden");
+    let guard = issued_tokens().lock().unwrap();
+    let known = guard
+        .get(code)
+        .expect("Credentials müssen aus dem öffentlichen API-Pfad stammen");
+    let find = |stored: &str| {
+        known
+            .iter()
+            .find(|raw| turnier_db::bearer::matches(raw, stored))
+            .expect("Kein passender ausgegebener Token")
+            .clone()
+    };
+    (find(&first), find(&second))
 }
 
 fn room_options(bans_per_team: i32, round_seconds: Option<i32>) -> CreateRoomOptions {
@@ -154,9 +201,19 @@ async fn lobby_anlegen_liefert_code_und_zwei_tokens() {
         (name1.as_str(), token1.as_str()),
         (name2.as_str(), token2.as_str()),
     ];
-    assert!(paare.contains(&("Team Eins", lobby.team1_token.as_str())));
-    assert!(paare.contains(&("Team Zwei", lobby.team2_token.as_str())));
+    assert!(paare.contains(&(
+        "Team Eins",
+        turnier_db::bearer::lookup(&lobby.team1_token).as_str()
+    )));
+    assert!(paare.contains(&(
+        "Team Zwei",
+        turnier_db::bearer::lookup(&lobby.team2_token).as_str()
+    )));
 
+    let stolen_hash = take_lobby_action(db.pool(), &lobby.code, &token1, "Abrams")
+        .await
+        .unwrap_err();
+    assert!(matches!(stolen_hash, DraftError::InvalidToken));
     let state = get_state_by_code(db.pool(), &lobby.code).await.unwrap();
     assert!(state.session.bracket_match_id.is_none());
     assert_eq!(state.actions.len(), QUICK_NO_BAN.len());
@@ -412,13 +469,26 @@ async fn raum_mit_runde_0_laeuft_ohne_deadline_und_ohne_auto_pick() {
 #[tokio::test]
 async fn rematch_nach_abschluss_tauscht_die_seiten() {
     let (db, code) = raum_anlegen(0, None).await;
-    let (slot1_token, _slot2) = slot_tokens(db.pool(), &code).await;
+    let first = claim_room(db.pool(), &code, 1).await.expect("Claim Team 1");
+    let slot1_token = first.token;
     let zu_frueh = rematch_room(db.pool(), &code, &slot1_token)
         .await
         .unwrap_err();
     assert!(matches!(zu_frueh, DraftError::RematchUnavailable));
 
-    assert!(beide_captains_bereit(db.pool(), &code).await);
+    assert!(
+        !room_ready(db.pool(), &code, &slot1_token)
+            .await
+            .unwrap()
+            .started
+    );
+    let second = claim_room(db.pool(), &code, 2).await.expect("Claim Team 2");
+    assert!(
+        room_ready(db.pool(), &code, &second.token)
+            .await
+            .unwrap()
+            .started
+    );
     spiele_raum_zu_ende(db.pool(), &code).await;
     let (status, _c1, _c2, _r1, _r2, lobby_status, _bans) = spalten(db.pool(), &code).await;
     assert_eq!(status, "completed");
