@@ -62,6 +62,7 @@ async fn main() -> anyhow::Result<()> {
         }
         _ => {}
     }
+    turnier_config::secrets::load_snapshot(&args.path).map_err(anyhow::Error::msg)?;
     init_tracing(&parsed);
     tracing::info!(anchor = CONFIG_ANCHOR, fingerprint = %parsed.fingerprint()?, "Globale TOML-Konfiguration geprüft");
     let check_only = args.mode == ConfigMode::Check;
