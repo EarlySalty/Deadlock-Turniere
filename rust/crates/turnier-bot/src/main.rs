@@ -215,9 +215,9 @@ mod tests {
     async fn migrierte_zentrale_db_erfuellt_den_draft_schema_vertrag() {
         // Test-Fixture ist eine explizite lokale Peer-Verbindung. Sie benötigt
         // weder produktive Secrets noch den einmaligen Produktions-FD3.
-        let config: serde_json::Value = serde_json::from_str(include_str!(
-            "../tests/central-draft-schema.json"
-        )).expect("normale lokale Peer-Testkonfiguration");
+        let config: serde_json::Value =
+            serde_json::from_str(include_str!("../tests/central-draft-schema.json"))
+                .expect("normale lokale Peer-Testkonfiguration");
         let value = |name| config[name].as_str().expect("Peer-Testmetadaten");
         assert!(value("database").starts_with("token_db_"));
         assert!(std::path::Path::new(value("socket")).is_absolute());
