@@ -107,7 +107,7 @@ function schreibe(raum: MockRaum) {
 }
 
 function neuerCode(): string {
-  let code = ''
+  let code: string
   do {
     code = Array.from(
       { length: 6 },
