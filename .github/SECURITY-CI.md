@@ -22,7 +22,7 @@ Workflow-Pfadfilter und keine geheimnisabhängig übersprungenen Pflichtjobs.
 | Job | Blockierende Entscheidung |
 | --- | --- |
 | Frontend | Node 24.14.1, `npm ci`, ESLint ohne Warnungen, `npm test`, `npm run build` |
-| Rust | Private Abhängigkeit vorhanden; Rust 1.97.1 fmt, Clippy mit `-D warnings`, Build aller Targets, sämtliche Workspace-Tests |
+| Rust | Versionierte öffentliche Pfadabhängigkeit; Rust 1.97.1 fmt, Clippy mit `-D warnings`, Build aller Targets, sämtliche Workspace-Tests |
 | Rust dependency audit | `cargo-audit 0.22.2` prüft das vollständige `rust/Cargo.lock`; Schwachstellen blockieren |
 | Secret Detection | Verbotene Geheimnisdateien und Gitleaks 8.30.1 über die vollständige erreichbare Git-Historie |
 | JavaScript Dependency Audit | `npm ci`, `npm audit --audit-level=high`, einschließlich Entwicklungsabhängigkeiten |
@@ -44,27 +44,24 @@ vollständig vorhandene `success`-Ergebnisse. Fehler, Abbruch, `skipped`, leere 
 fehlende Ergebnisse sowie ein abgebrochener Workflow sind nicht erfolgreich.
 Die gleiche Entscheidungsfunktion wird mit positiven und negativen Fällen getestet.
 
-## Private Rust-Abhängigkeit: bewusst keine Freigabe durch Auslassen
+## Versionierte Rust-Pfadabhängigkeit
 
-`dl-central-db` ist eine echte Pfadabhängigkeit aus `EarlySalty/Deadlock-Bots`.
-Das Schwester-Repository ist privat; **Deadlock-Turniere ist öffentlich**. Der
-geprüfte Commit steht in `.github/ci/central-db-revision.txt`. Der vorhandene
-Produktionspfad bleibt unverändert und es gibt weder einen Ersatz-Stub noch eine
-öffentliche Kopie der privaten Implementierung oder ihrer Migrationen.
+`dl-central-db` ist eine Pfadabhängigkeit aus `EarlySalty/Deadlock-Bots`. GitHub
+weist dieses Repository am 1. Oktober 2026 als öffentlich aus. Der geprüfte Commit
+steht in `.github/ci/central-db-revision.txt`; derselbe Commit ist in `main` für
+den Rust-CI-Checkout gepinnt. Der Pfad und der Produktionscode bleiben unverändert.
 
 Der GitHub-Rust-Job legt beide Checkouts in der benötigten Geschwisterstruktur an.
-Er verwendet ausschließlich den normalen, lesenden Repository-Token. Dieser
-verleiht keinen automatischen Zugriff auf das private Schwester-Repository.
-Solange keine ausdrücklich freigegebene, isolierte Lösung für diese Abhängigkeit
-vorliegt, muss der Checkout fehlschlagen und damit der Required PR Gate rot bleiben.
-Das ist ein offener Infrastruktur-/Vertraulichkeitsblocker, kein erfolgreicher
-Rust-Testlauf. Produktionssecrets oder private Quellcode-Artefakte in einem
-öffentlichen PR-Run sind keine zulässige Abkürzung.
+Er verwendet den normalen, lesenden Repository-Token und speichert keine
+Checkout-Credentials. Die öffentliche Repository-Sichtbarkeit erlaubt den Zugriff
+auf den gepinnten Commit ohne Zugriff auf private Quellcode-Artefakte oder
+Produktionssecrets. Falls das Schwester-Repository künftig privat wird oder der
+geprüfte Commit nicht verfügbar ist, muss der Checkout fehlschlagen und damit der
+Rust-Job rot bleiben.
 
-Ein Maintainer muss separat die Bereitstellung einer ausdrücklich zur Veröffentlichung
-freigegebenen Bibliothek oder eine sicher isolierte private Build-Integration
-entscheiden. Bis dahin darf die Rust-Prüfung nicht per `if`, `continue-on-error`,
-fehlendem Secret oder Dummy-Implementierung neutralisiert werden.
+Ein erfolgreicher Checkout belegt noch keinen erfolgreichen Rust-Testlauf. Die
+Rust-Abnahme erfordert weiterhin den tatsächlichen Lauf von Formatierung, Clippy,
+Build und Workspace-Tests.
 
 ## Isolierte Datenbanktests
 
@@ -188,8 +185,9 @@ entfernt oder umgangen und kein Main-Merge ausgeführt.
 Ein erfolgreicher lokaler Teiltest ist keine Gesamtabnahme. Für die Abnahme müssen
 PR-URL, getesteter Head-SHA, zugehörige Actions-Run-URLs, tatsächlich ausgeführte
 Tests, verbliebene Befunde und dieser Schutzstatus gemeinsam betrachtet werden.
-Der private Rust-Abhängigkeitsblocker muss ausdrücklich offen bleiben, solange
-der echte GitHub-Rust-Testlauf nicht möglich ist.
+Die öffentliche Sichtbarkeit und der gepinnte Commit belegen den Checkout-Vertrag,
+aber ersetzen keinen erfolgreichen Rust-Testlauf. Die produktive Abnahme bleibt
+außerhalb dieses PR-Testbetriebs.
 
 Referenzen: [Semgrep CLI](https://docs.semgrep.dev/cli-reference),
 [Trivy Exit-Code](https://trivy.dev/docs/latest/guide/configuration/others/),
