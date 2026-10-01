@@ -211,13 +211,30 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore = "braucht die migrierte Wegwerf-DB aus central_test_db.sh"]
+    #[ignore = "braucht den verifizierten zentralen Scratchrestore aus tests/central-draft-schema.json"]
     async fn migrierte_zentrale_db_erfuellt_den_draft_schema_vertrag() {
-        let pool = turnier_db::connect_central()
+        // Test-Fixture ist eine explizite lokale Peer-Verbindung. Sie benötigt
+        // weder produktive Secrets noch den einmaligen Produktions-FD3.
+        let config: serde_json::Value = serde_json::from_str(include_str!(
+            "../tests/central-draft-schema.json"
+        )).expect("normale lokale Peer-Testkonfiguration");
+        let value = |name| config[name].as_str().expect("Peer-Testmetadaten");
+        assert!(value("database").starts_with("token_db_"));
+        assert!(std::path::Path::new(value("socket")).is_absolute());
+        let options = turnier_db::sqlx::postgres::PgConnectOptions::new_without_pgpass()
+            .host(value("socket"))
+            .port(5432)
+            .username(value("user"))
+            .password("")
+            .database(value("database"))
+            .ssl_mode(turnier_db::sqlx::postgres::PgSslMode::Disable);
+        let pool = turnier_db::sqlx::postgres::PgPoolOptions::new()
+            .connect_with(options)
             .await
             .expect("Wegwerf-DB verbinden");
         verify_central_draft_schema(&pool)
             .await
             .expect("zentraler Draft-Schema-Vertrag");
+        pool.close().await;
     }
 }
