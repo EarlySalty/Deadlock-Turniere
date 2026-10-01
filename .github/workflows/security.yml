@@ -276,7 +276,7 @@ jobs:
         shell: bash
         run: |
           test -s "$RUNNER_TEMP/codeql/javascript.sarif"
-          jq -e -f .github/ci/codeql-policy.jq "$RUNNER_TEMP/codeql/javascript.sarif"
+          jq --slurp --exit-status -f .github/ci/codeql-policy.jq "$RUNNER_TEMP/codeql/javascript.sarif"
       - name: Upload report only
         if: always()
         continue-on-error: true
