@@ -1,0 +1,8 @@
+{
+  "secret_values_fd": 3,
+  "project_id": "EXISTING_PROJECT_ID",
+  "environment": "prod",
+  "secret_path": "/",
+  "socket_path": "/run/uplink-infisical/api.sock",
+  "database_secret": "DEADLOCK_CENTRAL_DSN"
+}

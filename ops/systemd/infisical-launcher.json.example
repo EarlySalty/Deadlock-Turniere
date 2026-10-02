@@ -1,0 +1,8 @@
+{
+  "project_id": "EXISTING_PROJECT_ID",
+  "environment": "prod",
+  "secret_path": "/",
+  "credential_path": "/PATH/TO/EXISTING/INFISICAL/CREDENTIAL",
+  "socket_path": "/run/uplink-infisical/api.sock",
+  "database_secret": "DEADLOCK_CENTRAL_DSN"
+}

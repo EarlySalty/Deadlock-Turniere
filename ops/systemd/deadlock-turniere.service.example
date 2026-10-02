@@ -1,7 +1,9 @@
 # Vorlage für eine systemd-User-Unit. Installationspfade bewusst anpassen.
 # Globale Betriebswerte stehen in config/bot.toml. Kein EnvironmentFile für sie.
-# Den bereits eingerichteten geschützten Infisical-Bootstrap weiterverwenden.
-# Sein vorhandenes LoadCredential-Drop-in gehört nicht in diese Vorlage.
+# Den geprüften Rust-Launcher mit privater FD3-Pipe verwenden.
+# Launcher und seine normale Metadatenkonfiguration gehören root und sind
+# nicht durch den Dienstnutzer schreibbar. Keine Secretwerte in Configdateien.
+# UID und GID 1000 sind Beispiele und müssen zum realen Dienstkonto passen.
 [Unit]
 Description=Deadlock Turniere Backend
 After=network-online.target
@@ -10,9 +12,14 @@ Wants=network-online.target
 [Service]
 Type=simple
 WorkingDirectory=/opt/deadlock-turniere
-ExecStart=/opt/deadlock-turniere/scripts/run_turniere_backend_rust.sh --config /opt/deadlock-turniere/config/bot.toml
+ExecStartPre=/opt/deadlock-turniere/rust/target/release/turnier-bot --config /opt/deadlock-turniere/config/bot.toml --check-config
+# Den bestehenden Deployment-Preflight mit realem Repo, main und --deploy
+# als zusätzlichen ExecStartPre übernehmen. Seine Prüfung nicht umgehen.
+ExecStart=/usr/bin/sudo -n /opt/deadlock-turniere/launcher/dl-infisical-env --token-pipe --config /etc/deadlock-turniere/infisical-launcher.json --uid 1000 --gid 1000 --child-no-new-privileges --child-clear-capability-bounding-set -- /opt/deadlock-turniere/rust/target/release/turnier-bot --config /opt/deadlock-turniere/config/bot.toml
 # Änderungen werden vor einem geordneten Neustart separat geprüft:
-# /opt/deadlock-turniere/scripts/run_turniere_backend_rust.sh --config /opt/deadlock-turniere/config/bot.toml --check-config
+# Der direkte --check-config liest keine Secrets und öffnet keinen Pool.
+# infisical.json neben bot.toml bindet secret_values_fd=3. Den vollständigen
+# --check separat durch den geprüften Launcher ausführen, ohne Serverstart.
 # Kein ExecReload: Clients, Listener und Scheduler werden beim Neustart aufgebaut.
 Restart=on-failure
 RestartSec=5
