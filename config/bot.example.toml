@@ -14,7 +14,8 @@ discord_master_broker_base_url = "http://127.0.0.1:8770"
 discord_match_channel_category_id = 1412800850580996256
 # Einheit: Sekunden.
 discord_match_channel_delete_delay_seconds = 300
-discord_sammelpunkt_channel_id = 1426160735469174875
+# Beispiel-ID durch die Plattform-ID des Sammelpunkts ersetzen.
+discord_sammelpunkt_channel_id = 1
 discord_team1_voice_channel_id = 1462434609563173019
 discord_team2_voice_channel_id = 1462434639858897017
 discord_tournament_lobby_channel_id = 1412411665713987635
