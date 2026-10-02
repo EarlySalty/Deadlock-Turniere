@@ -9,12 +9,12 @@
 use chrono::{DateTime, Utc};
 use sqlx::{PgConnection, Postgres, Transaction};
 
-use turnier_core::{now_utc, parse_discord_id, TournamentStatus};
+use turnier_core::{now_utc, parse_discord_id, TournamentMode, TournamentStatus};
 use turnier_db::Pool;
 use turnier_discord::DiscordNotifier;
 use turnier_engine::{
     generate_bracket_in_tx, generate_group_matches_in_tx, generate_groups_in_tx,
-    is_valid_transition, recalculate_player_points_in_tx, valid_next_statuses,
+    is_valid_transition_for_mode, recalculate_player_points_in_tx, valid_next_statuses_for_mode,
 };
 use turnier_match::MatchManager;
 
@@ -59,10 +59,8 @@ pub async fn acquire_single_active_tournament_lock(conn: &mut PgConnection) -> S
 
 /// Ermittelt den nächsten fälligen Status anhand der Zeitstempel und des Modus.
 ///
-/// Portiert `_get_due_next_status` (Z.68-92). Liefert `None`, wenn aktuell kein
-/// Übergang fällig ist. Bei `tournament_mode == "bracket_only"` wird die
-/// Gruppenphase übersprungen (checkin → bracket), aber NUR wenn `bracket_start`
-/// fällig ist (Logikfalle aus dem Original, bewusst 1:1 erhalten — `bugs_preserved`).
+/// Liefert `None`, wenn aktuell kein Übergang fällig ist. Ein Turnier ohne
+/// Gruppenphase wechselt zum geplanten Bracket-Start direkt aus dem Check-in.
 pub fn get_due_next_status(row: &DueStatusRow, now: DateTime<Utc>) -> Option<&'static str> {
     let s = row.status.as_str();
 
@@ -78,17 +76,10 @@ pub fn get_due_next_status(row: &DueStatusRow, now: DateTime<Utc>) -> Option<&'s
 
     let bracket_only = row.tournament_mode.as_deref() == Some("bracket_only");
 
-    if s == "checkin" && is_due(row.group_phase_start.as_ref(), now) {
-        if bracket_only {
-            // Gruppenphase überspringen — aber erst springen, wenn bracket_start
-            // fällig ist. group_phase_start dient hier nur als Auslöse-Gate.
-            // (Logikfalle 1:1 erhalten, siehe Modul-Doku.)
-            return if is_due(row.bracket_start.as_ref(), now) {
-                Some("bracket")
-            } else {
-                None
-            };
-        }
+    if s == "checkin" && bracket_only && is_due(row.bracket_start.as_ref(), now) {
+        return Some("bracket");
+    }
+    if s == "checkin" && !bracket_only && is_due(row.group_phase_start.as_ref(), now) {
         return Some("group_phase");
     }
 
@@ -110,7 +101,7 @@ fn parse_status(value: &str) -> Option<TournamentStatus> {
 /// aufgerufen. Portiert `advance_tournament_status` (Z.130-195) im Verhalten 1:1:
 ///
 /// 1. Übergang gegen die Status-Übergangstabelle validieren
-///    ([`is_valid_transition`]); ungültig → [`SchedulerError::InvalidTransition`].
+///    ([`is_valid_transition_for_mode`]); ungültig → [`SchedulerError::InvalidTransition`].
 /// 2. Status per Optimistic-Lock setzen
 ///    (`UPDATE ... WHERE id = $n AND status = current`); traf keine Zeile →
 ///    [`SchedulerError::StatusConflict`].
@@ -140,14 +131,34 @@ pub async fn advance_tournament_status(
     source: &str,
     actor_id: Option<&str>,
 ) -> SchedulerResult<serde_json::Value> {
+    let mut tx = pool.begin().await?;
+    if next_status == "registration" {
+        acquire_single_active_tournament_lock(&mut tx).await?;
+    }
+    // Modus und Status bleiben während Prüfung und Generierung unverändert.
+    let existing: Option<(String, String)> = sqlx::query_as(
+        "SELECT status, tournament_mode FROM turnier.tournaments WHERE id = $1 FOR UPDATE",
+    )
+    .bind(tournament_id)
+    .fetch_optional(&mut *tx)
+    .await?;
+    let Some((stored_status, stored_mode)) = existing else {
+        return Err(SchedulerError::StatusConflict);
+    };
+    if stored_status != current_status {
+        return Err(SchedulerError::StatusConflict);
+    }
+    let mode: TournamentMode = serde_json::from_value(serde_json::Value::String(stored_mode))
+        .map_err(|_| SchedulerError::InvalidTransition("Unbekannter Turniermodus".to_string()))?;
     // --- 1. Übergang validieren ---
     let from = parse_status(current_status);
     let to = parse_status(next_status);
-    let transition_ok = matches!((from, to), (Some(f), Some(t)) if is_valid_transition(f, t));
+    let transition_ok =
+        matches!((from, to), (Some(f), Some(t)) if is_valid_transition_for_mode(f, t, mode));
     if !transition_ok {
         let allowed = from
             .map(|f| {
-                valid_next_statuses(f)
+                valid_next_statuses_for_mode(f, mode)
                     .iter()
                     .map(status_as_str)
                     .collect::<Vec<_>>()
@@ -169,8 +180,6 @@ pub async fn advance_tournament_status(
     });
 
     // --- 2.-5. Statuswechsel + Seiteneffekte + Audit + ggf. Punkte: EINE Transaktion ---
-    let mut tx = pool.begin().await?;
-
     if next_status == "registration" {
         ensure_single_active_registration_in_tx(&mut tx, tournament_id).await?;
     }
@@ -370,8 +379,9 @@ mod tests {
     fn checkin_bracket_only_ueberspringt_gruppenphase() {
         let mut r = row("checkin");
         r.tournament_mode = Some("bracket_only".into());
-        r.group_phase_start = Some(utc("2026-06-14T11:00:00"));
-        // bracket_start noch nicht fällig → bleibt hängen (Logikfalle 1:1).
+        // Ein Bracket-Turnier braucht keinen Termin für eine Gruppenphase.
+        r.group_phase_start = None;
+        // Vor dem Bracket-Start bleibt der Check-in geöffnet.
         r.bracket_start = Some(utc("2026-06-14T13:00:00"));
         assert_eq!(get_due_next_status(&r, now()), None);
         // bracket_start fällig → direkt nach bracket.

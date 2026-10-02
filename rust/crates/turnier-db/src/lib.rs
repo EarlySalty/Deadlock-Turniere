@@ -11,7 +11,7 @@ pub mod pool;
 pub use error::{DbError, DbResult};
 pub use pool::{connect_central, connect_central_with_config, run_migrations, Pool};
 #[cfg(feature = "testing")]
-pub use pool::{test_pool, TestDb};
+pub use pool::{test_pool, test_pool_with_options, TestDb};
 
 // sqlx wird re-exportiert, damit Domänen-Crates dieselbe Version nutzen, ohne
 // sie einzeln deklarieren zu müssen.

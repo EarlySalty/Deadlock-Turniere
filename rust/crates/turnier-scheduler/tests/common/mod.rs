@@ -13,7 +13,7 @@ use std::sync::Arc;
 
 use turnier_config::Config;
 use turnier_core::now_utc;
-use turnier_db::{dynamic_sql::ReminderDedupeTable, test_pool, Pool, TestDb};
+use turnier_db::{dynamic_sql::ReminderDedupeTable, test_pool_with_options, Pool, TestDb};
 use turnier_discord::{BrokerClient, DiscordNotifier};
 use turnier_match::MatchManager;
 
@@ -21,7 +21,14 @@ pub const TEST_ADMIN_ID: i64 = 123_456_789_012_345_700;
 
 /// Frische, isolierte PG-Testdatenbank mit zentralen Migrationen.
 pub async fn temp_db() -> TestDb {
-    test_pool().await.expect("central test pool")
+    test_pool_with_options(
+        sqlx::postgres::PgConnectOptions::new()
+            .host("/var/run/postgresql")
+            .username("postgres")
+            .database("postgres"),
+    )
+    .await
+    .expect("central test pool")
 }
 
 /// Default-Config (keine echten Tokens nötig für die DB-Pfade).

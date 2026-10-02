@@ -8,6 +8,8 @@ use crate::error::DbResult;
 pub type Pool = PgPool;
 
 #[cfg(feature = "testing")]
+pub use dl_central_db::testing::test_pool_with_options;
+#[cfg(feature = "testing")]
 pub use dl_central_db::TestDb;
 
 /// Baut den zentralen Pool aus `DEADLOCK_CENTRAL_DSN`.

@@ -173,8 +173,10 @@ export default function DraftLobbyNeu() {
               <input
                 value={beitrittsCode}
                 onChange={(e) => setBeitrittsCode(e.target.value.toUpperCase())}
-                maxLength={6}
-                placeholder="ABC123"
+                maxLength={8}
+                placeholder="ABCD2345"
+                autoCapitalize="characters"
+                spellCheck={false}
                 className="w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2.5 text-center font-mono text-xl tracking-[0.3em] text-white placeholder:text-white/20 focus:border-[#c8a86b]/60 focus:outline-none"
               />
             </label>

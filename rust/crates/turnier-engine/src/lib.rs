@@ -34,7 +34,8 @@ pub use engine::groups::auto_num_groups;
 pub use engine::naming::name_key;
 pub use engine::slots::BracketSlot;
 pub use status::{
-    determine_tournament_mode, is_valid_transition, valid_next_statuses, AUTO_GROUP_STAGE_THRESHOLD,
+    determine_tournament_mode, is_valid_transition, is_valid_transition_for_mode,
+    valid_next_statuses, valid_next_statuses_for_mode, AUTO_GROUP_STAGE_THRESHOLD,
 };
 
 // Persistenz-API.

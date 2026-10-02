@@ -32,6 +32,76 @@ struct ConcurrentAdvance {
     actor_id: Option<&'static str>,
 }
 
+#[tokio::test]
+async fn bracket_only_checkin_erzeugt_bracket_und_auditet_atomar() {
+    let db = temp_db().await;
+    let pool = db.pool().clone();
+    let config = test_config();
+    let notifier = fake_notifier(pool.clone(), &config);
+    let matchmgr = fake_match_manager(pool.clone(), &config);
+    let id = insert_tournament(&pool, "T", "checkin", false).await;
+    insert_team(&pool, id, "Team A", TEST_CAPTAIN_A).await;
+    insert_team(&pool, id, "Team B", TEST_CAPTAIN_B).await;
+
+    let meta = advance_tournament_status(
+        &pool,
+        &matchmgr,
+        &notifier,
+        id,
+        "checkin",
+        "bracket",
+        "scheduler",
+        None,
+    )
+    .await
+    .expect("Bracket ohne Gruppenphase");
+
+    assert_eq!(tournament_status(&pool, id).await, "bracket");
+    assert_eq!(meta["bracket_matches_created"], 1);
+    assert_eq!(audit_count(&pool, "tournament_auto_advance").await, 1);
+    let (groups,): (i64,) =
+        sqlx::query_as("SELECT COUNT(*) FROM turnier.groups WHERE tournament_id = $1")
+            .bind(id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(groups, 0);
+}
+
+const TEST_CAPTAIN_A: i64 = 123_456_789_012_345_710;
+const TEST_CAPTAIN_B: i64 = 123_456_789_012_345_711;
+
+#[tokio::test]
+async fn gruppenturnier_darf_die_gruppenphase_nicht_ueberspringen() {
+    let db = temp_db().await;
+    let pool = db.pool().clone();
+    let config = test_config();
+    let notifier = fake_notifier(pool.clone(), &config);
+    let matchmgr = fake_match_manager(pool.clone(), &config);
+    let id = insert_tournament(&pool, "T", "checkin", false).await;
+    sqlx::query("UPDATE turnier.tournaments SET tournament_mode = 'group_stage' WHERE id = $1")
+        .bind(id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let err = advance_tournament_status(
+        &pool,
+        &matchmgr,
+        &notifier,
+        id,
+        "checkin",
+        "bracket",
+        "scheduler",
+        None,
+    )
+    .await
+    .expect_err("Gruppenphase darf nicht übersprungen werden");
+    assert!(matches!(err, SchedulerError::InvalidTransition(_)));
+    assert_eq!(tournament_status(&pool, id).await, "checkin");
+    assert_eq!(audit_count(&pool, "tournament_auto_advance").await, 0);
+}
+
 async fn concurrent_advance(call: ConcurrentAdvance) -> SchedulerResult<Value> {
     let ConcurrentAdvance {
         pool,
@@ -209,6 +279,11 @@ async fn paralleler_group_phase_uebergang_erzeugt_gruppen_nur_einmal() {
     let notifier = fake_notifier(pool.clone(), &config);
     let matchmgr = fake_match_manager(pool.clone(), &config);
     let id = insert_tournament(&pool, "T", "checkin", false).await;
+    sqlx::query("UPDATE turnier.tournaments SET tournament_mode = 'group_stage' WHERE id = $1")
+        .bind(id)
+        .execute(&pool)
+        .await
+        .unwrap();
     for team_number in 1..=4 {
         insert_ranked_team(&pool, id, team_number).await;
     }

@@ -46,6 +46,26 @@ pub fn is_valid_transition(from: TournamentStatus, to: TournamentStatus) -> bool
     valid_next_statuses(from).contains(&to)
 }
 
+/// Berücksichtigt beim Abschluss des Check-ins den gespeicherten Turniermodus.
+pub fn valid_next_statuses_for_mode(
+    status: TournamentStatus,
+    mode: TournamentMode,
+) -> &'static [TournamentStatus] {
+    if status == TournamentStatus::Checkin && mode == TournamentMode::BracketOnly {
+        &[TournamentStatus::Bracket]
+    } else {
+        valid_next_statuses(status)
+    }
+}
+
+pub fn is_valid_transition_for_mode(
+    from: TournamentStatus,
+    to: TournamentStatus,
+    mode: TournamentMode,
+) -> bool {
+    valid_next_statuses_for_mode(from, mode).contains(&to)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -81,5 +101,31 @@ mod tests {
         assert!(is_valid_transition(Completed, Archived));
         assert!(!is_valid_transition(Draft, Checkin));
         assert!(valid_next_statuses(Archived).is_empty());
+    }
+
+    #[test]
+    fn checkin_abschluss_passt_zum_modus() {
+        use TournamentStatus::*;
+        assert!(is_valid_transition_for_mode(
+            Checkin,
+            Bracket,
+            TournamentMode::BracketOnly
+        ));
+        assert!(!is_valid_transition_for_mode(
+            Checkin,
+            GroupPhase,
+            TournamentMode::BracketOnly
+        ));
+        assert!(is_valid_transition_for_mode(
+            Checkin,
+            GroupPhase,
+            TournamentMode::GroupStage
+        ));
+        assert!(!is_valid_transition_for_mode(
+            Checkin,
+            Bracket,
+            TournamentMode::GroupStage
+        ));
+        assert!(!is_valid_transition(Checkin, Bracket));
     }
 }
