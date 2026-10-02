@@ -323,7 +323,6 @@ impl Config {
         self.discord_master_broker_token = get_first_string(
             &[
                 "DISCORD_MASTER_BROKER_TOKEN",
-                "TURNIER_INTERNAL_API_TOKEN",
                 "MASTER_BROKER_TOKEN",
                 "MAIN_BOT_INTERNAL_TOKEN",
                 "TWITCH_INTERNAL_API_TOKEN",

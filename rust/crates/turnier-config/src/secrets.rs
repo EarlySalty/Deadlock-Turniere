@@ -176,7 +176,7 @@ mod tests {
             .current_dir(directory.path())
             .stdin(Stdio::piped());
         let mut child = command.spawn().unwrap();
-        child.stdin.take().unwrap().write_all(br#"{"DEADLOCK_CENTRAL_DSN":"synthetic-dsn","MASTER_BROKER_TOKEN":"synthetic-token"}"#).unwrap();
+        child.stdin.take().unwrap().write_all(br#"{"DEADLOCK_CENTRAL_DSN":"synthetic-dsn","MASTER_BROKER_TOKEN":"synthetic-token","TURNIER_INTERNAL_API_TOKEN":"synthetic-lagebild-token"}"#).unwrap();
         assert!(child.wait().unwrap().success());
     }
 
@@ -191,7 +191,17 @@ mod tests {
         );
         assert_eq!(
             resolve_first(&["TURNIER_INTERNAL_API_TOKEN", "MASTER_BROKER_TOKEN"]).as_deref(),
-            Some("synthetic-token")
+            Some("synthetic-lagebild-token")
+        );
+        let resolved = crate::Config::default().with_secrets();
+        assert_eq!(resolved.discord_master_broker_token, "synthetic-token");
+        assert_eq!(
+            resolved.turnier_internal_api_token,
+            "synthetic-lagebild-token"
+        );
+        assert_eq!(
+            resolved.discord_oauth_internal_api_token,
+            "synthetic-lagebild-token"
         );
         assert!(resolve_first(&["DISCORD_TOKEN"]).is_none());
         assert!(resolve_first(&["RUST_LOG"]).is_none());
