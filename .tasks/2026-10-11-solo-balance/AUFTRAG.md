@@ -53,11 +53,13 @@ The repo-local Graphify graph is absent; global Graphify resolved the building b
 
 Integrate and apply the companion migration with a newly built central migrator before deploying the application. Verification overrides only the Cargo dependency path to the clean companion worktree. The neighboring dirty Deadlock-Bots checkout is unchanged. The frontend fixture uses owned port 18900, not the running tournament service on port 8900. No merge, deployment or production restart is part of this worker handover.
 
-## Verification hold
+## Package B verification
 
-Implementation remains uncommitted at application HEAD `55efe68`. Shared compiler/cache requests stalled without an active `rustc`; no application compiler result was obtained. Only owned processes and the disposable labelled test database were stopped/cleaned. The shared sccache server and foreign builds were not interrupted.
+The real API/DB paths have passed 163 tests after correcting and rerunning the affected 14-test central target. The unaffected targets contributed 149 passes; the original full run exited 101 with two central failures, and the corrected target exited 0. Frontend tests passed 17, zero failed or skipped, exit 0. Final Clippy, Rust formatting, frontend lint and production build exited 0. No test was deleted or skipped and no resolver or DB fake replaced the risky paths.
 
-Passed: engine library tests (35, exit 0), final frontend tests (17, exit 0), frontend lint/build (exit 0), touched-crate format check (exit 0). Full API/DB tests and clippy are not verified. Clippy and Moli reached their initial background limits; there are no screenshots or application gate verdict. Resume instructions and commands are in [TODO.md](TODO.md).
+Moli verification at 1440 and 390 pixels passed preview, apply, persisted reload and unique mobile navigation checks. Nine final screenshots outside Git were opened with Read. Responsive tab/card overflow and duplicate navigation keys were fixed. Document width equals viewport width; console and application/API failures are zero. Optional external Cloudflare RUM requests failed four times in the full flow and twice in the team-editor check; they are recorded separately in the logs. The final artifact and acceptance evidence are in [TODO.md](TODO.md).
+
+The companion migration remains at `341159fb188b43aaeec1dde1c8ca7e48b1fe355f` with package A's ALLOW, exit 0. Application review evidence is `/tmp/solo-balance-b-gate.log`; the final handover names the reviewed application SHA and verdict. Both feature branches are preserved for the integrator. This worker does not merge, deploy or restart production services. Shared sccache was not restarted or bypassed.
 
 TEXTNACHWEIS[DR-1]: Gedankenstriche 0 | ae/oe/ue/ss-Ersatz 0 | Absolutwörter 5 belegt | Senke: admin UI and API errors.
 

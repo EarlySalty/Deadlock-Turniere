@@ -342,7 +342,7 @@ export default function ParticipantManager({
         )}
       </Card>
 
-      <div className="grid gap-4 xl:grid-cols-2">
+      <div className="grid grid-cols-1 gap-4">
         {teams.map((team) => (
           <Card key={team.id} className="p-5 space-y-4">
             <div className="flex flex-col gap-3">

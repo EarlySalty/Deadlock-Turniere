@@ -11,8 +11,6 @@ const navItems = [
   { label: 'Arena', path: '/', icon: Swords },
   { label: 'Draft', path: '/draft', icon: Swords },
   { label: 'Comp-Finder', path: '/comp', icon: Users },
-  { label: 'Draft', path: '/draft', icon: Swords },
-  { label: 'Comp-Finder', path: '/comp', icon: Users },
   { label: 'Rangliste', path: '/rangliste', icon: BarChart2 },
   { label: 'Regelwerk', path: '/hilfe', icon: Trophy },
 ]

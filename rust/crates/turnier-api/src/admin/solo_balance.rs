@@ -205,9 +205,9 @@ fn profile_score(profile: &RankProfile) -> i64 {
         profile
             .rank
             .as_deref()
-            .and_then(turnier_steam::rank::tier_for_rank_name)
+            .and_then(turnier_steam::tier_for_rank_name)
     });
-    turnier_steam::rank::rank_score(tier.filter(|tier| (1..=11).contains(tier)), profile.subrank)
+    turnier_steam::rank_score(tier.filter(|tier| (1..=11).contains(tier)), profile.subrank)
 }
 
 fn build_preview(

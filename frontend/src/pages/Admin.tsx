@@ -172,7 +172,7 @@ export default function Admin() {
         </p>
       </header>
 
-      <div role="tablist" className="flex gap-1 border-b border-border">
+      <div role="tablist" className="flex flex-wrap gap-1 border-b border-border">
         {MODE_TABS.map((tab) => {
           const Icon = tab.icon
           const isActive = adminMode === tab.key

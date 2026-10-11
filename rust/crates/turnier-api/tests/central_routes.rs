@@ -32,7 +32,14 @@ struct TestApp {
 async fn setup() -> TestApp {
     let db = test_pool().await.expect("central test pool");
     let pool = db.pool().clone();
+    TestApp {
+        app: build_test_router(&pool).await,
+        _db: db,
+        pool,
+    }
+}
 
+async fn build_test_router(pool: &Pool) -> Router {
     let config = Config {
         discord_admin_role_ids: "admin-role".to_string(),
         discord_tournament_admin_role_ids: String::new(),
@@ -46,11 +53,7 @@ async fn setup() -> TestApp {
     let state = AppState::build(pool.clone(), Arc::new(config))
         .await
         .expect("state build");
-    TestApp {
-        app: build_router(state),
-        _db: db,
-        pool,
-    }
+    build_router(state)
 }
 
 async fn session(pool: &Pool, discord_id: &str, name: &str, roles: &[&str]) -> String {
@@ -930,7 +933,7 @@ async fn seed_balance_signups(pool: &Pool, tournament_id: i64) {
         let tier = if index < 11 { (score - 1) / 6 } else { 0 };
         let subrank = if tier > 0 { score - tier * 6 } else { 3 };
         sqlx::query("INSERT INTO turnier.rank_cache (discord_id, source, rank, rank_tier, subrank, rank_score, cached_at) VALUES ($1, 'test', $2, $3, $4, $5, now()) ON CONFLICT (discord_id) DO UPDATE SET rank = EXCLUDED.rank, rank_tier = EXCLUDED.rank_tier, subrank = EXCLUDED.subrank, rank_score = EXCLUDED.rank_score, cached_at = now()")
-            .bind(discord_id).bind(turnier_steam::rank::rank_name_for_tier(tier)).bind(tier).bind(subrank).bind(score).execute(pool).await.expect("rank");
+            .bind(discord_id).bind(turnier_steam::rank_name_for_tier(tier)).bind(tier).bind(subrank).bind(score).execute(pool).await.expect("rank");
         sqlx::query("INSERT INTO turnier.tournament_signups (tournament_id, discord_id, discord_name, rank_score, signed_up_at) VALUES ($1, $2, $3, 0, now() + ($4 * interval '1 second'))")
             .bind(tournament_id).bind(discord_id).bind(format!("Testspieler {:02}", index + 1)).bind(index as f64).execute(pool).await.expect("signup");
     }
@@ -1007,7 +1010,7 @@ async fn serve_balance_fixture(ctx: &TestApp, token: String, tournament_id: i64,
 
 #[tokio::test]
 async fn solo_balance_preview_apply_rollback_and_next_tournament_priority() {
-    let ctx = setup().await;
+    let mut ctx = setup().await;
     let token = session(&ctx.pool, ADMIN_ID, "Admin", &["admin-role", "mod-role"]).await;
     let tournament_id = seed_tournament(&ctx.pool, "Solo-Ausgleich Test", "checkin", 6).await;
     seed_balance_signups(&ctx.pool, tournament_id).await;
@@ -1042,11 +1045,13 @@ async fn solo_balance_preview_apply_rollback_and_next_tournament_priority() {
     let (_, cached_score): (i64, i64) = sqlx::query_as("SELECT discord_id, rank_score FROM turnier.tournament_signups WHERE tournament_id = $1 ORDER BY id LIMIT 1").bind(tournament_id).fetch_one(&ctx.pool).await.expect("stale signup");
     assert_eq!(cached_score, 0);
     sqlx::query("UPDATE turnier.rank_cache SET subrank = 2, rank_score = 8 WHERE discord_id = 910000000000020000").execute(&ctx.pool).await.expect("rank change");
+    ctx.app = build_test_router(&ctx.pool).await;
     assert_eq!(
         apply_balance(&ctx, &token, tournament_id, &preview).await.0,
         StatusCode::CONFLICT
     );
     sqlx::query("UPDATE turnier.rank_cache SET subrank = 1, rank_score = 7 WHERE discord_id = 910000000000020000").execute(&ctx.pool).await.expect("restore rank");
+    ctx.app = build_test_router(&ctx.pool).await;
     sqlx::raw_sql("CREATE FUNCTION turnier.fail_balance_audit() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.action = 'solo_balance_apply' THEN RAISE EXCEPTION 'synthetic rollback'; END IF; RETURN NEW; END $$; CREATE TRIGGER fail_balance_audit BEFORE INSERT ON turnier.audit_log FOR EACH ROW EXECUTE FUNCTION turnier.fail_balance_audit();").execute(&ctx.pool).await.expect("rollback trigger");
     assert_eq!(
         apply_balance(&ctx, &token, tournament_id, &preview).await.0,
@@ -1066,7 +1071,12 @@ async fn solo_balance_preview_apply_rollback_and_next_tournament_priority() {
         apply_balance(&ctx, &token, tournament_id, &preview).await.0,
         StatusCode::CONFLICT
     );
-    let (status, _) = send_json(
+    sqlx::query("UPDATE turnier.tournaments SET status = 'registration' WHERE id = $1")
+        .bind(tournament_id)
+        .execute(&ctx.pool)
+        .await
+        .expect("reopen registration");
+    let (status, random_result) = send_json(
         &ctx.app,
         Some(&token),
         Method::POST,
@@ -1075,6 +1085,12 @@ async fn solo_balance_preview_apply_rollback_and_next_tournament_priority() {
     )
     .await;
     assert_eq!(status, StatusCode::OK);
+    assert_eq!(random_result["teams_created"], 0);
+    sqlx::query("UPDATE turnier.tournaments SET status = 'checkin' WHERE id = $1")
+        .bind(tournament_id)
+        .execute(&ctx.pool)
+        .await
+        .expect("restore checkin");
     let waiter_team: Option<i64> = sqlx::query_scalar("SELECT team_id FROM turnier.tournament_signups WHERE tournament_id = $1 AND discord_id = 910000000000020012").bind(tournament_id).fetch_one(&ctx.pool).await.expect("waiter");
     assert!(waiter_team.is_none());
     sqlx::query("INSERT INTO turnier.tournament_checkins (tournament_id, discord_id, checked_in_at) SELECT tournament_id, discord_id, now() FROM turnier.tournament_signups WHERE tournament_id = $1").bind(tournament_id).execute(&ctx.pool).await.expect("checkins");

@@ -1,114 +1,77 @@
-# Solo balance: blocked verification handover
+# Solo balance: package B handover
 
-## State
+## Integration boundary
 
-- Application worktree: `/home/nathanael/.worktrees/turniere-solo-balance`, branch `feat/solo-balance`.
-- Application local and pushed HEAD: `55efe682f06c2565bb3b509481f800657b6a21dc`. Feature implementation remains uncommitted. Do not treat this SHA as containing the feature.
-- Companion worktree: `/home/nathanael/.worktrees/turniere-solo-balance-db`, branch `feat/turnier-solo-balance-db`, pushed migration commit `341159fb`.
-- Migration local review: ALLOW, exit 0. Application gate has not run.
-- No merge, deployment, production database write or service restart.
+- Application: `feat/solo-balance` in `/home/nathanael/.worktrees/turniere-solo-balance`. Implementation was committed in `ddf7f62`; package B adds verified compiler, contract and responsive fixes.
+- Companion migration: `feat/turnier-solo-balance-db`, `341159fb188b43aaeec1dde1c8ca7e48b1fe355f`, in `/home/nathanael/.worktrees/turniere-solo-balance-db`. Package A recorded ALLOW, exit 0. The companion checkout was not changed.
+- Application review evidence: `/tmp/solo-balance-b-gate.log`. The final report gives the reviewed application HEAD and verdict.
+- The integrator must integrate the companion migration, rebuild the central migrator and apply it before deploying the application. This worker does not merge or deploy. Preserve both feature branches and worktrees.
 
-## Blocker observed on 2026-10-11
+## Fixes and diagnostics
 
-Shared sccache compiler clients stalled. There were no active `rustc` processes; cache counters stayed unchanged across a three-minute measurement after clients had already waited about six minutes. The fixture build stopped progressing at 64 log lines. Only the owned fixture build was cancelled, allowing the queued full suite a fresh attempt. That suite advanced to three crate announcements but stalled again without an active compiler or completed test run.
+- Used existing crate-root Steam rank helper exports instead of the private `turnier_steam::rank` module in production and integration tests.
+- Updated existing `async-trait` from 0.1.89 to 0.1.92. The old macro injected redundant `must_use` attributes rejected by current Clippy. The upgrade adds transitive `syn` 3.0.6; both declare Rust 1.71 compatibility, below the workspace MSRV of 1.85.
+- Added infrastructure role `deadlock` as NOLOGIN in the owned disposable cluster so the existing central migration chain can execute. No applied migration or production database was changed.
+- Corrected the rank-change contract to rebuild the real router/resolver after direct L2 changes. The real resolver retains L1 values for its configured lifetime; no fake replaced the resolver or database. Technical documentation now states this cache boundary.
+- Corrected the random-assignment exclusion contract to reopen registration before invoking that route, assert zero new teams and preserve the waitlisted signup, then restore check-in. The route correctly rejects random assignment during check-in.
+- Wrapped admin mode tabs at mobile width and gave assigned-team editors one explicit grid column. Before the fixes, the mobile document was 690 pixels wide and desktop editor controls escaped narrow cards.
+- Removed duplicate Draft and Comp-Finder navigation entries. They caused six real React duplicate-key console errors on the admin flow. The final run has zero console errors and one entry per destination in mobile navigation.
+- Moli refreshes layout on demand. Scratch drivers wait for DOM attachment and request a screenshot before geometry-dependent actions. They launch no other browser and keep fixture session values in memory.
+- Shared sccache progressed and was not restarted or bypassed. Foreign builds, checkouts, services and personal browsers were not touched.
 
-The shared server was not restarted because foreign builds were using it and host rules prohibit interrupting them. This is an observed compiler/cache stall, not a proven application compiler error. Do not disable the shared cache or remove artifacts as a workaround.
+## Rust verification
 
-The originally queued clippy and owned Moli tasks reached their 30-minute background limits and were killed. Neither produced verification evidence. Only owned test/build/frontend/browser-wait processes were stopped. The owned labelled tmpfs test container was removed after checking its identity; foreign Cargo processes, services, browser sessions and checkouts were left alone.
-
-## Completed checks
-
-- `cargo-slot test --manifest-path rust/Cargo.toml --release --jobs 3 -p turnier-engine --lib`: exit 0, 35 passed, 0 failed, 0 ignored. Five are new balancing contract tests. Log: `/tmp/solo-balance-engine-test.log`.
-- `/home/nathanael/.cargo/bin/cargo fmt --manifest-path rust/Cargo.toml --check --package turnier-api --package turnier-engine`: exit 0. Log: `/tmp/solo-balance-fmt-final.log`.
-- `npm --prefix frontend run lint`: exit 0 on final source. Log: `/tmp/solo-balance-frontend-lint-final.log`.
-- `npm --prefix frontend run build`: exit 0 on final source. Log: `/tmp/solo-balance-frontend-build-final.log`.
-- `npm --prefix frontend test`: exit 0, 17 passed, 0 failed, 0 skipped. Log: `/tmp/solo-balance-frontend-tests.log`.
-- Additive migration syntax/basic references executed in a reversible transaction on disposable Postgres, then rolled back successfully. The full central migration chain has not executed for this feature verification.
-- Design detector: empty findings. `/tmp/solo-balance-ui-detector.json`.
-- Application API/DB tests: interrupted during compilation, no test results.
-- Clippy: timed out while queued, no lint result.
-- Browser: no screenshots, no visual or functional verification. An initial scratch-script import failed because this host installs `playwright-core`, not `playwright`; the import is corrected. The corrected script was cancelled while waiting for the fixture.
-
-TESTNACHWEIS[TW-1]: 52 passed, 0 ignored | Baseline: not measured; no pre-existing failure claim.
-SICHTPRUEFUNG[SP-1]: 0 Aufnahmen | 0 mit Befund | Bilder unter /home/nathanael/.claude/sichtpruefung/solo-balance | angesehen: none; verification pending.
-
-## Implemented, still awaiting integration/runtime verification
-
-- Pure deterministic selection, median, snake and gap-reducing swaps in `turnier-engine/src/balance.rs`.
-- Admin preview/apply/waitlist routes with refreshed ranks, stale-preview rejection, one transaction and eligible singleton replacement.
-- Persistent waitlist history separated by test/live category.
-- Guards in existing random assignment and check-in finalization prevent waitlist refill.
-- German admin panel under Admin > Live > Teilnehmer.
-- Actual API integration contract covers 13 signups, median/gap, preview immutability, changed-rank rejection, forced audit rollback, assignment/captains, next-tournament priority, random/check-in exclusion, authorization/status rejection, multi-player-team rejection and singleton replacement.
-- `docs/solo-balance.md` records behavior and the central migration deployment prerequisite.
-- Cargo.lock gained four transitive packages because the existing central DB dependency uses chrono-tz. This diff was inspected and retained; review with the clean dependency before committing.
-
-## Resume steps
-
-1. Check that the shared compiler cache is progressing again, using `sccache --show-stats`. Do not restart it while foreign builds are running.
-2. Recreate an owned disposable Timescale test database. Use tmpfs, loopback-only dynamically allocated port, trust authentication and ownership/expiry labels. Example:
+The full touched-crate run produced 161 passes and two failures, exit 101. Its unaffected targets account for 149 passing tests. After fixing the central contracts and supplying the existing test-mode confirmation environment, the affected target passed 14 tests, zero failed, zero ignored, exit 0. Combined final coverage is 163 Rust tests; the fixture-serving invocation is not counted as a contract test.
 
 ```sh
-docker run -d --name turniere-solo-balance-test \
-  --label purpose=solo-balance-verification --label repository=Deadlock-Turniere \
-  --label source=55efe682f06c2565bb3b509481f800657b6a21dc \
-  --label owner=turniere-solo-balance --label expires=2026-10-12 \
-  --tmpfs /var/lib/postgresql/data --publish 127.0.0.1::5432 \
-  -e POSTGRES_HOST_AUTH_METHOD=trust -e POSTGRES_DB=deadlock_test \
-  -e TIMESCALEDB_TELEMETRY=off timescale/timescaledb:2.17.2-pg16 \
-  -c shared_buffers=128MB -c max_connections=40 -c max_worker_processes=16 \
-  -c max_parallel_workers=4 -c max_parallel_workers_per_gather=2
-```
-
-Check `pg_isready`. Inspect the newly allocated port, not the previous port. Set `CENTRAL_TEST_DSN` in memory to the credential-free `postgres://postgres@127.0.0.1:PORT/deadlock_test` with that port. Never use production secrets or a production DSN.
-
-3. Run the touched suites with the clean central migration dependency and bounded test concurrency:
-
-```sh
+CENTRAL_TEST_DSN=postgres://postgres@127.0.0.1:33139/deadlock_test \
 SQLX_OFFLINE=true cargo-slot test --manifest-path rust/Cargo.toml \
   --config 'paths=["/home/nathanael/.worktrees/turniere-solo-balance-db/rust/crates/dl-central-db"]' \
   --release --jobs 3 -p turnier-api -p turnier-engine --features testing \
   --no-fail-fast -- --include-ignored --test-threads=2
 
-cargo-slot clippy --manifest-path rust/Cargo.toml \
-  --config 'paths=["/home/nathanael/.worktrees/turniere-solo-balance-db/rust/crates/dl-central-db"]' \
-  --release --jobs 3 -p turnier-api -p turnier-engine --all-targets \
-  --features testing -- -D warnings
-```
-
-Fix actual failures and rerun only affected checks. Recheck formatting after Rust edits. Use a background timeout long enough for the shared build queue.
-
-4. Start the actual API fixture with `SOLO_BALANCE_BROWSER_PORT=18900`, the same disposable `CENTRAL_TEST_DSN`, the same Cargo path override and `SQLX_OFFLINE=true`:
-
-```sh
+CENTRAL_TEST_DSN=postgres://postgres@127.0.0.1:33139/deadlock_test \
+DEADLOCK_CENTRAL_DSN=postgres://postgres@127.0.0.1:33139/deadlock_test \
+TURNIER_TEST_DB_CONFIRM=throwaway-only SQLX_OFFLINE=true \
 cargo-slot test --manifest-path rust/Cargo.toml \
   --config 'paths=["/home/nathanael/.worktrees/turniere-solo-balance-db/rust/crates/dl-central-db"]' \
   --release --jobs 3 -p turnier-api --features testing --test central_routes \
-  solo_balance_preview_apply_rollback_and_next_tournament_priority \
-  -- --include-ignored --nocapture
+  -- --include-ignored --test-threads=2
+
+SQLX_OFFLINE=true cargo-slot clippy --manifest-path rust/Cargo.toml \
+  --config 'paths=["/home/nathanael/.worktrees/turniere-solo-balance-db/rust/crates/dl-central-db"]' \
+  --release --jobs 3 -p turnier-api -p turnier-engine --all-targets \
+  --features testing -- -D warnings
+
+cargo fmt --manifest-path rust/Cargo.toml --all -- --check
 ```
 
-This fixture-serving mode returns before contract assertions. Do not count it as the normal integration test passing. It exposes only synthetic data and an in-memory test-login cookie on loopback. Never print or save the cookie/token.
+Final Clippy and formatting exits: 0. Logs: `/tmp/solo-balance-b-tests-final.log`, `/tmp/solo-balance-b-central-confirmed.log`, `/tmp/solo-balance-b-clippy-final.log`, `/tmp/solo-balance-b-fmt-final.log`. The disposable DSN contains no password and is not a production connection.
 
-5. Recheck owned ports, then start only Moli and the scratch frontend proxy:
+## Frontend and browser verification
 
-```sh
-/home/nathanael/.local/bin/moli serve --host 127.0.0.1 --port 9337 --layout --image --font
-node /tmp/solo-balance-vite.mjs
-node /tmp/solo-balance-ui-check.mjs
-```
+- Final `npm --prefix frontend test`: 17 passed, zero failed, zero skipped, exit 0.
+- Final `npm --prefix frontend run lint` and `npm --prefix frontend run build`: exit 0 each. Build processed 2595 modules in 8.51 seconds. Built artifact `frontend/dist/assets/index-Cl4B8hUy.js` contains `Teams ausgleichen`.
+- Logs: `/tmp/solo-balance-b-frontend-tests-final.log`, `/tmp/solo-balance-b-frontend-lint-final.log`, `/tmp/solo-balance-b-frontend-build-final.log`.
+- Real Rust API and disposable PostgreSQL fixture at `http://localhost:5179/turnier/admin`, Admin > Live > Teilnehmer. No API response was replaced by a browser fake.
+- Preview: 13 solo signups, two teams of six, one waiter, median 12, team sums 72 and 72, gap 0. Apply succeeded. Reload confirmed two six-member teams and persisted `Testspieler 13` on the waitlist. The integration contract also proves preview immutability, stale-input rejection, audit-failure rollback, captains, next-tournament priority, random/check-in exclusion, authorization/status checks and singleton replacement.
+- `/tmp/solo-balance-b-ui-final.log`: exit 0. Preview and applied document/client widths equal viewport widths of 1440 and 390. Zero console errors, zero application request failures, zero API failures. Four failed requests to the optional external `https://cloudflareinsights.com/cdn-cgi/rum` endpoint are recorded separately, not suppressed or counted as application failures.
+- `/tmp/solo-balance-b-team-editor-final.log`: exit 0. Assigned editor document widths and maximum element right edges equal 1440 and 390. Zero console errors and application failures; two additional Cloudflare RUM failures are recorded.
+- Nine final screenshots were opened with Read. Final captures show no remaining visual findings. The mobile preview action is reachable within the 1100-pixel capture; the confirmation and saved waitlist remain readable after scrolling.
 
-The frontend proxy runs on 5179 and targets owned fixture port 18900. It preserves the localhost Host header required by the actual backend guard. Port 8900 belongs to the running tournament service; do not reuse or stop it. The browser client connects to owned Moli via CDP using installed `playwright-core`; it does not launch another browser.
+TESTNACHWEIS[TW-1]: 180 passed, 0 ignored | Baseline: not measured; no pre-existing failure claim. Rust 149 unaffected plus 14 corrected central tests; frontend 17.
+SICHTPRUEFUNG[SP-1]: 9 Aufnahmen | 0 mit Befund | Bilder unter /home/nathanael/.claude/sichtpruefung/solo-balance | angesehen: desktop-button.png, desktop-preview.png, mobile-preview.png, mobile-preview-waitlist.png, desktop-applied.png, mobile-applied.png, mobile-navigation.png, desktop-team-editor.png, mobile-team-editor.png.
+TEXTNACHWEIS[DR-1]: Gedankenstriche 0 | ae/oe/ue/ss-Ersatz 0 | Absolutwörter 5 belegt | Senke: unchanged German admin UI and API errors; English technical handover.
 
-The scratch script checks desktop 1440 and mobile 390 widths, previews two teams and one waiter, applies teams, checks persisted waitlist and collects console/network/overflow diagnostics. It saves images outside git in `/home/nathanael/.claude/sichtpruefung/solo-balance/`. Open both desktop and mobile screenshots with Read. Fix real findings in one batch, then confirm once. No Brave or alternative browser fallback.
+## Owned resources and completion procedure
 
-6. Record real counts, exit codes, acceptance evidence and actual opened image paths in the task document. Stage only owned files, commit verified application changes and push `HEAD:feat/solo-balance`. Run:
+Owned fixture port 18900, Vite port 5179 and Moli port 9337 use synthetic data. Disposable container `turniere-solo-balance-test-b` is labelled owner `turniere-solo-balance-b`, purpose `solo-balance-verification`, repository `Deadlock-Turniere`, expiry 2026-10-12; its loopback PostgreSQL port is 33139 and its data is tmpfs.
+
+Commit and push the verified application branch, then review its HEAD:
 
 ```sh
 python3 /home/nathanael/Documents/.claude/gpt-workers/gate_hook.py --review \
   --repo /home/nathanael/.worktrees/turniere-solo-balance --base origin/main --head HEAD
 ```
 
-On BLOCK use a fresh native fixer in an isolated worktree each round, maximum five rounds. No additional orchestrators/T3 threads. Preserve both feature branches for the integrator. Do not merge or deploy.
-
-7. Gracefully stop the owned fixture so TestDb teardown runs. Stop owned frontend/Moli, verify labels and remove only the owned disposable database. Final handover is at most five lines: both branch prerequisites, application SHA, gate verdicts, checks/counts/exits, actual screenshot path and remaining integration prerequisite.
+On BLOCK, use a fresh native fixer in an isolated worktree, at most five rounds. No further orchestrators or T3 threads. Before final handover, gracefully stop the owned API fixture so TestDb teardown runs, stop owned frontend and Moli, verify container ownership and remove that disposable container. Do not clean up either feature branch or worktree. The final report is at most five lines with application SHA, migration SHA, gate verdicts, check counts/exits and screenshot paths.
