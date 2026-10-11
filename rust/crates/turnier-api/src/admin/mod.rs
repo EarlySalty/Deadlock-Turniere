@@ -31,6 +31,7 @@ mod helpers;
 mod loaders;
 mod matches;
 mod phases;
+mod solo_balance;
 mod steam_ops;
 mod teams;
 mod tournament_row;
@@ -44,6 +45,7 @@ pub fn router() -> Router<AppState> {
         .merge(automatik::router())
         .merge(phases::router())
         .merge(teams::router())
+        .merge(solo_balance::router())
         .merge(brackets::router())
         .merge(matches::router())
         .merge(group_matches::router())

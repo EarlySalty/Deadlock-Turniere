@@ -923,6 +923,257 @@ async fn operations_confirm_and_reject_result_reports() {
     assert_eq!(match_winner, team2);
 }
 
+async fn seed_balance_signups(pool: &Pool, tournament_id: i64) {
+    for index in 0..13_i64 {
+        let discord_id = 910000000000020000 + index;
+        let score = if index < 11 { index + 7 } else { 3 };
+        let tier = if index < 11 { (score - 1) / 6 } else { 0 };
+        let subrank = if tier > 0 { score - tier * 6 } else { 3 };
+        sqlx::query("INSERT INTO turnier.rank_cache (discord_id, source, rank, rank_tier, subrank, rank_score, cached_at) VALUES ($1, 'test', $2, $3, $4, $5, now()) ON CONFLICT (discord_id) DO UPDATE SET rank = EXCLUDED.rank, rank_tier = EXCLUDED.rank_tier, subrank = EXCLUDED.subrank, rank_score = EXCLUDED.rank_score, cached_at = now()")
+            .bind(discord_id).bind(turnier_steam::rank::rank_name_for_tier(tier)).bind(tier).bind(subrank).bind(score).execute(pool).await.expect("rank");
+        sqlx::query("INSERT INTO turnier.tournament_signups (tournament_id, discord_id, discord_name, rank_score, signed_up_at) VALUES ($1, $2, $3, 0, now() + ($4 * interval '1 second'))")
+            .bind(tournament_id).bind(discord_id).bind(format!("Testspieler {:02}", index + 1)).bind(index as f64).execute(pool).await.expect("signup");
+    }
+}
+
+async fn balance_preview(
+    ctx: &TestApp,
+    token: &str,
+    tournament_id: i64,
+    count: Option<usize>,
+) -> Value {
+    let (status, body) = send_json(
+        &ctx.app,
+        Some(token),
+        Method::POST,
+        &format!("/api/admin/tournaments/{tournament_id}/solo-balance/preview"),
+        Some(json!({"team_count": count})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    body
+}
+
+async fn apply_balance(
+    ctx: &TestApp,
+    token: &str,
+    tournament_id: i64,
+    preview: &Value,
+) -> (StatusCode, Value) {
+    send_json(
+        &ctx.app,
+        Some(token),
+        Method::POST,
+        &format!("/api/admin/tournaments/{tournament_id}/solo-balance/apply"),
+        Some(
+            json!({"team_count": preview["team_count"], "preview_token": preview["preview_token"]}),
+        ),
+    )
+    .await
+}
+
+async fn serve_balance_fixture(ctx: &TestApp, token: String, tournament_id: i64, port: u16) {
+    sqlx::query("UPDATE turnier.tournaments SET is_test = false WHERE id = $1")
+        .bind(tournament_id)
+        .execute(&ctx.pool)
+        .await
+        .expect("fixture visibility");
+    let login = axum::routing::get(move || {
+        let token = token.clone();
+        async move {
+            (
+                [(
+                    axum::http::header::SET_COOKIE,
+                    format!("session_token={token}; HttpOnly; SameSite=Lax; Path=/"),
+                )],
+                "Testanmeldung bereit",
+            )
+        }
+    });
+    let router = Router::new()
+        .nest("/turnier", ctx.app.clone())
+        .route("/turnier/auth/test-login", login);
+    let listener = tokio::net::TcpListener::bind(("127.0.0.1", port))
+        .await
+        .expect("fixture listener");
+    println!("Synthetic solo balance fixture ready on port {port}");
+    axum::serve(listener, router)
+        .with_graceful_shutdown(async {
+            tokio::signal::ctrl_c().await.expect("shutdown");
+        })
+        .await
+        .expect("fixture server");
+}
+
+#[tokio::test]
+async fn solo_balance_preview_apply_rollback_and_next_tournament_priority() {
+    let ctx = setup().await;
+    let token = session(&ctx.pool, ADMIN_ID, "Admin", &["admin-role", "mod-role"]).await;
+    let tournament_id = seed_tournament(&ctx.pool, "Solo-Ausgleich Test", "checkin", 6).await;
+    seed_balance_signups(&ctx.pool, tournament_id).await;
+    if let Ok(port) = std::env::var("SOLO_BALANCE_BROWSER_PORT") {
+        serve_balance_fixture(
+            &ctx,
+            token,
+            tournament_id,
+            port.parse().expect("fixture port"),
+        )
+        .await;
+        return;
+    }
+    let preview = balance_preview(&ctx, &token, tournament_id, None).await;
+    assert_eq!(preview["team_count"], 2);
+    assert_eq!(preview["waitlist"].as_array().expect("waitlist").len(), 1);
+    assert_eq!(preview["gap"], 0.0);
+    assert_eq!(preview["median_score"], 12.0);
+    assert!(preview["teams"]
+        .as_array()
+        .expect("teams")
+        .iter()
+        .all(|team| team["players"].as_array().expect("players").len() == 6));
+    assert!(preview["teams"]
+        .as_array()
+        .expect("teams")
+        .iter()
+        .flat_map(|team| team["players"].as_array().expect("players"))
+        .any(|player| player["used_median"] == true && player["score"] == 12.0));
+    let before: (i64, i64, i64) = sqlx::query_as("SELECT (SELECT count(*) FROM turnier.teams), (SELECT count(*) FROM turnier.solo_balance_runs), (SELECT count(*) FROM turnier.solo_balance_waitlist)").fetch_one(&ctx.pool).await.expect("counts");
+    assert_eq!(before, (0, 0, 0));
+    let (_, cached_score): (i64, i64) = sqlx::query_as("SELECT discord_id, rank_score FROM turnier.tournament_signups WHERE tournament_id = $1 ORDER BY id LIMIT 1").bind(tournament_id).fetch_one(&ctx.pool).await.expect("stale signup");
+    assert_eq!(cached_score, 0);
+    sqlx::query("UPDATE turnier.rank_cache SET subrank = 2, rank_score = 8 WHERE discord_id = 910000000000020000").execute(&ctx.pool).await.expect("rank change");
+    assert_eq!(
+        apply_balance(&ctx, &token, tournament_id, &preview).await.0,
+        StatusCode::CONFLICT
+    );
+    sqlx::query("UPDATE turnier.rank_cache SET subrank = 1, rank_score = 7 WHERE discord_id = 910000000000020000").execute(&ctx.pool).await.expect("restore rank");
+    sqlx::raw_sql("CREATE FUNCTION turnier.fail_balance_audit() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.action = 'solo_balance_apply' THEN RAISE EXCEPTION 'synthetic rollback'; END IF; RETURN NEW; END $$; CREATE TRIGGER fail_balance_audit BEFORE INSERT ON turnier.audit_log FOR EACH ROW EXECUTE FUNCTION turnier.fail_balance_audit();").execute(&ctx.pool).await.expect("rollback trigger");
+    assert_eq!(
+        apply_balance(&ctx, &token, tournament_id, &preview).await.0,
+        StatusCode::INTERNAL_SERVER_ERROR
+    );
+    let after: (i64, i64, i64) = sqlx::query_as("SELECT (SELECT count(*) FROM turnier.teams), (SELECT count(*) FROM turnier.solo_balance_runs), (SELECT count(*) FROM turnier.solo_balance_waitlist)").fetch_one(&ctx.pool).await.expect("rollback counts");
+    assert_eq!(after, before);
+    sqlx::query("DROP TRIGGER fail_balance_audit ON turnier.audit_log")
+        .execute(&ctx.pool)
+        .await
+        .expect("remove trigger");
+    let (status, applied) = apply_balance(&ctx, &token, tournament_id, &preview).await;
+    assert_eq!(status, StatusCode::OK, "{applied}");
+    let counts: (i64, i64, i64, i64) = sqlx::query_as("SELECT (SELECT count(*) FROM turnier.teams), (SELECT count(*) FROM turnier.team_members), (SELECT count(*) FROM turnier.tournament_signups WHERE team_id IS NOT NULL), (SELECT count(*) FROM turnier.team_members WHERE role = 'captain')").fetch_one(&ctx.pool).await.expect("applied counts");
+    assert_eq!(counts, (2, 12, 12, 2));
+    assert_eq!(
+        apply_balance(&ctx, &token, tournament_id, &preview).await.0,
+        StatusCode::CONFLICT
+    );
+    let (status, _) = send_json(
+        &ctx.app,
+        Some(&token),
+        Method::POST,
+        &format!("/api/admin/tournaments/{tournament_id}/assign-random"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let waiter_team: Option<i64> = sqlx::query_scalar("SELECT team_id FROM turnier.tournament_signups WHERE tournament_id = $1 AND discord_id = 910000000000020012").bind(tournament_id).fetch_one(&ctx.pool).await.expect("waiter");
+    assert!(waiter_team.is_none());
+    sqlx::query("INSERT INTO turnier.tournament_checkins (tournament_id, discord_id, checked_in_at) SELECT tournament_id, discord_id, now() FROM turnier.tournament_signups WHERE tournament_id = $1").bind(tournament_id).execute(&ctx.pool).await.expect("checkins");
+    let result = turnier_engine::finalize_checkin(
+        &ctx.pool,
+        tournament_id,
+        turnier_engine::FinalizeCheckinParams::default(),
+    )
+    .await
+    .expect("checkin preview");
+    assert!(result.added_players.is_empty());
+    assert!(result.created_teams.is_empty());
+    assert!(result.remaining_solo_players.is_empty());
+    let next = seed_tournament(&ctx.pool, "Solo-Ausgleich Folge", "checkin", 6).await;
+    seed_balance_signups(&ctx.pool, next).await;
+    let next_preview = balance_preview(&ctx, &token, next, Some(1)).await;
+    let selected = next_preview["teams"][0]["players"]
+        .as_array()
+        .expect("selected");
+    assert!(selected
+        .iter()
+        .any(|player| player["discord_id"] == "910000000000020012" && player["priority"] == true));
+    assert_eq!(
+        next_preview["waitlist"][0]["discord_id"],
+        "910000000000020005"
+    );
+    assert_eq!(
+        apply_balance(&ctx, &token, next, &next_preview).await.0,
+        StatusCode::OK
+    );
+    let outsider = session(&ctx.pool, PLAYER_ID, "Player", &[]).await;
+    let (status, _) = send_json(
+        &ctx.app,
+        Some(&outsider),
+        Method::POST,
+        &format!("/api/admin/tournaments/{next}/solo-balance/preview"),
+        Some(json!({})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let wrong_status = seed_tournament(&ctx.pool, "Anmeldung offen", "registration", 6).await;
+    seed_balance_signups(&ctx.pool, wrong_status).await;
+    let (status, _) = send_json(
+        &ctx.app,
+        Some(&token),
+        Method::POST,
+        &format!("/api/admin/tournaments/{wrong_status}/solo-balance/preview"),
+        Some(json!({})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    let singleton_tournament = seed_tournament(&ctx.pool, "Solo-Einzelteams", "checkin", 6).await;
+    seed_balance_signups(&ctx.pool, singleton_tournament).await;
+    let singleton = seed_team(
+        &ctx.pool,
+        singleton_tournament,
+        "Einzelteam",
+        "910000000000020000",
+    )
+    .await;
+    sqlx::query("UPDATE turnier.tournament_signups SET team_id = $1 WHERE tournament_id = $2 AND discord_id = 910000000000020000")
+        .bind(singleton).bind(singleton_tournament).execute(&ctx.pool).await.expect("singleton signup");
+    sqlx::query("INSERT INTO turnier.team_members (team_id, discord_id, rank_score, role, joined_at) VALUES ($1, 910000000000020001, 0, 'member', now())")
+        .bind(singleton).execute(&ctx.pool).await.expect("existing teammate");
+    let (status, _) = send_json(
+        &ctx.app,
+        Some(&token),
+        Method::POST,
+        &format!("/api/admin/tournaments/{singleton_tournament}/solo-balance/preview"),
+        Some(json!({})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    sqlx::query(
+        "DELETE FROM turnier.team_members WHERE team_id = $1 AND discord_id = 910000000000020001",
+    )
+    .bind(singleton)
+    .execute(&ctx.pool)
+    .await
+    .expect("restore singleton");
+    let singleton_preview = balance_preview(&ctx, &token, singleton_tournament, None).await;
+    assert_eq!(
+        apply_balance(&ctx, &token, singleton_tournament, &singleton_preview)
+            .await
+            .0,
+        StatusCode::OK
+    );
+    let replaced: bool =
+        sqlx::query_scalar("SELECT NOT EXISTS (SELECT 1 FROM turnier.teams WHERE id = $1)")
+            .bind(singleton)
+            .fetch_one(&ctx.pool)
+            .await
+            .expect("singleton replaced");
+    assert!(replaced);
+    let replacement_counts: (i64, i64) = sqlx::query_as("SELECT (SELECT count(*) FROM turnier.teams WHERE tournament_id = $1), (SELECT count(*) FROM turnier.tournament_signups WHERE tournament_id = $1 AND team_id IS NOT NULL)")
+        .bind(singleton_tournament).fetch_one(&ctx.pool).await.expect("replacement counts");
+    assert_eq!(replacement_counts, (2, 12));
+}
+
 #[tokio::test]
 async fn test_mode_seed_simulate_and_wipe_use_throwaway_db() {
     let ctx = setup().await;

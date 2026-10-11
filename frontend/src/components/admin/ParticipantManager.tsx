@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import SoloBalancePanel from '@/components/admin/SoloBalancePanel'
 import Card from '@/components/ui/Card'
 import Button from '@/components/ui/Button'
 import { useAuth } from '@/hooks/useAuth'
@@ -225,6 +226,16 @@ export default function ParticipantManager({
 
   return (
     <div className="space-y-6">
+      {user?.is_admin && teamSize > 1 && (
+        <SoloBalancePanel
+          key={tournamentId}
+          tournamentId={tournamentId}
+          tournamentStatus={tournamentStatus}
+          teamSize={teamSize}
+          signupCount={signups.length}
+          teams={teams}
+        />
+      )}
       <Card className="p-6 space-y-4">
         <div className="flex items-center gap-2">
           <Users size={18} className="text-primary" />

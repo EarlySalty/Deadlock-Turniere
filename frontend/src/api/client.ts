@@ -63,6 +63,8 @@ import type {
   ObserverSessionDetail,
 } from '@/types/tournament'
 
+import type { BalancePreview, BalanceWaitlistEntry } from '@/types/soloBalance'
+
 const API_BASE = '/turnier/api'
 
 export class ApiError extends Error {
@@ -141,6 +143,19 @@ export const finalizeCheckin = (
     body: JSON.stringify({ allowed_team_ids: allowedTeamIds, snapshot_token: snapshotToken }),
   }
 )
+
+export const previewSoloBalance = (tournamentId: number, teamCount?: number) =>
+  request<BalancePreview>(`/admin/tournaments/${tournamentId}/solo-balance/preview`, {
+    method: 'POST', body: JSON.stringify({ team_count: teamCount ?? null }),
+  })
+
+export const applySoloBalance = (tournamentId: number, preview: BalancePreview) =>
+  request<BalancePreview>(`/admin/tournaments/${tournamentId}/solo-balance/apply`, {
+    method: 'POST', body: JSON.stringify({ team_count: preview.team_count, preview_token: preview.preview_token }),
+  })
+
+export const fetchSoloBalanceWaitlist = (tournamentId: number) =>
+  request<BalanceWaitlistEntry[]>(`/admin/tournaments/${tournamentId}/solo-balance/waitlist`)
 
 export const assignRandomTeams = (id: number) =>
   request<{ teams_created: number }>(`/admin/tournaments/${id}/assign-random`, { method: 'POST' })

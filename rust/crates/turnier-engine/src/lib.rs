@@ -18,6 +18,7 @@
 //! injizierbaren [`rand::rngs::StdRng`]; das Python-Modulo `-1 % n` ist überall
 //! als `rem_euclid` umgesetzt.
 
+pub mod balance;
 pub mod engine;
 pub mod error;
 pub mod mini_groups;

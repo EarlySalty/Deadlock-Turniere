@@ -1039,7 +1039,7 @@ async fn delete_signup(
 
 /// Fügt ein Mitglied mit gegebener Rolle ein.
 #[allow(clippy::too_many_arguments)]
-async fn insert_member(
+pub(super) async fn insert_member(
     tx: &mut Transaction<'_, Postgres>,
     team_id: i64,
     discord_id: &str,
@@ -1068,7 +1068,7 @@ async fn insert_member(
 }
 
 /// Setzt den Captain eines Teams.
-async fn set_captain(
+pub(super) async fn set_captain(
     tx: &mut Transaction<'_, Postgres>,
     team_id: i64,
     discord_id: &str,

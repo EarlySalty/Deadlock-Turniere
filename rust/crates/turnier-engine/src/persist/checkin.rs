@@ -220,6 +220,8 @@ pub async fn assign_random_teams(
         "SELECT id, discord_id, discord_name, steam_id, rank, rank_score \
          FROM turnier.tournament_signups \
          WHERE tournament_id = $1 AND team_id IS NULL \
+         AND NOT EXISTS (SELECT 1 FROM turnier.solo_balance_waitlist w \
+                         WHERE w.signup_id = turnier.tournament_signups.id) \
          ORDER BY signed_up_at, id",
     )
     .bind(tournament_id)
@@ -669,7 +671,9 @@ pub async fn finalize_checkin(
     // Signups (nach discord_id indexiert; Pool = Solo + eingecheckt).
     let signup_rows: Vec<SignupRow> = sqlx::query_as::<_, SignupRow>(
         "SELECT id, discord_id, discord_name, steam_id, rank, rank_score, team_id, signed_up_at \
-         FROM turnier.tournament_signups WHERE tournament_id = $1 ORDER BY signed_up_at, id",
+         FROM turnier.tournament_signups WHERE tournament_id = $1 \
+         AND (team_id IS NOT NULL OR NOT EXISTS (SELECT 1 FROM turnier.solo_balance_waitlist w \
+              WHERE w.signup_id = turnier.tournament_signups.id)) ORDER BY signed_up_at, id",
     )
     .bind(tournament_id)
     .fetch_all(&mut *tx)

@@ -45,6 +45,24 @@ Out of scope: automatic triggering, changes to normal team signup, Discord annou
 - Apply writes teams/members/team_id; second solo-balanced tournament picks the waitlisted player first.
 - Admin page shows button, preview and waitlist (screenshot path in report).
 
+## Implementation evidence
+
+BESTAND[BS-1]: teilweise | Fundort: rust/crates/turnier-api/src/admin/teams.rs:820 | Anknüpfung: existing member insertion, captain and signup helpers; batch rank resolver; snake seeding.
+
+The repo-local Graphify graph is absent; global Graphify resolved the building blocks. `turnier-db::run_migrations` is a no-op; production migrations belong to Deadlock-Bots `dl-central-db`. The additive migration is committed and pushed on companion branch `feat/turnier-solo-balance-db` at `341159fb`; its local gate returned ALLOW, exit 0. No tournament-wide capacity setting exists; balance preview accepts an optional team count capped by complete available teams. Balancing is allowed in check-in after registration, before phase generation. Preview does not write tournament, team, signup or waitlist data; the existing rank resolver retains its normal cache maintenance. Apply confirms the exact preview and rejects stale inputs. Test/live waitlist history is separated.
+
+Integrate and apply the companion migration with a newly built central migrator before deploying the application. Verification overrides only the Cargo dependency path to the clean companion worktree. The neighboring dirty Deadlock-Bots checkout is unchanged. The frontend fixture uses owned port 18900, not the running tournament service on port 8900. No merge, deployment or production restart is part of this worker handover.
+
+## Verification hold
+
+Implementation remains uncommitted at application HEAD `55efe68`. Shared compiler/cache requests stalled without an active `rustc`; no application compiler result was obtained. Only owned processes and the disposable labelled test database were stopped/cleaned. The shared sccache server and foreign builds were not interrupted.
+
+Passed: engine library tests (35, exit 0), final frontend tests (17, exit 0), frontend lint/build (exit 0), touched-crate format check (exit 0). Full API/DB tests and clippy are not verified. Clippy and Moli reached their initial background limits; there are no screenshots or application gate verdict. Resume instructions and commands are in [TODO.md](TODO.md).
+
+TEXTNACHWEIS[DR-1]: Gedankenstriche 0 | ae/oe/ue/ss-Ersatz 0 | Absolutwörter 5 belegt | Senke: admin UI and API errors.
+
+The five German absolute claims are guarded at `SoloBalancePanel.tsx:85,100` and `solo_balance.rs:144,168,176`. The no-em-dashes checker passed for the technical and handover documentation. No community publication was made.
+
 ## Final report (max 5 lines)
 
 Branch, SHA, gate verdict, checks run with exit codes, screenshot path, open points.

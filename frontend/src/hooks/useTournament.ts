@@ -4,6 +4,7 @@ import {
   fetchMyTournamentStatus,
   createTournament, updateTournament, deleteTournament,
   advanceTournament, assignRandomTeams, openCheckin, revertCheckin, finalizeCheckin,
+  previewSoloBalance, applySoloBalance, fetchSoloBalanceWaitlist,
   createTeam, joinTeam, signupSolo, checkinPlayer, getCheckinStatus,
   withdrawSolo, kickMember, inviteBySignup, leaveTeam,
   generateGroups, generateBracket,
@@ -37,6 +38,8 @@ import type {
   CreateTestTournamentRequest,
   MatchResultReportCreate,
 } from '@/types/tournament'
+
+import type { BalancePreview } from '@/types/soloBalance'
 
 function invalidateTournamentCaches(qc: ReturnType<typeof useQueryClient>, tournamentId?: number) {
   qc.invalidateQueries({ queryKey: ['tournaments'] })
@@ -91,6 +94,24 @@ export function useAdminTournament(id: number) {
     enabled: id > 0,
     refetchInterval: 3_000,
   })
+}
+
+export function useSoloBalance(tournamentId: number) {
+  const qc = useQueryClient()
+  const preview = useMutation({ mutationFn: (teamCount?: number) => previewSoloBalance(tournamentId, teamCount) })
+  const apply = useMutation({
+    mutationFn: (proposal: BalancePreview) => applySoloBalance(tournamentId, proposal),
+    onSuccess: () => {
+      invalidateTournamentCaches(qc, tournamentId)
+      qc.invalidateQueries({ queryKey: ['admin', 'solo-balance-waitlist', tournamentId] })
+    },
+  })
+  const waitlist = useQuery({
+    queryKey: ['admin', 'solo-balance-waitlist', tournamentId],
+    queryFn: () => fetchSoloBalanceWaitlist(tournamentId),
+    refetchInterval: 3_000,
+  })
+  return { preview, apply, waitlist }
 }
 
 export function useCreateTournament() {
