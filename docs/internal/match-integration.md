@@ -1,3 +1,5 @@
+> **Historical.** This is a dated plan, snapshot or design note. It does not describe the current state. The code on `origin/main` and the root `README.md` are authoritative. It also describes the Python backend (`backend/`), which is legacy and not run on v50671.
+
 # Match-Integration
 
 Die Match-Integration verbindet den Turnierbaum mit der operativen Match-Abwicklung. Technisch sitzt der HTTP-Einstieg in den Admin-Routen, die eigentliche Orchestrierung aber in `backend/match/manager.py`, `backend/match/result_processor.py`, `backend/match/series_manager.py` und `backend/tournament/engine.py`.

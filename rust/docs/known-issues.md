@@ -1,3 +1,5 @@
+> **Historical.** This is a dated plan, snapshot or design note. It does not describe the current state. The code on `origin/main` and the root `README.md` are authoritative. It lists issues found while porting the Python backend.
+
 # Known Issues — beim Port gefundene Alt-Bugs/Inkonsistenzen
 
 Hier sammeln wir Probleme des Python-Stands, die beim Port auffallen. Grundsatz

@@ -1,3 +1,5 @@
+> **Historical.** This is a dated plan, snapshot or design note. It does not describe the current state. The code on `origin/main` and the root `README.md` are authoritative.
+
 # Turnier-Automatik — Phase 1 Plan (Automatik-Grundloop)
 
 > Basis: Spec `docs/specs/2026-06-29-turnier-automatisierung-design.md`. Phase 0 (Rename+Audit+Fixes) ist auf `main`. Implementierung an Codex (gpt-5.5/xhigh); user-sichtbare Texte schreibt Claude. Branch `feat/turnier-automatik-phase1`.

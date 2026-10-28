@@ -1,3 +1,5 @@
+> **Historical.** This is a dated plan, snapshot or design note. It does not describe the current state. The code on `origin/main` and the root `README.md` are authoritative.
+
 # Turnier-Automatisierung — Design-Spec
 
 **Datum:** 2026-06-29

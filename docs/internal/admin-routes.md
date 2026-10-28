@@ -1,3 +1,5 @@
+> **Historical.** This is a dated plan, snapshot or design note. It does not describe the current state. The code on `origin/main` and the root `README.md` are authoritative. It also describes the Python backend (`backend/`), which is legacy and not run on v50671.
+
 # Admin-Routes
 
 Die Admin-Oberfläche des Turnier-Backends hängt primär an `backend/tournament/admin_routes.py` und ergänzt sich mit `operations_routes.py` für das Tagesgeschäft rund um Off-Stream-Ergebnisse. Auth-seitig gibt es zwei relevante Schienen:

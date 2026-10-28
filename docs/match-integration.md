@@ -1,3 +1,5 @@
+> **Historical.** This is a dated plan, snapshot or design note. It does not describe the current state. The code on `origin/main` and the root `README.md` are authoritative. It also describes the Python backend (`backend/`), which is legacy and not run on v50671.
+
 # Match-Integration — Lobby, Ergebnisse & Bracket-Advancement
 
 ## 1. Übersicht

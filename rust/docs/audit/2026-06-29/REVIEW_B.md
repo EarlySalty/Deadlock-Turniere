@@ -1,3 +1,5 @@
+> **Historical.** This is a dated plan, snapshot or design note. It does not describe the current state. The code on `origin/main` and the root `README.md` are authoritative. It is an audit snapshot, so findings may have been fixed since.
+
 # Phase0 Task3b Adversarial Review
 
 Datum: 2026-06-29

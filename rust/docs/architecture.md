@@ -41,10 +41,14 @@ Domänen-Crates kennen das Fundament, die Web-/App-Schicht kennt die Domäne.
   vereinheitlicht), Bo-N-Serien, Spielmodi, Auto-Lobby, Steam-Bridge-Queue.
   `MatchKind`-Enum + Repository statt stringly-typed `match_type`.
 - **turnier-draft** — Pick/Ban-Zustandsmaschine + Repository (CAS auf den Aktionsindex).
+- **turnier-match-core**: speicherunabhängige Ergebnis-Mappings, von den Match-Adaptern genutzt.
+- **turnier-automatik**: Fundament der automatischen Turnierplanung (Presets, Vorschläge, Votes, Feedback, DM-Opt-out, Signals).
+- **turnier-scrim**: Scrim-Domänenfundament; reine Entscheidungen getrennt von Repositories und Effekten.
+- **turnier-observer**: automatischer Ingame-Observer für Scrims.
 - **turnier-scheduler** — Hintergrund-Loop (Phasenübergänge + Reminder) und die geteilte
   Orchestrierung `advance_tournament_status` (auch von turnier-api genutzt).
 - **turnier-api** — axum-HTTP-Schicht: `AppState`, Extractoren, Fehler→Response,
-  Middleware (CORS, TrustedHost) und die Router aller ~213 Endpunkte.
+  Middleware (CORS, TrustedHost) und die Router aller Endpunkte.
 - **turnier-bot** — Composition-Root + Binary: Config → zentraler PgPool →
   AppState → Scheduler → `axum::serve`. Mit `--check` baut der Prozess Config,
   Pool, AppState, Scheduler und Router, ohne zu servieren oder Scheduler-Checks

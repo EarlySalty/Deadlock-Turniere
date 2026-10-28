@@ -1,3 +1,5 @@
+> **Historical.** This is a dated plan, snapshot or design note. It does not describe the current state. The code on `origin/main` and the root `README.md` are authoritative. It also describes the Python backend (`backend/`), which is legacy and not run on v50671.
+
 # Steam-Bridge-Implementation
 
 Die Steam-Bridge koppelt das Python-Turnierbackend an den separaten Steam-Bot, ohne dass beide Prozesse direkt RPC oder Webhooks gegeneinander sprechen. Stattdessen nutzen sie eine gemeinsame Task-Queue in SQLite. Das Backend schreibt Aufträge hinein, der Steam-Bot nimmt sie auf, arbeitet gegen den Deadlock Game Coordinator und schreibt das Ergebnis wieder zurück.

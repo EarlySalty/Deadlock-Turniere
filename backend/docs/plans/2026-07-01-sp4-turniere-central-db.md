@@ -1,3 +1,5 @@
+> **Historical.** This is a dated plan, snapshot or design note. It does not describe the current state. The code on `origin/main` and the root `README.md` are authoritative. It also describes the Python backend (`backend/`), which is legacy and not run on v50671.
+
 # SP4 Turniere -- zentrale Postgres-Umstellung Implementation Plan
 
 > **Fuer ausfuehrende Worker:** Dieser Plan ist der Review-/Ausfuehrungsvertrag fuer die Turniere-Codeumstellung. Worker implementieren ticketweise, verifizieren selbst, lassen danach einen frischen Kritiker gegen alle geaenderten Dateien laufen und uebergeben uncommitted an Claude. Claude entscheidet ueber Commit/Push und spaeteren Cutover. Schritte mit Checkbox (`- [ ]`) sind Fortschrittsmarker.

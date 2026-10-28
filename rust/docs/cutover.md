@@ -1,3 +1,5 @@
+> **Historical.** This is a dated plan, snapshot or design note. It does not describe the current state. The code on `origin/main` and the root `README.md` are authoritative. It is the cutover checklist from the Python-to-Rust migration; the Rust backend is live.
+
 # Cutover — Python → Rust
 
 Stand der Rust-Neuentwicklung unter `/rust` und was vor dem Scharfschalten noetig

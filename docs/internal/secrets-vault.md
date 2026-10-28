@@ -1,3 +1,5 @@
+> **Historical.** This is a dated plan, snapshot or design note. It does not describe the current state. The code on `origin/main` and the root `README.md` are authoritative. It also describes the Python backend (`backend/`), which is legacy and not run on v50671.
+
 # Secrets und Vault
 
 Das Turnierbackend ist inzwischen so aufgebaut, dass Secret-Werte nicht fest an eine einzelne Plattform oder einen einzelnen Secret-Store gebunden sind. Entscheidend ist die Reihenfolge der Auflösung:
