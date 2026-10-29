@@ -294,7 +294,7 @@ fn environment_and_dynamic_file_keys_cannot_override_toml() {
 }
 
 #[test]
-fn runtime_environment_reads_are_limited_to_secrets_and_throwaway_guards() {
+fn runtime_environment_reads_are_limited_to_secrets() {
     fn walk(path: &Path, sources: &mut Vec<PathBuf>) {
         for entry in std::fs::read_dir(path).unwrap() {
             let path = entry.unwrap().path();
@@ -328,7 +328,6 @@ fn runtime_environment_reads_are_limited_to_secrets_and_throwaway_guards() {
             path.display()
         );
         let secret_resolver = path.ends_with("turnier-config/src/secrets.rs");
-        let throwaway_guard = path.ends_with("turnier-api/src/test_mode.rs");
         for line in runtime.lines().filter(|line| {
             line.contains("env::var")
                 || line.contains("getenv(")
@@ -337,19 +336,7 @@ fn runtime_environment_reads_are_limited_to_secrets_and_throwaway_guards() {
             if secret_resolver {
                 continue;
             }
-            let approved_guard = throwaway_guard
-                && [
-                    "\"CENTRAL_TEST_DSN\"",
-                    "\"DEADLOCK_CENTRAL_DSN\"",
-                    "\"TURNIER_TEST_DB_CONFIRM\"",
-                ]
-                .iter()
-                .any(|key| line.contains(key));
-            assert!(
-                approved_guard,
-                "nicht freigegebener ENV-Leser: {}",
-                path.display()
-            );
+            panic!("nicht freigegebener ENV-Leser: {}", path.display());
         }
     }
 }

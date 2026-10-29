@@ -1191,9 +1191,15 @@ async fn solo_balance_preview_apply_rollback_and_next_tournament_priority() {
 }
 
 #[tokio::test]
-async fn test_mode_seed_simulate_and_wipe_use_throwaway_db() {
+async fn test_mode_seed_simulate_and_wipe_only_touch_test_data() {
     let ctx = setup().await;
     let mod_token = session(&ctx.pool, ADMIN_ID, "Mod", &["mod-role"]).await;
+    let real_tournament = seed_tournament(&ctx.pool, "Real Cup", "registration", 1).await;
+    sqlx::query(r#"UPDATE turnier."tournaments" SET is_test = false WHERE id = $1"#)
+        .bind(real_tournament)
+        .execute(&ctx.pool)
+        .await
+        .expect("mark real tournament");
 
     let (status, users) = send_json(
         &ctx.app,
@@ -1252,4 +1258,12 @@ async fn test_mode_seed_simulate_and_wipe_use_throwaway_db() {
     .await
     .expect("remaining tournaments");
     assert_eq!(remaining, 0);
+
+    let real_remaining: i64 =
+        sqlx::query_scalar(r#"SELECT COUNT(*) FROM turnier."tournaments" WHERE id = $1"#)
+            .bind(real_tournament)
+            .fetch_one(&ctx.pool)
+            .await
+            .expect("real tournament");
+    assert_eq!(real_remaining, 1);
 }

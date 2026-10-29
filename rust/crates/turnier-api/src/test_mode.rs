@@ -269,7 +269,7 @@ async fn create_test_users_in_db(
     rng: &mut Rng,
     count: i64,
 ) -> WebResult<Vec<TestUserCreated>> {
-    ensure_throwaway_test_db_tx(tx).await?;
+    ensure_test_schema_tx(tx).await?;
     let existing: Vec<(i64,)> = sqlx::query_as(
         r#"SELECT discord_id FROM turnier."user_profiles"
            WHERE discord_id >= $1 AND discord_id < $2"#,
@@ -421,7 +421,7 @@ where
 /// und turnierfremde Signups/Check-ins bleiben als Orphans liegen (siehe
 /// `bugs_preserved`).
 async fn delete_test_users_in_db(tx: &mut sqlx::Transaction<'_, Postgres>) -> WebResult<i64> {
-    ensure_throwaway_test_db_tx(tx).await?;
+    ensure_test_schema_tx(tx).await?;
     let deleted: i64 = sqlx::query_scalar(
         r#"SELECT COUNT(*) FROM turnier."user_profiles"
            WHERE discord_id >= $1 AND discord_id < $2"#,
@@ -510,12 +510,13 @@ where
 }
 
 /// Löscht den kompletten Turnier-Baum (Gruppen/Bracket/Teams/Signups/Check-ins)
-/// und das Turnier selbst. Der Einstieg ist hart auf die Wegwerf-Test-DB gegatet.
+/// und das Turnier selbst. Verweigert jedes Turnier ohne `is_test`.
 async fn delete_tournament_tree(
     tx: &mut sqlx::Transaction<'_, Postgres>,
     tournament_id: i64,
 ) -> WebResult<()> {
-    ensure_throwaway_test_db_tx(tx).await?;
+    ensure_test_schema_tx(tx).await?;
+    ensure_test_tournament(&mut **tx, tournament_id).await?;
     let group_ids: Vec<i64> =
         sqlx::query_scalar(r#"SELECT id FROM turnier."groups" WHERE tournament_id = $1"#)
             .bind(tournament_id)
@@ -707,32 +708,14 @@ async fn clear_bracket_tree(
     Ok(())
 }
 
-async fn ensure_throwaway_test_db_tx(tx: &mut sqlx::Transaction<'_, Postgres>) -> WebResult<()> {
-    ensure_throwaway_test_db(&mut **tx).await
+async fn ensure_test_schema_tx(tx: &mut sqlx::Transaction<'_, Postgres>) -> WebResult<()> {
+    ensure_test_schema(&mut **tx).await
 }
 
-/// Erlaubt Testdaten-Mutationen nur gegen die Wegwerf-Test-DB.
-///
-/// Neben der DSN-Gleichheit braucht es `TURNIER_TEST_DB_CONFIRM=throwaway-only`.
-/// Diese zweite, nur vom Test-Harness gesetzte Bedingung schützt vor reiner
-/// Env-Var-Verwechslung, bei der Test- und aktive DSN versehentlich auf eine
-/// echte zentrale DB zeigen.
-async fn ensure_throwaway_test_db<'e, E>(executor: E) -> WebResult<()>
+async fn ensure_test_schema<'e, E>(executor: E) -> WebResult<()>
 where
     E: sqlx::Executor<'e, Database = Postgres>,
 {
-    let central_test_dsn = std::env::var("CENTRAL_TEST_DSN").ok();
-    let active_dsn = std::env::var("DEADLOCK_CENTRAL_DSN").ok();
-    let env_allows_throwaway =
-        matches!((central_test_dsn, active_dsn), (Some(test), Some(active)) if test == active);
-    let confirmed_throwaway =
-        std::env::var("TURNIER_TEST_DB_CONFIRM").ok().as_deref() == Some("throwaway-only");
-    if !env_allows_throwaway || !confirmed_throwaway {
-        return Err(WebError::forbidden(
-            "Test-Daten-Mutation ist nur gegen die zentrale Wegwerf-Test-DB erlaubt",
-        ));
-    }
-
     let table_exists: Option<(i64,)> = sqlx::query_as(
         "SELECT 1::BIGINT FROM information_schema.tables WHERE table_schema = 'turnier' AND table_name = 'tournaments'",
     )
@@ -740,7 +723,7 @@ where
     .await?;
     if table_exists.is_none() {
         return Err(WebError::forbidden(
-            "Test-Daten-Mutation ist nur gegen initialisierte Test-Schema erlaubt",
+            "Turnier-Schema ist nicht initialisiert",
         ));
     }
     Ok(())
@@ -757,7 +740,7 @@ async fn create_test_users(
     Json(body): Json<TestUsersCreateRequest>,
 ) -> WebResult<Json<TestUsersCreateResponse>> {
     validate_range(body.count, 1, 100, "count")?;
-    ensure_throwaway_test_db(&state.pool).await?;
+    ensure_test_schema(&state.pool).await?;
 
     let mut rng = Rng::new();
     let mut tx = state.pool.begin().await?;
@@ -802,7 +785,7 @@ async fn delete_test_users(
     State(state): State<AppState>,
     ModUser(user): ModUser,
 ) -> WebResult<Json<TestUsersDeleteResponse>> {
-    ensure_throwaway_test_db(&state.pool).await?;
+    ensure_test_schema(&state.pool).await?;
     let mut tx = state.pool.begin().await?;
     ensure_test_user_deletion_allowed(&mut *tx).await?;
     let deleted = delete_test_users_in_db(&mut tx).await?;
@@ -828,7 +811,7 @@ async fn create_test_tournament(
     ModUser(user): ModUser,
     Json(body): Json<TestTournamentCreateRequest>,
 ) -> WebResult<Json<TestTournamentCreateResponse>> {
-    ensure_throwaway_test_db(&state.pool).await?;
+    ensure_test_schema(&state.pool).await?;
     validate_range(body.team_size, 1, 12, "team_size")?;
     validate_range(body.num_teams, 2, 128, "num_teams")?;
     if body.mode != "bracket_only" && body.mode != "group_then_bracket" {
@@ -1113,7 +1096,7 @@ async fn simulate_test_tournament_round(
     ModUser(user): ModUser,
     Path(tournament_id): Path<i64>,
 ) -> WebResult<Json<SimulateRoundResponse>> {
-    ensure_throwaway_test_db(&state.pool).await?;
+    ensure_test_schema(&state.pool).await?;
     let flags = ensure_test_tournament(&state.pool, tournament_id).await?;
 
     let finished_statuses: Vec<&str> = FINISHED_MATCH_STATUSES.to_vec();
@@ -1220,7 +1203,7 @@ async fn wipe_test_data(
     State(state): State<AppState>,
     ModUser(user): ModUser,
 ) -> WebResult<Json<TestWipeResponse>> {
-    ensure_throwaway_test_db(&state.pool).await?;
+    ensure_test_schema(&state.pool).await?;
     let mut tx = state.pool.begin().await?;
 
     let tournament_ids: Vec<i64> = sqlx::query_scalar(

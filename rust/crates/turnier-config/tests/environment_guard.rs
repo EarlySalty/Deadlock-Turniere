@@ -85,12 +85,7 @@ impl<'ast> Visit<'ast> for Guard<'_> {
             let cli = self.binary() && name == "std::env::args_os";
             let dsn =
                 self.file == "turnier-db/src/pool.rs" && name == "dl_central_db::dsn_from_env";
-            let test_guard = self.file == "turnier-api/src/test_mode.rs"
-                && name == "std::env::var"
-                && call.args.len() == 1
-                && matches!(call.args.first(), Some(syn::Expr::Lit(syn::ExprLit { lit: syn::Lit::Str(key), .. }))
-                    if matches!(key.value().as_str(), "CENTRAL_TEST_DSN" | "DEADLOCK_CENTRAL_DSN" | "TURNIER_TEST_DB_CONFIRM"));
-            if cli || dsn || test_guard {
+            if cli || dsn {
                 for arg in &call.args {
                     self.visit_expr(arg);
                 }
