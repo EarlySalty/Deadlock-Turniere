@@ -55,6 +55,8 @@ const DISCORD_SYNC_SUCCESS: &str = "Discord-Rollen aktualisiert.";
 /// Der Text muss das sagen, sonst versucht jemand die ganze Aktion neu statt nur den Versand.
 const DISCORD_SYNC_FAILED: &str =
     "Gespeichert, aber die Discord-Nachricht ging nicht raus. Löse denselben Vorgang noch einmal aus, dann wird sie nachgereicht.";
+const SIGNUP_ROLE_FAILED: &str =
+    "Deine Anmeldung ist gespeichert. Die Rolle Scrims Teilnehmer konnte gerade nicht vergeben werden. Schick das Formular später noch einmal ab oder melde dich bei der Scrim-Orga.";
 const DISCORD_DELIVERY_UNCERTAIN: &str =
     "Gespeichert. Die Discord-Zustellung ist unklar. Prüfe den Zielkanal, bevor du erneut sendest.";
 const DISCORD_ROLE_CREATION_FAILED: &str =
@@ -2392,7 +2394,7 @@ async fn signup(
         )
         .await?;
     if !sync_signup_roles(&state, &signup, mutation.idempotency_key).await {
-        return Err(WebError::new(StatusCode::BAD_GATEWAY, DISCORD_SYNC_FAILED));
+        return Err(WebError::new(StatusCode::BAD_GATEWAY, SIGNUP_ROLE_FAILED));
     }
     Ok(Json(signup.participant))
 }

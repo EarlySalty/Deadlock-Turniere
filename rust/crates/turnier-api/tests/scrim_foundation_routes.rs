@@ -1131,7 +1131,7 @@ async fn signup_role_failure_is_reported_and_retried_from_saved_state() {
     };
     let body = json!({"rank":"Oracle","roles":"Flex"});
 
-    let (status, _) = send(
+    let (status, failure) = send(
         &app,
         IpAddr::V4(Ipv4Addr::LOCALHOST),
         headers,
@@ -1141,6 +1141,9 @@ async fn signup_role_failure_is_reported_and_retried_from_saved_state() {
     )
     .await;
     assert_eq!(status, StatusCode::BAD_GATEWAY);
+    assert!(failure["detail"]
+        .as_str()
+        .is_some_and(|detail| detail.starts_with("Deine Anmeldung ist gespeichert.")));
     let saved: i64 =
         sqlx::query_scalar("SELECT COUNT(*) FROM scrim.participants WHERE discord_id=950002")
             .fetch_one(db.pool())
