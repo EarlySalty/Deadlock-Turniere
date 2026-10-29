@@ -33,18 +33,18 @@ pub fn router() -> Router<AppState> {
         )
 }
 
-/// `GET /api/tournaments` — alle nicht-draft-Turniere, absteigend nach created_at.
+/// `GET /api/tournaments` — alle nicht-draft-Turniere ohne Test-Turniere, absteigend nach created_at.
 async fn list_tournaments(State(state): State<AppState>) -> WebResult<Json<Vec<Tournament>>> {
     let tournaments = helpers::list_tournament_dtos(
         &state.pool,
-        "WHERE status != 'draft' ORDER BY created_at DESC",
+        "WHERE status != 'draft' AND is_test = false ORDER BY created_at DESC",
     )
     .await?;
     Ok(Json(tournaments))
 }
 
 /// `GET /api/tournaments/{tournament_id}` — öffentliches Turnier-Detail.
-/// 404 auch bei `status = 'draft'`.
+/// 404 auch bei `status = 'draft'` und bei Test-Turnieren.
 async fn get_tournament(
     State(state): State<AppState>,
     Path(tournament_id): Path<i64>,
@@ -58,7 +58,8 @@ async fn get_tournament(
         return Err(WebError::not_found("Turnier nicht gefunden"));
     };
     let status: String = row.try_get("status")?;
-    if status == "draft" {
+    let is_test: bool = row.try_get("is_test")?;
+    if status == "draft" || is_test {
         return Err(WebError::not_found("Turnier nicht gefunden"));
     }
 
