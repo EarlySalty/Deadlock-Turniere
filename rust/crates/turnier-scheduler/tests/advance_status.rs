@@ -345,7 +345,7 @@ async fn paralleler_group_phase_uebergang_erzeugt_gruppen_nur_einmal() {
 }
 
 #[tokio::test]
-async fn parallele_registration_mit_zu_nahem_start_erlaubt_nur_ein_turnier() {
+async fn zu_naher_start_blockiert_beide_entwuerfe() {
     let db = temp_db().await;
     let pool = db.pool().clone();
     let base = now_utc() + Duration::days(3);
@@ -356,7 +356,6 @@ async fn parallele_registration_mit_zu_nahem_start_erlaubt_nur_ein_turnier() {
 
     let results = advance_both_to_registration(&pool, first_id, second_id).await;
 
-    assert_eq!(results.iter().filter(|result| result.is_ok()).count(), 1);
     let conflicts: Vec<&String> = results
         .iter()
         .filter_map(|result| match result {
@@ -364,9 +363,46 @@ async fn parallele_registration_mit_zu_nahem_start_erlaubt_nur_ein_turnier() {
             _ => None,
         })
         .collect();
-    assert_eq!(conflicts.len(), 1);
-    assert!(conflicts[0].contains("mindestens 4 Stunden Abstand"));
-    assert_eq!(registration_count(&pool).await, 1);
+    assert_eq!(conflicts.len(), 2);
+    assert!(conflicts
+        .iter()
+        .all(|msg| msg.contains("mindestens 4 Stunden Abstand zwischen Turnierstarts")));
+    assert_eq!(registration_count(&pool).await, 0);
+}
+
+#[tokio::test]
+async fn zu_naher_start_neben_laufender_anmeldung_wird_abgelehnt() {
+    let db = temp_db().await;
+    let pool = db.pool().clone();
+    let config = test_config();
+    let notifier = fake_notifier(pool.clone(), &config);
+    let matchmgr = fake_match_manager(pool.clone(), &config);
+    let base = now_utc() + Duration::days(3);
+    let running_id = insert_tournament(&pool, "Laufend", "registration", false).await;
+    let draft_id = insert_tournament(&pool, "Entwurf", "draft", false).await;
+    set_bracket_start(&pool, running_id, base).await;
+    set_bracket_start(&pool, draft_id, base - Duration::minutes(239)).await;
+
+    let result = advance_tournament_status(
+        &pool,
+        &matchmgr,
+        &notifier,
+        draft_id,
+        "draft",
+        "registration",
+        "scheduler",
+        None,
+    )
+    .await;
+
+    let Err(SchedulerError::StartGapConflict(msg)) = result else {
+        panic!("Abstandskonflikt erwartet");
+    };
+    assert_eq!(
+        msg,
+        format!("Zu nah an Turnier #{running_id} Laufend: mindestens 4 Stunden Abstand zwischen Turnierstarts.")
+    );
+    assert_eq!(tournament_status(&pool, draft_id).await, "draft");
 }
 
 #[tokio::test]
