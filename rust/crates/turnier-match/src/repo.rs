@@ -16,6 +16,17 @@ use turnier_db::Pool;
 use crate::error::{MatchError, MatchResult};
 use crate::kind::MatchKind;
 
+pub(crate) const VALID_LOBBY_STATUSES: [&str; 2] = ["pending", "checkin"];
+pub(crate) const VALID_START_STATUSES: [&str; 1] = ["lobby_created"];
+pub(crate) const VALID_LEAVE_STATUSES: [&str; 2] = ["lobby_created", "in_progress"];
+
+const GROUP_ACCEPTS_WRITES: &str = "group_id IN ( \
+     SELECT g.id FROM turnier.groups g \
+     JOIN turnier.tournaments t ON t.id = g.tournament_id \
+     WHERE g.id = $1 \
+       AND (t.tournament_mode IS DISTINCT FROM 'league' OR t.status = 'group_phase') \
+     FOR SHARE OF t)";
+
 /// Snapshot einer Match-Zeile, vereinheitlicht für Bracket und Group.
 ///
 /// `scope_value` ist der Wert der Scope-Spalte (`tournament_id` für Bracket,
@@ -175,10 +186,6 @@ fn not_found_msg(kind: MatchKind, match_id: i64, tournament_id: i64) -> String {
     }
 }
 
-/// Schreibt nach erfolgreicher Lobby-Erstellung `steam_party_id`, `party_code`,
-/// `status = 'lobby_created'` und `hero_assignments` — scope-gebunden.
-///
-/// Entspricht dem ersten UPDATE in `_create_lobby_for_match`.
 pub async fn set_lobby_created(
     pool: &Pool,
     kind: MatchKind,
@@ -187,83 +194,112 @@ pub async fn set_lobby_created(
     party_id: &str,
     party_code: &str,
     hero_assignments: Option<&Value>,
-) -> MatchResult<()> {
-    match kind {
-        MatchKind::Bracket => sqlx::query(
+) -> MatchResult<bool> {
+    if matches!(kind, MatchKind::Bracket) {
+        sqlx::query(
             "UPDATE turnier.bracket_matches \
              SET steam_party_id = $1, party_code = $2, status = 'lobby_created', hero_assignments = $3::jsonb \
              WHERE id = $4 AND tournament_id = $5",
-        ),
-        MatchKind::Group => sqlx::query(
-            "UPDATE turnier.group_matches \
-             SET steam_party_id = $1, party_code = $2, status = 'lobby_created', hero_assignments = $3::jsonb \
-             WHERE id = $4 AND group_id = $5",
-        ),
+        )
+        .bind(party_id)
+        .bind(party_code)
+        .bind(hero_assignments)
+        .bind(match_id)
+        .bind(scope_value)
+        .execute(pool)
+        .await?;
+        return Ok(true);
     }
-    .bind(party_id)
-    .bind(party_code)
-    .bind(hero_assignments)
-    .bind(match_id)
-    .bind(scope_value)
-    .execute(pool)
-    .await?;
-    Ok(())
+    let sql = format!(
+        "UPDATE turnier.group_matches \
+         SET steam_party_id = $2, party_code = $3, status = 'lobby_created', hero_assignments = $4::jsonb \
+         WHERE id = $5 AND status = ANY($6) AND winner_id IS NULL \
+           AND COALESCE(steam_party_id, '') = '' AND {GROUP_ACCEPTS_WRITES}"
+    );
+    let written = sqlx::query(&sql)
+        .bind(scope_value)
+        .bind(party_id)
+        .bind(party_code)
+        .bind(hero_assignments)
+        .bind(match_id)
+        .bind(&VALID_LOBBY_STATUSES[..])
+        .execute(pool)
+        .await?;
+    Ok(written.rows_affected() > 0)
 }
 
-/// Schreibt die `discord_channel_id` scope-gebunden (zweites UPDATE im Lobby-Flow).
 pub async fn set_discord_channel_id(
     pool: &Pool,
     kind: MatchKind,
     match_id: i64,
     scope_value: i64,
+    party_id: &str,
     channel_id: &str,
-) -> MatchResult<()> {
+) -> MatchResult<bool> {
     let channel_id = parse_discord_id(channel_id).map_err(|_| {
         MatchError::invalid("discord_channel_id muss eine numerische Discord-ID sein")
     })?;
-    match kind {
-        MatchKind::Bracket => sqlx::query(
+    if matches!(kind, MatchKind::Bracket) {
+        sqlx::query(
             "UPDATE turnier.bracket_matches SET discord_channel_id = $1 WHERE id = $2 AND tournament_id = $3",
-        ),
-        MatchKind::Group => sqlx::query(
-            "UPDATE turnier.group_matches SET discord_channel_id = $1 WHERE id = $2 AND group_id = $3",
-        ),
+        )
+        .bind(channel_id)
+        .bind(match_id)
+        .bind(scope_value)
+        .execute(pool)
+        .await?;
+        return Ok(true);
     }
-    .bind(channel_id)
-    .bind(match_id)
-    .bind(scope_value)
-    .execute(pool)
-    .await?;
-    Ok(())
+    let sql = format!(
+        "UPDATE turnier.group_matches SET discord_channel_id = $2 \
+         WHERE id = $3 AND status = ANY($4) AND steam_party_id = $5 AND {GROUP_ACCEPTS_WRITES}"
+    );
+    let written = sqlx::query(&sql)
+        .bind(scope_value)
+        .bind(channel_id)
+        .bind(match_id)
+        .bind(&VALID_LEAVE_STATUSES[..])
+        .bind(party_id)
+        .execute(pool)
+        .await?;
+    Ok(written.rows_affected() > 0)
 }
 
-/// Setzt `status = 'in_progress'` und (per COALESCE) die `deadlock_match_id`.
-/// Entspricht dem UPDATE in `_start_match_for_match`.
 pub async fn set_in_progress(
     pool: &Pool,
     kind: MatchKind,
     match_id: i64,
     scope_value: i64,
+    party_id: &str,
     deadlock_match_id: Option<&str>,
-) -> MatchResult<()> {
-    match kind {
-        MatchKind::Bracket => sqlx::query(
+) -> MatchResult<bool> {
+    if matches!(kind, MatchKind::Bracket) {
+        sqlx::query(
             "UPDATE turnier.bracket_matches \
              SET status = 'in_progress', deadlock_match_id = COALESCE($1::text, deadlock_match_id) \
              WHERE id = $2 AND tournament_id = $3",
-        ),
-        MatchKind::Group => sqlx::query(
-            "UPDATE turnier.group_matches \
-             SET status = 'in_progress', deadlock_match_id = COALESCE($1::text, deadlock_match_id) \
-             WHERE id = $2 AND group_id = $3",
-        ),
+        )
+        .bind(deadlock_match_id)
+        .bind(match_id)
+        .bind(scope_value)
+        .execute(pool)
+        .await?;
+        return Ok(true);
     }
-    .bind(deadlock_match_id)
-    .bind(match_id)
-    .bind(scope_value)
-    .execute(pool)
-    .await?;
-    Ok(())
+    let sql = format!(
+        "UPDATE turnier.group_matches \
+         SET status = 'in_progress', deadlock_match_id = COALESCE($2::text, deadlock_match_id) \
+         WHERE id = $3 AND status = ANY($4) AND steam_party_id = $5 AND {GROUP_ACCEPTS_WRITES}"
+    );
+    let written = sqlx::query(&sql)
+        .bind(scope_value)
+        .bind(deadlock_match_id)
+        .bind(match_id)
+        .bind(&VALID_START_STATUSES[..])
+        .bind(party_id)
+        .execute(pool)
+        .await?;
+    Ok(written.rows_affected() > 0)
 }
 
 /// Liest `lobby_settings` eines Turniers als JSON-Objekt.

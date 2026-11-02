@@ -113,6 +113,14 @@ pub struct ApplyGroupParams {
     pub duration_s: Option<i64>,
     pub players: Option<Vec<Value>>,
     pub source: String,
+    pub fence: Option<GroupMatchFence>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, sqlx::FromRow)]
+pub struct GroupMatchFence {
+    pub status: String,
+    pub steam_party_id: Option<String>,
+    pub deadlock_match_id: Option<String>,
 }
 
 impl ApplyGroupParams {
@@ -395,6 +403,14 @@ impl MatchManager {
 
         let now = now_utc();
         let mut tx = self.pool.begin().await.map_err(turnier_db::DbError::from)?;
+        ensure_group_result_still_wanted(
+            &mut tx,
+            tournament_id,
+            match_id,
+            group_id,
+            params.fence.as_ref(),
+        )
+        .await?;
         sqlx::query(
             "UPDATE turnier.group_matches \
              SET winner_id = $1, status = 'completed', \
@@ -571,6 +587,56 @@ impl MatchManager {
         )
         .await;
     }
+}
+
+async fn ensure_group_result_still_wanted(
+    tx: &mut Transaction<'_, Postgres>,
+    tournament_id: i64,
+    match_id: i64,
+    group_id: i64,
+    fence: Option<&GroupMatchFence>,
+) -> MatchResult<()> {
+    let is_league = crate::league::tournament_is_league(&mut **tx, tournament_id).await?;
+    if is_league && !crate::league::league_is_running(tx, tournament_id).await? {
+        tracing::warn!(
+            tournament_id,
+            match_id,
+            "Ergebnis verworfen, das Turnier läuft nicht mehr"
+        );
+        return Err(MatchError::state(format!(
+            "Turnier {tournament_id} läuft nicht mehr, das Ergebnis wurde verworfen"
+        )));
+    }
+    let current: Option<GroupMatchFence> = sqlx::query_as(
+        "SELECT status, steam_party_id, deadlock_match_id FROM turnier.group_matches \
+         WHERE id = $1 AND group_id = $2 FOR UPDATE",
+    )
+    .bind(match_id)
+    .bind(group_id)
+    .fetch_optional(&mut **tx)
+    .await?;
+    let current = current.ok_or_else(|| {
+        MatchError::not_found(format!(
+            "Group-Match {match_id} im Turnier {tournament_id} nicht gefunden"
+        ))
+    })?;
+    if TERMINAL_STATUSES.contains(&current.status.as_str()) {
+        return Err(MatchError::state(format!(
+            "Group-Match {match_id} kann aus Status {} nicht verarbeitet werden",
+            current.status
+        )));
+    }
+    if is_league && fence.is_some_and(|expected| *expected != current) {
+        tracing::warn!(
+            tournament_id,
+            match_id,
+            "Ergebnis verworfen, das Match wurde während der Abfrage geändert"
+        );
+        return Err(MatchError::state(format!(
+            "Group-Match {match_id} wurde während der Abfrage geändert, das Ergebnis wurde verworfen"
+        )));
+    }
+    Ok(())
 }
 
 /// Verkettetes Folge-Match (Snapshot für den Downstream-Reset).

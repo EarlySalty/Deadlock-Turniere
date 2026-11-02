@@ -209,16 +209,29 @@ async fn set_match_result(
                 ));
             }
             let winning_slot = if winner_id == team1_id { 1 } else { 2 };
-            write_league_manual_result_in_tx(&mut tx, match_id, group_id, winner_id, winning_slot)
-                .await?;
+            let written = write_league_manual_result_in_tx(
+                &mut tx,
+                match_id,
+                group_id,
+                winner_id,
+                winning_slot,
+            )
+            .await?;
+            if !written {
+                return Err(group_match_changed(match_id));
+            }
         } else {
-            sqlx::query(
-                r#"UPDATE turnier."group_matches" SET winner_id = $1, status = 'completed', played_at = now() WHERE id = $2"#,
+            let written = sqlx::query(
+                r#"UPDATE turnier."group_matches" SET winner_id = $1, status = 'completed', played_at = now()
+                 WHERE id = $2 AND status NOT IN ('completed', 'forfeit', 'cancelled')"#,
             )
             .bind(winner_id)
             .bind(match_id)
             .execute(&mut *tx)
             .await?;
+            if written.rows_affected() == 0 {
+                return Err(group_match_changed(match_id));
+            }
             record_group_standing_in_tx(&mut tx, group_id, winner_id, Some(loser_id)).await?;
             sqlx::query(
                 r#"INSERT INTO turnier."match_results" (group_match_id, winning_team, source, created_at) VALUES ($1, $2, 'manual', now())"#,
@@ -252,6 +265,12 @@ async fn set_match_result(
     }
 
     Err(WebError::not_found("Match nicht gefunden"))
+}
+
+fn group_match_changed(match_id: i64) -> WebError {
+    WebError::bad_request(format!(
+        "Group-Match {match_id} wurde inzwischen abgeschlossen oder abgebrochen"
+    ))
 }
 
 /// `POST .../matches/{match_id}/games/{game_number}/start` — Serien-Spiel N

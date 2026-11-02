@@ -17,13 +17,11 @@ use crate::error::{SteamTaskError, SteamTaskResult};
 use crate::kind::MatchKind;
 use crate::modes::{self, resolve_match_objective};
 use crate::presets;
-use crate::repo::{self, MatchRow, Participant};
+use crate::repo::{
+    self, MatchRow, Participant, VALID_LEAVE_STATUSES, VALID_LOBBY_STATUSES, VALID_START_STATUSES,
+};
 use crate::steam_bridge::{ActiveTaskFilter, TaskOutcome};
 use crate::MatchManager;
-
-const VALID_LOBBY_STATUSES: [&str; 2] = ["pending", "checkin"];
-const VALID_START_STATUSES: [&str; 1] = ["lobby_created"];
-const VALID_LEAVE_STATUSES: [&str; 2] = ["lobby_created", "in_progress"];
 
 impl MatchManager {
     // --- Öffentliche Lobby-API (Bracket + Group) ------------------------
@@ -207,6 +205,11 @@ impl MatchManager {
                     duration_s,
                     players,
                     source: "automatic".to_string(),
+                    fence: Some(crate::result::GroupMatchFence {
+                        status: m.status.clone(),
+                        steam_party_id: m.steam_party_id.clone(),
+                        deadlock_match_id: m.deadlock_match_id.clone(),
+                    }),
                 };
                 self.apply_group_match_result(tournament_id, match_id, params)
                     .await?
@@ -352,7 +355,7 @@ impl MatchManager {
         let party_id = coerce_required_str(result.get("party_id"), "party_id")?;
         let (party_code, join_code) = resolve_party_codes(&result)?;
 
-        repo::set_lobby_created(
+        let stored = repo::set_lobby_created(
             &self.pool,
             kind,
             match_id,
@@ -362,6 +365,13 @@ impl MatchManager {
             hero_assignments,
         )
         .await?;
+        if !stored {
+            self.discard_unwanted_lobby(tournament_id, match_id, &party_id)
+                .await;
+            return Err(SteamTaskError::state(
+                "Das Match hat sich während der Lobby-Erstellung geändert, die Lobby wird nicht verwendet",
+            ));
+        }
 
         let invite_result = self
             .invite_match_participants(&party_id, &steam_ids)
@@ -375,6 +385,7 @@ impl MatchManager {
                     tournament_id,
                     match_id,
                     &m,
+                    &party_id,
                     &party_code,
                     &participants,
                     &participant_discord_ids,
@@ -398,6 +409,28 @@ impl MatchManager {
         Ok(Value::Object(out))
     }
 
+    async fn discard_unwanted_lobby(&self, tournament_id: i64, match_id: i64, party_id: &str) {
+        tracing::warn!(
+            tournament_id,
+            match_id,
+            "Lobby-Antwort verworfen, das Match nimmt keine Lobby mehr an"
+        );
+        if let Err(err) = self
+            .run_steam_task(
+                "Lobby verlassen",
+                "GC_LOBBY_LEAVE",
+                &json!({ "party_id": party_id }),
+                self.bridge_settings.control_timeout_seconds as f64,
+            )
+            .await
+        {
+            tracing::error!(
+                tournament_id, match_id, error = %err,
+                "Verworfene Lobby konnte nicht verlassen werden"
+            );
+        }
+    }
+
     /// Discord-Setup nach erfolgreicher Lobby-Erstellung (best-effort).
     /// Gibt die Channel-ID zurück oder `None` (jeder Fehler → `None`, exakt wie
     /// der äußere `except`-Block im Original, der `discord_channel_id = None` setzt).
@@ -408,6 +441,7 @@ impl MatchManager {
         tournament_id: i64,
         match_id: i64,
         m: &MatchRow,
+        party_id: &str,
         party_code: &str,
         participants: &[Participant],
         participant_discord_ids: &[String],
@@ -431,12 +465,32 @@ impl MatchManager {
             }
         };
 
-        if let Err(err) =
-            repo::set_discord_channel_id(&self.pool, kind, match_id, m.scope_value, &channel_id)
-                .await
+        match repo::set_discord_channel_id(
+            &self.pool,
+            kind,
+            match_id,
+            m.scope_value,
+            party_id,
+            &channel_id,
+        )
+        .await
         {
-            tracing::error!(match_id, error = %err, "discord_channel_id persistieren fehlgeschlagen");
-            return None;
+            Ok(true) => {}
+            Ok(false) => {
+                tracing::warn!(
+                    tournament_id,
+                    match_id,
+                    "Match-Channel verworfen, das Match nimmt keinen Channel mehr an"
+                );
+                if let Err(err) = notifier.delete_match_channel(&channel_id).await {
+                    tracing::error!(match_id, error = %err, "Verworfener Match-Channel konnte nicht gelöscht werden");
+                }
+                return None;
+            }
+            Err(err) => {
+                tracing::error!(match_id, error = %err, "discord_channel_id persistieren fehlgeschlagen");
+                return None;
+            }
         }
 
         if let Err(err) = notifier
@@ -559,6 +613,30 @@ impl MatchManager {
             )
             .await?;
 
+        let raw = first_truthy(&result, &["match_id", "deadlock_match_id"]);
+        let match_id_value = coerce_optional_int(raw.as_ref(), "match_id")?;
+        let deadlock_str = match_id_value.map(|i| i.to_string());
+
+        let stored = repo::set_in_progress(
+            &self.pool,
+            kind,
+            match_id,
+            m.scope_value,
+            &party_id,
+            deadlock_str.as_deref(),
+        )
+        .await?;
+        if !stored {
+            tracing::warn!(
+                tournament_id,
+                match_id,
+                "Start-Antwort verworfen, das Match nimmt keinen Start mehr an"
+            );
+            return Err(SteamTaskError::state(
+                "Das Match hat sich während des Starts geändert, der Start wurde nicht übernommen",
+            ));
+        }
+
         let participants = repo::load_participants(&self.pool, &m).await?;
         let participant_discord_ids = non_empty_discord_ids(&participants);
         let is_test = repo::is_test_tournament(&self.pool, tournament_id).await?;
@@ -610,21 +688,6 @@ impl MatchManager {
                 }
             }
         }
-
-        // `result.get("match_id") or result.get("deadlock_match_id")`, dann zu
-        // optional int coercen; in der DB als String, im Rückgabe-Dict als int.
-        let raw = first_truthy(&result, &["match_id", "deadlock_match_id"]);
-        let match_id_value = coerce_optional_int(raw.as_ref(), "match_id")?;
-        let deadlock_str = match_id_value.map(|i| i.to_string());
-
-        repo::set_in_progress(
-            &self.pool,
-            kind,
-            match_id,
-            m.scope_value,
-            deadlock_str.as_deref(),
-        )
-        .await?;
 
         let mut out = as_object(result);
         out.insert("success".into(), json!(true));

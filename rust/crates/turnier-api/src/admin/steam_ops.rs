@@ -265,9 +265,7 @@ pub async fn reset_match(
         ["completed", "forfeit", "cancelled"].contains(&status.as_str())
     };
     if refused {
-        return Err(WebError::bad_request(
-            "Abgeschlossene oder abgebrochene Matches können nicht zurückgesetzt werden",
-        ));
+        return Err(reset_refused());
     }
     if league_group_id.is_some() {
         let mut conn = state.pool.acquire().await?;
@@ -293,7 +291,8 @@ pub async fn reset_match(
         MatchKind::Group => (
             r#"UPDATE turnier."group_matches" SET status = 'pending', steam_party_id = NULL, party_code = NULL,
              deadlock_match_id = NULL, discord_channel_id = NULL
-             WHERE id = $1 AND group_id IN (SELECT id FROM turnier."groups" WHERE tournament_id = $2)"#,
+             WHERE id = $1 AND group_id IN (SELECT id FROM turnier."groups" WHERE tournament_id = $2)
+             AND status NOT IN ('completed', 'forfeit', 'cancelled')"#,
             "group_match_reset",
         ),
     };
@@ -301,13 +300,18 @@ pub async fn reset_match(
     let mut tx = state.pool.begin().await?;
     if let Some(group_id) = league_group_id {
         ensure_league_running(&mut tx, tournament_id).await?;
-        reset_league_match_in_tx(&mut tx, match_id, group_id).await?;
+        if !reset_league_match_in_tx(&mut tx, match_id, group_id).await? {
+            return Err(reset_refused());
+        }
     } else {
-        sqlx::query(update_sql)
+        let written = sqlx::query(update_sql)
             .bind(match_id)
             .bind(tournament_id)
             .execute(&mut *tx)
             .await?;
+        if matches!(kind, MatchKind::Group) && written.rows_affected() == 0 {
+            return Err(reset_refused());
+        }
     }
     super::helpers::audit(
         &mut *tx,
@@ -319,6 +323,12 @@ pub async fn reset_match(
     tx.commit().await?;
 
     Ok(Json(json!({ "success": true })))
+}
+
+fn reset_refused() -> WebError {
+    WebError::bad_request(
+        "Abgeschlossene oder abgebrochene Matches können nicht zurückgesetzt werden",
+    )
 }
 
 async fn ensure_league_running(conn: &mut PgConnection, tournament_id: i64) -> WebResult<()> {
@@ -373,8 +383,13 @@ pub async fn manual_lobby(
         ),
         MatchKind::Group => (
             r#"UPDATE turnier."group_matches" SET party_code = $1, steam_party_id = $2, status = 'lobby_created'
-             WHERE id = $3 AND group_id IN (SELECT id FROM turnier."groups" WHERE tournament_id = $4)
-             AND status NOT IN ('completed', 'forfeit', 'cancelled')"#,
+             WHERE id = $3 AND status NOT IN ('completed', 'forfeit', 'cancelled')
+             AND group_id IN (
+                 SELECT g.id FROM turnier."groups" g
+                 JOIN turnier."tournaments" t ON t.id = g.tournament_id
+                 WHERE g.tournament_id = $4
+                   AND (t.tournament_mode IS DISTINCT FROM 'league' OR t.status = 'group_phase')
+                 FOR SHARE OF t)"#,
             "group_match_manual_lobby",
             "Gruppen-Match kann nicht manuell gesetzt werden",
         ),

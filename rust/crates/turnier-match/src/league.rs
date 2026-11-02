@@ -129,17 +129,20 @@ pub async fn write_league_manual_result_in_tx(
     group_id: i64,
     winner_id: i64,
     winning_slot: i64,
-) -> sqlx::Result<()> {
-    sqlx::query(
+) -> sqlx::Result<bool> {
+    let written = sqlx::query(
         "UPDATE turnier.group_matches \
          SET winner_id = $1, status = 'completed', played_at = now() \
-         WHERE id = $2 AND group_id = $3",
+         WHERE id = $2 AND group_id = $3 AND status NOT IN ('cancelled', 'forfeit')",
     )
     .bind(winner_id)
     .bind(match_id)
     .bind(group_id)
     .execute(&mut **tx)
     .await?;
+    if written.rows_affected() == 0 {
+        return Ok(false);
+    }
     delete_match_results(tx, match_id).await?;
     sqlx::query(
         "INSERT INTO turnier.match_results (group_match_id, winning_team, source, created_at) \
@@ -149,27 +152,32 @@ pub async fn write_league_manual_result_in_tx(
     .bind(winning_slot)
     .execute(&mut **tx)
     .await?;
-    recompute_league_standings_in_tx(tx, group_id).await
+    recompute_league_standings_in_tx(tx, group_id).await?;
+    Ok(true)
 }
 
 pub async fn reset_league_match_in_tx(
     tx: &mut Transaction<'_, Postgres>,
     match_id: i64,
     group_id: i64,
-) -> sqlx::Result<()> {
-    sqlx::query(
+) -> sqlx::Result<bool> {
+    let written = sqlx::query(
         "UPDATE turnier.group_matches \
          SET status = 'pending', winner_id = NULL, played_at = NULL, steam_party_id = NULL, \
              party_code = NULL, deadlock_match_id = NULL, discord_channel_id = NULL, \
              match_duration_s = NULL, match_stats = NULL \
-         WHERE id = $1 AND group_id = $2",
+         WHERE id = $1 AND group_id = $2 AND status NOT IN ('cancelled', 'forfeit')",
     )
     .bind(match_id)
     .bind(group_id)
     .execute(&mut **tx)
     .await?;
+    if written.rows_affected() == 0 {
+        return Ok(false);
+    }
     delete_match_results(tx, match_id).await?;
-    recompute_league_standings_in_tx(tx, group_id).await
+    recompute_league_standings_in_tx(tx, group_id).await?;
+    Ok(true)
 }
 
 async fn delete_match_results(
