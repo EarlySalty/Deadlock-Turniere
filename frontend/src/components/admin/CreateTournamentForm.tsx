@@ -5,6 +5,12 @@ import Button from '@/components/ui/Button'
 import DateTimeInput from '@/components/ui/DateTimeInput'
 import { useCreateTournament } from '@/hooks/useTournament'
 import { LEAGUE_LABEL, localInputToIso } from '@/lib/league'
+import ReminderOffsetsInput from './ReminderOffsetsInput'
+import {
+  DEFAULT_REMINDER_OFFSETS,
+  DEFAULT_START_REMINDER_OFFSETS,
+  offsetsOrDefault,
+} from './reminderOffsets'
 import type {
   BracketFormat,
   InviteMode,
@@ -207,14 +213,6 @@ function buildFinalConvars(
   return { ...base, ...Object.fromEntries(activeSliderEntries) }
 }
 
-function parseReminderOffsets(value: string): number[] {
-  const parsed = value
-    .split(',')
-    .map((entry) => Number(entry.trim()))
-    .filter((entry) => Number.isFinite(entry) && entry >= 0)
-  return parsed.length > 0 ? parsed : [1440, 120, 15]
-}
-
 // ---------------------------------------------------------------------------
 // Formular
 // ---------------------------------------------------------------------------
@@ -242,8 +240,8 @@ export default function CreateTournamentForm() {
   const [tournamentGameMode, setTournamentGameMode] =
     useState<TournamentGameMode>('standard')
   const [autoLobbyEnabled, setAutoLobbyEnabled] = useState(true)
-  const [reminderOffsets, setReminderOffsets] = useState('1440, 120, 15')
-  const [startReminderOffsets, setStartReminderOffsets] = useState('1440, 60')
+  const [reminderOffsets, setReminderOffsets] = useState(DEFAULT_REMINDER_OFFSETS)
+  const [startReminderOffsets, setStartReminderOffsets] = useState(DEFAULT_START_REMINDER_OFFSETS)
   const [matchObjective, setMatchObjective] = useState('auto')
   const [noShowGrace, setNoShowGrace] = useState(10)
   const [sliders, setSliders] = useState<Record<string, SliderState>>(initSliders)
@@ -307,8 +305,8 @@ export default function CreateTournamentForm() {
         tournament_game_mode: tournamentGameMode,
         auto_lobby_enabled: autoLobbyEnabled,
         exclude_from_leaderboard: excludeFromLeaderboard,
-        reminder_offsets: parseReminderOffsets(reminderOffsets),
-        start_reminder_offsets: parseReminderOffsets(startReminderOffsets),
+        reminder_offsets: offsetsOrDefault(reminderOffsets, DEFAULT_REMINDER_OFFSETS),
+        start_reminder_offsets: offsetsOrDefault(startReminderOffsets, DEFAULT_START_REMINDER_OFFSETS),
         match_objective: matchObjective,
         no_show_grace_minutes: noShowGrace,
         rules: rules.trim() || undefined,
@@ -335,7 +333,8 @@ export default function CreateTournamentForm() {
           setExcludeFromLeaderboard(false)
           setTournamentGameMode('standard')
           setAutoLobbyEnabled(true)
-          setReminderOffsets('1440, 120, 15')
+          setReminderOffsets(DEFAULT_REMINDER_OFFSETS)
+          setStartReminderOffsets(DEFAULT_START_REMINDER_OFFSETS)
           setFinalSeriesFormat(null)
           setSliders(initSliders())
         },
@@ -548,22 +547,15 @@ export default function CreateTournamentForm() {
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <div>
-            <label htmlFor="reminder-offsets" className="block text-sm font-medium text-foreground mb-1.5">
-              Reminder vor Turnier-Start
-            </label>
-            <input
-              id="reminder-offsets"
-              type="text"
-              value={reminderOffsets}
-              onChange={(e) => setReminderOffsets(e.target.value)}
-              placeholder="1440, 120, 15"
-              className="w-full bg-background border border-border rounded-lg px-3 py-2 text-foreground placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-primary/50"
-            />
-            <p className="mt-1 text-xs text-muted">Kommagetrennte Minuten, z.B. 1440, 120, 15</p>
-          </div>
+          <ReminderOffsetsInput
+            id="reminder-offsets"
+            label="Reminder vor Turnier-Start"
+            value={reminderOffsets}
+            onChange={setReminderOffsets}
+            hint="Geht an alle mit Anmelde-Erinnerung, solange die Anmeldung offen ist. Ohne Auswahl gelten 1 Tag, 2 Std und 15 Min."
+          />
 
-          <label className="flex items-center gap-3 rounded-lg border border-border px-3 py-2 cursor-pointer">
+          <label className="flex items-center gap-3 rounded-lg border border-border px-3 py-2 cursor-pointer self-start">
             <input
               type="checkbox"
               checked={excludeFromLeaderboard}
@@ -578,20 +570,13 @@ export default function CreateTournamentForm() {
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          <div>
-            <label htmlFor="start-reminder-offsets" className="block text-sm font-medium text-foreground mb-1.5">
-              Erinnerung vor Match-Start
-            </label>
-            <input
-              id="start-reminder-offsets"
-              type="text"
-              value={startReminderOffsets}
-              onChange={(e) => setStartReminderOffsets(e.target.value)}
-              placeholder="1440, 60"
-              className="w-full bg-background border border-border rounded-lg px-3 py-2 text-foreground placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-primary/50"
-            />
-            <p className="mt-1 text-xs text-muted">Minuten vor Turnier-Beginn, an Teilnehmer.</p>
-          </div>
+          <ReminderOffsetsInput
+            id="start-reminder-offsets"
+            label="Erinnerung vor Match-Start"
+            value={startReminderOffsets}
+            onChange={setStartReminderOffsets}
+            hint="Geht an alle angemeldeten Teilnehmer. Ohne Auswahl gelten 1 Tag und 1 Std."
+          />
 
           <div>
             <label htmlFor="match-objective" className="block text-sm font-medium text-foreground mb-1.5">
