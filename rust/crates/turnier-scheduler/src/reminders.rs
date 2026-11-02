@@ -20,6 +20,7 @@ use turnier_db::{dynamic_sql::ReminderDedupeTable, Pool};
 use turnier_discord::{DiscordNotifier, NotificationEvent};
 use turnier_match::league::current_round_match_ids;
 
+use crate::start_gap::effective_start;
 use crate::time::{is_within_configured_window, offset_label, parse_reminder_offsets_with_default};
 
 /// Lädt alle Teilnehmer-Discord-IDs eines Turniers: Solo-Signups UNION
@@ -90,10 +91,11 @@ struct MatchReminderRow {
 /// `group_phase_start` (Fallback `bracket_start`). Portiert
 /// `_tournament_start_value` (Z.376-384).
 fn tournament_start_value(row: &StartReminderRow) -> Option<DateTime<Utc>> {
-    if row.tournament_mode.as_deref() == Some("bracket_only") {
-        return row.bracket_start;
-    }
-    row.group_phase_start.or(row.bracket_start)
+    effective_start(
+        row.tournament_mode.as_deref(),
+        row.group_phase_start,
+        row.bracket_start,
+    )
 }
 
 /// Registrierungs-Reminder an Profile mit `notify_registration_reminder = 1`, vor

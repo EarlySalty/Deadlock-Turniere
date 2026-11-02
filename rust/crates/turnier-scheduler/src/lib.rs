@@ -26,6 +26,7 @@ pub mod error;
 pub mod loop_runner;
 pub mod reminders;
 pub mod routine;
+pub mod start_gap;
 pub mod time;
 pub mod transition;
 
@@ -38,11 +39,12 @@ pub use reminders::{
     check_and_send_start_reminders, load_all_profile_ids, load_tournament_participant_ids,
 };
 pub use routine::{RoutineDecision, RoutinePlan, RoutineSchedule, RoutineSettings};
+pub use start_gap::{
+    acquire_tournament_schedule_lock, ensure_start_gap, MIN_START_GAP_HOURS,
+    TOURNAMENT_SCHEDULE_ADVISORY_LOCK_KEY,
+};
 pub use time::{
     is_due, is_within_window, offset_label, parse_reminder_offsets, DEFAULT_REMINDER_OFFSETS,
     REMINDER_WINDOW_MINUTES,
 };
-pub use transition::{
-    acquire_single_active_tournament_lock, advance_tournament_status, get_due_next_status,
-    DueStatusRow, SINGLE_ACTIVE_TOURNAMENT_ADVISORY_LOCK_KEY,
-};
+pub use transition::{advance_tournament_status, get_due_next_status, DueStatusRow};

@@ -9,6 +9,7 @@ mod common;
 
 use std::sync::Arc;
 
+use chrono::{DateTime, Duration, Utc};
 use common::{
     audit_count, fake_match_manager, fake_notifier, insert_team, insert_team_member,
     insert_tournament, temp_db, test_config, tournament_status,
@@ -344,15 +345,54 @@ async fn paralleler_group_phase_uebergang_erzeugt_gruppen_nur_einmal() {
 }
 
 #[tokio::test]
-async fn parallele_registration_aktivierung_erlaubt_nur_ein_aktives_turnier() {
+async fn parallele_registration_mit_zu_nahem_start_erlaubt_nur_ein_turnier() {
     let db = temp_db().await;
     let pool = db.pool().clone();
+    let base = now_utc() + Duration::days(3);
+    let first_id = insert_tournament(&pool, "T1", "draft", false).await;
+    let second_id = insert_tournament(&pool, "T2", "draft", false).await;
+    set_bracket_start(&pool, first_id, base).await;
+    set_bracket_start(&pool, second_id, base + Duration::hours(3)).await;
+
+    let results = advance_both_to_registration(&pool, first_id, second_id).await;
+
+    assert_eq!(results.iter().filter(|result| result.is_ok()).count(), 1);
+    let conflicts: Vec<&String> = results
+        .iter()
+        .filter_map(|result| match result {
+            Err(SchedulerError::StartGapConflict(msg)) => Some(msg),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(conflicts.len(), 1);
+    assert!(conflicts[0].contains("mindestens 4 Stunden Abstand"));
+    assert_eq!(registration_count(&pool).await, 1);
+}
+
+#[tokio::test]
+async fn zwei_turniere_mit_vier_stunden_abstand_laufen_parallel() {
+    let db = temp_db().await;
+    let pool = db.pool().clone();
+    let base = now_utc() + Duration::days(3);
+    let first_id = insert_tournament(&pool, "T1", "draft", false).await;
+    let second_id = insert_tournament(&pool, "T2", "draft", false).await;
+    set_bracket_start(&pool, first_id, base).await;
+    set_bracket_start(&pool, second_id, base + Duration::hours(4)).await;
+
+    let results = advance_both_to_registration(&pool, first_id, second_id).await;
+
+    assert!(results.iter().all(|result| result.is_ok()));
+    assert_eq!(registration_count(&pool).await, 2);
+}
+
+async fn advance_both_to_registration(
+    pool: &turnier_db::Pool,
+    first_id: i64,
+    second_id: i64,
+) -> [SchedulerResult<Value>; 2] {
     let config = test_config();
     let notifier = fake_notifier(pool.clone(), &config);
     let matchmgr = fake_match_manager(pool.clone(), &config);
-    let first_id = insert_tournament(&pool, "T1", "draft", false).await;
-    let second_id = insert_tournament(&pool, "T2", "draft", false).await;
-
     let barrier = Arc::new(Barrier::new(2));
     let first = tokio::spawn(concurrent_advance(ConcurrentAdvance {
         pool: pool.clone(),
@@ -367,8 +407,8 @@ async fn parallele_registration_aktivierung_erlaubt_nur_ein_aktives_turnier() {
     }));
     let second = tokio::spawn(concurrent_advance(ConcurrentAdvance {
         pool: pool.clone(),
-        matchmgr: matchmgr.clone(),
-        notifier: notifier.clone(),
+        matchmgr,
+        notifier,
         barrier,
         tournament_id: second_id,
         current_status: "draft",
@@ -376,37 +416,28 @@ async fn parallele_registration_aktivierung_erlaubt_nur_ein_aktives_turnier() {
         source: "manual",
         actor_id: Some("123456789012345710"),
     }));
-
-    let results = [
+    [
         first.await.expect("first task"),
         second.await.expect("second task"),
-    ];
-    assert_eq!(results.iter().filter(|result| result.is_ok()).count(), 1);
-    let active_conflicts = results
-        .iter()
-        .map(|result| match result {
-            Err(SchedulerError::ActiveTournamentConflict(_)) => 1,
-            _ => 0,
-        })
-        .sum::<usize>();
-    assert_eq!(active_conflicts, 1);
+    ]
+}
 
-    let active_count: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM turnier.tournaments \
-         WHERE status IN ('registration', 'checkin', 'group_phase', 'bracket') \
-           AND is_test = false",
+async fn set_bracket_start(pool: &turnier_db::Pool, tournament_id: i64, start: DateTime<Utc>) {
+    sqlx::query("UPDATE turnier.tournaments SET bracket_start = $1 WHERE id = $2")
+        .bind(start)
+        .bind(tournament_id)
+        .execute(pool)
+        .await
+        .expect("set bracket start");
+}
+
+async fn registration_count(pool: &turnier_db::Pool) -> i64 {
+    sqlx::query_scalar(
+        "SELECT COUNT(*) FROM turnier.tournaments WHERE status = 'registration' AND is_test = false",
     )
-    .fetch_one(&pool)
+    .fetch_one(pool)
     .await
-    .expect("active count");
-    assert_eq!(active_count, 1);
-    let draft_count: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM turnier.tournaments WHERE status = 'draft' AND is_test = false",
-    )
-    .fetch_one(&pool)
-    .await
-    .expect("draft count");
-    assert_eq!(draft_count, 1);
+    .expect("registration count")
 }
 
 async fn seed_two_team_completed_bracket(pool: &turnier_db::Pool, tournament_id: i64) {

@@ -286,14 +286,6 @@ export default function Admin() {
                     Abbrechen
                   </button>
                 </div>
-                {activeLiveTournament && (
-                  <Card className="p-4">
-                    <p className="text-sm text-warning">
-                      Solange ein aktives Turnier existiert, blockiert der Server das
-                      Anlegen eines weiteren.
-                    </p>
-                  </Card>
-                )}
                 <CreateTournamentForm />
               </section>
             ) : loadingLiveDetail && liveSelectedId ? (

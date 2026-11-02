@@ -27,9 +27,8 @@ use crate::extract::{AdminUser, ModUser};
 use crate::state::AppState;
 
 use super::helpers::{
-    self, audit, delete_group_phase_tree, delete_tournament_tree, ensure_single_active_tournament,
-    group_phase_has_played_matches, load_tournament_or_404, serialize_lobby_settings,
-    serialize_reminder_offsets,
+    audit, delete_group_phase_tree, delete_tournament_tree, group_phase_has_played_matches,
+    load_tournament_or_404, serialize_lobby_settings, serialize_reminder_offsets,
 };
 use super::loaders::{
     load_bracket_matches, load_groups_for_tournament, load_mini_groups_for_tournament,
@@ -193,9 +192,8 @@ async fn create_tournament(
         determine_tournament_mode(body.team_size as usize, body.force_tournament_mode);
 
     let mut tx = state.pool.begin().await?;
-    ensure_single_active_tournament(&mut tx, None).await?;
+    turnier_scheduler::acquire_tournament_schedule_lock(&mut tx).await?;
 
-    // Insert inkl. lobby_settings (safe-Fix: das nachgelagerte UPDATE entfällt).
     let tournament_id: i64 = sqlx::query_scalar(
         r#"INSERT INTO turnier."tournaments"
          (name, status, description, team_size, bracket_format, registration_start, registration_end,
@@ -238,6 +236,7 @@ async fn create_tournament(
     .bind(lobby_settings)
     .fetch_one(&mut *tx)
     .await?;
+    turnier_scheduler::ensure_start_gap(&mut tx, tournament_id).await?;
 
     audit(
         &mut *tx,
@@ -296,6 +295,7 @@ async fn update_tournament(
     let body = body.validated().map_err(WebError::bad_request)?;
 
     let mut tx = state.pool.begin().await?;
+    turnier_scheduler::acquire_tournament_schedule_lock(&mut tx).await?;
     let existing =
         sqlx::query(r#"SELECT status, tournament_mode FROM turnier."tournaments" WHERE id = $1"#)
             .bind(tournament_id)
@@ -344,9 +344,6 @@ async fn update_tournament(
                 return Err(WebError::bad_request(
                     "Bitte über Turnier abschließen beenden, damit die Tabelle gewertet wird",
                 ));
-            }
-            if helpers::ACTIVE_TOURNAMENT_STATUSES.contains(&new_status_s) {
-                ensure_single_active_tournament(&mut tx, Some(tournament_id)).await?;
             }
         }
     }
@@ -603,6 +600,7 @@ async fn update_tournament(
     if existing_mode == "league" && current_status == "group_phase" {
         shift_league_plan_to_stored_start(&mut tx, tournament_id).await?;
     }
+    turnier_scheduler::ensure_start_gap(&mut tx, tournament_id).await?;
 
     audit(
         &mut *tx,
@@ -847,9 +845,6 @@ async fn advance_tournament(
                 "Keine weitere Phase möglich (aktuell: {current_status})"
             )));
         };
-        if helpers::ACTIVE_TOURNAMENT_STATUSES.contains(&next_status) {
-            ensure_single_active_tournament(&mut tx, Some(tournament_id)).await?;
-        }
         tx.commit().await?;
         (current_status, next_status)
     };
@@ -896,7 +891,7 @@ async fn advance_status_shared(
         turnier_scheduler::SchedulerError::StatusConflict => {
             WebError::conflict("Turnierstatus wurde parallel geändert")
         }
-        turnier_scheduler::SchedulerError::ActiveTournamentConflict(msg) => WebError::conflict(msg),
+        turnier_scheduler::SchedulerError::StartGapConflict(msg) => WebError::conflict(msg),
         other => other.into(),
     })
 }

@@ -7,7 +7,7 @@
 //! Lock, auditet, berechnet bei `completed` die Punkte neu und plant Auto-Lobbys.
 
 use chrono::{DateTime, Utc};
-use sqlx::{PgConnection, Postgres, Transaction};
+use sqlx::{Postgres, Transaction};
 
 use turnier_core::{now_utc, parse_discord_id, TournamentMode, TournamentStatus};
 use turnier_db::Pool;
@@ -22,6 +22,7 @@ use turnier_match::league::open_league_match_count;
 use turnier_match::MatchManager;
 
 use crate::error::{SchedulerError, SchedulerResult};
+use crate::start_gap::{acquire_tournament_schedule_lock, ensure_start_gap};
 use crate::time::is_due;
 
 /// Die für die Übergangsentscheidung relevanten Felder einer `tournaments`-Zeile.
@@ -38,26 +39,6 @@ pub struct DueStatusRow {
     pub checkin_start: Option<DateTime<Utc>>,
     pub group_phase_start: Option<DateTime<Utc>>,
     pub bracket_start: Option<DateTime<Utc>>,
-}
-
-/// Gemeinsamer PG-Advisory-Xact-Lock für die Single-Active-Tournament-Invariante.
-///
-/// Scheduler und Admin-Routen verwenden denselben Key, damit der Check
-/// "existiert schon ein anderes aktives Nicht-Test-Turnier?" und der folgende
-/// Statuswechsel nicht gegeneinander rennen.
-pub const SINGLE_ACTIVE_TOURNAMENT_ADVISORY_LOCK_KEY: i64 = i64::from_be_bytes(*b"trnactv1");
-
-const ACTIVE_NON_TEST_STATUSES: [&str; 4] = ["registration", "checkin", "group_phase", "bracket"];
-
-/// Nimmt den gemeinsamen Single-Active-Advisory-Lock für die laufende
-/// Transaktion. Der Lock wird von Postgres automatisch beim Commit/Rollback
-/// freigegeben.
-pub async fn acquire_single_active_tournament_lock(conn: &mut PgConnection) -> SchedulerResult<()> {
-    sqlx::query("SELECT pg_advisory_xact_lock($1)")
-        .bind(SINGLE_ACTIVE_TOURNAMENT_ADVISORY_LOCK_KEY)
-        .execute(conn)
-        .await?;
-    Ok(())
 }
 
 /// Ermittelt den nächsten fälligen Status anhand der Zeitstempel und des Modus.
@@ -137,7 +118,7 @@ pub async fn advance_tournament_status(
 ) -> SchedulerResult<serde_json::Value> {
     let mut tx = pool.begin().await?;
     if next_status == "registration" {
-        acquire_single_active_tournament_lock(&mut tx).await?;
+        acquire_tournament_schedule_lock(&mut tx).await?;
     }
     // Modus und Status bleiben während Prüfung und Generierung unverändert.
     let existing: Option<(String, String)> = sqlx::query_as(
@@ -189,7 +170,7 @@ pub async fn advance_tournament_status(
 
     // --- 2.-5. Statuswechsel + Seiteneffekte + Audit + ggf. Punkte: EINE Transaktion ---
     if next_status == "registration" {
-        ensure_single_active_registration_in_tx(&mut tx, tournament_id).await?;
+        ensure_start_gap(&mut tx, tournament_id).await?;
     }
 
     let now = now_utc();
@@ -266,45 +247,6 @@ async fn ensure_league_is_finished(
     if open > 0 {
         return Err(SchedulerError::InvalidTransition(format!(
             "Das Turnier kann erst abgeschlossen werden, wenn alle Spiele gewertet sind. Offen: {open}"
-        )));
-    }
-    Ok(())
-}
-
-async fn ensure_single_active_registration_in_tx(
-    tx: &mut Transaction<'_, Postgres>,
-    tournament_id: i64,
-) -> SchedulerResult<()> {
-    acquire_single_active_tournament_lock(&mut *tx).await?;
-
-    let target: Option<(bool,)> =
-        sqlx::query_as("SELECT is_test FROM turnier.tournaments WHERE id = $1")
-            .bind(tournament_id)
-            .fetch_optional(&mut **tx)
-            .await?;
-    let Some((is_test,)) = target else {
-        return Err(SchedulerError::StatusConflict);
-    };
-    if is_test {
-        return Ok(());
-    }
-
-    let row: Option<(i64, String, String)> = sqlx::query_as(
-        "SELECT id, name, status FROM turnier.tournaments \
-         WHERE id != $1 \
-           AND status = ANY($2) \
-           AND is_test = false \
-         ORDER BY id \
-         LIMIT 1",
-    )
-    .bind(tournament_id)
-    .bind(ACTIVE_NON_TEST_STATUSES.as_slice())
-    .fetch_optional(&mut **tx)
-    .await?;
-
-    if let Some((id, name, status)) = row {
-        return Err(SchedulerError::ActiveTournamentConflict(format!(
-            "Es gibt bereits ein aktives Turnier: #{id} {name} ({status})"
         )));
     }
     Ok(())

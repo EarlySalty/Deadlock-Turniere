@@ -271,7 +271,7 @@ impl Scheduler {
                 );
                 return false;
             }
-            Err(crate::SchedulerError::ActiveTournamentConflict(msg)) => {
+            Err(crate::SchedulerError::StartGapConflict(msg)) => {
                 tracing::warn!(
                     tournament_id = row.id,
                     next_status,

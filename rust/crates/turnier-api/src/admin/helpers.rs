@@ -1,21 +1,12 @@
-//! Gemeinsame Helfer der Admin-Routen: Audit-Schreiber, 404-Loader, die
-//! Single-Active-Tournament-Invariante, Team-Kapazitäts-/Lock-Prüfungen,
-//! Lobby-Settings-/Reminder-Serialisierung und die Tree-Lösch-Sequenzen.
-//!
-//! Portiert die `_*`-Helfer aus `tournament/admin_routes.py`. Alle Loader/Checks
-//! arbeiten gegen einen `Executor`, damit sie sowohl auf dem Pool als auch
-//! innerhalb einer Transaktion laufen (TOCTOU-Checks in EINER Tx wie gefordert).
-
 use serde_json::Value;
 use sqlx::postgres::PgRow;
-use sqlx::{Executor, PgConnection, Postgres, QueryBuilder, Row};
+use sqlx::{Executor, Postgres};
 
 use turnier_core::LobbySettingsPreset;
 
 use crate::db;
 use crate::error::{WebError, WebResult};
 
-/// Status, in denen ein Turnier als „aktiv" gilt (Single-Active-Gate).
 pub const ACTIVE_TOURNAMENT_STATUSES: [&str; 5] =
     ["draft", "registration", "checkin", "group_phase", "bracket"];
 
@@ -104,40 +95,6 @@ where
     .await?;
     if row.is_none() {
         return Err(WebError::not_found("Match nicht gefunden"));
-    }
-    Ok(())
-}
-
-/// Stellt sicher, dass nur ein aktives, nicht-Test-Turnier existiert.
-///
-/// `ignore_tournament_id` schließt das eigene Turnier aus (Update/Advance). Bei
-/// Verletzung → 409 mit der Original-Detailmeldung (`#<id> <name> (<status>)`).
-pub async fn ensure_single_active_tournament(
-    conn: &mut PgConnection,
-    ignore_tournament_id: Option<i64>,
-) -> WebResult<()> {
-    turnier_scheduler::acquire_single_active_tournament_lock(&mut *conn).await?;
-
-    let mut query = QueryBuilder::<Postgres>::new(
-        r#"SELECT id, name, status FROM turnier."tournaments" WHERE status IN ("#,
-    );
-    let mut separated = query.separated(", ");
-    for status in ACTIVE_TOURNAMENT_STATUSES {
-        separated.push_bind(status);
-    }
-    query.push(") AND is_test = false");
-    if let Some(id) = ignore_tournament_id {
-        query.push(" AND id != ");
-        query.push_bind(id);
-    }
-
-    if let Some(row) = query.build().fetch_optional(&mut *conn).await? {
-        let id: i64 = row.get("id");
-        let name: String = row.get("name");
-        let status: String = row.get("status");
-        return Err(WebError::conflict(format!(
-            "Es gibt bereits ein aktives Turnier: #{id} {name} ({status})"
-        )));
     }
     Ok(())
 }
