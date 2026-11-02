@@ -26,6 +26,9 @@ import Leitstand from '@/components/admin/Leitstand'
 import AdminPhaseNav from '@/components/admin/AdminPhaseNav'
 import { defaultPhaseFor, type AdminPhase } from '@/components/admin/adminPhase'
 import GroupStandings from '@/components/groups/GroupStandings'
+import GroupMatchList from '@/components/groups/GroupMatchList'
+import LeaguePlanPanel from '@/components/admin/LeaguePlanPanel'
+import { LEAGUE_LABEL, isLeague } from '@/lib/league'
 import BracketView from '@/components/bracket/BracketView'
 import MiniGroupPanel from '@/components/bracket/MiniGroupPanel'
 import AutoLobbyButton from '@/components/admin/AutoLobbyButton'
@@ -100,6 +103,7 @@ export default function Admin() {
 
   const hasGroups = Boolean(liveDetail?.groups.some((g) => g.matches.length > 0))
   const hasBracket = Boolean(liveDetail?.bracket_matches.length)
+  const liveLeague = isLeague(liveDetail?.tournament_mode)
 
   useEffect(() => {
     if (!liveDetail) {
@@ -300,6 +304,7 @@ export default function Admin() {
                   status={liveDetail.status}
                   hasGroups={hasGroups}
                   hasBracket={hasBracket}
+                  league={liveLeague}
                   activePhase={activePhase}
                   onChange={setActivePhase}
                 />
@@ -337,10 +342,34 @@ export default function Admin() {
                       teamSize={liveDetail.team_size}
                       teams={liveDetail.teams}
                       signups={liveDetail.signups}
+                      league={liveLeague}
                     />
                   )}
 
-                  {activePhase === 'group_phase' && hasGroups && (
+                  {activePhase === 'group_phase' && hasGroups && liveLeague && (
+                    <section className="space-y-4">
+                      <header>
+                        <h2 className="text-lg font-semibold text-foreground">{LEAGUE_LABEL}</h2>
+                        <p className="mt-1 text-sm text-muted">
+                          Tabelle und Spielplan. Kein Bracket: am Ende entscheidet die Tabelle.
+                        </p>
+                      </header>
+                      <GroupStandings groups={liveDetail.groups} teams={liveDetail.teams} league />
+                      {liveDetail.status === 'group_phase' ? (
+                        <LeaguePlanPanel
+                          tournamentId={liveDetail.id}
+                          groups={liveDetail.groups}
+                          teams={liveDetail.teams}
+                          autoLobby={liveDetail.auto_lobby_enabled}
+                          onRefresh={() => void refetchLiveDetail()}
+                        />
+                      ) : (
+                        <GroupMatchList groups={liveDetail.groups} teams={liveDetail.teams} league />
+                      )}
+                    </section>
+                  )}
+
+                  {activePhase === 'group_phase' && hasGroups && !liveLeague && (
                     <section className="space-y-4">
                       <header>
                         <h2 className="text-lg font-semibold text-foreground">Gruppenphase</h2>

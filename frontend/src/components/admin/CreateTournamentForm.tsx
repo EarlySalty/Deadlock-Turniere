@@ -4,11 +4,13 @@ import Card from '@/components/ui/Card'
 import Button from '@/components/ui/Button'
 import DateTimeInput from '@/components/ui/DateTimeInput'
 import { useCreateTournament } from '@/hooks/useTournament'
+import { LEAGUE_LABEL, localInputToIso } from '@/lib/league'
 import type {
   BracketFormat,
   InviteMode,
   LobbySettingsPreset,
   TournamentGameMode,
+  TournamentMode,
 } from '@/types/tournament'
 import { Trophy, AlertCircle, CheckCircle, SlidersHorizontal, Swords } from 'lucide-react'
 
@@ -41,6 +43,32 @@ const GAME_MODE_OPTIONS: {
     value: 'single_lane',
     label: 'Single Lane Battle',
     description: '6v6 nur auf einer Lane. Heldenwahl frei. (In Vorbereitung.)',
+  },
+]
+
+type TournamentFormat = 'auto' | TournamentMode
+
+const FORMAT_OPTIONS: { value: TournamentFormat; label: string; description: string }[] = [
+  {
+    value: 'auto',
+    label: 'Automatisch nach Teamgröße',
+    description: 'Gruppenphase mit Bracket oder nur Bracket, je nach Teamgröße.',
+  },
+  {
+    value: 'bracket_only',
+    label: 'Nur Bracket',
+    description: 'K.-o.-Turnier ohne Gruppenphase.',
+  },
+  {
+    value: 'group_stage',
+    label: 'Gruppenphase + Bracket',
+    description: 'Erst Gruppen, die besten Teams ziehen ins Bracket ein.',
+  },
+  {
+    value: 'league',
+    label: LEAGUE_LABEL,
+    description:
+      'Jedes Team spielt einmal gegen jedes andere, Runde für Runde zu festen Zeiten. Sieg +2, Niederlage -1. Am Ende entscheidet die Tabelle, ein Bracket gibt es nicht. Bei 10 Teams sind das 45 Spiele in 9 Runden.',
   },
 ]
 
@@ -196,6 +224,8 @@ export default function CreateTournamentForm() {
   const [description, setDescription] = useState('')
   const [rules, setRules] = useState('')
   const [teamSize, setTeamSize] = useState(6)
+  const [tournamentFormat, setTournamentFormat] = useState<TournamentFormat>('auto')
+  const [leagueStart, setLeagueStart] = useState('')
   const [bracketFormat, setBracketFormat] = useState<BracketFormat>('single_elimination')
   const [seriesFormat, setSeriesFormat] = useState<1 | 3 | 5>(1)
   const [finalSeriesFormat, setFinalSeriesFormat] = useState<1 | 3 | 5 | null>(null)
@@ -220,6 +250,7 @@ export default function CreateTournamentForm() {
   const [successMsg, setSuccessMsg] = useState('')
 
   const createMutation = useCreateTournament()
+  const league = tournamentFormat === 'league'
 
   const hasActiveSliders = CONVAR_SLIDERS.some((c) => sliders[c.key]?.enabled)
 
@@ -261,8 +292,10 @@ export default function CreateTournamentForm() {
         description: description.trim() || undefined,
         team_size: teamSize,
         bracket_format: bracketFormat,
-        series_format: seriesFormat,
-        final_series_format: finalSeriesFormat ?? undefined,
+        force_tournament_mode: tournamentFormat === 'auto' ? undefined : tournamentFormat,
+        group_phase_start: league ? localInputToIso(leagueStart) : undefined,
+        series_format: league ? undefined : seriesFormat,
+        final_series_format: league ? undefined : finalSeriesFormat ?? undefined,
         registration_start: regStart || undefined,
         registration_end: regEnd || undefined,
         checkin_start: checkinStart || undefined,
@@ -287,6 +320,8 @@ export default function CreateTournamentForm() {
           setDescription('')
           setRules('')
           setTeamSize(6)
+          setTournamentFormat('auto')
+          setLeagueStart('')
           setBracketFormat('single_elimination')
           setSeriesFormat(1)
           setRegStart('')
@@ -362,6 +397,43 @@ export default function CreateTournamentForm() {
           />
         </div>
 
+        <div>
+          <label htmlFor="tournament-format" className="block text-sm font-medium text-foreground mb-1.5">
+            Turnierformat
+          </label>
+          <select
+            id="tournament-format"
+            value={tournamentFormat}
+            onChange={(e) => setTournamentFormat(e.target.value as TournamentFormat)}
+            className="w-full bg-background border border-border rounded-lg px-3 py-2 text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
+          >
+            {FORMAT_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>{option.label}</option>
+            ))}
+          </select>
+          <p className="mt-1 text-xs text-muted">
+            {FORMAT_OPTIONS.find((option) => option.value === tournamentFormat)?.description}
+          </p>
+        </div>
+
+        {league && (
+          <div>
+            <label htmlFor="league-first-round" className="block text-sm font-medium text-foreground mb-1.5">
+              Erste Runde beginnt
+            </label>
+            <DateTimeInput
+              id="league-first-round"
+              value={leagueStart}
+              onChange={(e) => setLeagueStart(e.target.value)}
+              className="w-full bg-background border border-border rounded-lg px-3 py-2 text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
+            />
+            <p className="mt-1 text-xs text-muted">
+              Der Spielplan entsteht beim Abschluss des Check-ins, jede Runde dauert zunächst 50 Minuten.
+              Danach kannst du Start und Minuten pro Runde unter „Spielplan“ ändern.
+            </p>
+          </div>
+        )}
+
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           {/* Teamgröße */}
           <div>
@@ -380,7 +452,7 @@ export default function CreateTournamentForm() {
           </div>
 
           {/* Bracket-Format */}
-          <div>
+          {!league && <div>
             <label htmlFor="bracket-format" className="block text-sm font-medium text-foreground mb-1.5">
               Bracket-Format
             </label>
@@ -393,10 +465,10 @@ export default function CreateTournamentForm() {
               <option value="single_elimination">Single Elimination</option>
               <option value="double_elimination">Double Elimination</option>
             </select>
-          </div>
+          </div>}
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        {!league && <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
             <label htmlFor="series-format" className="block text-sm font-medium text-foreground mb-1.5">
               Serienformat (Standard)
@@ -433,7 +505,7 @@ export default function CreateTournamentForm() {
             </select>
             <p className="mt-1 text-xs text-muted">Überschreibt das Format nur für das Finale.</p>
           </div>
-        </div>
+        </div>}
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
@@ -640,8 +712,9 @@ export default function CreateTournamentForm() {
               <div>
                 <div className="text-sm font-medium text-foreground">Lobbys automatisch erstellen</div>
                 <div className="text-xs text-muted">
-                  Sobald Bracket/Gruppen generiert sind oder ein Match-Ergebnis eingetragen wird, legt der
-                  Bot die nächsten Lobbys ohne Klick an.
+                  {league
+                    ? 'Sobald der Termin einer Runde erreicht ist, legt der Bot ihre Lobbys ohne Klick an. Die nächste Runde folgt, wenn alle Spiele der Runde davor gewertet sind.'
+                    : 'Sobald Bracket/Gruppen generiert sind oder ein Match-Ergebnis eingetragen wird, legt der Bot die nächsten Lobbys ohne Klick an.'}
                 </div>
               </div>
             </label>

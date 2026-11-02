@@ -13,6 +13,7 @@ import {
   useRevertCheckin,
   useUpdateTournament,
 } from '@/hooks/useTournament'
+import { LEAGUE_LABEL, isLeague, localInputToIso, toLocalInput } from '@/lib/league'
 import type {
   Tournament,
   TournamentGameMode,
@@ -56,6 +57,18 @@ const STATUS_ACTIONS: Record<string, { label: string; confirmMsg: string }> = {
   completed: { label: 'Archivieren', confirmMsg: 'Turnier ins Archiv verschieben?' },
 }
 
+const LEAGUE_FINISH_ACTION = {
+  label: 'Turnier abschließen',
+  confirmMsg: 'Turnier abschließen? Das geht erst, wenn alle Spiele gewertet sind. Danach lassen sich keine Ergebnisse mehr ändern.',
+}
+
+const LEAGUE_STEPS = [
+  'Anmeldung und Check-in laufen wie gewohnt.',
+  'Beim Abschluss des Check-ins entsteht der Spielplan: jedes Team gegen jedes andere, in festen Runden ab dem eingestellten Start.',
+  'Unter „Spielplan“ steuerst du Zeiten und Lobbys und trägst Sieger ein oder korrigierst sie. Sieg +2, Niederlage -1.',
+  'Sind alle Spiele gewertet, schließt du das Turnier ab. Die Tabelle ist die Endplatzierung.',
+]
+
 function toInputDateTime(value: string | null | undefined): string {
   if (!value) return ''
   return value.replace(' ', 'T').slice(0, 16)
@@ -89,6 +102,10 @@ export default function TournamentManager({
   const generateGroupsMutation = useGenerateGroups()
   const generateBracketMutation = useGenerateBracket()
 
+  const storedLeague = isLeague(tournament.tournament_mode)
+  const storedStartInput = storedLeague
+    ? toLocalInput(tournament.group_phase_start)
+    : toInputDateTime(tournament.group_phase_start)
   const [form, setForm] = useState({
     name: tournament.name,
     description: tournament.description ?? '',
@@ -102,7 +119,7 @@ export default function TournamentManager({
     registration_start: toInputDateTime(tournament.registration_start),
     registration_end: toInputDateTime(tournament.registration_end),
     checkin_start: toInputDateTime(tournament.checkin_start ?? null),
-    group_phase_start: toInputDateTime(tournament.group_phase_start),
+    group_phase_start: storedStartInput,
     bracket_start: toInputDateTime(tournament.bracket_start),
     exclude_from_leaderboard: tournament.exclude_from_leaderboard,
     reminder_offsets: toReminderOffsetString(tournament.reminder_offsets),
@@ -112,7 +129,11 @@ export default function TournamentManager({
   const [deleteConfirmationId, setDeleteConfirmationId] = useState<number | null>(null)
   const deleteConfirmed = deleteConfirmationId === tournament.id
 
-  const action = STATUS_ACTIONS[tournament.status]
+  const league = isLeague(form.tournament_mode)
+  const leagueRunning = tournament.status === 'group_phase'
+  const modeLocked = !canChangeTournamentMode || (leagueRunning && storedLeague)
+  const action =
+    storedLeague && leagueRunning ? LEAGUE_FINISH_ACTION : STATUS_ACTIONS[tournament.status]
   const isLoading =
     detailsUpdateMutation.isPending ||
     advanceMutation.isPending ||
@@ -140,6 +161,12 @@ export default function TournamentManager({
     setForm((current) => ({ ...current, [key]: value }))
   }
 
+  const groupStartPayload = () => {
+    if (!league && !storedLeague) return form.group_phase_start || undefined
+    if (form.group_phase_start === storedStartInput) return undefined
+    return localInputToIso(form.group_phase_start)
+  }
+
   const handleSave = () => {
     const payload: TournamentUpdate = {
       name: form.name.trim(),
@@ -153,7 +180,7 @@ export default function TournamentManager({
       registration_start: form.registration_start || undefined,
       registration_end: form.registration_end || undefined,
       checkin_start: form.checkin_start || undefined,
-      group_phase_start: form.group_phase_start || undefined,
+      group_phase_start: groupStartPayload(),
       bracket_start: form.bracket_start || undefined,
       exclude_from_leaderboard: form.exclude_from_leaderboard,
       reminder_offsets: parseReminderOffsets(form.reminder_offsets),
@@ -266,6 +293,17 @@ export default function TournamentManager({
         </div>
       </div>
 
+      {league && (
+        <div className="rounded-lg border border-primary/20 bg-primary/5 p-4">
+          <h3 className="text-sm font-semibold text-foreground">So läuft „{LEAGUE_LABEL}“</h3>
+          <ol className="mt-2 list-decimal space-y-1 pl-5 text-sm text-muted">
+            {LEAGUE_STEPS.map((step) => (
+              <li key={step}>{step}</li>
+            ))}
+          </ol>
+        </div>
+      )}
+
       <div className="grid gap-4 lg:grid-cols-2">
         <div className="space-y-4">
           <div>
@@ -324,7 +362,7 @@ export default function TournamentManager({
             />
           </div>
 
-          <div>
+          {!league && <div>
             <label htmlFor="admin-bracket-format" className="mb-1.5 block text-sm font-medium text-foreground">
               Bracket-Format
             </label>
@@ -337,9 +375,9 @@ export default function TournamentManager({
               <option value="single_elimination">Single Elimination</option>
               <option value="double_elimination">Double Elimination</option>
             </select>
-          </div>
+          </div>}
 
-          <div>
+          {!league && <div>
             <label htmlFor="admin-series-format" className="mb-1.5 block text-sm font-medium text-foreground">
               Serienformat (Standard)
             </label>
@@ -353,9 +391,9 @@ export default function TournamentManager({
               <option value={3}>Bo3</option>
               <option value={5}>Bo5</option>
             </select>
-          </div>
+          </div>}
 
-          <div>
+          {!league && <div>
             <label htmlFor="admin-final-series-format" className="mb-1.5 block text-sm font-medium text-foreground">
               Finale Match Format
             </label>
@@ -374,7 +412,7 @@ export default function TournamentManager({
               <option value={5}>Bo5</option>
             </select>
             <p className="mt-1 text-xs text-muted">Überschreibt das Format nur für das Finale.</p>
-          </div>
+          </div>}
 
           <div>
             <label htmlFor="admin-tournament-mode" className="mb-1.5 block text-sm font-medium text-foreground">
@@ -384,14 +422,17 @@ export default function TournamentManager({
               id="admin-tournament-mode"
               value={form.tournament_mode}
               onChange={(event) => handleChange('tournament_mode', event.target.value)}
-              disabled={!canChangeTournamentMode}
+              disabled={modeLocked}
               className="w-full rounded-lg border border-border bg-background px-3 py-2 text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 disabled:opacity-60"
             >
               <option value="bracket_only">Nur Bracket</option>
               <option value="group_stage">Gruppenphase + Bracket</option>
+              <option value="league" disabled={leagueRunning && !storedLeague}>{LEAGUE_LABEL}</option>
             </select>
             <p className="mt-1 text-xs text-muted">
-              Änderbar in Check-in oder in der Gruppenphase, solange noch kein Gruppenmatch gespielt wurde.
+              {league
+                ? 'Jedes Team spielt einmal gegen jedes andere. Am Ende entscheidet die Tabelle, ein Bracket gibt es nicht. Festlegen geht bis zum Abschluss des Check-ins.'
+                : 'Änderbar in Check-in oder in der Gruppenphase, solange noch kein Gruppenmatch gespielt wurde.'}
             </p>
           </div>
 
@@ -430,8 +471,9 @@ export default function TournamentManager({
             <div>
               <div className="text-sm font-medium text-foreground">Lobbys automatisch erstellen</div>
               <div className="text-xs text-muted">
-                Wenn an: Bot legt Lobbys nach Bracket-/Gruppen-Generierung und nach jedem Match-Ergebnis
-                automatisch an. Aus = nur manuell per „Lobby erstellen".
+                {league
+                  ? 'Wenn an: Bot legt die Lobbys einer Runde an, sobald ihr Termin erreicht ist und die Runde davor gewertet ist. Aus = nur manuell per „Lobby erstellen“.'
+                  : 'Wenn an: Bot legt Lobbys nach Bracket-/Gruppen-Generierung und nach jedem Match-Ergebnis automatisch an. Aus = nur manuell per „Lobby erstellen".'}
               </div>
             </div>
           </label>
@@ -480,7 +522,7 @@ export default function TournamentManager({
 
           <div>
             <label htmlFor="admin-group-start" className="mb-1.5 block text-sm font-medium text-foreground">
-              Gruppenphase Start
+              {league ? 'Erste Runde beginnt' : 'Gruppenphase Start'}
             </label>
             <DateTimeInput
               id="admin-group-start"
@@ -488,6 +530,11 @@ export default function TournamentManager({
               onChange={(event) => handleChange('group_phase_start', event.target.value)}
               className="w-full rounded-lg border border-border bg-background px-3 py-2 text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
             />
+            {league && (
+              <p className="mt-1 text-xs text-muted">
+                Verschiebt den ganzen Spielplan, sobald er steht. Die Minuten pro Runde stellst du unter „Spielplan“ ein.
+              </p>
+            )}
           </div>
 
           <div>
@@ -516,7 +563,7 @@ export default function TournamentManager({
             </div>
           </label>
 
-          <div>
+          {!league && <div>
             <label htmlFor="admin-bracket-start" className="mb-1.5 block text-sm font-medium text-foreground">
               Bracket Start
             </label>
@@ -526,7 +573,7 @@ export default function TournamentManager({
               onChange={(event) => handleChange('bracket_start', event.target.value)}
               className="w-full rounded-lg border border-border bg-background px-3 py-2 text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
             />
-          </div>
+          </div>}
         </div>
       </div>
 
@@ -548,7 +595,7 @@ export default function TournamentManager({
           </Button>
         )}
 
-        {tournament.status === 'group_phase' && (
+        {tournament.status === 'group_phase' && !storedLeague && (
           <Button variant="secondary" size="sm" disabled={isLoading} onClick={handleGenerateGroups}>
             <Users size={14} />
             {generateGroupsMutation.isPending ? 'Generiert...' : 'Gruppen neu generieren'}

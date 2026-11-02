@@ -1,3 +1,4 @@
+import { LEAGUE_LABEL, isLeague } from '@/lib/league'
 import { Link } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import { useTournaments } from '@/hooks/useTournament'
@@ -96,7 +97,9 @@ export default function Home() {
                     </span>
                     <span className="flex items-center gap-2">
                       <Shield size={16} className="text-primary" />
-                      {active.bracket_format === 'single_elimination' ? 'Single Elim.' : 'Double Elim.'}
+                      {isLeague(active.tournament_mode)
+                        ? LEAGUE_LABEL
+                        : active.bracket_format === 'single_elimination' ? 'Single Elim.' : 'Double Elim.'}
                     </span>
                     {active.rules && (
                       <span className="flex items-center gap-2 text-amber-500/80">

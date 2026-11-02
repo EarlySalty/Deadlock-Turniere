@@ -1,6 +1,6 @@
 export type TournamentStatus = 'draft' | 'registration' | 'checkin' | 'group_phase' | 'bracket' | 'completed' | 'archived'
 export type BracketFormat = 'single_elimination' | 'double_elimination'
-export type TournamentMode = 'group_stage' | 'bracket_only'
+export type TournamentMode = 'group_stage' | 'bracket_only' | 'league'
 export type TournamentGameMode = 'standard' | 'mirror' | 'all_same' | 'random_heroes' | 'single_lane'
 export type MatchStatus = 'pending' | 'checkin' | 'lobby_created' | 'in_progress' | 'completed' | 'forfeit' | 'cancelled'
 export type RecruitmentStatus = 'open' | 'application' | 'closed'
@@ -235,6 +235,7 @@ export interface GroupMatch {
   hero_assignments: Record<string, unknown> | null
   scheduled_at: string | null
   played_at: string | null
+  round?: number
 }
 
 export interface Group {
@@ -302,6 +303,8 @@ export interface TournamentCreate {
   description?: string
   team_size: number
   bracket_format: BracketFormat
+  force_tournament_mode?: TournamentMode
+  group_phase_start?: string
   series_format?: 1 | 3 | 5
   final_series_format?: 1 | 3 | 5
   registration_start?: string
@@ -673,7 +676,7 @@ export interface CreateTestTournamentRequest {
   name: string
   team_size: number
   num_teams: number
-  mode: 'bracket_only' | 'group_then_bracket'
+  mode: 'bracket_only' | 'group_then_bracket' | 'league'
   tournament_game_mode?: TournamentGameMode
   advance_to?: 'checkin' | 'group_phase' | 'bracket'
 }

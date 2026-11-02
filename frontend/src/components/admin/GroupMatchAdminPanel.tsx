@@ -10,7 +10,8 @@ import {
   useStartGroupMatch,
   useSubmitMatchResult,
 } from '@/hooks/useTournament'
-import type { Group, Team } from '@/types/tournament'
+import { formatRoundTime, leagueRounds } from '@/lib/league'
+import type { Group, GroupMatch, Team } from '@/types/tournament'
 import {
   AlertCircle,
   CheckCircle2,
@@ -22,6 +23,7 @@ import {
   Radio,
   RefreshCcw,
   Swords,
+  Trophy,
 } from 'lucide-react'
 
 interface GroupMatchAdminPanelProps {
@@ -29,6 +31,11 @@ interface GroupMatchAdminPanelProps {
   groups: Group[]
   teams: Team[]
   onRefresh?: () => void
+  league?: boolean
+}
+
+function currentRoundOf(group: Group): number | null {
+  return leagueRounds(group.matches).find((round) => round.openMatches > 0)?.round ?? null
 }
 
 type MatchMessage = {
@@ -79,6 +86,7 @@ export default function GroupMatchAdminPanel({
   groups,
   teams,
   onRefresh,
+  league = false,
 }: GroupMatchAdminPanelProps) {
   const submitResultMutation = useSubmitMatchResult()
   const createLobbyMutation = useCreateGroupLobby()
@@ -125,8 +133,8 @@ export default function GroupMatchAdminPanel({
     })
   }
 
-  const handleSubmit = async (matchId: number) => {
-    const winnerId = selectedWinners[matchId]
+  const handleSubmit = async (matchId: number, chosenWinnerId?: number) => {
+    const winnerId = chosenWinnerId ?? selectedWinners[matchId]
     if (!winnerId || isLocked) return
 
     setSubmittingMatchId(matchId)
@@ -166,16 +174,16 @@ export default function GroupMatchAdminPanel({
     try {
       if (action === 'create') {
         await createLobbyMutation.mutateAsync({ tournamentId, matchId })
-        setMessage(matchId, { kind: 'success', text: 'Gruppen-Lobby wurde erstellt.' })
+        setMessage(matchId, { kind: 'success', text: league ? 'Lobby wurde erstellt.' : 'Gruppen-Lobby wurde erstellt.' })
       } else if (action === 'start') {
         await startMatchMutation.mutateAsync({ tournamentId, matchId })
-        setMessage(matchId, { kind: 'success', text: 'Gruppen-Match wurde gestartet.' })
+        setMessage(matchId, { kind: 'success', text: league ? 'Match wurde gestartet.' : 'Gruppen-Match wurde gestartet.' })
       } else if (action === 'fetch') {
         await fetchResultMutation.mutateAsync({ tournamentId, matchId })
         setMessage(matchId, { kind: 'success', text: 'Ergebnis wurde aus Deadlock übernommen.' })
       } else {
         await leaveLobbyMutation.mutateAsync({ tournamentId, matchId })
-        setMessage(matchId, { kind: 'success', text: 'Bot hat die Gruppen-Lobby verlassen.' })
+        setMessage(matchId, { kind: 'success', text: league ? 'Bot hat die Lobby verlassen.' : 'Bot hat die Gruppen-Lobby verlassen.' })
       }
       onRefresh?.()
     } catch (error) {
@@ -201,12 +209,15 @@ export default function GroupMatchAdminPanel({
   }
 
   const handleResetMatch = async (matchId: number) => {
-    if (isLocked || !window.confirm('Gruppen-Match wirklich zurücksetzen?')) return
+    const confirmText = league
+      ? 'Spiel wirklich zurücksetzen? Das Ergebnis wird gelöscht und die Tabelle neu berechnet.'
+      : 'Gruppen-Match wirklich zurücksetzen?'
+    if (isLocked || !window.confirm(confirmText)) return
     setActiveAction({ matchId, action: 'leave' })
     clearMessage(matchId)
     try {
       await resetMatchMutation.mutateAsync({ tournamentId, matchId })
-      setMessage(matchId, { kind: 'success', text: 'Gruppen-Match wurde zurückgesetzt.' })
+      setMessage(matchId, { kind: 'success', text: league ? 'Spiel wurde zurückgesetzt.' : 'Gruppen-Match wurde zurückgesetzt.' })
       onRefresh?.()
     } catch (error) {
       setMessage(matchId, {
@@ -241,15 +252,246 @@ export default function GroupMatchAdminPanel({
     }
   }
 
+  const renderMatch = (group: Group, match: GroupMatch, isCurrentRound: boolean) => {
+  const team1Name = getTeamName(match.team1_id, teams, group)
+  const team2Name = getTeamName(match.team2_id, teams, group)
+  const winnerName = match.winner_id
+    ? getTeamName(match.winner_id, teams, group)
+    : null
+  const message = messages[match.id]
+  const isTerminal = ['completed', 'forfeit', 'cancelled'].includes(match.status)
+  const isSubmitting = submittingMatchId === match.id
+  const currentAction = activeAction?.matchId === match.id ? activeAction.action : null
+  const canCreateLobby = isCurrentRound && !match.steam_party_id && ['pending', 'checkin'].includes(match.status)
+  const canStartMatch = match.status === 'lobby_created' && Boolean(match.steam_party_id)
+  const canFetchResult = match.status === 'in_progress' && (Boolean(match.steam_party_id) || Boolean(match.deadlock_match_id))
+  const canLeaveLobby = ['lobby_created', 'in_progress'].includes(match.status) && Boolean(match.steam_party_id)
+  const canReset = league
+    ? match.status !== 'pending' || match.winner_id !== null
+    : !['completed', 'forfeit', 'cancelled'].includes(match.status)
+
+  return (
+    <div key={match.id} className="rounded-xl border border-border bg-background/60 p-4">
+      <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+        <div>
+          <div className="flex items-center gap-2 text-sm text-muted">
+            <Gavel size={14} className="text-primary" />
+            <span>Match #{match.id}</span>
+          </div>
+          <h4 className="mt-1 text-base font-semibold text-foreground">
+            {team1Name} vs {team2Name}
+          </h4>
+        </div>
+        <div className="text-sm text-muted">
+          Status: <span className="text-foreground">{getStatusLabel(match.status)}</span>
+        </div>
+      </div>
+
+      <div className="mt-3 flex flex-wrap gap-3 text-xs text-muted">
+        {match.deadlock_match_id && <span>Deadlock Match-ID: {match.deadlock_match_id}</span>}
+        {match.match_duration_s !== null && <span>Dauer: {Math.floor(match.match_duration_s / 60)}m</span>}
+        {formatSchedule(match.scheduled_at) && <span>Termin: {formatSchedule(match.scheduled_at)}</span>}
+      </div>
+
+      {match.party_code && (
+        <div className="mt-3 rounded-xl border border-primary/20 bg-primary/10 px-4 py-3">
+          <div className="flex items-center gap-2 text-xs uppercase tracking-wider text-primary/80">
+            <KeyRound size={14} />
+            Party-Code
+          </div>
+          <div className="mt-2 text-xl font-bold tracking-[0.18em] text-foreground">
+            {match.party_code}
+          </div>
+          <Button
+            variant="secondary"
+            size="sm"
+            className="mt-3"
+            onClick={() => void handleCopyCode(match.id, match.party_code!)}
+          >
+            <Copy size={14} />
+            {copyFeedback[match.id] ? 'Kopiert' : 'Code kopieren'}
+          </Button>
+        </div>
+      )}
+
+      {winnerName && (
+        <p className="mt-3 text-sm text-success">
+          Gewinner: <span className="font-semibold">{winnerName}</span>
+        </p>
+      )}
+
+      <div className="mt-4 flex flex-wrap gap-2">
+        {canCreateLobby && (
+          <Button
+            variant="primary"
+            size="sm"
+            disabled={isLocked}
+            onClick={() => void handleAction(match.id, 'create')}
+          >
+            <Radio size={14} />
+            {currentAction === 'create' ? 'Erstellt...' : 'Lobby erstellen'}
+          </Button>
+        )}
+        {canStartMatch && (
+          <Button
+            variant="primary"
+            size="sm"
+            disabled={isLocked}
+            onClick={() => void handleAction(match.id, 'start')}
+          >
+            <Play size={14} />
+            {currentAction === 'start' ? 'Startet...' : 'Match starten'}
+          </Button>
+        )}
+        {canFetchResult && (
+          <Button
+            variant="secondary"
+            size="sm"
+            disabled={isLocked}
+            onClick={() => void handleAction(match.id, 'fetch')}
+          >
+            <RefreshCcw size={14} />
+            {currentAction === 'fetch' ? 'Lädt...' : 'Ergebnis abrufen'}
+          </Button>
+        )}
+        {canLeaveLobby && (
+          <Button
+            variant="ghost"
+            size="sm"
+            disabled={isLocked}
+            onClick={() => void handleAction(match.id, 'leave')}
+          >
+            <DoorOpen size={14} />
+            {currentAction === 'leave' ? 'Verlässt...' : 'Lobby verlassen'}
+          </Button>
+        )}
+        {canReset && (
+          <Button
+            variant="ghost"
+            size="sm"
+            disabled={isLocked}
+            onClick={() => void handleResetMatch(match.id)}
+          >
+            <RefreshCcw size={14} />
+            Match zurücksetzen
+          </Button>
+        )}
+      </div>
+
+      {isCurrentRound && !match.steam_party_id && !isTerminal && (
+        <div className="mt-3 grid gap-2 sm:grid-cols-[1fr_auto]">
+          <input
+            type="text"
+            value={manualCodes[match.id] ?? ''}
+            onChange={(event) => setManualCodes((current) => ({ ...current, [match.id]: event.target.value }))}
+            placeholder="Manuellen Party-Code eintragen"
+            className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
+          />
+          <Button
+            variant="secondary"
+            size="sm"
+            disabled={isLocked}
+            onClick={() => void handleSetManualLobby(match.id)}
+          >
+            Code speichern
+          </Button>
+        </div>
+      )}
+
+      {league && (
+          <div className="mt-4 flex flex-wrap gap-2">
+            {[match.team1_id, match.team2_id]
+              .filter((teamId) => teamId !== match.winner_id)
+              .map((teamId) => {
+                const name = teamId === match.team1_id ? team1Name : team2Name
+                return (
+                  <Button
+                    key={teamId}
+                    variant={isTerminal ? 'ghost' : 'secondary'}
+                    size="sm"
+                    disabled={isLocked}
+                    onClick={() => {
+                      const correction = `Ergebnis korrigieren: ${name} hat gewonnen?`
+                      if (!isTerminal || window.confirm(correction)) {
+                        void handleSubmit(match.id, teamId)
+                      }
+                    }}
+                  >
+                    <Trophy size={14} />
+                    {isTerminal ? `Korrigieren: ${name} gewinnt` : `${name} gewinnt`}
+                  </Button>
+                )
+              })}
+          </div>
+        )}
+
+      {!league && !isTerminal && (
+        <div className="mt-4 space-y-3">
+          <div className="space-y-2">
+            <label className="flex items-center gap-2 text-sm text-foreground">
+              <input
+                type="radio"
+                name={`group-winner-${match.id}`}
+                checked={selectedWinners[match.id] === match.team1_id}
+                onChange={() =>
+                  setSelectedWinners((current) => ({ ...current, [match.id]: match.team1_id }))
+                }
+                className="accent-primary"
+              />
+              <span>{team1Name} gewonnen</span>
+            </label>
+            <label className="flex items-center gap-2 text-sm text-foreground">
+              <input
+                type="radio"
+                name={`group-winner-${match.id}`}
+                checked={selectedWinners[match.id] === match.team2_id}
+                onChange={() =>
+                  setSelectedWinners((current) => ({ ...current, [match.id]: match.team2_id }))
+                }
+                className="accent-primary"
+              />
+              <span>{team2Name} gewonnen</span>
+            </label>
+          </div>
+
+          <Button
+            variant="primary"
+            size="sm"
+            disabled={!selectedWinners[match.id] || isLocked}
+            onClick={() => void handleSubmit(match.id)}
+          >
+            {isSubmitting ? 'Speichert...' : 'Ergebnis speichern'}
+          </Button>
+        </div>
+      )}
+
+      {message && (
+        <div
+          className={`mt-3 flex items-center gap-2 rounded-lg p-3 text-sm ${
+            message.kind === 'error'
+              ? 'border border-red-500/20 bg-red-500/10 text-red-400'
+              : 'border border-green-500/20 bg-green-500/10 text-green-400'
+          }`}
+        >
+          {message.kind === 'error' ? <AlertCircle size={16} /> : <CheckCircle2 size={16} />}
+          <span>{message.text}</span>
+        </div>
+      )}
+    </div>
+  )
+  }
+
   return (
     <div className="grid gap-4">
       {groupsWithMatches.map((group) => (
         <Card key={group.id} className="p-5 space-y-4">
           <div className="flex items-center justify-between gap-3">
             <div>
-              <h3 className="text-lg font-semibold text-foreground">{group.name}</h3>
+              <h3 className="text-lg font-semibold text-foreground">{league ? 'Spielplan' : group.name}</h3>
               <p className="mt-1 text-sm text-muted">
-                Gruppen-Lobbys steuern, Ergebnisse abrufen oder manuell eintragen.
+                {league
+                  ? 'Sieger eintragen oder korrigieren. Lobbys gibt es für die aktuelle Runde.'
+                  : 'Gruppen-Lobbys steuern, Ergebnisse abrufen oder manuell eintragen.'}
               </p>
             </div>
             <span className="text-xs text-muted">
@@ -258,205 +500,28 @@ export default function GroupMatchAdminPanel({
           </div>
 
           <div className="space-y-3">
-            {group.matches.map((match) => {
-              const team1Name = getTeamName(match.team1_id, teams, group)
-              const team2Name = getTeamName(match.team2_id, teams, group)
-              const winnerName = match.winner_id
-                ? getTeamName(match.winner_id, teams, group)
-                : null
-              const message = messages[match.id]
-              const isTerminal = ['completed', 'forfeit', 'cancelled'].includes(match.status)
-              const isSubmitting = submittingMatchId === match.id
-              const currentAction = activeAction?.matchId === match.id ? activeAction.action : null
-              const canCreateLobby = !match.steam_party_id && ['pending', 'checkin'].includes(match.status)
-              const canStartMatch = match.status === 'lobby_created' && Boolean(match.steam_party_id)
-              const canFetchResult = match.status === 'in_progress' && (Boolean(match.steam_party_id) || Boolean(match.deadlock_match_id))
-              const canLeaveLobby = ['lobby_created', 'in_progress'].includes(match.status) && Boolean(match.steam_party_id)
-              const canReset = !['completed', 'forfeit', 'cancelled'].includes(match.status)
-
-              return (
-                <div key={match.id} className="rounded-xl border border-border bg-background/60 p-4">
-                  <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-                    <div>
-                      <div className="flex items-center gap-2 text-sm text-muted">
-                        <Gavel size={14} className="text-primary" />
-                        <span>Match #{match.id}</span>
-                      </div>
-                      <h4 className="mt-1 text-base font-semibold text-foreground">
-                        {team1Name} vs {team2Name}
-                      </h4>
+            {league
+              ? leagueRounds(group.matches).map((round) => (
+                  <details
+                    key={round.round}
+                    open={round.round === currentRoundOf(group) || round.openMatches > 0}
+                    className="rounded-xl border border-border bg-background/30"
+                  >
+                    <summary className="flex cursor-pointer flex-wrap items-center gap-x-3 gap-y-1 px-4 py-3 text-sm">
+                      <span className="font-semibold text-foreground">Runde {round.round}</span>
+                      <span className="text-muted">{formatRoundTime(round.scheduledAt)}</span>
+                      <span className="ml-auto text-xs text-muted">
+                        {round.matches.length - round.openMatches}/{round.matches.length} gewertet
+                      </span>
+                    </summary>
+                    <div className="space-y-3 px-3 pb-3">
+                      {round.matches.map((match) =>
+                        renderMatch(group, match, round.round === currentRoundOf(group)),
+                      )}
                     </div>
-                    <div className="text-sm text-muted">
-                      Status: <span className="text-foreground">{getStatusLabel(match.status)}</span>
-                    </div>
-                  </div>
-
-                  <div className="mt-3 flex flex-wrap gap-3 text-xs text-muted">
-                    {match.deadlock_match_id && <span>Deadlock Match-ID: {match.deadlock_match_id}</span>}
-                    {match.match_duration_s !== null && <span>Dauer: {Math.floor(match.match_duration_s / 60)}m</span>}
-                    {formatSchedule(match.scheduled_at) && <span>Termin: {formatSchedule(match.scheduled_at)}</span>}
-                  </div>
-
-                  {match.party_code && (
-                    <div className="mt-3 rounded-xl border border-primary/20 bg-primary/10 px-4 py-3">
-                      <div className="flex items-center gap-2 text-xs uppercase tracking-wider text-primary/80">
-                        <KeyRound size={14} />
-                        Party-Code
-                      </div>
-                      <div className="mt-2 text-xl font-bold tracking-[0.18em] text-foreground">
-                        {match.party_code}
-                      </div>
-                      <Button
-                        variant="secondary"
-                        size="sm"
-                        className="mt-3"
-                        onClick={() => void handleCopyCode(match.id, match.party_code!)}
-                      >
-                        <Copy size={14} />
-                        {copyFeedback[match.id] ? 'Kopiert' : 'Code kopieren'}
-                      </Button>
-                    </div>
-                  )}
-
-                  {winnerName && (
-                    <p className="mt-3 text-sm text-success">
-                      Gewinner: <span className="font-semibold">{winnerName}</span>
-                    </p>
-                  )}
-
-                  <div className="mt-4 flex flex-wrap gap-2">
-                    {canCreateLobby && (
-                      <Button
-                        variant="primary"
-                        size="sm"
-                        disabled={isLocked}
-                        onClick={() => void handleAction(match.id, 'create')}
-                      >
-                        <Radio size={14} />
-                        {currentAction === 'create' ? 'Erstellt...' : 'Lobby erstellen'}
-                      </Button>
-                    )}
-                    {canStartMatch && (
-                      <Button
-                        variant="primary"
-                        size="sm"
-                        disabled={isLocked}
-                        onClick={() => void handleAction(match.id, 'start')}
-                      >
-                        <Play size={14} />
-                        {currentAction === 'start' ? 'Startet...' : 'Match starten'}
-                      </Button>
-                    )}
-                    {canFetchResult && (
-                      <Button
-                        variant="secondary"
-                        size="sm"
-                        disabled={isLocked}
-                        onClick={() => void handleAction(match.id, 'fetch')}
-                      >
-                        <RefreshCcw size={14} />
-                        {currentAction === 'fetch' ? 'Lädt...' : 'Ergebnis abrufen'}
-                      </Button>
-                    )}
-                    {canLeaveLobby && (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        disabled={isLocked}
-                        onClick={() => void handleAction(match.id, 'leave')}
-                      >
-                        <DoorOpen size={14} />
-                        {currentAction === 'leave' ? 'Verlässt...' : 'Lobby verlassen'}
-                      </Button>
-                    )}
-                    {canReset && (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        disabled={isLocked}
-                        onClick={() => void handleResetMatch(match.id)}
-                      >
-                        <RefreshCcw size={14} />
-                        Match zurücksetzen
-                      </Button>
-                    )}
-                  </div>
-
-                  {!match.steam_party_id && !isTerminal && (
-                    <div className="mt-3 grid gap-2 sm:grid-cols-[1fr_auto]">
-                      <input
-                        type="text"
-                        value={manualCodes[match.id] ?? ''}
-                        onChange={(event) => setManualCodes((current) => ({ ...current, [match.id]: event.target.value }))}
-                        placeholder="Manuellen Party-Code eintragen"
-                        className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
-                      />
-                      <Button
-                        variant="secondary"
-                        size="sm"
-                        disabled={isLocked}
-                        onClick={() => void handleSetManualLobby(match.id)}
-                      >
-                        Code speichern
-                      </Button>
-                    </div>
-                  )}
-
-                  {!isTerminal && (
-                    <div className="mt-4 space-y-3">
-                      <div className="space-y-2">
-                        <label className="flex items-center gap-2 text-sm text-foreground">
-                          <input
-                            type="radio"
-                            name={`group-winner-${match.id}`}
-                            checked={selectedWinners[match.id] === match.team1_id}
-                            onChange={() =>
-                              setSelectedWinners((current) => ({ ...current, [match.id]: match.team1_id }))
-                            }
-                            className="accent-primary"
-                          />
-                          <span>{team1Name} gewonnen</span>
-                        </label>
-                        <label className="flex items-center gap-2 text-sm text-foreground">
-                          <input
-                            type="radio"
-                            name={`group-winner-${match.id}`}
-                            checked={selectedWinners[match.id] === match.team2_id}
-                            onChange={() =>
-                              setSelectedWinners((current) => ({ ...current, [match.id]: match.team2_id }))
-                            }
-                            className="accent-primary"
-                          />
-                          <span>{team2Name} gewonnen</span>
-                        </label>
-                      </div>
-
-                      <Button
-                        variant="primary"
-                        size="sm"
-                        disabled={!selectedWinners[match.id] || isLocked}
-                        onClick={() => void handleSubmit(match.id)}
-                      >
-                        {isSubmitting ? 'Speichert...' : 'Ergebnis speichern'}
-                      </Button>
-                    </div>
-                  )}
-
-                  {message && (
-                    <div
-                      className={`mt-3 flex items-center gap-2 rounded-lg p-3 text-sm ${
-                        message.kind === 'error'
-                          ? 'border border-red-500/20 bg-red-500/10 text-red-400'
-                          : 'border border-green-500/20 bg-green-500/10 text-green-400'
-                      }`}
-                    >
-                      {message.kind === 'error' ? <AlertCircle size={16} /> : <CheckCircle2 size={16} />}
-                      <span>{message.text}</span>
-                    </div>
-                  )}
-                </div>
-              )
-            })}
+                  </details>
+                ))
+              : group.matches.map((match) => renderMatch(group, match, true))}
           </div>
         </Card>
       ))}

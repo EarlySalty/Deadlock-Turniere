@@ -7,7 +7,7 @@ import {
   previewSoloBalance, applySoloBalance, fetchSoloBalanceWaitlist,
   createTeam, joinTeam, signupSolo, checkinPlayer, getCheckinStatus,
   withdrawSolo, kickMember, inviteBySignup, leaveTeam,
-  generateGroups, generateBracket,
+  generateGroups, generateBracket, rescheduleLeaguePlan,
   triggerAutoLobby, fetchMiniGroups,
   createLobby, startMatch, fetchMatchResult, leaveLobby, submitMatchResult,
   createGroupLobby, startGroupMatch, fetchGroupMatchResult, leaveGroupLobby,
@@ -257,8 +257,33 @@ export function useCheckin(tournamentId: number) {
 export function useGenerateGroups() {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: ({ tournamentId, numGroups }: { tournamentId: number; numGroups?: number }) =>
-      generateGroups(tournamentId, numGroups),
+    mutationFn: ({
+      tournamentId,
+      numGroups,
+      slotMinutes,
+    }: {
+      tournamentId: number
+      numGroups?: number
+      slotMinutes?: number
+    }) => generateGroups(tournamentId, numGroups, slotMinutes),
+    onSuccess: (_data, vars) => {
+      invalidateTournamentCaches(qc, vars.tournamentId)
+    },
+  })
+}
+
+export function useRescheduleLeaguePlan() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({
+      tournamentId,
+      start,
+      slotMinutes,
+    }: {
+      tournamentId: number
+      start: string
+      slotMinutes: number
+    }) => rescheduleLeaguePlan(tournamentId, start, slotMinutes),
     onSuccess: (_data, vars) => {
       invalidateTournamentCaches(qc, vars.tournamentId)
     },

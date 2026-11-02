@@ -8,6 +8,10 @@ In der Gruppenphase spielt jedes Team gegen die anderen Teams seiner Gruppe. Ans
 
 Das Format bietet mehrere Spiele pro Team und braucht entsprechend mehr Zeit. Anzahl und Größe der Gruppen hängen von der Turnierkonfiguration ab.
 
+## Jeder gegen jeden
+
+Jedes Team spielt einmal gegen jedes andere, Runde für Runde zu festen Zeiten. Bei 10 Teams sind das 45 Spiele in 9 Runden, bei ungerader Teamzahl setzt pro Runde ein Team aus. Ein Sieg gibt +2 Punkte, eine Niederlage -1. Bei Punktgleichheit entscheidet die Zahl der Siege, danach der direkte Vergleich. Ein Bracket gibt es nicht: die Tabelle ist am Ende die Platzierung. Den Start und die Minuten pro Runde stellt die Turnierleitung im Spielplan ein.
+
 ## Nur Bracket
 
 Nach Anmeldung und Check-in beginnt direkt das K.-o.-Turnier. Es gibt keine Gruppenphase. Bei acht Teams umfasst ein einfaches K.-o.-Turnier Viertelfinale, Halbfinale und Finale, insgesamt sieben Spiele.

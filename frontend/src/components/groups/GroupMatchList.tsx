@@ -1,11 +1,13 @@
 import { motion } from 'framer-motion'
 import { CheckCircle2, Clock, KeyRound, Radio, Swords } from 'lucide-react'
 import Card from '@/components/ui/Card'
+import { formatRoundTime, leagueRounds } from '@/lib/league'
 import type { Group, GroupMatch, TeamPublic } from '@/types/tournament'
 
 interface Props {
   groups: Group[]
   teams: TeamPublic[]
+  league?: boolean
 }
 
 interface RoundEntry {
@@ -122,16 +124,16 @@ function formatSchedule(value: string | null): string {
   })
 }
 
-export default function GroupMatchList({ groups, teams }: Props) {
+export default function GroupMatchList({ groups, teams, league = false }: Props) {
   const groupsWithMatches = groups
-    .map((group) => ({ ...group, rounds: buildRounds(group) }))
+    .map((group) => ({ ...group, rounds: league ? leagueRounds(group.matches) : buildRounds(group).map((entry) => ({ ...entry, scheduledAt: null as string | null })) }))
     .filter((group) => group.rounds.length > 0)
 
   if (groupsWithMatches.length === 0) {
     return (
       <Card className="p-6 text-center">
         <Swords size={32} className="mx-auto text-muted mb-3" />
-        <p className="text-muted">Noch keine Gruppenspiele geplant</p>
+        <p className="text-muted">{league ? 'Der Spielplan steht noch nicht' : 'Noch keine Gruppenspiele geplant'}</p>
       </Card>
     )
   }
@@ -139,13 +141,13 @@ export default function GroupMatchList({ groups, teams }: Props) {
   return (
     <div className="space-y-4">
       <div>
-        <h2 className="text-lg font-semibold text-foreground">Spielplan Gruppenphase</h2>
+        <h2 className="text-lg font-semibold text-foreground">{league ? 'Spielplan' : 'Spielplan Gruppenphase'}</h2>
         <p className="text-sm text-muted">
           Runde für Runde sehen, welches Team gegeneinander spielt und welcher Status gerade aktiv ist.
         </p>
       </div>
 
-      <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+      <div className={`grid grid-cols-1 gap-4 ${league ? '' : 'xl:grid-cols-2'}`}>
         {groupsWithMatches.map((group, groupIndex) => (
           <motion.div
             key={group.id}
@@ -157,7 +159,7 @@ export default function GroupMatchList({ groups, teams }: Props) {
               <div className="border-b border-border px-5 py-4">
                 <div className="flex items-center gap-2">
                   <Swords size={16} className="text-primary" />
-                  <h3 className="font-semibold text-foreground">{group.name}</h3>
+                  <h3 className="font-semibold text-foreground">{league ? 'Alle Runden' : group.name}</h3>
                   <span className="ml-auto text-xs text-muted">
                     {group.matches.filter((match) => match.status === 'completed' || match.status === 'forfeit').length}/{group.matches.length} fertig
                   </span>
@@ -171,7 +173,9 @@ export default function GroupMatchList({ groups, teams }: Props) {
                       <div>
                         <div className="text-xs uppercase tracking-wider text-muted">Runde {roundEntry.round}</div>
                         <div className="text-sm font-medium text-foreground">
-                          {roundEntry.matches.length} Match{roundEntry.matches.length === 1 ? '' : 'es'}
+                          {league
+                            ? formatRoundTime(roundEntry.scheduledAt)
+                            : `${roundEntry.matches.length} Match${roundEntry.matches.length === 1 ? '' : 'es'}`}
                         </div>
                       </div>
                     </div>
@@ -190,7 +194,7 @@ export default function GroupMatchList({ groups, teams }: Props) {
                                 <div className="text-xs uppercase tracking-wider text-muted">
                                   Spiel {matchIndex + 1}
                                 </div>
-                                <div className="flex items-center gap-3 text-sm">
+                                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
                                   <span className={team1Won ? 'font-semibold text-green-400' : 'text-foreground'}>
                                     {team1Name}
                                   </span>
@@ -199,9 +203,11 @@ export default function GroupMatchList({ groups, teams }: Props) {
                                     {team2Name}
                                   </span>
                                 </div>
-                                <div className="text-xs text-muted">
-                                  {formatSchedule(match.scheduled_at)}
-                                </div>
+                                {!league && (
+                                  <div className="text-xs text-muted">
+                                    {formatSchedule(match.scheduled_at)}
+                                  </div>
+                                )}
                               </div>
 
                               <div className="flex flex-wrap items-center gap-2">

@@ -2,19 +2,25 @@ import { motion } from 'framer-motion'
 import { Trophy, LayoutGrid } from 'lucide-react'
 import Card from '@/components/ui/Card'
 import TeamRosterTooltip from '@/components/ui/TeamRosterTooltip'
+import { LEAGUE_SCORING_TEXT } from '@/lib/league'
 import type { Group, TeamPublic } from '@/types/tournament'
 
 interface Props {
   groups: Group[]
   teams?: TeamPublic[]
+  league?: boolean
 }
 
-export default function GroupStandings({ groups, teams = [] }: Props) {
+export default function GroupStandings({ groups, teams = [], league = false }: Props) {
   if (groups.length === 0) {
     return (
       <Card className="p-6 text-center">
         <LayoutGrid size={32} className="mx-auto text-muted mb-3" />
-        <p className="text-muted">Gruppenphase noch nicht gestartet</p>
+        <p className="text-muted">
+          {league
+            ? 'Die Tabelle erscheint, sobald der Check-in abgeschlossen ist und der Spielplan steht.'
+            : 'Gruppenphase noch nicht gestartet'}
+        </p>
       </Card>
     )
   }
@@ -25,12 +31,14 @@ export default function GroupStandings({ groups, teams = [] }: Props) {
   }
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+    <div className={`grid grid-cols-1 gap-4 ${league ? '' : 'lg:grid-cols-2'}`}>
       {groups.map((group, groupIndex) => {
-        const sortedTeams = [...group.teams].sort((a, b) => {
-          if (b.points !== a.points) return b.points - a.points
-          return b.wins - a.wins
-        })
+        const sortedTeams = league
+          ? group.teams
+          : [...group.teams].sort((a, b) => {
+              if (b.points !== a.points) return b.points - a.points
+              return b.wins - a.wins
+            })
 
         return (
           <motion.div
@@ -57,7 +65,7 @@ export default function GroupStandings({ groups, teams = [] }: Props) {
                   </thead>
                   <tbody>
                     {sortedTeams.map((team, index) => {
-                      const isQualified = index < 2
+                      const isQualified = !league && index < 2
                       const fullTeam = teamById.get(team.team_id)
                       return (
                         <tr
@@ -101,7 +109,7 @@ export default function GroupStandings({ groups, teams = [] }: Props) {
                           <td className="text-center px-4 py-2.5">
                             <span
                               className={`font-semibold ${
-                                isQualified ? 'text-success' : 'text-muted'
+                                isQualified ? 'text-success' : league ? 'text-foreground' : 'text-muted'
                               }`}
                             >
                               {team.points}
@@ -113,6 +121,9 @@ export default function GroupStandings({ groups, teams = [] }: Props) {
                   </tbody>
                 </table>
               </div>
+              {league && (
+                <p className="border-t border-border px-5 py-3 text-xs text-muted">{LEAGUE_SCORING_TEXT}</p>
+              )}
             </Card>
           </motion.div>
         )

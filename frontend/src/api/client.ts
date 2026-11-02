@@ -443,10 +443,16 @@ export const deleteAdminSignup = (tournamentId: number, signupId: number) =>
   })
 
 // Groups & Bracket Generation
-export const generateGroups = (tournamentId: number, numGroups: number = 4) =>
+export const generateGroups = (tournamentId: number, numGroups: number = 4, slotMinutes?: number) =>
   request<{ groups_created: number; matches_created: number }>(
     `/admin/tournaments/${tournamentId}/groups/generate`,
-    { method: 'POST', body: JSON.stringify({ num_groups: numGroups }) }
+    { method: 'POST', body: JSON.stringify({ num_groups: numGroups, slot_minutes: slotMinutes }) }
+  )
+
+export const rescheduleLeaguePlan = (tournamentId: number, start: string, slotMinutes: number) =>
+  request<{ matches_updated: number }>(
+    `/admin/tournaments/${tournamentId}/league/schedule`,
+    { method: 'POST', body: JSON.stringify({ start, slot_minutes: slotMinutes }) }
   )
 
 export const generateBracket = (tournamentId: number) =>

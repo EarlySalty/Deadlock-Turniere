@@ -14,6 +14,7 @@ interface CheckinManagerProps {
   teamSize: number
   teams: Team[]
   signups: TournamentSignup[]
+  league?: boolean
 }
 
 interface ParticipantRow {
@@ -32,6 +33,7 @@ export default function CheckinManager({
   teamSize,
   teams,
   signups,
+  league = false,
 }: CheckinManagerProps) {
   const { data: checkinStatus } = useCheckinStatus(tournamentId)
   const finalizeMutation = useFinalizeCheckin(tournamentId)
@@ -112,9 +114,11 @@ export default function CheckinManager({
       {
         onSuccess: (result) => {
           setFeedback(
-            result.advanced_to_bracket
-              ? 'Check-in abgeschlossen und Turnier direkt ins Bracket verschoben.'
-              : 'Check-in abgeschlossen und Turnier in die Gruppenphase verschoben.'
+            league
+              ? 'Check-in abgeschlossen. Der Spielplan steht, du findest ihn unter „Spielplan“.'
+              : result.advanced_to_bracket
+                ? 'Check-in abgeschlossen und Turnier direkt ins Bracket verschoben.'
+                : 'Check-in abgeschlossen und Turnier in die Gruppenphase verschoben.'
           )
           setPreview(null)
         },

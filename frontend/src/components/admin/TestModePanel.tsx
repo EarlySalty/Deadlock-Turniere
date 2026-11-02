@@ -303,13 +303,18 @@ export default function TestModePanel() {
                 onChange={(e) =>
                   setTournamentForm({
                     ...tournamentForm,
-                    mode: e.target.value as 'bracket_only' | 'group_then_bracket',
+                    mode: e.target.value as CreateTestTournamentRequest['mode'],
+                    advance_to:
+                      e.target.value === 'league' && tournamentForm.advance_to === 'bracket'
+                        ? 'group_phase'
+                        : tournamentForm.advance_to,
                   })
                 }
                 className="rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
               >
                 <option value="bracket_only">Nur Bracket</option>
                 <option value="group_then_bracket">Gruppen + Bracket</option>
+                <option value="league">Jeder gegen jeden</option>
               </select>
             </div>
             <div className="flex flex-col gap-1">
@@ -328,7 +333,10 @@ export default function TestModePanel() {
                 {tournamentForm.mode === 'group_then_bracket' && (
                   <option value="group_phase">Gruppenphase</option>
                 )}
-                <option value="bracket">Bracket</option>
+                {tournamentForm.mode === 'league' && (
+                  <option value="group_phase">Spielplan</option>
+                )}
+                {tournamentForm.mode !== 'league' && <option value="bracket">Bracket</option>}
               </select>
             </div>
           </div>

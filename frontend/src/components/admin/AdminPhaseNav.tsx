@@ -82,6 +82,7 @@ interface AdminPhaseNavProps {
   status: TournamentStatus
   hasGroups: boolean
   hasBracket: boolean
+  league?: boolean
   activePhase: AdminPhase
   onChange: (phase: AdminPhase) => void
 }
@@ -97,6 +98,7 @@ export default function AdminPhaseNav({
   status,
   hasGroups,
   hasBracket,
+  league = false,
   activePhase,
   onChange,
 }: AdminPhaseNavProps) {
@@ -142,7 +144,7 @@ export default function AdminPhaseNav({
               {state === 'done' ? <Check size={11} /> : <Icon size={11} />}
             </span>
             <span className="min-w-0 truncate text-sm font-medium leading-tight">
-              {phase.label}
+              {league && phase.id === 'group_phase' ? 'Spielplan' : phase.label}
             </span>
           </button>
         )

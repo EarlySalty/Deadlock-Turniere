@@ -29,6 +29,14 @@ const TOURNAMENT_STEPS = [
   },
 ]
 
+const LEAGUE_STEPS = [
+  'Beim Erstellen wählst du das Format „Jeder gegen jeden“ und den Start der ersten Runde.',
+  'Beim Abschluss des Check-ins entsteht der Spielplan: jedes Team spielt einmal gegen jedes andere, in Runden zu festen Zeiten. Bei 10 Teams sind das 45 Spiele in 9 Runden. Bei ungerader Teamzahl setzt pro Runde ein Team aus.',
+  'Unter „Spielplan“ änderst du Start und Minuten pro Runde, trägst Sieger ein und korrigierst sie. Lobbys öffnen zum Termin der aktuellen Runde.',
+  'Ein Sieg gibt +2 Punkte, eine Niederlage -1. Bei Punktgleichheit entscheidet die Zahl der Siege, danach der direkte Vergleich.',
+  'Sind alle Spiele gewertet, schließt du das Turnier ab. Die Tabelle ist die Endplatzierung, ein Bracket gibt es nicht.',
+]
+
 const ADMIN_ACTIONS = [
   ['Anmeldung starten', 'Wenn das Turnier freigegeben werden soll.', 'Setzt den Status auf Anmeldung.'],
   ['Zur Gruppenphase', 'Wenn die Anmeldung beendet ist.', 'Generiert Gruppen und Spiele.'],
@@ -129,6 +137,20 @@ Jeder Spieler trägt selbst die Verantwortung, sich vor Turnierbeginn über Abla
             </Card>
           ))}
         </div>
+      </section>
+
+      <section className="space-y-6">
+        <div className="flex items-center gap-3 border-l-2 border-primary pl-4 py-1">
+          <Trophy size={20} className="text-primary" />
+          <h2 className="text-xl font-bold tracking-widest text-foreground uppercase">Format: Jeder gegen jeden</h2>
+        </div>
+        <Card>
+          <ol className="list-decimal space-y-2 pl-5 text-sm text-muted">
+            {LEAGUE_STEPS.map((step) => (
+              <li key={step}>{step}</li>
+            ))}
+          </ol>
+        </Card>
       </section>
 
       {/* Admin Sektion */}

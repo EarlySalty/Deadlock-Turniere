@@ -4,6 +4,8 @@ import Card from '@/components/ui/Card'
 import GroupStandings from '@/components/groups/GroupStandings'
 import BracketView from '@/components/bracket/BracketView'
 import MiniGroupPanel from '@/components/bracket/MiniGroupPanel'
+import GroupMatchList from '@/components/groups/GroupMatchList'
+import { LEAGUE_LABEL, isLeague } from '@/lib/league'
 import TournamentCasterPanel from '@/components/admin/TournamentCasterPanel'
 import { Archive, Trophy, Users2, ListChecks } from 'lucide-react'
 
@@ -30,6 +32,7 @@ export default function ArchivedTournamentView({ tournament }: ArchivedTournamen
     return true
   })
 
+  const league = isLeague(tournament.tournament_mode)
   const teamCount = tournament.teams.length
   const playerCount = tournament.teams.reduce((sum, t) => sum + t.members.length, 0)
   const matchCount =
@@ -91,7 +94,7 @@ export default function ArchivedTournamentView({ tournament }: ArchivedTournamen
                 : 'border-transparent text-muted hover:text-foreground'
             }`}
           >
-            {tab.label}
+            {league && tab.key === 'groups' ? 'Tabelle' : tab.label}
           </button>
         ))}
       </div>
@@ -103,13 +106,15 @@ export default function ArchivedTournamentView({ tournament }: ArchivedTournamen
             <p className="text-sm text-muted">{tournament.description}</p>
           )}
           <dl className="grid gap-3 text-sm sm:grid-cols-2">
-            <div>
-              <dt className="text-xs uppercase text-muted">Format</dt>
-              <dd>{tournament.bracket_format}</dd>
-            </div>
+            {!league && (
+              <div>
+                <dt className="text-xs uppercase text-muted">Format</dt>
+                <dd>{tournament.bracket_format}</dd>
+              </div>
+            )}
             <div>
               <dt className="text-xs uppercase text-muted">Modus</dt>
-              <dd>{tournament.tournament_mode}</dd>
+              <dd>{league ? LEAGUE_LABEL : tournament.tournament_mode}</dd>
             </div>
             <div>
               <dt className="text-xs uppercase text-muted">Team-Größe</dt>
@@ -140,7 +145,12 @@ export default function ArchivedTournamentView({ tournament }: ArchivedTournamen
       )}
 
       {active === 'groups' && (
-        <GroupStandings groups={tournament.groups} teams={tournament.teams} />
+        <div className="space-y-6">
+          <GroupStandings groups={tournament.groups} teams={tournament.teams} league={league} />
+          {league && (
+            <GroupMatchList groups={tournament.groups} teams={tournament.teams} league />
+          )}
+        </div>
       )}
 
       {active === 'teams' && (

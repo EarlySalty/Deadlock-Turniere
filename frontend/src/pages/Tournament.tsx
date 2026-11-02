@@ -14,6 +14,7 @@ import Badge from '@/components/ui/Badge'
 import Button from '@/components/ui/Button'
 import LoadingSpinner from '@/components/ui/LoadingSpinner'
 import ConsentModal from '@/components/ConsentModal'
+import { LEAGUE_LABEL, isLeague } from '@/lib/league'
 import GroupStandings from '@/components/groups/GroupStandings'
 import GroupMatchList from '@/components/groups/GroupMatchList'
 import BracketView from '@/components/bracket/BracketView'
@@ -146,7 +147,7 @@ function buildGroupResultEntries(
       const loserId = match.winner_id === match.team1_id ? match.team2_id : match.team1_id
       return {
         id: `group-${match.id}`,
-        title: `${group.name} • Runde ${index + 1}`,
+        title: match.round ? `Runde ${match.round}` : `${group.name} • Runde ${index + 1}`,
         winnerName,
         loserName: getTeamName(loserId, teams),
         playedAt: match.played_at,
@@ -222,9 +223,12 @@ export default function Tournament() {
   const showResultsTab = tournament
     ? ['group_phase', 'bracket', 'completed', 'archived'].includes(tournament.status)
     : false
+  const league = isLeague(tournament?.tournament_mode)
   const availableTabs = ALL_TABS.filter(
     (tab) => showResultsTab || (tab.key !== 'ergebnisse' && tab.key !== 'rangliste')
   )
+    .filter((tab) => !league || tab.key !== 'bracket')
+    .map((tab) => (league && tab.key === 'gruppen' ? { ...tab, label: 'Tabelle' } : tab))
   const activeTab = availableTabs.some((tab) => tab.key === selectedTab)
     ? selectedTab
     : 'übersicht'
@@ -392,8 +396,8 @@ export default function Tournament() {
               <p className="text-sm font-bold text-foreground uppercase">{tournament.teams.length} Teams gemeldet</p>
             </div>
             <div className="space-y-1">
-              <p className="text-[10px] uppercase font-bold text-muted tracking-widest">Regelwerk</p>
-              <p className="text-sm font-bold text-foreground uppercase">{tournament.bracket_format === 'single_elimination' ? 'Single Elim.' : 'Double Elim.'}</p>
+              <p className="text-[10px] uppercase font-bold text-muted tracking-widest">{league ? 'Format' : 'Regelwerk'}</p>
+              <p className="text-sm font-bold text-foreground uppercase">{league ? LEAGUE_LABEL : tournament.bracket_format === 'single_elimination' ? 'Single Elim.' : 'Double Elim.'}</p>
             </div>
             {tournament.tournament_game_mode !== 'standard' && (
               <div className="space-y-1">
@@ -857,9 +861,9 @@ export default function Tournament() {
 
         {activeTab === 'gruppen' && (
           <div className="space-y-12">
-            <GroupStandings groups={tournament.groups} teams={tournament.teams} />
+            <GroupStandings groups={tournament.groups} teams={tournament.teams} league={league} />
             <div className="border-t border-white/5 pt-12">
-               <GroupMatchList groups={tournament.groups} teams={tournament.teams} />
+               <GroupMatchList groups={tournament.groups} teams={tournament.teams} league={league} />
             </div>
           </div>
         )}
@@ -961,6 +965,14 @@ export default function Tournament() {
 function TournamentRangliste({ tournament }: { tournament: TournamentDetailPublic }) {
   const bracketEntries = deriveBracketPlacements(tournament.bracket_matches, tournament.teams)
   const hasGroups = tournament.groups.length > 0
+  const league = isLeague(tournament.tournament_mode)
+  const finished = ['completed', 'archived'].includes(tournament.status)
+  const groupTeams = tournament.groups.flatMap((group) =>
+    group.teams.map((team) => ({ ...team, groupName: group.name })),
+  )
+  const rankedTeams = league
+    ? groupTeams
+    : [...groupTeams].sort((a, b) => (b.points !== a.points ? b.points - a.points : b.wins - a.wins))
 
   if (bracketEntries.length === 0 && !hasGroups) {
     return (
@@ -1017,7 +1029,7 @@ function TournamentRangliste({ tournament }: { tournament: TournamentDetailPubli
         <section className="space-y-6">
            <div className="flex items-center gap-3 border-l-2 border-primary pl-4 py-1">
              <BarChart2 size={20} className="text-primary" />
-             <h2 className="text-xl font-bold tracking-widest text-foreground uppercase">Gruppenwertung</h2>
+             <h2 className="text-xl font-bold tracking-widest text-foreground uppercase">{league ? (finished ? 'Endplatzierung' : 'Aktuelle Tabelle') : 'Gruppenwertung'}</h2>
           </div>
           <Card className="p-0 overflow-hidden border-white/5">
             <table className="w-full text-sm">
@@ -1031,12 +1043,12 @@ function TournamentRangliste({ tournament }: { tournament: TournamentDetailPubli
                 </tr>
               </thead>
               <tbody>
-                {tournament.groups
-                  .flatMap((group) => group.teams.map((team) => ({ ...team, groupName: group.name })))
-                  .sort((a, b) => b.points !== a.points ? b.points - a.points : b.wins - a.wins)
+                {rankedTeams
                   .map((team, idx) => (
                     <tr key={`${team.team_id}-${team.groupName}`} className="border-b border-white/5 last:border-0 hover:bg-white/[0.02] transition-colors">
-                      <td className="px-6 py-4 text-center text-muted font-bold">{idx + 1}</td>
+                      <td className="px-6 py-4 text-center text-muted font-bold">
+                        {league && finished && idx === 0 ? <Trophy size={18} className="text-primary mx-auto" /> : idx + 1}
+                      </td>
                       <td className="px-6 py-4 font-bold text-foreground uppercase tracking-wide">{team.team_name}</td>
                       <td className="px-6 py-4 text-center text-muted font-medium">{team.wins}</td>
                       <td className="px-6 py-4 text-center text-muted font-medium">{team.losses}</td>
