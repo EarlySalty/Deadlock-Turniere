@@ -18,7 +18,7 @@ use serde_json::Value;
 use turnier_core::{discord_id_to_string, now_utc};
 use turnier_db::{dynamic_sql::ReminderDedupeTable, Pool};
 use turnier_discord::{DiscordNotifier, NotificationEvent};
-use turnier_match::league::due_lobby_match_ids;
+use turnier_match::league::current_round_match_ids;
 
 use crate::time::{is_within_configured_window, offset_label, parse_reminder_offsets_with_default};
 
@@ -298,17 +298,19 @@ async fn load_league_reminder_rows(pool: &Pool) -> sqlx::Result<Vec<MatchReminde
     .await?;
     let mut match_ids = Vec::new();
     for tournament_id in tournament_ids {
-        match_ids.extend(due_lobby_match_ids(pool, tournament_id, now_utc()).await?);
+        match_ids.extend(current_round_match_ids(pool, tournament_id).await?);
     }
     sqlx::query_as(
         "SELECT gm.id, gm.team1_id, gm.team2_id, t.name AS tournament_name \
          FROM turnier.group_matches gm \
          JOIN turnier.groups g ON g.id = gm.group_id \
          JOIN turnier.tournaments t ON t.id = g.tournament_id \
-         WHERE gm.id = ANY($1) AND gm.status = 'pending' \
+         WHERE gm.id = ANY($1) AND gm.scheduled_at <= $2 \
+           AND gm.status IN ('pending', 'lobby_created') \
          ORDER BY gm.id",
     )
     .bind(&match_ids)
+    .bind(now_utc())
     .fetch_all(pool)
     .await
 }

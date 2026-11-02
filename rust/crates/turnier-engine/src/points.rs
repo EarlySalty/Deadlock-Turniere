@@ -104,17 +104,13 @@ pub fn team_wins(matches: &[CompletedMatch]) -> HashMap<i64, i64> {
 /// Berechnet den Punkte-Beitrag EINES Teilnehmers (über sein `team_id`) in EINEM
 /// Turnier.
 ///
-/// `total_completed_matches` ist die Gesamtzahl abgeschlossener Bracket-Matches
-/// des Turniers — das Original zählt diese GLOBAL als `matches_played` pro
-/// Spieler (bug-preserved: nicht team-spezifisch).
-///
 /// Punkte = Teilnahme (1) + Platzierungspunkte + `floor(wins * 0.5)` (bewusste
 /// Integer-Trunkierung wie im Original via `int(wins * 0.5)`).
 pub fn contribution_for_team(
     team_id: i64,
     placements: &HashMap<i64, i64>,
     wins: &HashMap<i64, i64>,
-    total_completed_matches: i64,
+    matches_played: i64,
 ) -> PointsContribution {
     let placement = placements.get(&team_id).copied();
     let team_win_count = wins.get(&team_id).copied().unwrap_or(0);
@@ -128,7 +124,7 @@ pub fn contribution_for_team(
 
     PointsContribution {
         points,
-        matches_played: total_completed_matches,
+        matches_played,
         matches_won: team_win_count,
         placement,
     }

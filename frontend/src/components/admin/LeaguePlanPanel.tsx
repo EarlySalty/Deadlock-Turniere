@@ -59,18 +59,23 @@ function ScheduleEditor({ tournamentId, initialStart, initialSlot, canRebuild }:
   const reschedule = useRescheduleLeaguePlan()
   const rebuild = useGenerateGroups()
   const [start, setStart] = useState(initialStart)
+  const [savedStart, setSavedStart] = useState(initialStart)
   const [slot, setSlot] = useState(initialSlot)
   const [notice, setNotice] = useState<Notice | null>(null)
   const busy = reschedule.isPending || rebuild.isPending
   const startIso = localInputToIso(start)
   const validSlot = Number.isInteger(slot) && slot >= 1 && slot <= 1440
+  const startUnsaved = start !== savedStart
 
   const handleReschedule = () => {
     if (!startIso) return
     reschedule.mutate(
       { tournamentId, start: startIso, slotMinutes: slot },
       {
-        onSuccess: () => setNotice({ kind: 'success', text: 'Zeitplan wurde angepasst.' }),
+        onSuccess: () => {
+          setSavedStart(start)
+          setNotice({ kind: 'success', text: 'Zeitplan wurde angepasst.' })
+        },
         onError: (error) =>
           setNotice({ kind: 'error', text: errorText(error, 'Zeitplan konnte nicht geändert werden') }),
       },
@@ -78,7 +83,12 @@ function ScheduleEditor({ tournamentId, initialStart, initialSlot, canRebuild }:
   }
 
   const handleRebuild = () => {
-    if (!window.confirm('Spielplan neu auslosen? Alle Paarungen werden neu erstellt.')) return
+    const question =
+      'Spielplan neu erstellen?\n\n' +
+      'Alle Spiele des aktuellen Plans werden gelöscht und aus der aktuellen Teamliste neu angelegt. ' +
+      'Sind die Teams unverändert, kommen dieselben Paarungen wieder heraus.\n\n' +
+      `Runde 1 beginnt zur gespeicherten Startzeit, jede Runde dauert ${slot} Minuten.`
+    if (!window.confirm(question)) return
     rebuild.mutate(
       { tournamentId, slotMinutes: slot },
       {
@@ -137,12 +147,23 @@ function ScheduleEditor({ tournamentId, initialStart, initialSlot, canRebuild }:
           {reschedule.isPending ? 'Speichert...' : 'Zeiten übernehmen'}
         </Button>
         {canRebuild && (
-          <Button variant="secondary" size="sm" disabled={busy || !validSlot} onClick={handleRebuild}>
+          <Button
+            variant="secondary"
+            size="sm"
+            disabled={busy || !validSlot || startUnsaved}
+            onClick={handleRebuild}
+          >
             <ListRestart size={14} />
             {rebuild.isPending ? 'Erstellt...' : 'Spielplan neu erstellen'}
           </Button>
         )}
       </div>
+      {canRebuild && startUnsaved && (
+        <p className="text-xs text-muted">
+          Die geänderte Startzeit ist noch nicht gespeichert. Übernimm sie zuerst mit „Zeiten
+          übernehmen“, dann kannst du den Spielplan neu erstellen.
+        </p>
+      )}
       {notice && <NoticeLine notice={notice} />}
     </Card>
   )

@@ -303,6 +303,45 @@ async fn reset_with_stored_discord_channel_does_not_fail() {
 }
 
 #[tokio::test]
+async fn reset_on_a_finished_league_keeps_the_discord_channel() {
+    let app = app().await;
+    let liga = league(&app.pool, 2, "league").await;
+    let ab = match_between(&app.pool, &liga, liga.teams[0], liga.teams[1]).await;
+    assert_eq!(app.submit(&liga, ab, liga.teams[0]).await, StatusCode::OK);
+    sqlx::query("UPDATE turnier.group_matches SET discord_channel_id = 123456789 WHERE id = $1")
+        .bind(ab)
+        .execute(&app.pool)
+        .await
+        .expect("channel");
+    set_status(&app.pool, &liga, "completed").await;
+
+    assert_eq!(app.reset(&liga, ab).await, StatusCode::BAD_REQUEST);
+    assert_eq!(channel_delete_attempts(&app.pool).await, 0);
+
+    set_status(&app.pool, &liga, "group_phase").await;
+    assert_eq!(app.reset(&liga, ab).await, StatusCode::OK);
+    assert_eq!(channel_delete_attempts(&app.pool).await, 1);
+}
+
+async fn set_status(pool: &Pool, league: &League, status: &str) {
+    sqlx::query("UPDATE turnier.tournaments SET status = $1 WHERE id = $2")
+        .bind(status)
+        .bind(league.id)
+        .execute(pool)
+        .await
+        .expect("status");
+}
+
+async fn channel_delete_attempts(pool: &Pool) -> i64 {
+    sqlx::query_scalar(
+        "SELECT COUNT(*) FROM turnier.discord_tasks WHERE payload->>'channel_id' = '123456789'",
+    )
+    .fetch_one(pool)
+    .await
+    .expect("delete attempts")
+}
+
+#[tokio::test]
 async fn group_stage_manual_path_keeps_plus_three_and_refuses_changes() {
     let app = app().await;
     let liga = league(&app.pool, 2, "group_stage").await;

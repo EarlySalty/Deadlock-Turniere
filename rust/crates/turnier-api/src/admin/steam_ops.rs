@@ -9,7 +9,7 @@ use axum::http::StatusCode;
 use axum::Json;
 use serde::Deserialize;
 use serde_json::{json, Value};
-use sqlx::Row;
+use sqlx::{PgConnection, Row};
 
 use turnier_match::{MatchKind, SteamTaskError};
 
@@ -269,6 +269,10 @@ pub async fn reset_match(
             "Abgeschlossene oder abgebrochene Matches können nicht zurückgesetzt werden",
         ));
     }
+    if league_group_id.is_some() {
+        let mut conn = state.pool.acquire().await?;
+        ensure_league_running(&mut conn, tournament_id).await?;
+    }
     let discord_channel_id: Option<i64> = row.get("discord_channel_id");
     if let Some(channel_id) = discord_channel_id {
         if let Err(err) = state
@@ -296,11 +300,7 @@ pub async fn reset_match(
 
     let mut tx = state.pool.begin().await?;
     if let Some(group_id) = league_group_id {
-        if !league_is_running(&mut tx, tournament_id).await? {
-            return Err(WebError::bad_request(
-                "Ergebnisse lassen sich nur ändern, solange das Turnier läuft",
-            ));
-        }
+        ensure_league_running(&mut tx, tournament_id).await?;
         reset_league_match_in_tx(&mut tx, match_id, group_id).await?;
     } else {
         sqlx::query(update_sql)
@@ -319,6 +319,15 @@ pub async fn reset_match(
     tx.commit().await?;
 
     Ok(Json(json!({ "success": true })))
+}
+
+async fn ensure_league_running(conn: &mut PgConnection, tournament_id: i64) -> WebResult<()> {
+    if league_is_running(conn, tournament_id).await? {
+        return Ok(());
+    }
+    Err(WebError::bad_request(
+        "Ergebnisse lassen sich nur ändern, solange das Turnier läuft",
+    ))
 }
 
 async fn league_group_of(

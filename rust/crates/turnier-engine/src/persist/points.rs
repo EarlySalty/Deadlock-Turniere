@@ -36,10 +36,24 @@ struct MatchRow {
     winner_id: Option<i64>,
 }
 
+enum MatchesPlayed {
+    TournamentWide(i64),
+    PerTeam(HashMap<i64, i64>),
+}
+
+impl MatchesPlayed {
+    fn for_team(&self, team_id: i64) -> i64 {
+        match self {
+            Self::TournamentWide(total) => *total,
+            Self::PerTeam(counts) => counts.get(&team_id).copied().unwrap_or(0),
+        }
+    }
+}
+
 struct TournamentResults {
     placements: HashMap<i64, i64>,
     wins: HashMap<i64, i64>,
-    total_completed: i64,
+    matches_played: MatchesPlayed,
 }
 
 async fn bracket_results(
@@ -65,7 +79,7 @@ async fn bracket_results(
     Ok(TournamentResults {
         placements: team_placements(&matches),
         wins: team_wins(&matches),
-        total_completed: matches.len() as i64,
+        matches_played: MatchesPlayed::TournamentWide(matches.len() as i64),
     })
 }
 
@@ -106,8 +120,16 @@ async fn league_results(
             .map(|(index, row)| (row.team_id, index as i64 + 1))
             .collect(),
         wins: table.iter().map(|row| (row.team_id, row.wins)).collect(),
-        total_completed: games.len() as i64,
+        matches_played: MatchesPlayed::PerTeam(games_per_team(&games)),
     })
+}
+
+fn games_per_team(games: &[LeagueGame]) -> HashMap<i64, i64> {
+    let mut counts = HashMap::new();
+    for team_id in games.iter().flat_map(|g| [g.team1_id, g.team2_id]) {
+        *counts.entry(team_id).or_insert(0) += 1;
+    }
+    counts
 }
 
 /// Aggregierter Stand eines Spielers über alle gewerteten Turniere.
@@ -195,7 +217,7 @@ pub async fn recalculate_player_points_in_tx(
                 team_id,
                 &results.placements,
                 &results.wins,
-                results.total_completed,
+                results.matches_played.for_team(team_id),
             );
             aggregates.entry(discord_id).or_default().add(contribution);
         }

@@ -4,11 +4,12 @@ mod common;
 
 use chrono::{Duration, Utc};
 use common::{
-    fake_match_manager, fake_notifier, insert_team, insert_tournament, test_config,
-    tournament_status,
+    fake_match_manager, fake_notifier, insert_team, insert_team_member, insert_tournament,
+    test_config, tournament_status,
 };
 use turnier_scheduler::{
-    advance_tournament_status, get_due_next_status, DueStatusRow, SchedulerError,
+    advance_tournament_status, check_and_send_match_reminders, get_due_next_status, DueStatusRow,
+    SchedulerError,
 };
 
 const CAPTAIN: i64 = 123_456_789_012_345_900;
@@ -136,4 +137,61 @@ async fn league_goes_from_checkin_to_plan_to_completed_without_bracket() {
             .await
             .expect("count");
     assert_eq!(bracket_matches, 0);
+}
+
+#[tokio::test]
+async fn first_round_gets_its_reminder_after_lobbies_opened_at_the_transition() {
+    let db = turnier_db::test_pool().await.expect("central test pool");
+    let pool = db.pool().clone();
+    let config = test_config();
+    let notifier = fake_notifier(pool.clone(), &config);
+    let matchmgr = fake_match_manager(pool.clone(), &config);
+    let id = insert_tournament(&pool, "Liga", "checkin", false).await;
+    sqlx::query(
+        "UPDATE turnier.tournaments SET tournament_mode = 'league', group_phase_start = $1 \
+         WHERE id = $2",
+    )
+    .bind(Utc::now() - Duration::minutes(1))
+    .bind(id)
+    .execute(&pool)
+    .await
+    .expect("mode");
+    for index in 0..10 {
+        let team = insert_team(&pool, id, &format!("Team {index}"), CAPTAIN + index).await;
+        insert_team_member(&pool, team, CAPTAIN + index).await;
+    }
+    advance_tournament_status(
+        &pool,
+        &matchmgr,
+        &notifier,
+        id,
+        "checkin",
+        "group_phase",
+        "scheduler",
+        None,
+    )
+    .await
+    .expect("plan");
+    sqlx::query(
+        "UPDATE turnier.group_matches SET status = 'lobby_created', steam_party_id = 'party' \
+         WHERE scheduled_at = (SELECT group_phase_start FROM turnier.tournaments WHERE id = $1) \
+           AND group_id IN (SELECT id FROM turnier.groups WHERE tournament_id = $1)",
+    )
+    .bind(id)
+    .execute(&pool)
+    .await
+    .expect("lobbies");
+
+    for _ in 0..2 {
+        check_and_send_match_reminders(&pool, &notifier)
+            .await
+            .expect("reminders");
+        let sent: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM turnier.sent_match_reminders WHERE match_type = 'group'",
+        )
+        .fetch_one(&pool)
+        .await
+        .expect("reminder count");
+        assert_eq!(sent, 5);
+    }
 }
