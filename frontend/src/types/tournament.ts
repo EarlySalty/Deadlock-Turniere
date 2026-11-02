@@ -57,6 +57,7 @@ export interface Tournament {
   invite_mode: InviteMode
   invite_window_start: string | null
   invite_window_end: string | null
+  lobby_settings?: string | null
   exclude_from_leaderboard: boolean
   reminder_offsets: number[]
   start_reminder_offsets: number[]
@@ -345,6 +346,8 @@ export interface TournamentUpdate {
   invite_mode?: InviteMode
   invite_window_start?: string
   invite_window_end?: string
+  lobby_settings_preset?: LobbySettingsPreset
+  lobby_settings?: Record<string, unknown>
   exclude_from_leaderboard?: boolean
   reminder_offsets?: number[]
   start_reminder_offsets?: number[]
