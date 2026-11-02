@@ -1,7 +1,9 @@
+import { isLeague } from '@/lib/league'
 import type { TournamentStatus } from '@/types/tournament'
 
 interface BadgeProps {
   status: TournamentStatus
+  mode?: string | null
   className?: string
 }
 
@@ -15,11 +17,12 @@ const statusConfig: Record<TournamentStatus, { label: string; style: string }> =
   archived: { label: 'Archiviert', style: 'border-white/10 text-muted bg-white/5 opacity-50' },
 }
 
-export default function Badge({ status, className = '' }: BadgeProps) {
+export default function Badge({ status, mode, className = '' }: BadgeProps) {
   const config = statusConfig[status]
+  const label = status === 'group_phase' && isLeague(mode) ? 'Läuft' : config.label
   return (
     <span className={`inline-flex items-center rounded-md border px-2 py-0.5 text-[10px] font-bold uppercase tracking-widest ${config.style} ${className}`}>
-      {config.label}
+      {label}
     </span>
   )
 }

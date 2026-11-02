@@ -257,7 +257,7 @@ export default function Admin() {
                           <span className="inline-block h-2 w-2 shrink-0 rounded-full bg-green-400" />
                         </div>
                         <div className="mt-2 flex items-center gap-2">
-                          <Badge status={t.status} />
+                          <Badge status={t.status} mode={t.tournament_mode} />
                           <span className="text-[10px] text-muted">
                             {new Date(t.created_at).toLocaleDateString('de-DE')}
                           </span>
@@ -501,7 +501,7 @@ export default function Admin() {
                             {t.name}
                           </div>
                           <div className="mt-1 flex items-center gap-2">
-                            <Badge status={t.status} />
+                            <Badge status={t.status} mode={t.tournament_mode} />
                             <span className="text-[10px] text-muted">
                               {new Date(t.created_at).toLocaleDateString('de-DE')}
                             </span>

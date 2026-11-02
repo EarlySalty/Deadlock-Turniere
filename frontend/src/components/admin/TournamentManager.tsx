@@ -266,7 +266,7 @@ export default function TournamentManager({
           <div className="flex items-center gap-3">
             <Trophy size={20} className="text-primary" />
             <h2 className="text-lg font-semibold text-foreground">Turnier-Verwaltung</h2>
-            <Badge status={tournament.status} />
+            <Badge status={tournament.status} mode={tournament.tournament_mode} />
           </div>
           <p className="text-sm text-muted">
             Metadaten pflegen, Phasen steuern und Generierung sicher auslösen.

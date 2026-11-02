@@ -372,7 +372,7 @@ export default function Tournament() {
       {/* Hero Header */}
       <section className="relative overflow-hidden rounded-lg border-b border-white/5 pb-12">
         <div className="absolute top-0 right-0 p-4">
-          <Badge status={tournament.status} className="scale-110" />
+          <Badge status={tournament.status} mode={tournament.tournament_mode} className="scale-110" />
         </div>
         <div className="space-y-4">
           <div className="flex items-center gap-3">

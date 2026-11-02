@@ -86,7 +86,7 @@ export default function Home() {
                       )}
                     </div>
                     <div className="shrink-0">
-                      <Badge status={active.status} className="scale-110 origin-top-right" />
+                      <Badge status={active.status} mode={active.tournament_mode} className="scale-110 origin-top-right" />
                     </div>
                   </div>
 
@@ -146,7 +146,7 @@ export default function Home() {
                         {new Date(t.created_at).toLocaleDateString('de-DE')}
                       </span>
                     </div>
-                    <Badge status={t.status} className="scale-75 origin-right" />
+                    <Badge status={t.status} mode={t.tournament_mode} className="scale-75 origin-right" />
                   </div>
                 </Card>
               </Link>

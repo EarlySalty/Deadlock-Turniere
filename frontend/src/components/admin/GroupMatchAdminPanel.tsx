@@ -504,7 +504,7 @@ export default function GroupMatchAdminPanel({
               ? leagueRounds(group.matches).map((round) => (
                   <details
                     key={round.round}
-                    open={round.round === currentRoundOf(group) || round.openMatches > 0}
+                    open={round.round === currentRoundOf(group)}
                     className="rounded-xl border border-border bg-background/30"
                   >
                     <summary className="flex cursor-pointer flex-wrap items-center gap-x-3 gap-y-1 px-4 py-3 text-sm">
