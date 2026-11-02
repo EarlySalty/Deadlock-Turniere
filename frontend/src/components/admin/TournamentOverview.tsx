@@ -101,7 +101,7 @@ export function TournamentSummaryCard({ tournament: t }: { tournament: AdminTour
     <Card className="space-y-4 p-5">
       <div className="flex flex-wrap items-center gap-3">
         <Trophy size={20} className="shrink-0 text-primary" />
-        <h2 className="min-w-0 flex-1 truncate text-xl font-bold text-foreground">{t.name}</h2>
+        <h2 className="min-w-0 flex-1 break-words text-xl font-bold text-foreground">{t.name}</h2>
         <Badge status={t.status} mode={t.tournament_mode} />
       </div>
       <dl className="grid grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-4">
@@ -125,7 +125,7 @@ export function CollapsedTournamentRow({ tournament: t, onSelect }: { tournament
       aria-expanded={false}
       className="flex w-full flex-wrap items-center gap-x-4 gap-y-1 rounded-xl border border-border bg-card/60 px-4 py-3 text-left transition-colors hover:border-border-hover hover:bg-card-hover"
     >
-      <span className="min-w-0 flex-1 truncate font-medium text-foreground">{t.name}</span>
+      <span className="min-w-0 basis-full truncate font-medium text-foreground sm:basis-auto sm:flex-1">{t.name}</span>
       <Badge status={t.status} mode={t.tournament_mode} />
       <span className="flex items-center gap-1 text-xs text-muted">
         <CalendarDays size={12} />

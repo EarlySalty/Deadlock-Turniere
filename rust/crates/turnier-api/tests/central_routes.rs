@@ -732,6 +732,41 @@ async fn admin_tournament_delete_removes_team_application_and_invitation_rows() 
 }
 
 #[tokio::test]
+async fn admin_tournament_list_carries_team_and_signup_counts() {
+    let ctx = setup().await;
+    let admin_token = session(&ctx.pool, ADMIN_ID, "Admin", &["admin-role", "mod-role"]).await;
+    let tournament_id = seed_tournament(&ctx.pool, "Admin Count Cup", "registration", 3).await;
+    let team_id = seed_team(&ctx.pool, tournament_id, "Count Team", CAPTAIN_ID).await;
+    seed_signup(&ctx.pool, tournament_id, PLAYER_ID, "Solo Offen").await;
+    let assigned = seed_signup(&ctx.pool, tournament_id, INVITED_ID, "Solo Zugeteilt").await;
+    sqlx::query(r#"UPDATE turnier."tournament_signups" SET team_id = $1 WHERE id = $2"#)
+        .bind(team_id)
+        .bind(assigned)
+        .execute(&ctx.pool)
+        .await
+        .expect("assign signup");
+
+    let (status, body) = send_json(
+        &ctx.app,
+        Some(&admin_token),
+        Method::GET,
+        "/api/admin/tournaments",
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let entry = body
+        .as_array()
+        .and_then(|list| list.iter().find(|t| t["id"] == tournament_id))
+        .expect("tournament in admin list");
+    assert_eq!(entry["name"], "Admin Count Cup");
+    assert_eq!(entry["team_count"], 1);
+    assert_eq!(entry["player_count"], 1);
+    assert_eq!(entry["signup_count"], 2);
+    assert_eq!(entry["open_signup_count"], 1);
+}
+
+#[tokio::test]
 async fn admin_team_delete_removes_team_application_and_invitation_rows() {
     let ctx = setup().await;
     let mod_token = session(&ctx.pool, ADMIN_ID, "Mod", &["admin-role", "mod-role"]).await;

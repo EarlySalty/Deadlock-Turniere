@@ -498,7 +498,7 @@ export default function TeamBuilderPanel({ tournamentId, teamSize, teams, signup
             Noch kein Team. Lege oben eins an.
           </p>
         ) : (
-          <div className="grid content-start gap-3 sm:grid-cols-2">
+          <div className="grid content-start gap-3 grid-cols-[repeat(auto-fill,minmax(15rem,1fr))]">
             {view.teams.map((team) => (
               <TeamCard
                 key={team.key}
