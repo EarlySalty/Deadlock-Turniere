@@ -15,7 +15,7 @@ interface CollapsibleSectionProps extends SettingsSectionProps {
 
 export function SettingsSection({ title, description, children }: SettingsSectionProps) {
   return (
-    <section className="space-y-4 rounded-xl border border-border bg-background/30 p-4 sm:p-5">
+    <section className="space-y-4 rounded-xl border border-border bg-background/30 p-3 sm:p-5">
       <header>
         <h3 className="text-base font-semibold text-foreground">{title}</h3>
         <p className="mt-0.5 text-sm text-muted">{description}</p>
@@ -39,7 +39,7 @@ export function CollapsibleSection({
       onToggle={(event) => onToggle(event.currentTarget.open)}
       className="group rounded-xl border border-border bg-background/30"
     >
-      <summary className="flex cursor-pointer list-none items-start justify-between gap-3 p-4 sm:p-5 [&::-webkit-details-marker]:hidden">
+      <summary className="flex cursor-pointer list-none items-start justify-between gap-3 p-3 sm:p-5 [&::-webkit-details-marker]:hidden">
         <div>
           <h3 className="text-base font-semibold text-foreground">{title}</h3>
           <p className="mt-0.5 text-sm text-muted">{description}</p>
@@ -47,7 +47,7 @@ export function CollapsibleSection({
         </div>
         <ChevronDown size={18} className="mt-1 shrink-0 text-muted transition-transform group-open:rotate-180" />
       </summary>
-      <div className="space-y-4 border-t border-border p-4 sm:p-5">{children}</div>
+      <div className="space-y-4 border-t border-border p-3 sm:p-5">{children}</div>
     </details>
   )
 }

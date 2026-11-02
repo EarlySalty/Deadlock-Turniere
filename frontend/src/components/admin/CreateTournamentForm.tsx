@@ -134,7 +134,7 @@ export default function CreateTournamentForm({ template }: CreateTournamentFormP
   }
 
   return (
-    <Card className="p-4 sm:p-6">
+    <Card className="sm:p-2">
       <div className="mb-5 flex items-center gap-2">
         <Trophy size={20} className="text-primary" />
         <h2 className="text-lg font-semibold text-foreground">Neues Turnier erstellen</h2>
