@@ -36,6 +36,7 @@ use sqlx::{Postgres, QueryBuilder};
 use turnier_config::Config;
 use turnier_core::TournamentGameMode;
 use turnier_engine::FinalizeCheckinParams;
+use turnier_match::league::{current_round_match_ids, tournament_is_league};
 use turnier_match::{ApplyBracketParams, ApplyGroupParams};
 
 use crate::db;
@@ -814,7 +815,7 @@ async fn create_test_tournament(
     ensure_test_schema(&state.pool).await?;
     validate_range(body.team_size, 1, 12, "team_size")?;
     validate_range(body.num_teams, 2, 128, "num_teams")?;
-    if body.mode != "bracket_only" && body.mode != "group_then_bracket" {
+    if body.mode != "bracket_only" && body.mode != "group_then_bracket" && body.mode != "league" {
         return Err(WebError::unprocessable("mode ist ungültig"));
     }
     if body.advance_to != "bracket"
@@ -827,6 +828,12 @@ async fn create_test_tournament(
     if body.mode == "bracket_only" && body.advance_to == "group_phase" {
         return Err(WebError::bad_request(
             "group_phase ist für bracket_only nicht verfügbar",
+        ));
+    }
+
+    if body.mode == "league" && body.advance_to == "bracket" {
+        return Err(WebError::bad_request(
+            "Das Format Jeder gegen jeden hat kein Bracket",
         ));
     }
 
@@ -1113,7 +1120,7 @@ async fn simulate_test_tournament_round(
     .fetch_all(&state.pool)
     .await?;
 
-    let group_rows: Vec<OpenGroupMatch> = sqlx::query_as(
+    let mut group_rows: Vec<OpenGroupMatch> = sqlx::query_as(
         r#"SELECT gm.id, gm.team1_id, gm.team2_id
          FROM turnier."group_matches" gm
          JOIN turnier."groups" g ON g.id = gm.group_id
@@ -1126,6 +1133,10 @@ async fn simulate_test_tournament_round(
     .bind(&finished_statuses)
     .fetch_all(&state.pool)
     .await?;
+    if tournament_is_league(&state.pool, tournament_id).await? {
+        let current_round = current_round_match_ids(&state.pool, tournament_id).await?;
+        group_rows.retain(|row| current_round.contains(&row.id));
+    }
 
     let mut rng = Rng::new();
     let mut simulated_matches: i64 = 0;
@@ -1253,6 +1264,8 @@ fn validate_range(value: i64, lo: i64, hi: i64, field: &str) -> WebResult<()> {
 fn normalize_test_mode(mode: &str) -> &'static str {
     if mode == "group_then_bracket" {
         "group_stage"
+    } else if mode == "league" {
+        "league"
     } else {
         "bracket_only"
     }

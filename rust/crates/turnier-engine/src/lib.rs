@@ -21,6 +21,7 @@
 pub mod balance;
 pub mod engine;
 pub mod error;
+pub mod league;
 pub mod mini_groups;
 pub mod points;
 pub mod status;
@@ -45,7 +46,8 @@ pub use persist::{
     advance_bracket_winner, assign_random_teams, build_checkin_snapshot_token,
     complete_mini_group_round_robin, finalize_checkin, generate_bracket, generate_bracket_in_tx,
     generate_group_matches, generate_group_matches_in_tx, generate_groups, generate_groups_in_tx,
-    recalculate_player_points, recalculate_player_points_in_tx, AddedPlayer, CreatedTeam,
-    FinalizeCheckinParams, FinalizeCheckinResult, NoShuffle, RemovedPlayer, RngShuffler,
-    SoloPlayer, SoloShuffler, TeamWarning,
+    generate_league_plan_in_tx, league_slot_minutes_in_tx, recalculate_player_points,
+    recalculate_player_points_in_tx, reschedule_league_plan_in_tx, AddedPlayer, CreatedTeam,
+    FinalizeCheckinParams, FinalizeCheckinResult, LeaguePlanSummary, NoShuffle, RemovedPlayer,
+    RngShuffler, SoloPlayer, SoloShuffler, TeamWarning,
 };

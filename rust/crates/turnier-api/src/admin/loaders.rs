@@ -306,6 +306,7 @@ pub async fn load_groups_for_tournament(pool: &Pool, tournament_id: i64) -> WebR
                 hero_assignments: db::json_object(r.hero_assignments),
                 scheduled_at: db::opt_ts_to_string(r.scheduled_at),
                 played_at: db::opt_ts_to_string(r.played_at),
+                round: None,
             });
         }
 
@@ -318,6 +319,7 @@ pub async fn load_groups_for_tournament(pool: &Pool, tournament_id: i64) -> WebR
             matches,
         });
     }
+    crate::league_view::apply_league_view(pool, tournament_id, &mut groups).await?;
     Ok(groups)
 }
 

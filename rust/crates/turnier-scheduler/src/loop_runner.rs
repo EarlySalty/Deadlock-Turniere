@@ -19,6 +19,7 @@ use turnier_automatik::{presets, routine as routine_store};
 use turnier_core::TournamentMode;
 use turnier_db::Pool;
 use turnier_discord::DiscordNotifier;
+use turnier_match::league::running_league_ids_with_auto_lobby;
 use turnier_match::MatchManager;
 
 use crate::reminders::{
@@ -90,6 +91,22 @@ impl Scheduler {
         if let Err(err) = check_and_send_match_reminders(&self.pool, &self.notifier).await {
             tracing::error!(error = %err, "Match-Reminder-Check fehlgeschlagen");
         }
+        if let Err(err) = self.open_due_league_lobbies().await {
+            tracing::error!(error = %err, "Lobby-Check für laufende Runden fehlgeschlagen");
+        }
+    }
+
+    async fn open_due_league_lobbies(&self) -> sqlx::Result<()> {
+        for tournament_id in running_league_ids_with_auto_lobby(&self.pool).await? {
+            if let Err(err) = self
+                .matchmgr
+                .schedule_auto_lobbies_for_tournament(tournament_id)
+                .await
+            {
+                tracing::error!(tournament_id, error = %err, "Lobbys der fälligen Runde nicht geöffnet");
+            }
+        }
+        Ok(())
     }
 
     pub async fn run_routine_check(&self, now: DateTime<Utc>) {

@@ -40,20 +40,7 @@ impl MatchManager {
         .map(|r| r.get::<i64, _>("id"))
         .collect();
 
-        let group_ids: Vec<i64> = sqlx::query(
-            "SELECT gm.id FROM turnier.group_matches gm \
-             JOIN turnier.groups g ON g.id = gm.group_id \
-             WHERE g.tournament_id = $1 \
-               AND gm.team1_id IS NOT NULL AND gm.team2_id IS NOT NULL \
-               AND gm.status IN ('pending', 'checkin') AND gm.steam_party_id IS NULL \
-             ORDER BY gm.id",
-        )
-        .bind(tournament_id)
-        .fetch_all(&self.pool)
-        .await?
-        .into_iter()
-        .map(|r| r.get::<i64, _>("id"))
-        .collect();
+        let group_ids = self.auto_lobby_group_match_ids(tournament_id).await?;
 
         for match_id in bracket_ids {
             if let Err(err) = self.create_lobby(tournament_id, match_id).await {
@@ -72,6 +59,29 @@ impl MatchManager {
             }
         }
         Ok(())
+    }
+
+    async fn auto_lobby_group_match_ids(&self, tournament_id: i64) -> MatchResult<Vec<i64>> {
+        if crate::league::tournament_is_league(&self.pool, tournament_id).await? {
+            let now = turnier_core::now_utc();
+            let ids = crate::league::due_lobby_match_ids(&self.pool, tournament_id, now).await?;
+            return Ok(ids);
+        }
+        let ids = sqlx::query(
+            "SELECT gm.id FROM turnier.group_matches gm \
+             JOIN turnier.groups g ON g.id = gm.group_id \
+             WHERE g.tournament_id = $1 \
+               AND gm.team1_id IS NOT NULL AND gm.team2_id IS NOT NULL \
+               AND gm.status IN ('pending', 'checkin') AND gm.steam_party_id IS NULL \
+             ORDER BY gm.id",
+        )
+        .bind(tournament_id)
+        .fetch_all(&self.pool)
+        .await?
+        .into_iter()
+        .map(|r| r.get::<i64, _>("id"))
+        .collect();
+        Ok(ids)
     }
 
     /// Plant Auto-Lobbys für die Folge-Matches eines abgeschlossenen Bracket-

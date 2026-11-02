@@ -51,10 +51,11 @@ pub fn valid_next_statuses_for_mode(
     status: TournamentStatus,
     mode: TournamentMode,
 ) -> &'static [TournamentStatus] {
-    if status == TournamentStatus::Checkin && mode == TournamentMode::BracketOnly {
-        &[TournamentStatus::Bracket]
-    } else {
-        valid_next_statuses(status)
+    match (status, mode) {
+        (TournamentStatus::Checkin, TournamentMode::BracketOnly) => &[TournamentStatus::Bracket],
+        (TournamentStatus::GroupPhase, TournamentMode::League) => &[TournamentStatus::Completed],
+        (TournamentStatus::Bracket, TournamentMode::League) => &[],
+        _ => valid_next_statuses(status),
     }
 }
 
@@ -127,5 +128,24 @@ mod tests {
             TournamentMode::GroupStage
         ));
         assert!(!is_valid_transition(Checkin, Bracket));
+    }
+
+    #[test]
+    fn league_runs_from_checkin_over_group_phase_to_completed() {
+        use TournamentStatus::*;
+        let league = TournamentMode::League;
+        assert!(is_valid_transition_for_mode(Checkin, GroupPhase, league));
+        assert!(is_valid_transition_for_mode(GroupPhase, Completed, league));
+        assert!(!is_valid_transition_for_mode(Checkin, Bracket, league));
+        assert!(!is_valid_transition_for_mode(GroupPhase, Bracket, league));
+        assert!(is_valid_transition_for_mode(Completed, Archived, league));
+    }
+
+    #[test]
+    fn group_stage_still_needs_the_bracket() {
+        use TournamentStatus::*;
+        let mode = TournamentMode::GroupStage;
+        assert!(is_valid_transition_for_mode(GroupPhase, Bracket, mode));
+        assert!(!is_valid_transition_for_mode(GroupPhase, Completed, mode));
     }
 }

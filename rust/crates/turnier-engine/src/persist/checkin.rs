@@ -986,7 +986,25 @@ pub async fn finalize_checkin(
         // Optionales Vorrücken.
         if params.advance_to_group_phase {
             let status_changed: u64;
-            if tournament.tournament_mode == "group_stage" {
+            if tournament.tournament_mode == "league" {
+                let plan = super::league::generate_league_plan_in_tx(
+                    &mut tx,
+                    tournament_id,
+                    crate::league::DEFAULT_SLOT_MINUTES,
+                )
+                .await?;
+                groups_created = 1;
+                matches_created = plan.matches;
+                let res = sqlx::query(
+                    "UPDATE turnier.tournaments SET status = 'group_phase', updated_at = $1 \
+                     WHERE id = $2 AND status = 'checkin'",
+                )
+                .bind(now_utc())
+                .bind(tournament_id)
+                .execute(&mut *tx)
+                .await?;
+                status_changed = res.rows_affected();
+            } else if tournament.tournament_mode == "group_stage" {
                 let group_ids = generate_groups_in_tx(&mut tx, tournament_id, None).await?;
                 groups_created = group_ids.len() as i64;
                 matches_created = generate_group_matches_in_tx(&mut tx, tournament_id).await?;

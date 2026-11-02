@@ -34,6 +34,8 @@ pub struct GroupMatch {
     pub hero_assignments: Option<Value>,
     pub scheduled_at: Option<String>,
     pub played_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub round: Option<i64>,
 }
 
 /// Eine Gruppe inkl. Tabellen und Matches.

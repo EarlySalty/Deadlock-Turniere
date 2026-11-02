@@ -19,6 +19,7 @@ use sqlx::{Pool, Postgres, Transaction};
 use turnier_core::now_utc;
 
 use crate::error::TournamentResult;
+use crate::league::{league_table, LeagueGame};
 use crate::points::{
     contribution_for_team, team_placements, team_wins, CompletedMatch, PointsContribution,
 };
@@ -33,6 +34,80 @@ struct MatchRow {
     team1_id: Option<i64>,
     team2_id: Option<i64>,
     winner_id: Option<i64>,
+}
+
+struct TournamentResults {
+    placements: HashMap<i64, i64>,
+    wins: HashMap<i64, i64>,
+    total_completed: i64,
+}
+
+async fn bracket_results(
+    tx: &mut Transaction<'_, Postgres>,
+    tournament_id: i64,
+) -> TournamentResult<TournamentResults> {
+    let raw_matches: Vec<MatchRow> = sqlx::query_as::<_, MatchRow>(
+        "SELECT round, team1_id, team2_id, winner_id FROM turnier.bracket_matches \
+         WHERE tournament_id = $1 AND status = 'completed' ORDER BY round DESC, id",
+    )
+    .bind(tournament_id)
+    .fetch_all(&mut **tx)
+    .await?;
+    let matches: Vec<CompletedMatch> = raw_matches
+        .iter()
+        .map(|r| CompletedMatch {
+            round: r.round,
+            team1_id: r.team1_id,
+            team2_id: r.team2_id,
+            winner_id: r.winner_id,
+        })
+        .collect();
+    Ok(TournamentResults {
+        placements: team_placements(&matches),
+        wins: team_wins(&matches),
+        total_completed: matches.len() as i64,
+    })
+}
+
+async fn league_results(
+    tx: &mut Transaction<'_, Postgres>,
+    tournament_id: i64,
+) -> TournamentResult<TournamentResults> {
+    let team_rows: Vec<(i64,)> = sqlx::query_as(
+        "SELECT gt.team_id FROM turnier.group_teams gt \
+         JOIN turnier.groups g ON g.id = gt.group_id \
+         WHERE g.tournament_id = $1 ORDER BY gt.id",
+    )
+    .bind(tournament_id)
+    .fetch_all(&mut **tx)
+    .await?;
+    let game_rows: Vec<(i64, i64, Option<i64>)> = sqlx::query_as(
+        "SELECT gm.team1_id, gm.team2_id, gm.winner_id FROM turnier.group_matches gm \
+         JOIN turnier.groups g ON g.id = gm.group_id \
+         WHERE g.tournament_id = $1 AND gm.status = 'completed' AND gm.winner_id IS NOT NULL",
+    )
+    .bind(tournament_id)
+    .fetch_all(&mut **tx)
+    .await?;
+    let team_ids: Vec<i64> = team_rows.into_iter().map(|(id,)| id).collect();
+    let games: Vec<LeagueGame> = game_rows
+        .into_iter()
+        .map(|(team1_id, team2_id, winner_id)| LeagueGame {
+            team1_id,
+            team2_id,
+            winner_id,
+        })
+        .collect();
+    let table = league_table(&team_ids, &games);
+    Ok(TournamentResults {
+        placements: table
+            .iter()
+            .enumerate()
+            .map(|(index, row)| (row.team_id, index as i64 + 1))
+            .collect(),
+        wins: table.iter().map(|row| (row.team_id, row.wins)).collect(),
+        total_completed: games.len() as i64,
+    })
 }
 
 /// Aggregierter Stand eines Spielers über alle gewerteten Turniere.
@@ -88,8 +163,8 @@ pub async fn recalculate_player_points_in_tx(
     // Alle gewerteten Turniere: abgeschlossen UND nicht von der Rangliste
     // ausgeschlossen (der Original-Caller filtert exclude_from_leaderboard vor
     // dem Recalc; hier zentral).
-    let tournaments: Vec<(i64,)> = sqlx::query_as(
-        "SELECT id FROM turnier.tournaments \
+    let tournaments: Vec<(i64, String)> = sqlx::query_as(
+        "SELECT id, tournament_mode FROM turnier.tournaments \
          WHERE status = 'completed' AND exclude_from_leaderboard = false \
          ORDER BY id",
     )
@@ -98,28 +173,12 @@ pub async fn recalculate_player_points_in_tx(
 
     let mut aggregates: HashMap<i64, PlayerAggregate> = HashMap::new();
 
-    for (tid,) in &tournaments {
-        // Abgeschlossene Bracket-Matches, round DESC (für die Platzierungs-Heuristik).
-        let raw_matches: Vec<MatchRow> = sqlx::query_as::<_, MatchRow>(
-            "SELECT round, team1_id, team2_id, winner_id FROM turnier.bracket_matches \
-             WHERE tournament_id = $1 AND status = 'completed' ORDER BY round DESC, id",
-        )
-        .bind(tid)
-        .fetch_all(&mut **tx)
-        .await?;
-        let matches: Vec<CompletedMatch> = raw_matches
-            .iter()
-            .map(|r| CompletedMatch {
-                round: r.round,
-                team1_id: r.team1_id,
-                team2_id: r.team2_id,
-                winner_id: r.winner_id,
-            })
-            .collect();
-
-        let placements = team_placements(&matches);
-        let wins = team_wins(&matches);
-        let total_completed = matches.len() as i64;
+    for (tid, mode) in &tournaments {
+        let results = if mode == "league" {
+            league_results(tx, *tid).await?
+        } else {
+            bracket_results(tx, *tid).await?
+        };
 
         // Teilnehmer: Mitglieder aller Teams dieses Turniers.
         let participants: Vec<(i64, i64)> = sqlx::query_as(
@@ -132,7 +191,12 @@ pub async fn recalculate_player_points_in_tx(
         .await?;
 
         for (discord_id, team_id) in participants {
-            let contribution = contribution_for_team(team_id, &placements, &wins, total_completed);
+            let contribution = contribution_for_team(
+                team_id,
+                &results.placements,
+                &results.wins,
+                results.total_completed,
+            );
             aggregates.entry(discord_id).or_default().add(contribution);
         }
     }

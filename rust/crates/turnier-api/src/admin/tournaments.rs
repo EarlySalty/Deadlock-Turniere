@@ -15,8 +15,10 @@ use turnier_core::{
     LobbySettingsPreset, Patch, Tournament, TournamentCreate, TournamentDetail, TournamentMode,
     TournamentStatus, TournamentUpdate,
 };
+use turnier_engine::league::DEFAULT_SLOT_MINUTES;
 use turnier_engine::{
-    determine_tournament_mode, generate_bracket_in_tx, is_valid_transition, valid_next_statuses,
+    determine_tournament_mode, generate_bracket_in_tx, league_slot_minutes_in_tx,
+    reschedule_league_plan_in_tx, valid_next_statuses, valid_next_statuses_for_mode,
 };
 
 use crate::db;
@@ -87,6 +89,7 @@ fn mode_str(mode: TournamentMode) -> &'static str {
     match mode {
         TournamentMode::GroupStage => "group_stage",
         TournamentMode::BracketOnly => "bracket_only",
+        TournamentMode::League => "league",
     }
 }
 
@@ -308,14 +311,14 @@ async fn update_tournament(
         if new_status_s != current_status {
             let allowed: Vec<&'static str> = parse_status(&current_status)
                 .map(|s| {
-                    valid_next_statuses(s)
+                    next_statuses_for_stored_mode(s, &existing_mode)
                         .iter()
                         .map(|t| status_str(*t))
                         .collect()
                 })
                 .unwrap_or_default();
             let transition_ok = parse_status(&current_status)
-                .map(|f| is_valid_transition(f, new_status))
+                .map(|f| next_statuses_for_stored_mode(f, &existing_mode).contains(&new_status))
                 .unwrap_or(false);
             if !transition_ok {
                 let allowed_text = if allowed.is_empty() {
@@ -335,6 +338,11 @@ async fn update_tournament(
             if current_status == "checkin" && new_status_s == "group_phase" {
                 return Err(WebError::bad_request(
                     "Check-in bitte über finalize-checkin abschließen",
+                ));
+            }
+            if existing_mode == "league" && new_status_s == "completed" {
+                return Err(WebError::bad_request(
+                    "Bitte über Turnier abschließen beenden, damit die Tabelle gewertet wird",
                 ));
             }
             if helpers::ACTIVE_TOURNAMENT_STATUSES.contains(&new_status_s) {
@@ -455,6 +463,12 @@ async fn update_tournament(
             ));
         }
         let mode_s = mode_str(force_mode);
+        let league_involved = mode_s == "league" || existing_mode == "league";
+        if current_status == "group_phase" && league_involved && mode_s != existing_mode {
+            return Err(WebError::bad_request(
+                "Das Format Jeder gegen jeden lässt sich in der laufenden Phase nicht wechseln",
+            ));
+        }
         push_typed!(
             "tournament_mode",
             json!(mode_s),
@@ -584,6 +598,10 @@ async fn update_tournament(
         .bind(tournament_id)
         .execute(&mut *tx)
         .await?;
+    }
+
+    if existing_mode == "league" && current_status == "group_phase" {
+        shift_league_plan_to_stored_start(&mut tx, tournament_id).await?;
     }
 
     audit(
@@ -758,6 +776,36 @@ async fn revert_checkin(
     Ok(Json(load_tournament_dto(&state.pool, tournament_id).await?))
 }
 
+async fn shift_league_plan_to_stored_start(
+    tx: &mut sqlx::Transaction<'_, Postgres>,
+    tournament_id: i64,
+) -> WebResult<()> {
+    let start: Option<chrono::DateTime<chrono::Utc>> =
+        sqlx::query_scalar(r#"SELECT group_phase_start FROM turnier."tournaments" WHERE id = $1"#)
+            .bind(tournament_id)
+            .fetch_one(&mut **tx)
+            .await?;
+    let Some(start) = start else {
+        return Ok(());
+    };
+    let slot_minutes = league_slot_minutes_in_tx(tx, tournament_id)
+        .await?
+        .unwrap_or(DEFAULT_SLOT_MINUTES);
+    reschedule_league_plan_in_tx(tx, tournament_id, start, slot_minutes).await?;
+    Ok(())
+}
+
+fn next_statuses_for_stored_mode(
+    status: TournamentStatus,
+    stored_mode: &str,
+) -> &'static [TournamentStatus] {
+    if stored_mode == "league" {
+        valid_next_statuses_for_mode(status, TournamentMode::League)
+    } else {
+        valid_next_statuses(status)
+    }
+}
+
 /// `POST /api/admin/tournaments/{id}/advance` — Phase weiterschalten.
 async fn advance_tournament(
     State(state): State<AppState>,
@@ -766,12 +814,15 @@ async fn advance_tournament(
 ) -> WebResult<Json<Tournament>> {
     let (current_status, next_status) = {
         let mut tx = state.pool.begin().await?;
-        let existing = sqlx::query(r#"SELECT status FROM turnier."tournaments" WHERE id = $1"#)
-            .bind(tournament_id)
-            .fetch_optional(&mut *tx)
-            .await?
-            .ok_or_else(|| WebError::not_found("Turnier nicht gefunden"))?;
+        let existing = sqlx::query(
+            r#"SELECT status, tournament_mode FROM turnier."tournaments" WHERE id = $1"#,
+        )
+        .bind(tournament_id)
+        .fetch_optional(&mut *tx)
+        .await?
+        .ok_or_else(|| WebError::not_found("Turnier nicht gefunden"))?;
         let current_status: String = existing.get("status");
+        let stored_mode: String = existing.get("tournament_mode");
 
         if current_status == "registration" {
             return Err(WebError::bad_request(
@@ -785,7 +836,7 @@ async fn advance_tournament(
         }
         let allowed: Vec<&'static str> = parse_status(&current_status)
             .map(|s| {
-                valid_next_statuses(s)
+                next_statuses_for_stored_mode(s, &stored_mode)
                     .iter()
                     .map(|t| status_str(*t))
                     .collect()

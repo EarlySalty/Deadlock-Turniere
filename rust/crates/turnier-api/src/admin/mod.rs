@@ -28,6 +28,7 @@ mod brackets;
 mod casters;
 mod group_matches;
 mod helpers;
+mod league;
 mod loaders;
 mod matches;
 mod phases;
@@ -48,6 +49,7 @@ pub fn router() -> Router<AppState> {
         .merge(solo_balance::router())
         .merge(brackets::router())
         .merge(matches::router())
+        .merge(league::router())
         .merge(group_matches::router())
         .merge(casters::router())
         .merge(voice::router())

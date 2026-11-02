@@ -32,6 +32,7 @@ pub mod auto_lobby;
 pub mod core_adapter;
 pub mod error;
 pub mod kind;
+pub mod league;
 pub mod lobby;
 pub mod modes;
 pub mod presets;

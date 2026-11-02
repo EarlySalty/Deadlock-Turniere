@@ -13,6 +13,8 @@ use sqlx::Row;
 
 use turnier_match::{MatchKind, SteamTaskError};
 
+use turnier_match::league::{group_is_league, league_is_running, reset_league_match_in_tx};
+
 use crate::error::{WebError, WebResult};
 use crate::state::AppState;
 
@@ -245,7 +247,7 @@ pub async fn reset_match(
             r#"SELECT discord_channel_id, status FROM turnier."bracket_matches" WHERE id = $1 AND tournament_id = $2"#
         }
         MatchKind::Group => {
-            r#"SELECT gm.discord_channel_id, gm.status FROM turnier."group_matches" gm
+            r#"SELECT gm.discord_channel_id, gm.status, gm.group_id FROM turnier."group_matches" gm
              JOIN turnier."groups" g ON g.id = gm.group_id WHERE gm.id = $1 AND g.tournament_id = $2"#
         }
     };
@@ -256,14 +258,24 @@ pub async fn reset_match(
         .await?
         .ok_or_else(|| WebError::not_found("Match nicht gefunden"))?;
     let status: String = row.get("status");
-    if ["completed", "forfeit", "cancelled"].contains(&status.as_str()) {
+    let league_group_id = league_group_of(state, kind, &row).await?;
+    let refused = if league_group_id.is_some() {
+        ["forfeit", "cancelled"].contains(&status.as_str())
+    } else {
+        ["completed", "forfeit", "cancelled"].contains(&status.as_str())
+    };
+    if refused {
         return Err(WebError::bad_request(
             "Abgeschlossene oder abgebrochene Matches können nicht zurückgesetzt werden",
         ));
     }
-    let discord_channel_id: Option<String> = row.get("discord_channel_id");
-    if let Some(channel_id) = discord_channel_id.filter(|c| !c.is_empty()) {
-        if let Err(err) = state.notifier.delete_match_channel(&channel_id).await {
+    let discord_channel_id: Option<i64> = row.get("discord_channel_id");
+    if let Some(channel_id) = discord_channel_id {
+        if let Err(err) = state
+            .notifier
+            .delete_match_channel(&channel_id.to_string())
+            .await
+        {
             tracing::error!(error = %err, "Discord-Channel konnte beim Match-Reset nicht gelöscht werden");
         }
     }
@@ -283,11 +295,20 @@ pub async fn reset_match(
     };
 
     let mut tx = state.pool.begin().await?;
-    sqlx::query(update_sql)
-        .bind(match_id)
-        .bind(tournament_id)
-        .execute(&mut *tx)
-        .await?;
+    if let Some(group_id) = league_group_id {
+        if !league_is_running(&mut tx, tournament_id).await? {
+            return Err(WebError::bad_request(
+                "Ergebnisse lassen sich nur ändern, solange das Turnier läuft",
+            ));
+        }
+        reset_league_match_in_tx(&mut tx, match_id, group_id).await?;
+    } else {
+        sqlx::query(update_sql)
+            .bind(match_id)
+            .bind(tournament_id)
+            .execute(&mut *tx)
+            .await?;
+    }
     super::helpers::audit(
         &mut *tx,
         action,
@@ -298,6 +319,20 @@ pub async fn reset_match(
     tx.commit().await?;
 
     Ok(Json(json!({ "success": true })))
+}
+
+async fn league_group_of(
+    state: &AppState,
+    kind: MatchKind,
+    row: &sqlx::postgres::PgRow,
+) -> WebResult<Option<i64>> {
+    if !matches!(kind, MatchKind::Group) {
+        return Ok(None);
+    }
+    let group_id: i64 = row.get("group_id");
+    Ok(group_is_league(&state.pool, group_id)
+        .await?
+        .then_some(group_id))
 }
 
 /// `manual-lobby` für beide Match-Arten (party_code/steam_party_id manuell setzen).

@@ -370,7 +370,7 @@ where
     let row = sqlx::query(
         r#"SELECT 1 FROM turnier."group_matches" gm JOIN turnier."groups" g ON gm.group_id = g.id
          WHERE g.tournament_id = $1
-         AND (gm.status != 'pending' OR gm.winner_id IS NOT NULL OR gm.played_at IS NOT NULL) \
+         AND (gm.status != 'pending' OR gm.winner_id IS NOT NULL OR gm.played_at IS NOT NULL)
          LIMIT 1"#,
     )
     .bind(tournament_id)

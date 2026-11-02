@@ -45,7 +45,7 @@ str_enum! {
 
 str_enum! {
     /// Aus der Teamanzahl abgeleiteter (oder admin-erzwungener) Turnier-Modus.
-    TournamentMode { GroupStage, BracketOnly }
+    TournamentMode { GroupStage, BracketOnly, League }
 }
 
 str_enum! {

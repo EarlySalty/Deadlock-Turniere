@@ -13,6 +13,7 @@ mod bracket;
 mod checkin;
 mod double_elim;
 mod groups;
+mod league;
 mod mini_group_complete;
 mod points;
 
@@ -25,6 +26,10 @@ pub use checkin::{
 };
 pub use groups::{
     generate_group_matches, generate_group_matches_in_tx, generate_groups, generate_groups_in_tx,
+};
+pub use league::{
+    generate_league_plan_in_tx, league_slot_minutes_in_tx, reschedule_league_plan_in_tx,
+    LeaguePlanSummary,
 };
 pub use mini_group_complete::complete_mini_group_round_robin;
 pub use points::{recalculate_player_points, recalculate_player_points_in_tx};

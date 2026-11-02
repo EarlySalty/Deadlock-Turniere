@@ -412,23 +412,7 @@ impl MatchManager {
         .bind(match_id)
         .execute(&mut *tx)
         .await?;
-        sqlx::query(
-            "UPDATE turnier.group_teams SET wins = wins + 1, points = points + 3 \
-             WHERE group_id = $1 AND team_id = $2",
-        )
-        .bind(group_id)
-        .bind(winner_id)
-        .execute(&mut *tx)
-        .await?;
-        if let Some(loser_id) = loser_id {
-            sqlx::query(
-                "UPDATE turnier.group_teams SET losses = losses + 1 WHERE group_id = $1 AND team_id = $2",
-            )
-            .bind(group_id)
-            .bind(loser_id)
-            .execute(&mut *tx)
-            .await?;
-        }
+        crate::league::record_group_standing_in_tx(&mut tx, group_id, winner_id, loser_id).await?;
         sqlx::query("DELETE FROM turnier.match_results WHERE group_match_id = $1")
             .bind(match_id)
             .execute(&mut *tx)

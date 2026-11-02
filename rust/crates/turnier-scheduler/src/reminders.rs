@@ -18,6 +18,7 @@ use serde_json::Value;
 use turnier_core::{discord_id_to_string, now_utc};
 use turnier_db::{dynamic_sql::ReminderDedupeTable, Pool};
 use turnier_discord::{DiscordNotifier, NotificationEvent};
+use turnier_match::league::due_lobby_match_ids;
 
 use crate::time::{is_within_configured_window, offset_label, parse_reminder_offsets_with_default};
 
@@ -283,8 +284,43 @@ pub async fn check_and_send_match_reminders(
     .fetch_all(pool)
     .await?;
 
+    send_match_reminders(pool, notifier, matches, "bracket").await?;
+    let league_matches = load_league_reminder_rows(pool).await?;
+    send_match_reminders(pool, notifier, league_matches, "group").await
+}
+
+async fn load_league_reminder_rows(pool: &Pool) -> sqlx::Result<Vec<MatchReminderRow>> {
+    let tournament_ids: Vec<i64> = sqlx::query_scalar(
+        "SELECT id FROM turnier.tournaments \
+         WHERE tournament_mode = 'league' AND status = 'group_phase' AND is_test = false",
+    )
+    .fetch_all(pool)
+    .await?;
+    let mut match_ids = Vec::new();
+    for tournament_id in tournament_ids {
+        match_ids.extend(due_lobby_match_ids(pool, tournament_id, now_utc()).await?);
+    }
+    sqlx::query_as(
+        "SELECT gm.id, gm.team1_id, gm.team2_id, t.name AS tournament_name \
+         FROM turnier.group_matches gm \
+         JOIN turnier.groups g ON g.id = gm.group_id \
+         JOIN turnier.tournaments t ON t.id = g.tournament_id \
+         WHERE gm.id = ANY($1) AND gm.status = 'pending' \
+         ORDER BY gm.id",
+    )
+    .bind(&match_ids)
+    .fetch_all(pool)
+    .await
+}
+
+async fn send_match_reminders(
+    pool: &Pool,
+    notifier: &DiscordNotifier,
+    matches: Vec<MatchReminderRow>,
+    match_type: &str,
+) -> sqlx::Result<()> {
     for m in matches {
-        if match_reminder_already_sent(pool, m.id).await? {
+        if match_reminder_already_sent(pool, match_type, m.id).await? {
             continue;
         }
 
@@ -311,9 +347,10 @@ pub async fn check_and_send_match_reminders(
 
         sqlx::query(
             "INSERT INTO turnier.sent_match_reminders (match_type, match_id, kind, sent_at) \
-             VALUES ('bracket', $1, 'next_up', $2) \
+             VALUES ($1, $2, 'next_up', $3) \
              ON CONFLICT (match_type, match_id, kind) DO NOTHING",
         )
+        .bind(match_type)
         .bind(m.id)
         .bind(now_utc())
         .execute(pool)
@@ -383,11 +420,16 @@ async fn mark_reminder_sent(
     Ok(())
 }
 
-async fn match_reminder_already_sent(pool: &Pool, match_id: i64) -> sqlx::Result<bool> {
+async fn match_reminder_already_sent(
+    pool: &Pool,
+    match_type: &str,
+    match_id: i64,
+) -> sqlx::Result<bool> {
     let row: Option<(i32,)> = sqlx::query_as(
         "SELECT 1 FROM turnier.sent_match_reminders \
-         WHERE match_type = 'bracket' AND match_id = $1 AND kind = 'next_up' LIMIT 1",
+         WHERE match_type = $1 AND match_id = $2 AND kind = 'next_up' LIMIT 1",
     )
+    .bind(match_type)
     .bind(match_id)
     .fetch_optional(pool)
     .await?;

@@ -14,6 +14,11 @@ use sqlx::Row;
 
 use turnier_match::{ApplyBracketParams, MatchError, MatchKind};
 
+use turnier_match::league::{
+    group_is_league, league_is_running, record_group_standing_in_tx,
+    write_league_manual_result_in_tx,
+};
+
 use crate::error::{WebError, WebResult};
 use crate::extract::{AdminUser, ModUser};
 use crate::state::AppState;
@@ -171,14 +176,20 @@ async fn set_match_result(
 
     if let Some(gm) = group_match {
         let gm_status: String = gm.get("status");
-        if ["completed", "cancelled", "forfeit"].contains(&gm_status.as_str()) {
+        let team1_id: i64 = gm.get("team1_id");
+        let team2_id: i64 = gm.get("team2_id");
+        let group_id: i64 = gm.get("group_id");
+        let is_league = group_is_league(&state.pool, group_id).await?;
+        let refused = if is_league {
+            ["cancelled", "forfeit"].contains(&gm_status.as_str())
+        } else {
+            ["completed", "cancelled", "forfeit"].contains(&gm_status.as_str())
+        };
+        if refused {
             return Err(WebError::bad_request(format!(
                 "Group-Match {match_id} kann aus Status {gm_status} nicht verarbeitet werden"
             )));
         }
-        let team1_id: i64 = gm.get("team1_id");
-        let team2_id: i64 = gm.get("team2_id");
-        let group_id: i64 = gm.get("group_id");
         if winner_id != team1_id && winner_id != team2_id {
             return Err(WebError::bad_request(
                 "winner_id muss eines der beiden Teams im Match sein",
@@ -191,34 +202,32 @@ async fn set_match_result(
         };
 
         let mut tx = state.pool.begin().await?;
-        sqlx::query(
-            r#"UPDATE turnier."group_matches" SET winner_id = $1, status = 'completed', played_at = now() WHERE id = $2"#,
-        )
-        .bind(winner_id)
-        .bind(match_id)
-        .execute(&mut *tx)
-        .await?;
-        // Standings inkrementell (Befund admin_routes.py:2236 — +3 fix, nicht
-        // idempotent; 1:1 erhalten, needs-decision).
-        sqlx::query(
-            r#"UPDATE turnier."group_teams" SET wins = wins + 1, points = points + 3 WHERE group_id = $1 AND team_id = $2"#,
-        )
-        .bind(group_id)
-        .bind(winner_id)
-        .execute(&mut *tx)
-        .await?;
-        sqlx::query(r#"UPDATE turnier."group_teams" SET losses = losses + 1 WHERE group_id = $1 AND team_id = $2"#)
-            .bind(group_id)
-            .bind(loser_id)
+        if is_league {
+            if !league_is_running(&mut tx, tournament_id).await? {
+                return Err(WebError::bad_request(
+                    "Ergebnisse lassen sich nur ändern, solange das Turnier läuft",
+                ));
+            }
+            let winning_slot = if winner_id == team1_id { 1 } else { 2 };
+            write_league_manual_result_in_tx(&mut tx, match_id, group_id, winner_id, winning_slot)
+                .await?;
+        } else {
+            sqlx::query(
+                r#"UPDATE turnier."group_matches" SET winner_id = $1, status = 'completed', played_at = now() WHERE id = $2"#,
+            )
+            .bind(winner_id)
+            .bind(match_id)
             .execute(&mut *tx)
             .await?;
-        sqlx::query(
-            r#"INSERT INTO turnier."match_results" (group_match_id, winning_team, source) VALUES ($1, $2, 'manual')"#,
-        )
-        .bind(match_id)
-        .bind(winner_id)
-        .execute(&mut *tx)
-        .await?;
+            record_group_standing_in_tx(&mut tx, group_id, winner_id, Some(loser_id)).await?;
+            sqlx::query(
+                r#"INSERT INTO turnier."match_results" (group_match_id, winning_team, source, created_at) VALUES ($1, $2, 'manual', now())"#,
+            )
+            .bind(match_id)
+            .bind(winner_id)
+            .execute(&mut *tx)
+            .await?;
+        }
         audit(
             &mut *tx,
             "match_result_group",
@@ -228,6 +237,7 @@ async fn set_match_result(
                 "match_id": match_id,
                 "winner_id": winner_id,
                 "group_id": group_id,
+                "previous_status": gm_status,
             }),
         )
         .await?;

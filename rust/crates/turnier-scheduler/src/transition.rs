@@ -12,10 +12,13 @@ use sqlx::{PgConnection, Postgres, Transaction};
 use turnier_core::{now_utc, parse_discord_id, TournamentMode, TournamentStatus};
 use turnier_db::Pool;
 use turnier_discord::DiscordNotifier;
+use turnier_engine::league::DEFAULT_SLOT_MINUTES;
 use turnier_engine::{
     generate_bracket_in_tx, generate_group_matches_in_tx, generate_groups_in_tx,
-    is_valid_transition_for_mode, recalculate_player_points_in_tx, valid_next_statuses_for_mode,
+    generate_league_plan_in_tx, is_valid_transition_for_mode, recalculate_player_points_in_tx,
+    valid_next_statuses_for_mode,
 };
+use turnier_match::league::open_league_match_count;
 use turnier_match::MatchManager;
 
 use crate::error::{SchedulerError, SchedulerResult};
@@ -83,7 +86,8 @@ pub fn get_due_next_status(row: &DueStatusRow, now: DateTime<Utc>) -> Option<&'s
         return Some("group_phase");
     }
 
-    if s == "group_phase" && is_due(row.bracket_start.as_ref(), now) {
+    let league = row.tournament_mode.as_deref() == Some("league");
+    if s == "group_phase" && !league && is_due(row.bracket_start.as_ref(), now) {
         return Some("bracket");
     }
 
@@ -171,6 +175,10 @@ pub async fn advance_tournament_status(
         )));
     }
 
+    if mode == TournamentMode::League && next_status == "completed" {
+        ensure_league_is_finished(&mut tx, tournament_id).await?;
+    }
+
     // --- Metadata-Basis ---
     let mut metadata = serde_json::json!({
         "tournament_id": tournament_id,
@@ -199,7 +207,11 @@ pub async fn advance_tournament_status(
         return Err(SchedulerError::StatusConflict);
     }
 
-    if next_status == "group_phase" {
+    if next_status == "group_phase" && mode == TournamentMode::League {
+        let plan = generate_league_plan_in_tx(&mut tx, tournament_id, DEFAULT_SLOT_MINUTES).await?;
+        metadata["groups_created"] = serde_json::json!(1);
+        metadata["matches_created"] = serde_json::json!(plan.matches);
+    } else if next_status == "group_phase" {
         let group_ids = generate_groups_in_tx(&mut tx, tournament_id, None).await?;
         let match_count: i64 = generate_group_matches_in_tx(&mut tx, tournament_id).await?;
         metadata["groups_created"] = serde_json::json!(group_ids.len());
@@ -244,6 +256,19 @@ pub async fn advance_tournament_status(
     schedule_lobbies_best_effort(matchmgr, tournament_id, next_status).await;
 
     Ok(metadata)
+}
+
+async fn ensure_league_is_finished(
+    tx: &mut Transaction<'_, Postgres>,
+    tournament_id: i64,
+) -> SchedulerResult<()> {
+    let open = open_league_match_count(&mut **tx, tournament_id).await?;
+    if open > 0 {
+        return Err(SchedulerError::InvalidTransition(format!(
+            "Das Turnier kann erst abgeschlossen werden, wenn alle Spiele gewertet sind. Offen: {open}"
+        )));
+    }
+    Ok(())
 }
 
 async fn ensure_single_active_registration_in_tx(
