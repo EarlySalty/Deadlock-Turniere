@@ -69,6 +69,13 @@ export interface Tournament {
   rules: string | null
 }
 
+export interface AdminTournamentSummary extends Tournament {
+  team_count: number
+  player_count: number
+  signup_count: number
+  open_signup_count: number
+}
+
 // --- Admin types (with discord_id) ---
 
 export interface TeamMember {

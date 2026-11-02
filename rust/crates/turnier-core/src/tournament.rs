@@ -277,6 +277,16 @@ pub struct Tournament {
     pub is_test: bool,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct AdminTournamentSummary {
+    #[serde(flatten)]
+    pub tournament: Tournament,
+    pub team_count: i64,
+    pub player_count: i64,
+    pub signup_count: i64,
+    pub open_signup_count: i64,
+}
+
 /// Anmeldung eines Spielers zu einem Turnier (volle Sicht inkl. `discord_id`).
 #[derive(Debug, Clone, Serialize)]
 pub struct TournamentSignup {
