@@ -20,6 +20,12 @@ import {
   localInputToIso,
   toLocalInput,
 } from '@/lib/league'
+import ReminderOffsetsInput from './ReminderOffsetsInput'
+import {
+  DEFAULT_REMINDER_OFFSETS,
+  DEFAULT_START_REMINDER_OFFSETS,
+  offsetsOrDefault,
+} from './reminderOffsets'
 import type {
   Tournament,
   TournamentGameMode,
@@ -82,18 +88,6 @@ function toInputDateTime(value: string | null | undefined): string {
   return value.replace(' ', 'T').slice(0, 16)
 }
 
-function toReminderOffsetString(value: number[] | null | undefined): string {
-  return (value && value.length > 0 ? value : [1440, 120, 15]).join(', ')
-}
-
-function parseReminderOffsets(value: string): number[] {
-  const parsed = value
-    .split(',')
-    .map((entry) => Number(entry.trim()))
-    .filter((entry) => Number.isFinite(entry) && entry >= 0)
-  return parsed.length > 0 ? parsed : [1440, 120, 15]
-}
-
 export default function TournamentManager({
   tournament,
   teamCount,
@@ -130,7 +124,11 @@ export default function TournamentManager({
     group_phase_start: storedStartInput,
     bracket_start: toInputDateTime(tournament.bracket_start),
     exclude_from_leaderboard: tournament.exclude_from_leaderboard,
-    reminder_offsets: toReminderOffsetString(tournament.reminder_offsets),
+    reminder_offsets: offsetsOrDefault(tournament.reminder_offsets ?? [], DEFAULT_REMINDER_OFFSETS),
+    start_reminder_offsets: offsetsOrDefault(
+      tournament.start_reminder_offsets ?? [],
+      DEFAULT_START_REMINDER_OFFSETS
+    ),
     rules: tournament.rules ?? '',
   })
   const [successMessage, setSuccessMessage] = useState('')
@@ -166,7 +164,7 @@ export default function TournamentManager({
 
   const handleChange = (
     key: keyof typeof form,
-    value: string | number | boolean | null
+    value: string | number | boolean | number[] | null
   ) => {
     setForm((current) => ({ ...current, [key]: value }))
   }
@@ -193,7 +191,11 @@ export default function TournamentManager({
       group_phase_start: groupStartPayload(),
       bracket_start: form.bracket_start || undefined,
       exclude_from_leaderboard: form.exclude_from_leaderboard,
-      reminder_offsets: parseReminderOffsets(form.reminder_offsets),
+      reminder_offsets: offsetsOrDefault(form.reminder_offsets, DEFAULT_REMINDER_OFFSETS),
+      start_reminder_offsets: offsetsOrDefault(
+        form.start_reminder_offsets,
+        DEFAULT_START_REMINDER_OFFSETS
+      ),
       rules: form.rules.trim() || null,
     }
     if (canChangeTournamentMode && form.tournament_mode !== tournament.tournament_mode) {
@@ -547,18 +549,21 @@ export default function TournamentManager({
             )}
           </div>
 
-          <div>
-            <label htmlFor="admin-reminder-offsets" className="mb-1.5 block text-sm font-medium text-foreground">
-              Reminder vor Turnier-Start
-            </label>
-            <input
-              id="admin-reminder-offsets"
-              type="text"
-              value={form.reminder_offsets}
-              onChange={(event) => handleChange('reminder_offsets', event.target.value)}
-              className="w-full rounded-lg border border-border bg-background px-3 py-2 text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
-            />
-          </div>
+          <ReminderOffsetsInput
+            id="admin-reminder-offsets"
+            label="Reminder vor Turnier-Start"
+            value={form.reminder_offsets}
+            onChange={(offsets) => handleChange('reminder_offsets', offsets)}
+            hint="Geht an alle mit Anmelde-Erinnerung, solange die Anmeldung offen ist."
+          />
+
+          <ReminderOffsetsInput
+            id="admin-start-reminder-offsets"
+            label="Erinnerung vor Match-Start"
+            value={form.start_reminder_offsets}
+            onChange={(offsets) => handleChange('start_reminder_offsets', offsets)}
+            hint="Geht an alle angemeldeten Teilnehmer."
+          />
 
           <label className="flex items-center gap-3 rounded-lg border border-border px-3 py-2 cursor-pointer sm:col-span-2">
             <input

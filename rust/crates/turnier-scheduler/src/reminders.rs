@@ -64,13 +64,12 @@ struct RegistrationReminderRow {
     is_test: bool,
 }
 
-/// Felder eines Turniers für die Start-Reminder. Bildet `_tournament_start_value`
-/// (Z.376-384) ab.
 #[derive(sqlx::FromRow)]
 struct StartReminderRow {
     id: i64,
     name: String,
     tournament_mode: Option<String>,
+    registration_end: Option<DateTime<Utc>>,
     group_phase_start: Option<DateTime<Utc>>,
     bracket_start: Option<DateTime<Utc>>,
     start_reminder_offsets: Option<Value>,
@@ -86,14 +85,13 @@ struct MatchReminderRow {
     tournament_name: String,
 }
 
-/// Effektiver Turnier-Start: bei `bracket_only` zählt `bracket_start`, sonst
-/// `group_phase_start` (Fallback `bracket_start`). Portiert
-/// `_tournament_start_value` (Z.376-384).
 fn tournament_start_value(row: &StartReminderRow) -> Option<DateTime<Utc>> {
-    if row.tournament_mode.as_deref() == Some("bracket_only") {
-        return row.bracket_start;
-    }
-    row.group_phase_start.or(row.bracket_start)
+    let scheduled = if row.tournament_mode.as_deref() == Some("bracket_only") {
+        row.bracket_start
+    } else {
+        row.group_phase_start.or(row.bracket_start)
+    };
+    scheduled.or(row.registration_end)
 }
 
 /// Registrierungs-Reminder an Profile mit `notify_registration_reminder = 1`, vor
@@ -204,7 +202,7 @@ pub async fn check_and_send_start_reminders_with_config(
     settings: &turnier_config::SchedulerConfig,
 ) -> sqlx::Result<()> {
     let rows: Vec<StartReminderRow> = sqlx::query_as(
-        "SELECT id, name, tournament_mode, group_phase_start, bracket_start, \
+        "SELECT id, name, tournament_mode, registration_end, group_phase_start, bracket_start, \
                 start_reminder_offsets, is_test FROM turnier.tournaments \
          WHERE status IN ('registration', 'checkin') ORDER BY id",
     )
@@ -259,12 +257,6 @@ pub async fn check_and_send_start_reminders_with_config(
     Ok(())
 }
 
-/// „Gleich dran"-Reminder an Teammitglieder offener Bracket-Matches (pending,
-/// beide Teams gesetzt, keine Steam-Party). Portiert
-/// `_check_and_send_match_reminders` (Z.447-500). Diese Funktion hat keinen
-/// `now`-Parameter, weil das Original (wie hier) rein über den Match-Zustand und
-/// die Dedupe-Tabelle gated; Konsistenz zur injizierbaren Signatur bleibt durch
-/// den ungenutzten Aufruf-Kontext gewahrt.
 pub async fn check_and_send_match_reminders(
     pool: &Pool,
     notifier: &DiscordNotifier,
@@ -477,6 +469,7 @@ mod tests {
             id: 1,
             name: "T".into(),
             tournament_mode: mode.map(str::to_string),
+            registration_end: None,
             group_phase_start: group.map(utc),
             bracket_start: bracket.map(utc),
             start_reminder_offsets: None,
@@ -498,7 +491,6 @@ mod tests {
             Some("2026-06-14T12:00:00"),
         );
         assert_eq!(tournament_start_value(&r), Some(utc("2026-06-14T10:00:00")));
-        // group_stage explizit.
         let r2 = srow(
             Some("group_stage"),
             Some("2026-06-14T10:00:00"),
@@ -524,8 +516,20 @@ mod tests {
             Some("2026-06-14T12:00:00"),
         );
         assert_eq!(tournament_start_value(&r), Some(utc("2026-06-14T12:00:00")));
-        // bracket_only ohne bracket_start → None (auch wenn group_phase_start da ist).
         let r2 = srow(Some("bracket_only"), Some("2026-06-14T10:00:00"), None);
         assert_eq!(tournament_start_value(&r2), None);
+    }
+
+    #[test]
+    fn start_value_bracket_only_ohne_bracket_start_nimmt_anmeldeschluss() {
+        let mut r = srow(Some("bracket_only"), None, None);
+        r.registration_end = Some(utc("2026-11-14T18:00:00"));
+        assert_eq!(tournament_start_value(&r), Some(utc("2026-11-14T18:00:00")));
+        let mut explicit = srow(Some("bracket_only"), None, Some("2026-11-14T19:00:00"));
+        explicit.registration_end = Some(utc("2026-11-14T18:00:00"));
+        assert_eq!(
+            tournament_start_value(&explicit),
+            Some(utc("2026-11-14T19:00:00"))
+        );
     }
 }
