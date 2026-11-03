@@ -12,7 +12,7 @@ const navItems = [
   { label: 'Draft', path: '/draft', icon: Swords },
   { label: 'Comp-Finder', path: '/comp', icon: Users },
   { label: 'Rangliste', path: '/rangliste', icon: BarChart2 },
-  { label: 'Regelwerk', path: '/hilfe', icon: Trophy },
+  { label: 'Hilfe', path: '/hilfe', icon: Trophy },
 ]
 
 export default function Header() {

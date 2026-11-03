@@ -15,6 +15,7 @@ import Button from '@/components/ui/Button'
 import LoadingSpinner from '@/components/ui/LoadingSpinner'
 import ConsentModal from '@/components/ConsentModal'
 import { LEAGUE_LABEL, isLeague, plannedTournamentStart } from '@/lib/league'
+import { TOURNAMENT_RULES_URL } from '@/lib/discord'
 import GroupStandings from '@/components/groups/GroupStandings'
 import GroupMatchList from '@/components/groups/GroupMatchList'
 import BracketView from '@/components/bracket/BracketView'
@@ -675,7 +676,7 @@ export default function Tournament() {
                     <div className="text-center py-20 opacity-40 italic">
                        <ScrollText size={48} className="mx-auto mb-4 opacity-20" />
                        <p className="text-xl">Für dieses Turnier gibt es keine eigenen Regeln.</p>
-                       <p className="text-sm mt-2">Es gilt das allgemeine Regelwerk.</p>
+                       <p className="text-sm mt-2">Es gelten die <a href={TOURNAMENT_RULES_URL} target="_blank" rel="noopener noreferrer" className="text-primary underline">Turnierregeln auf Discord</a>.</p>
                     </div>
                   )}
                </div>

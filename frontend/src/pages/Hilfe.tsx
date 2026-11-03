@@ -1,8 +1,8 @@
 import { motion } from 'framer-motion'
-import ReactMarkdown from 'react-markdown'
 import Card from '@/components/ui/Card'
+import { DISCORD_INVITE_URL, TOURNAMENT_RULES_URL } from '@/lib/discord'
 import {
-  BookOpen, Settings, Trophy, Shield,
+  BookOpen, Settings, Trophy, ScrollText,
   AlertTriangle
 } from 'lucide-react'
 
@@ -47,50 +47,6 @@ const ADMIN_ACTIONS = [
 ]
 
 export default function Hilfe() {
-  const generalRules = `
-# Der Allgemeine Regelwerk
-
-Mit der Teilnahme am Turnier sowie dem abgeschlossenen Check-in bestätigen alle Spieler, die vollständigen Turnierregeln sorgfältig gelesen, verstanden und akzeptiert zu haben. Den Teilnehmern ist bewusst, dass sämtliche Entscheidungen der Turnierleitung auf Grundlage dieser Regeln getroffen werden. 
-
-Jeder Spieler trägt selbst die Verantwortung, sich vor Turnierbeginn über Ablauf, Verhaltensregeln, Teilnahmebedingungen sowie mögliche Sanktionen bei Regelverstößen zu informieren. Unkenntnis der Regeln schützt nicht vor entsprechenden Maßnahmen der Turnierleitung.
-
----
-
-### 1.0 Allgemeine Regeln
-
-1.1 **Teilnahmepflicht:** Nach erfolgreichem Check-in besteht Teilnahmepflicht. Ein Rückzug oder Nichterscheinen wird als Disqualifikation gewertet.
-
-1.2 **Ausnahmefälle:** Bei Krankheit oder unvorhergesehenen Umständen ist die Turnierleitung frühzeitig zu informieren. Erfolgt keine Rückmeldung und das Match wird nicht angetreten, kann dies zur Disqualifikation führen.
-
-1.3 **Wartezeit:** Die maximale Wartezeit pro Match beträgt **5 Minuten**. Sind beide Spieler früher bereit, kann das Match einvernehmlich auch vor Ablauf der Wartezeit gestartet werden.
-
-1.4 **Termintreue:** Beide Parteien sind verpflichtet, das Match zur angegebenen Uhrzeit auszutragen!
-
-1.5 **Preisgeld:** Das Preisgeld wird freiwillig bereitgestellt. Ein rechtlicher Anspruch auf Auszahlung oder Gewährung des Preisgeldes besteht nicht.
-
-### 2.0 Integrität & Software
-
-2.1 **Cheating:** Jegliche Art von Cheats, Hacks, Scripts oder unfairen Vorteilen ist streng verboten.
-
-2.2 **Exploits:** Das Ausnutzen von Fehlern (Bugs) wird nicht toleriert. Falls ein Spieler beim Ausnutzen eines Bugs überführt wird, hat er mit Strafen von der Turnierleitung zu rechnen bzw. mit einer Disqualifikation!
-
-2.3 **Skins:** Modmanager für Hero Skins sind erlaubt.
-
-### 3.0 Verhalten & Umfeld
-
-3.1 **Respekt:** Respektvoller Umgang wird vorausgesetzt. Rassismus, Diskriminierung, Beleidigungen oder unsportliches Verhalten werden nicht toleriert und können zum Ausschluss vom Turnier führen. Kleiner, respektvoller Banter ist erlaubt, solange Grenzen nicht überschritten werden.
-
-3.2 **Neutralität:** Politische, diskriminierende oder provokative Äußerungen, die den Ablauf oder das Umfeld des Turniers negativ beeinflussen, sind zu unterlassen und können zur sofortigen Disqualifikation führen.
-
-### 4.0 Organisatorisches & Medien
-
-4.1 **Teilnehmerzahl:** Sollte die Mindestanzahl von **12 Teilnehmern** nicht erreicht werden, behält sich die Turnierleitung das Recht vor, das Turnier abzusagen oder zu verschieben!
-
-4.2 **Streaming & Medien:** Die Turniere (insb. „ZeRo´s 1# Keyboard Warriors“) werden live auf Twitch übertragen. Mit dem Check-in erklären sich alle Teilnehmer damit einverstanden, dass ihre Spielinhalte, Ingame-Namen, Charaktere sowie spielbezogene Darstellungen live gestreamt, aufgezeichnet und veröffentlicht werden dürfen.
-
-4.3 **Letzte Instanz:** Die Turnierleitung ist die letzte Entscheidungsinstanz und behält sich vor, in Ausnahmefällen den Turnierverlauf zu beeinflussen und wenn nötig abzuändern.
-`
-
   return (
     <motion.div
       initial={{ opacity: 0, y: 10 }}
@@ -103,20 +59,28 @@ Jeder Spieler trägt selbst die Verantwortung, sich vor Turnierbeginn über Abla
             <BookOpen size={32} className="text-primary" />
           </div>
         </div>
-        <h1 className="text-4xl font-bold tracking-tighter text-foreground font-display">Das <span className="text-primary">Regelwerk</span></h1>
+        <h1 className="text-4xl font-bold tracking-tighter text-foreground font-display">Turnier-<span className="text-primary">Hilfe</span></h1>
         <p className="text-muted italic max-w-lg mx-auto">
-          Diese Regeln gelten für alle Turniere.
+          So laufen unsere Turniere ab.
         </p>
       </div>
 
-      <Card className="p-8 md:p-12 border-white/5 bg-white/[0.02] relative overflow-hidden">
-         <div className="absolute top-0 right-0 p-8 opacity-[0.03] pointer-events-none">
-            <Shield size={200} />
-         </div>
-         
-         <div className="relative z-10 prose prose-invert prose-amber max-w-none">
-            <ReactMarkdown>{generalRules}</ReactMarkdown>
-         </div>
+      <Card className="p-8 text-center space-y-4">
+        <ScrollText size={32} className="mx-auto text-primary" />
+        <h2 className="text-xl font-bold text-foreground uppercase tracking-widest">Regelwerk</h2>
+        <p className="text-sm text-muted max-w-md mx-auto">
+          Die aktuellen Turnierregeln findest du auf unserem Discord im Kanal #turnier-regeln.
+        </p>
+        <div className="pt-2">
+          <a
+            href={TOURNAMENT_RULES_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-2 bg-primary hover:bg-primary-hover text-on-gold px-8 py-3 rounded-lg font-bold uppercase tracking-widest text-xs transition-colors"
+          >
+            Regeln auf Discord lesen
+          </a>
+        </div>
       </Card>
 
       {/* Turnier-Ablauf */}
@@ -189,7 +153,7 @@ Jeder Spieler trägt selbst die Verantwortung, sich vor Turnierbeginn über Abla
         </p>
         <div className="pt-4">
           <a
-            href="https://discord.gg/deadlock-de"
+            href={DISCORD_INVITE_URL}
             target="_blank"
             rel="noopener noreferrer"
             className="inline-flex items-center gap-2 bg-amber-500 hover:bg-amber-600 text-black px-8 py-3 rounded-lg font-bold uppercase tracking-widest text-xs transition-colors"
