@@ -383,7 +383,7 @@ async fn materialize(state: &AppState, proposal_id: i64, actor_id: &str) -> WebR
         event_start: config_time(&config, "event_start")?,
         bracket_start: config_time(&config, "bracket_start")?,
     };
-    let ensured = routine::ensure_routine_tournament(&state.pool, &approved_preset, &plan).await?;
+    let ensured = ensure_checked_routine_tournament(state, &approved_preset, &plan).await?;
     if ensured.status == "draft" {
         turnier_scheduler::advance_tournament_status(
             &state.pool,
@@ -403,6 +403,21 @@ async fn materialize(state: &AppState, proposal_id: i64, actor_id: &str) -> WebR
     }
     proposals::approve_and_attach_tournament(&state.pool, proposal_id, ensured.id).await?;
     Ok((ensured.id, true))
+}
+
+async fn ensure_checked_routine_tournament(
+    state: &AppState,
+    preset: &presets::Preset,
+    plan: &RoutineTournamentPlan,
+) -> WebResult<routine::EnsuredRoutineTournament> {
+    let mut tx = state.pool.begin().await?;
+    turnier_scheduler::acquire_tournament_schedule_lock(&mut tx).await?;
+    let ensured = routine::ensure_routine_tournament(&mut tx, preset, plan).await?;
+    if ensured.status == "draft" {
+        turnier_scheduler::ensure_start_gap(&mut tx, ensured.id).await?;
+    }
+    tx.commit().await?;
+    Ok(ensured)
 }
 
 fn approved_preset(mut preset: presets::Preset, config: &Value) -> WebResult<presets::Preset> {

@@ -413,6 +413,78 @@ async fn failed_materialization_keeps_proposal_pending() {
 }
 
 #[tokio::test]
+async fn conflicting_routine_approval_leaves_no_draft() {
+    let (app, _db, pool, session) = setup().await;
+    sqlx::query(
+        "INSERT INTO turnier.tournaments \
+             (name, status, team_size, bracket_format, created_by, created_at, updated_at, \
+              invite_mode, tournament_mode, series_format, exclude_from_leaderboard, \
+              tournament_game_mode, auto_lobby_enabled, is_test, match_objective, \
+              no_show_grace_minutes, source, group_phase_start) \
+         VALUES ('Abendturnier', 'registration', 6, 'single_elimination', $1, now(), now(), \
+                 'always', 'group_stage', 1, false, 'standard', false, false, 'auto', 10, \
+                 'test', '2026-07-19T19:00:00Z')",
+    )
+    .bind(910_000_000_000_000_009_i64)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let preset_json = create_preset(&app, &session, "Routine Konflikt").await;
+    let preset = presets::get(&pool, preset_json["id"].as_i64().unwrap())
+        .await
+        .unwrap()
+        .unwrap();
+    let at = |value: &str| {
+        chrono::DateTime::parse_from_rfc3339(value)
+            .unwrap()
+            .to_utc()
+    };
+    let proposal = ensure_routine_proposal(
+        &pool,
+        &preset,
+        &RoutineTournamentPlan {
+            registration_start: at("2026-07-12T18:00:00Z"),
+            registration_end: at("2026-07-19T17:30:00Z"),
+            checkin_start: at("2026-07-19T17:30:00Z"),
+            event_start: at("2026-07-19T18:00:00Z"),
+            bracket_start: at("2026-07-19T21:00:00Z"),
+        },
+    )
+    .await
+    .unwrap();
+    let uri = format!("/internal/turnier/v1/proposals/{}/vote", proposal.id);
+    let (status, _) = send_internal(
+        &app,
+        Some("internal-token"),
+        &uri,
+        json!({"actor_id":"1337518124647579601","role_ids":["1337518124647579661"],"decision":"approve"}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, body) = send_internal(
+        &app,
+        Some("internal-token"),
+        &uri,
+        json!({"actor_id":"1401891955931222602","role_ids":["1401891955931222110"],"decision":"approve"}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert!(body.to_string().contains("Abendturnier"), "{body}");
+
+    let drafts: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM turnier.tournaments WHERE source = 'routine'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(drafts, 0);
+    let proposal = turnier_automatik::proposals::get_proposal(&pool, proposal.id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(proposal.tournament_id.is_none());
+}
+
+#[tokio::test]
 async fn failed_revision_activation_does_not_block_retry() {
     let (app, _db, pool, _session) = setup().await;
     let proposal_id = turnier_automatik::proposals::create_proposal(

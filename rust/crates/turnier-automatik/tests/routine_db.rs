@@ -1,8 +1,9 @@
 use chrono::{DateTime, Duration, Utc};
+use turnier_automatik::presets::Preset;
 use turnier_automatik::presets::{self, Category, NewPreset, PresetConfig};
 use turnier_automatik::routine::{
     ensure_routine_proposal, ensure_routine_tournament, load_invitation_candidate_ids,
-    RoutineTournamentPlan,
+    EnsuredRoutineTournament, RoutineTournamentPlan,
 };
 use turnier_core::{BracketFormat, InviteMode, TournamentGameMode, TournamentMode};
 use turnier_db::{test_pool, Pool};
@@ -32,6 +33,17 @@ fn preset_config() -> PresetConfig {
     }
 }
 
+async fn ensure_committed(
+    pool: &Pool,
+    preset: &Preset,
+    plan: &RoutineTournamentPlan,
+) -> turnier_automatik::AutomatikResult<EnsuredRoutineTournament> {
+    let mut tx = pool.begin().await?;
+    let ensured = ensure_routine_tournament(&mut tx, preset, plan).await?;
+    tx.commit().await?;
+    Ok(ensured)
+}
+
 #[tokio::test]
 async fn aktives_preset_erzeugt_genau_einen_entwurf_mit_remindern() {
     let db = test_pool().await.expect("central test pool");
@@ -56,10 +68,10 @@ async fn aktives_preset_erzeugt_genau_einen_entwurf_mit_remindern() {
         bracket_start: utc("2026-07-18T21:00:00Z"),
     };
 
-    let first = ensure_routine_tournament(pool, &preset, &plan)
+    let first = ensure_committed(pool, &preset, &plan)
         .await
         .expect("first ensure");
-    let second = ensure_routine_tournament(pool, &preset, &plan)
+    let second = ensure_committed(pool, &preset, &plan)
         .await
         .expect("second ensure");
 
@@ -85,7 +97,7 @@ async fn aktives_preset_erzeugt_genau_einen_entwurf_mit_remindern() {
     revised.description_template = Some("Neue Beschreibung".to_string());
     revised.rules = Some("Neue Regeln".to_string());
     revised.team_size = 5;
-    let retried = ensure_routine_tournament(pool, &revised, &plan)
+    let retried = ensure_committed(pool, &revised, &plan)
         .await
         .expect("retry revised draft");
     assert_eq!(retried.id, first.id);

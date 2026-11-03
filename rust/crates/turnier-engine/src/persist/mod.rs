@@ -16,6 +16,7 @@ mod groups;
 mod league;
 mod mini_group_complete;
 mod points;
+mod start_gap;
 
 pub use advance::advance_bracket_winner;
 pub use bracket::{generate_bracket, generate_bracket_in_tx};
@@ -33,6 +34,10 @@ pub use league::{
 };
 pub use mini_group_complete::complete_mini_group_round_robin;
 pub use points::{recalculate_player_points, recalculate_player_points_in_tx};
+pub use start_gap::{
+    acquire_tournament_schedule_lock, effective_start, ensure_start_gap, start_gap_message,
+    starts_too_close, MIN_START_GAP_HOURS, TOURNAMENT_SCHEDULE_ADVISORY_LOCK_KEY,
+};
 
 use serde_json::Value;
 use sqlx::{Postgres, Transaction};

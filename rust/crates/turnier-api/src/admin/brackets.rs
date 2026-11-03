@@ -86,6 +86,7 @@ async fn generate_league_plan(
     slot_minutes: Option<i64>,
 ) -> WebResult<Json<Value>> {
     let mut tx = state.pool.begin().await?;
+    turnier_scheduler::acquire_tournament_schedule_lock(&mut tx).await?;
     let status: String =
         sqlx::query_scalar(r#"SELECT status FROM turnier."tournaments" WHERE id = $1 FOR UPDATE"#)
             .bind(tournament_id)

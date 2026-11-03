@@ -2,6 +2,7 @@ use chrono::{DateTime, Duration, Utc};
 use sqlx::{Postgres, Transaction};
 use turnier_core::now_utc;
 
+use super::start_gap::ensure_start_gap;
 use crate::error::{TournamentError, TournamentResult};
 use crate::league::{
     is_valid_slot_minutes, league_rounds, round_offset_minutes, LEAGUE_GROUP_NAME,
@@ -154,7 +155,7 @@ async fn write_group_phase_start(
     .bind(tournament_id)
     .execute(&mut **tx)
     .await?;
-    Ok(())
+    ensure_start_gap(tx, tournament_id).await
 }
 
 async fn delete_existing_plan(

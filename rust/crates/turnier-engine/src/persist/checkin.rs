@@ -585,6 +585,9 @@ pub async fn finalize_checkin(
     params: FinalizeCheckinParams<'_>,
 ) -> TournamentResult<FinalizeCheckinResult> {
     let mut tx = pool.begin().await?;
+    if params.confirm && params.advance_to_group_phase {
+        super::start_gap::acquire_tournament_schedule_lock(&mut tx).await?;
+    }
 
     let tournament: Option<TournamentRow> = sqlx::query_as::<_, TournamentRow>(
         "SELECT status, team_size, tournament_mode, bracket_format \

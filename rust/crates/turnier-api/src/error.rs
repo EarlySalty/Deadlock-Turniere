@@ -108,6 +108,7 @@ impl From<turnier_engine::TournamentError> for WebError {
             Validation(msg) => Self::bad_request(msg),
             SnapshotMismatch => Self::conflict("Daten wurden zwischenzeitlich geändert"),
             StatusConflict => Self::conflict("Statuswechsel kollidiert"),
+            StartGapConflict(msg) => Self::conflict(msg),
             Steam(_) => Self::internal("Rang-/Steam-Fehler"),
             Db(e) => e.into(),
         }

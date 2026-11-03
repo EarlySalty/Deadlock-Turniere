@@ -43,6 +43,11 @@ pub use status::{
 // Persistenz-API.
 #[cfg(feature = "persist")]
 pub use persist::{
+    acquire_tournament_schedule_lock, effective_start, ensure_start_gap, start_gap_message,
+    starts_too_close, MIN_START_GAP_HOURS, TOURNAMENT_SCHEDULE_ADVISORY_LOCK_KEY,
+};
+#[cfg(feature = "persist")]
+pub use persist::{
     advance_bracket_winner, assign_random_teams, build_checkin_snapshot_token,
     complete_mini_group_round_robin, finalize_checkin, generate_bracket, generate_bracket_in_tx,
     generate_group_matches, generate_group_matches_in_tx, generate_groups, generate_groups_in_tx,

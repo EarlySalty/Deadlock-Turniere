@@ -3,6 +3,7 @@
 
 use chrono::{DateTime, Duration, Utc};
 use serde_json::json;
+use sqlx::PgConnection;
 use turnier_core::{discord_id_to_string, json::wire_string_to_jsonb, parse_discord_id};
 use turnier_db::Pool;
 
@@ -112,16 +113,15 @@ pub async fn ensure_routine_proposal(
 /// Legt fuer Preset und Startslot hoechstens einen Entwurf an. Der Aufrufer
 /// oeffnet ihn anschliessend ueber die bestehende Statusmaschine.
 pub async fn ensure_routine_tournament(
-    pool: &Pool,
+    conn: &mut PgConnection,
     preset: &Preset,
     plan: &RoutineTournamentPlan,
 ) -> AutomatikResult<EnsuredRoutineTournament> {
-    let mut tx = pool.begin().await?;
     let created_by = parse_discord_id(&preset.created_by)
         .map_err(|_| crate::AutomatikError::InvalidNumericId(preset.created_by.clone()))?;
     sqlx::query("SELECT pg_advisory_xact_lock($1)")
         .bind(ROUTINE_CREATE_LOCK)
-        .execute(&mut *tx)
+        .execute(&mut *conn)
         .await?;
 
     if let Some((id, status)) = sqlx::query_as::<_, (i64, String)>(
@@ -131,7 +131,7 @@ pub async fn ensure_routine_tournament(
     )
     .bind(preset.id)
     .bind(plan.event_start)
-    .fetch_optional(&mut *tx)
+    .fetch_optional(&mut *conn)
     .await?
     {
         if status == "draft" {
@@ -166,10 +166,9 @@ pub async fn ensure_routine_tournament(
                 preset.start_reminder_offsets.as_deref(),
             ))
             .bind(id)
-            .execute(&mut *tx)
+            .execute(&mut *conn)
             .await?;
         }
-        tx.commit().await?;
         return Ok(EnsuredRoutineTournament {
             id,
             status,
@@ -211,10 +210,8 @@ pub async fn ensure_routine_tournament(
         preset.start_reminder_offsets.as_deref(),
     ))
     .bind(preset.id)
-    .fetch_one(&mut *tx)
+    .fetch_one(&mut *conn)
     .await?;
-    tx.commit().await?;
-
     Ok(EnsuredRoutineTournament {
         id,
         status: "draft".to_string(),

@@ -28,6 +28,9 @@ pub enum TournamentError {
     #[error("Turnierstatus wurde parallel geändert")]
     StatusConflict,
 
+    #[error("{0}")]
+    StartGapConflict(String),
+
     /// Rang-Resolver-Fehler (Steam-/Discord-Lookup) beim Solo-Team-Bilden.
     #[cfg(feature = "persist")]
     #[error(transparent)]

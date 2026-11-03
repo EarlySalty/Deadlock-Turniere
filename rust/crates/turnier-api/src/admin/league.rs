@@ -34,6 +34,7 @@ async fn reschedule_plan(
     Json(body): Json<ScheduleBody>,
 ) -> WebResult<Json<Value>> {
     let mut tx = state.pool.begin().await?;
+    turnier_scheduler::acquire_tournament_schedule_lock(&mut tx).await?;
     let row = sqlx::query(
         r#"SELECT status, tournament_mode FROM turnier."tournaments" WHERE id = $1 FOR UPDATE"#,
     )

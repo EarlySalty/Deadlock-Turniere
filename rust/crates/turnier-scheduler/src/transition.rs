@@ -117,7 +117,7 @@ pub async fn advance_tournament_status(
     actor_id: Option<&str>,
 ) -> SchedulerResult<serde_json::Value> {
     let mut tx = pool.begin().await?;
-    if next_status == "registration" {
+    if next_status == "registration" || next_status == "group_phase" {
         acquire_tournament_schedule_lock(&mut tx).await?;
     }
     // Modus und Status bleiben während Prüfung und Generierung unverändert.

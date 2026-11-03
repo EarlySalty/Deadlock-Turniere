@@ -37,7 +37,7 @@ pub enum SchedulerError {
     /// Fehler aus der Turnier-Engine (Generierung Gruppen/Matches/Bracket,
     /// Punkte-Neuberechnung).
     #[error(transparent)]
-    Tournament(#[from] turnier_engine::TournamentError),
+    Tournament(turnier_engine::TournamentError),
 
     /// Persistenz-Fehler (Pool/Query).
     #[error(transparent)]
@@ -50,6 +50,17 @@ pub enum SchedulerError {
 impl From<sqlx::Error> for SchedulerError {
     fn from(err: sqlx::Error) -> Self {
         SchedulerError::Db(turnier_db::DbError::from(err))
+    }
+}
+
+impl From<turnier_engine::TournamentError> for SchedulerError {
+    fn from(err: turnier_engine::TournamentError) -> Self {
+        match err {
+            turnier_engine::TournamentError::StartGapConflict(msg) => {
+                SchedulerError::StartGapConflict(msg)
+            }
+            other => SchedulerError::Tournament(other),
+        }
     }
 }
 
