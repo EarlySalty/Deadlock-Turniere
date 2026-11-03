@@ -361,6 +361,7 @@ export default function Admin() {
                           groups={liveDetail.groups}
                           teams={liveDetail.teams}
                           autoLobby={liveDetail.auto_lobby_enabled}
+                          countsForLeaderboard={!liveDetail.exclude_from_leaderboard}
                           onRefresh={() => void refetchLiveDetail()}
                         />
                       ) : (

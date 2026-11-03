@@ -11,6 +11,7 @@ import {
 } from '@/hooks/useTournament'
 import {
   isDecided,
+  leagueFinishConfirm,
   leagueRounds,
   localInputToIso,
   slotMinutesOf,
@@ -23,6 +24,7 @@ interface LeaguePlanPanelProps {
   groups: Group[]
   teams: Team[]
   autoLobby: boolean
+  countsForLeaderboard: boolean
   onRefresh?: () => void
 }
 
@@ -169,10 +171,16 @@ function ScheduleEditor({ tournamentId, initialStart, initialSlot, canRebuild }:
   )
 }
 
-function FinishCard({ tournamentId, openMatches }: { tournamentId: number; openMatches: number }) {
+interface FinishCardProps {
+  tournamentId: number
+  openMatches: number
+  countsForLeaderboard: boolean
+}
+
+function FinishCard({ tournamentId, openMatches, countsForLeaderboard }: FinishCardProps) {
   const advance = useAdvanceTournament()
   const handleFinish = () => {
-    if (window.confirm('Turnier abschließen? Danach lassen sich keine Ergebnisse mehr ändern.')) {
+    if (window.confirm(leagueFinishConfirm(countsForLeaderboard))) {
       advance.mutate(tournamentId)
     }
   }
@@ -211,6 +219,7 @@ export default function LeaguePlanPanel({
   groups,
   teams,
   autoLobby,
+  countsForLeaderboard,
   onRefresh,
 }: LeaguePlanPanelProps) {
   const matches = groups.flatMap((group) => group.matches)
@@ -245,7 +254,11 @@ export default function LeaguePlanPanel({
         teams={teams}
         onRefresh={onRefresh}
       />
-      <FinishCard tournamentId={tournamentId} openMatches={openMatches} />
+      <FinishCard
+        tournamentId={tournamentId}
+        openMatches={openMatches}
+        countsForLeaderboard={countsForLeaderboard}
+      />
     </div>
   )
 }

@@ -1,0 +1,367 @@
+{
+  "enabled": true,
+  "mode": 0,
+  "default_channel_ids": [
+    "1289721245281292289",
+    "1289721245281292290",
+    "1289721245281292291",
+    "1407787097217040547",
+    "1426220702054355077",
+    "1398021105339334666",
+    "1342057180421165131",
+    "1483136301271355532",
+    "1310153243795390475",
+    "1459628609705738539",
+    "1326973956825284628",
+    "1444646330319241337",
+    "1327664119649800284"
+  ],
+  "prompts": [
+    {
+      "id": "1527065946106232995",
+      "type": 0,
+      "title": "Wo stehst du gerade?",
+      "single_select": true,
+      "required": false,
+      "in_onboarding": true,
+      "options": [
+        {
+          "id": "1527065946106232998",
+          "title": "Ich spiele Deadlock und suche Mitspieler",
+          "description": "",
+          "role_ids": [],
+          "channel_ids": [
+            "1376335502919335936"
+          ],
+          "emoji_name": "🎮",
+          "emoji_animated": false
+        },
+        {
+          "id": "1527065946106232999",
+          "title": "Ich brauche noch einen Invite",
+          "description": "Ich hab Deadlock noch nicht — ich brauche einen Invite",
+          "role_ids": [
+            "1522384960021856368"
+          ],
+          "channel_ids": [],
+          "emoji_name": "🔑",
+          "emoji_animated": false
+        },
+        {
+          "id": "1527065946106233000",
+          "title": "Ich bin ganz neu — nehmt mich an die Hand",
+          "description": "Ich bin ganz neu und will's lernen — nehmt mich an die Hand",
+          "role_ids": [
+            "1522384961481609236"
+          ],
+          "channel_ids": [],
+          "emoji_name": "🌱",
+          "emoji_animated": false
+        }
+      ]
+    },
+    {
+      "id": "0",
+      "type": 0,
+      "title": "Worauf hast du Lust?",
+      "single_select": false,
+      "required": false,
+      "in_onboarding": true,
+      "options": [
+        {
+          "id": "1",
+          "title": "Scrims",
+          "description": "Trainingsspiele mit festen Teams. Danach mit /scrim-signup eintragen.",
+          "role_ids": [
+            "1520849762851618817"
+          ],
+          "channel_ids": [],
+          "emoji_name": "dl_ranked",
+          "emoji_animated": false,
+          "emoji_id": "1522518271306366996"
+        },
+        {
+          "id": "2",
+          "title": "Lustige Custom Games",
+          "description": "Hide and Seek, Spaßmodi und andere Customs. Du wirst gepingt, wenn eine Runde startet.",
+          "role_ids": [
+            "1407086020331311144"
+          ],
+          "channel_ids": [],
+          "emoji_name": "dl_brawl",
+          "emoji_animated": false,
+          "emoji_id": "1522518262708174928"
+        },
+        {
+          "id": "3",
+          "title": "Turniere",
+          "description": "Schaltet den Turnier-Bereich frei: Regeln, Ankündigungen, Team- und Spielersuche.",
+          "role_ids": [
+            "1566909672676663447"
+          ],
+          "channel_ids": [],
+          "emoji_name": "dl_crown",
+          "emoji_animated": false,
+          "emoji_id": "1522518265421631538"
+        }
+      ]
+    },
+    {
+      "id": "1527065946106233001",
+      "type": 0,
+      "title": "Wofür willst du Pings bekommen?",
+      "single_select": false,
+      "required": false,
+      "in_onboarding": true,
+      "options": [
+        {
+          "id": "1527065946181734503",
+          "title": "Patchnotes",
+          "description": "",
+          "role_ids": [
+            "1330994309524357140"
+          ],
+          "channel_ids": []
+        },
+        {
+          "id": "1527065946181734504",
+          "title": "Spielersuche",
+          "description": "",
+          "role_ids": [
+            "1411798947936342097"
+          ],
+          "channel_ids": []
+        },
+        {
+          "id": "1527065946181734507",
+          "title": "Streams",
+          "description": "",
+          "role_ids": [
+            "1522384962207088773"
+          ],
+          "channel_ids": []
+        }
+      ]
+    },
+    {
+      "id": "1420468904618102918",
+      "type": 0,
+      "title": "Wähle hier deinen aktuellen Deadlock Rang aus.",
+      "single_select": true,
+      "required": true,
+      "in_onboarding": true,
+      "options": [
+        {
+          "id": "1492610805898674321",
+          "title": "Initiate / Novize",
+          "description": "",
+          "role_ids": [
+            "1492960891619250408",
+            "1304216250649415771"
+          ],
+          "channel_ids": [],
+          "emoji_name": "initiate",
+          "emoji_animated": false,
+          "emoji_id": "1546480749845418037"
+        },
+        {
+          "id": "1492610805898674322",
+          "title": "Seeker",
+          "description": "",
+          "role_ids": [
+            "1304216250649415771",
+            "1492959966284218611"
+          ],
+          "channel_ids": [],
+          "emoji_name": "seeker",
+          "emoji_animated": false,
+          "emoji_id": "1546480757155827752"
+        },
+        {
+          "id": "1492610805898674323",
+          "title": "Acolyte / Akolyth",
+          "description": "",
+          "role_ids": [
+            "1492960350755225730",
+            "1304216250649415771"
+          ],
+          "channel_ids": [],
+          "emoji_name": "acolyte",
+          "emoji_animated": false,
+          "emoji_id": "1546480764093202542"
+        },
+        {
+          "id": "1492613919842238528",
+          "title": "Sentinel",
+          "description": "",
+          "role_ids": [
+            "1304216250649415771",
+            "1492960274096066831"
+          ],
+          "channel_ids": [],
+          "emoji_name": "sentinel",
+          "emoji_animated": false,
+          "emoji_id": "1546480771131514991"
+        },
+        {
+          "id": "1492613919842238529",
+          "title": "Mystic",
+          "description": "",
+          "role_ids": [
+            "1492960262184239178",
+            "1304216250649415771"
+          ],
+          "channel_ids": [],
+          "emoji_name": "mystic",
+          "emoji_animated": false,
+          "emoji_id": "1546480778496581734"
+        },
+        {
+          "id": "1492613919842238530",
+          "title": "Ritualist",
+          "description": "",
+          "role_ids": [
+            "1304216250649415771",
+            "1492960184920834110"
+          ],
+          "channel_ids": [],
+          "emoji_name": "ritualist",
+          "emoji_animated": false,
+          "emoji_id": "1546480786763415567"
+        },
+        {
+          "id": "1492613919842238531",
+          "title": "Emissary / Emissär",
+          "description": "",
+          "role_ids": [
+            "1492959936513052672",
+            "1304216250649415771"
+          ],
+          "channel_ids": [],
+          "emoji_name": "emissary",
+          "emoji_animated": false,
+          "emoji_id": "1546480793961107476"
+        },
+        {
+          "id": "1492613919842238532",
+          "title": "Oracle / Orakel",
+          "description": "",
+          "role_ids": [
+            "1492959889767534602",
+            "1304216250649415771"
+          ],
+          "channel_ids": [],
+          "emoji_name": "oracle",
+          "emoji_animated": false,
+          "emoji_id": "1546480801032704000"
+        },
+        {
+          "id": "1492613919842238533",
+          "title": "Phantom",
+          "description": "",
+          "role_ids": [
+            "1304216250649415771",
+            "1492959474468655134"
+          ],
+          "channel_ids": [],
+          "emoji_name": "phantom",
+          "emoji_animated": false,
+          "emoji_id": "1546480809433763902"
+        },
+        {
+          "id": "1492613919905288274",
+          "title": "Ascendant / Aszendent",
+          "description": "",
+          "role_ids": [
+            "1304216250649415771",
+            "1491935935414276198"
+          ],
+          "channel_ids": [],
+          "emoji_name": "ascendant",
+          "emoji_animated": false,
+          "emoji_id": "1546480817046298675"
+        },
+        {
+          "id": "1492613919905288275",
+          "title": "Eternus",
+          "description": "",
+          "role_ids": [
+            "1304216250649415771",
+            "1492959003700101180"
+          ],
+          "channel_ids": [],
+          "emoji_name": "eternus",
+          "emoji_animated": false,
+          "emoji_id": "1546480824222748674"
+        },
+        {
+          "id": "1492615412670529653",
+          "title": "Neu im Game / Rang ist Unbekannt",
+          "description": "",
+          "role_ids": [
+            "1304216250649415771"
+          ],
+          "channel_ids": [
+            "1398021105339334666",
+            "1470126503252721845"
+          ],
+          "emoji_name": "❓",
+          "emoji_animated": false
+        }
+      ]
+    },
+    {
+      "id": "1527065946181734508",
+      "type": 0,
+      "title": "Willst du Starthilfe?",
+      "single_select": false,
+      "required": false,
+      "in_onboarding": true,
+      "options": [
+        {
+          "id": "1527065946181734511",
+          "title": "Echten Rang automatisch bekommen",
+          "description": "Nach dem Start schicken wir dir die kurze Steam-Anleitung (2 Minuten).",
+          "role_ids": [
+            "1522762890174529546"
+          ],
+          "channel_ids": [],
+          "emoji_name": "🔗",
+          "emoji_animated": false
+        },
+        {
+          "id": "1527065946215157780",
+          "title": "Kleine Server-Tour per DM",
+          "description": "Ich zeig dir Schritt für Schritt, wie der Server funktioniert.",
+          "role_ids": [
+            "1527047393164529684"
+          ],
+          "channel_ids": [],
+          "emoji_name": "🧭",
+          "emoji_animated": false
+        }
+      ]
+    },
+    {
+      "id": "1537294348041986090",
+      "type": 0,
+      "title": "Deinen Account verknüpfen",
+      "single_select": false,
+      "required": false,
+      "in_onboarding": false,
+      "options": [
+        {
+          "id": "1537294348041986093",
+          "title": "Steam",
+          "description": "Zeigt dir den Kanal, in dem du deinen Steam-Account verknüpfst.",
+          "role_ids": [],
+          "channel_ids": [
+            "1398021105339334666"
+          ],
+          "emoji_name": "🔗",
+          "emoji_animated": false
+        }
+      ]
+    }
+  ]
+}

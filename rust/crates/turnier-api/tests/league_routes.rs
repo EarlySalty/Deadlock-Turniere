@@ -584,3 +584,75 @@ async fn scheduled_gaps(pool: &Pool, league: &League) -> Vec<i64> {
         .map(|pair| (pair[1] - pair[0]).num_minutes())
         .collect()
 }
+
+#[tokio::test]
+async fn league_result_slot_does_not_lock_unrelated_team_with_that_id() {
+    let app = app().await;
+    sqlx::query("SELECT setval(pg_get_serial_sequence('turnier.teams', 'id'), 1000)")
+        .execute(&app.pool)
+        .await
+        .expect("sequence");
+    let liga = league(&app.pool, 2, "league").await;
+    let (a, b) = (liga.teams[0], liga.teams[1]);
+    let ab = match_between(&app.pool, &liga, a, b).await;
+    assert_eq!(app.submit(&liga, ab, b).await, StatusCode::OK);
+    let stored: i64 = sqlx::query_scalar(
+        "SELECT winning_team FROM turnier.match_results WHERE group_match_id = $1",
+    )
+    .bind(ab)
+    .fetch_one(&app.pool)
+    .await
+    .expect("stored slot");
+
+    let other = unrelated_team(&app.pool, stored).await;
+    let (status, body) = app
+        .call(
+            Method::DELETE,
+            &format!("/api/admin/tournaments/{other}/teams/{stored}"),
+            None,
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    let (locked, _) = app
+        .call(
+            Method::DELETE,
+            &format!("/api/admin/tournaments/{}/teams/{b}", liga.id),
+            None,
+        )
+        .await;
+    assert_eq!(locked, StatusCode::BAD_REQUEST);
+}
+
+async fn unrelated_team(pool: &Pool, team_id: i64) -> i64 {
+    let now = Utc::now();
+    let tournament: i64 = sqlx::query_scalar(
+        "INSERT INTO turnier.tournaments \
+             (name, status, team_size, bracket_format, created_by, created_at, updated_at, \
+              invite_mode, tournament_mode, series_format, exclude_from_leaderboard, \
+              tournament_game_mode, auto_lobby_enabled, is_test, match_objective, \
+              no_show_grace_minutes, source) \
+         VALUES ('Andere', 'registration', 1, 'single_elimination', $1, $2, $2, 'always', \
+                 'bracket_only', 1, false, 'standard', false, false, 'auto', 10, 'test') \
+         RETURNING id",
+    )
+    .bind(910_000_000_000_020_001_i64)
+    .bind(now)
+    .fetch_one(pool)
+    .await
+    .expect("other tournament");
+    sqlx::query(
+        "INSERT INTO turnier.teams \
+             (id, tournament_id, name, name_key, captain_discord_id, created_at, \
+              recruitment_status) \
+         VALUES ($1, $2, 'Fremd', 'fremd', $3, $4, 'open')",
+    )
+    .bind(team_id)
+    .bind(tournament)
+    .bind(FIRST_PLAYER_ID + 50)
+    .bind(now)
+    .execute(pool)
+    .await
+    .expect("unrelated team");
+    tournament
+}

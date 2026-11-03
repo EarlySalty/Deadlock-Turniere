@@ -158,7 +158,7 @@ pub async fn check_and_send_registration_reminders_with_config(
             }
 
             let message = format!(
-                "Turnier '{name}' startet in {} — letzte Chance zur Anmeldung!",
+                "Turnier '{name}' startet in {}. Letzte Chance zur Anmeldung!",
                 offset_label(offset)
             );
             if !send_reminder(
@@ -235,7 +235,7 @@ pub async fn check_and_send_start_reminders_with_config(
             }
 
             let message = format!(
-                "Turnier '{}' startet in {} — sei rechtzeitig da und mach dich ready!",
+                "Turnier '{}' startet in {}. Sei rechtzeitig da und mach dich ready!",
                 row.name,
                 offset_label(offset)
             );
@@ -257,12 +257,6 @@ pub async fn check_and_send_start_reminders_with_config(
     Ok(())
 }
 
-/// „Gleich dran"-Reminder an Teammitglieder offener Bracket-Matches (pending,
-/// beide Teams gesetzt, keine Steam-Party). Portiert
-/// `_check_and_send_match_reminders` (Z.447-500). Diese Funktion hat keinen
-/// `now`-Parameter, weil das Original (wie hier) rein über den Match-Zustand und
-/// die Dedupe-Tabelle gated — Konsistenz zur injizierbaren Signatur bleibt durch
-/// den ungenutzten Aufruf-Kontext gewahrt.
 pub async fn check_and_send_match_reminders(
     pool: &Pool,
     notifier: &DiscordNotifier,
@@ -330,7 +324,7 @@ async fn send_match_reminders(
         }
 
         let message = format!(
-            "Hey! Euer Match im Turnier '{}' ist als Nächstes dran — macht euch ready.",
+            "Hey! Euer Match im Turnier '{}' ist als Nächstes dran. Macht euch ready.",
             m.tournament_name
         );
         if !send_reminder(
