@@ -11,4 +11,4 @@
 | P7 lobby automation test | | | wave 2 | |
 | P9 em-dash sweep | feat/no-em-dashes | | spawned 2026-11-03 | user: remove all em dashes in the repo (125 source files); conflicts with P1-P4 resolved by whoever lands later |
 | P10 timezone fix | | | wave 2, after P3a/P4 land | admin form sends naive local time, DB stores it as UTC, times 1-2 h off (legacy Python read Berlin time); fix form + API to send zoned time; check existing rows incl. #16 |
-| P11 registration reminder vs check-in | | | wave 2 | 15-minute registration reminder can never send because check-in ends registration status first; also gate nits: 0-minute reminder not addable, edit-form help text about defaults |
+| P11 registration reminder vs check-in + scheduler test harness | | | wave 2 | scheduler tests/common/mod.rs hard-codes a local PG socket, all 10 advance_status DB tests fail at setup on ionos (verified 2026-11-03 on main eb9dc80, log /tmp/turniere-p2-dbtest.log); port to DATABASE_URL via test-db-run; 15-minute registration reminder can never send because check-in ends registration status first; also gate nits: 0-minute reminder not addable, edit-form help text about defaults |
