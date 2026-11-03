@@ -1,11 +1,7 @@
 import type { BracketFormat, TournamentDetail } from '@/types/tournament'
 import { defaultGameRules, lobbyFromStored, type GameRulesState } from './gameRules'
-import {
-  DEFAULT_REMINDER_OFFSETS,
-  DEFAULT_START_REMINDER_OFFSETS,
-  formatOffsets,
-  type TournamentFormat,
-} from './options'
+import type { TournamentFormat } from './options'
+import { DEFAULT_REMINDER_OFFSETS, DEFAULT_START_REMINDER_OFFSETS, offsetsOrDefault } from '../reminderOffsets'
 import { defaultSpecialSettings, type SpecialSettingsState } from './specialSettings'
 
 export type SeriesFormat = 1 | 3 | 5
@@ -19,8 +15,8 @@ export interface CreateFormValues {
   bracketFormat: BracketFormat
   seriesFormat: SeriesFormat
   finalSeriesFormat: SeriesFormat | null
-  reminderOffsets: string
-  startReminderOffsets: string
+  reminderOffsets: number[]
+  startReminderOffsets: number[]
   special: SpecialSettingsState
   gameRules: GameRulesState
 }
@@ -40,8 +36,8 @@ export function defaultCreateValues(): CreateFormValues {
     bracketFormat: 'single_elimination',
     seriesFormat: 1,
     finalSeriesFormat: null,
-    reminderOffsets: formatOffsets(DEFAULT_REMINDER_OFFSETS, DEFAULT_REMINDER_OFFSETS),
-    startReminderOffsets: formatOffsets(DEFAULT_START_REMINDER_OFFSETS, DEFAULT_START_REMINDER_OFFSETS),
+    reminderOffsets: DEFAULT_REMINDER_OFFSETS,
+    startReminderOffsets: DEFAULT_START_REMINDER_OFFSETS,
     special: defaultSpecialSettings(),
     gameRules: defaultGameRules(),
   }
@@ -71,8 +67,8 @@ export function templateFromTournament(tournament: TournamentDetail): CreateTemp
       bracketFormat: tournament.bracket_format,
       seriesFormat: seriesOf(tournament.series_format) ?? 1,
       finalSeriesFormat: seriesOf(tournament.final_series_format),
-      reminderOffsets: formatOffsets(tournament.reminder_offsets, DEFAULT_REMINDER_OFFSETS),
-      startReminderOffsets: formatOffsets(tournament.start_reminder_offsets, DEFAULT_START_REMINDER_OFFSETS),
+      reminderOffsets: offsetsOrDefault(tournament.reminder_offsets ?? [], DEFAULT_REMINDER_OFFSETS),
+      startReminderOffsets: offsetsOrDefault(tournament.start_reminder_offsets ?? [], DEFAULT_START_REMINDER_OFFSETS),
       special: {
         inviteMode: tournament.invite_mode,
         inviteWindowStart: '',

@@ -24,12 +24,11 @@ import {
 } from './settings/StandardFields'
 import {
   DATE_HINTS,
-  DEFAULT_REMINDER_OFFSETS,
   FORMAT_OPTIONS,
   GAME_MODE_OPTIONS,
   PRESET_LABELS,
-  parseOffsets,
 } from './settings/options'
+import { DEFAULT_REMINDER_OFFSETS, DEFAULT_START_REMINDER_OFFSETS, offsetsOrDefault } from './reminderOffsets'
 
 interface CreateTournamentFormProps {
   template?: CreateTemplate
@@ -117,8 +116,8 @@ export default function CreateTournamentForm({ template }: CreateTournamentFormP
         tournament_game_mode: gameRules.gameMode,
         auto_lobby_enabled: gameRules.autoLobby,
         exclude_from_leaderboard: special.excludeFromLeaderboard,
-        reminder_offsets: parseOffsets(values.reminderOffsets, DEFAULT_REMINDER_OFFSETS),
-        start_reminder_offsets: parseOffsets(values.startReminderOffsets, DEFAULT_REMINDER_OFFSETS),
+        reminder_offsets: offsetsOrDefault(values.reminderOffsets, DEFAULT_REMINDER_OFFSETS),
+        start_reminder_offsets: offsetsOrDefault(values.startReminderOffsets, DEFAULT_START_REMINDER_OFFSETS),
         match_objective: gameRules.matchObjective,
         no_show_grace_minutes: special.noShowGrace,
         rules: values.rules.trim() || undefined,

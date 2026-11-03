@@ -144,23 +144,8 @@ export const CONVAR_SLIDERS: ConvarSliderConfig[] = [
   { key: 'citadel_dps_multiplier', label: 'DPS-Multiplikator', min: 0.5, max: 5, step: 0.5, defaultValue: 1.0, unit: '×', hint: 'Normal: 1.0.' },
 ]
 
-export const DEFAULT_REMINDER_OFFSETS = [1440, 120, 15]
-export const DEFAULT_START_REMINDER_OFFSETS = [1440, 60]
-
 export function optionDescription<T extends string>(options: Choice<T>[], value: T): string {
   return options.find((option) => option.value === value)?.description ?? ''
-}
-
-export function formatOffsets(value: number[] | null | undefined, fallback: number[]): string {
-  return (value && value.length > 0 ? value : fallback).join(', ')
-}
-
-export function parseOffsets(value: string, fallback: number[]): number[] {
-  const parsed = value
-    .split(',')
-    .map((entry) => Number(entry.trim()))
-    .filter((entry) => Number.isFinite(entry) && entry >= 0)
-  return parsed.length > 0 ? parsed : fallback
 }
 
 export const DATE_HINTS = {

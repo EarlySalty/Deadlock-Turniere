@@ -1,6 +1,7 @@
 import DateTimeInput from '@/components/ui/DateTimeInput'
 import type { BracketFormat } from '@/types/tournament'
 import Field from './Field'
+import ReminderOffsetsInput from '../ReminderOffsetsInput'
 import { SubHeading } from './SettingsSection'
 import { INPUT_CLASS } from './options'
 import type { SeriesFormat } from './createFormValues'
@@ -19,8 +20,8 @@ export interface MatchFormatValue {
 }
 
 export interface ReminderValue {
-  reminderOffsets: string
-  startReminderOffsets: string
+  reminderOffsets: number[]
+  startReminderOffsets: number[]
 }
 
 export interface DateEntry {
@@ -163,34 +164,20 @@ export function ReminderFields({ idPrefix, value, onChange }: FieldGroupProps<Re
     <div className="space-y-4">
       <SubHeading>Erinnerungen</SubHeading>
       <div className="grid gap-4 sm:grid-cols-2">
-        <Field
+        <ReminderOffsetsInput
           id={`${idPrefix}-reminder-offsets`}
           label="Reminder vor Turnier-Start"
-          hint="Minuten vor dem Turnier-Start, mit Komma getrennt. 1440 = 1 Tag."
-        >
-          <input
-            id={`${idPrefix}-reminder-offsets`}
-            type="text"
-            value={value.reminderOffsets}
-            onChange={(event) => onChange({ reminderOffsets: event.target.value })}
-            placeholder="1440, 120, 15"
-            className={INPUT_CLASS}
-          />
-        </Field>
-        <Field
+          value={value.reminderOffsets}
+          onChange={(reminderOffsets) => onChange({ reminderOffsets })}
+          hint="Geht an alle mit Anmelde-Erinnerung, solange die Anmeldung offen ist. Ohne Auswahl gelten 1 Tag, 2 Std und 15 Min."
+        />
+        <ReminderOffsetsInput
           id={`${idPrefix}-start-reminder-offsets`}
           label="Erinnerung vor Match-Start"
-          hint="Minuten vor Turnierbeginn, geht an alle Teilnehmer."
-        >
-          <input
-            id={`${idPrefix}-start-reminder-offsets`}
-            type="text"
-            value={value.startReminderOffsets}
-            onChange={(event) => onChange({ startReminderOffsets: event.target.value })}
-            placeholder="1440, 60"
-            className={INPUT_CLASS}
-          />
-        </Field>
+          value={value.startReminderOffsets}
+          onChange={(startReminderOffsets) => onChange({ startReminderOffsets })}
+          hint="Geht an alle angemeldeten Teilnehmer. Ohne Auswahl gelten 1 Tag und 1 Std."
+        />
       </div>
     </div>
   )

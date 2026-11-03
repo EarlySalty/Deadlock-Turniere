@@ -1,13 +1,8 @@
 import { isLeague, localInputToIso, toLocalInput } from '@/lib/league'
 import type { Tournament, TournamentMode, TournamentUpdate } from '@/types/tournament'
 import { lobbyChanged, lobbyFromStored, resolveLobbyPayload, type GameRulesState } from './gameRules'
-import {
-  DATE_HINTS,
-  DEFAULT_REMINDER_OFFSETS,
-  DEFAULT_START_REMINDER_OFFSETS,
-  formatOffsets,
-  parseOffsets,
-} from './options'
+import { DATE_HINTS } from './options'
+import { DEFAULT_REMINDER_OFFSETS, DEFAULT_START_REMINDER_OFFSETS, offsetsOrDefault } from '../reminderOffsets'
 import type { SpecialSettingsState } from './specialSettings'
 import type { BasicsValue, DateEntry, MatchFormatValue, ReminderValue } from './StandardFields'
 import type { SeriesFormat } from './createFormValues'
@@ -56,8 +51,8 @@ export function initialEditState(tournament: Tournament): EditState {
       checkinStart: toInputDateTime(tournament.checkin_start ?? null),
       groupPhaseStart: storedGroupStart(tournament),
       bracketStart: toInputDateTime(tournament.bracket_start),
-      reminderOffsets: formatOffsets(tournament.reminder_offsets, DEFAULT_REMINDER_OFFSETS),
-      startReminderOffsets: formatOffsets(tournament.start_reminder_offsets, DEFAULT_START_REMINDER_OFFSETS),
+      reminderOffsets: offsetsOrDefault(tournament.reminder_offsets ?? [], DEFAULT_REMINDER_OFFSETS),
+      startReminderOffsets: offsetsOrDefault(tournament.start_reminder_offsets ?? [], DEFAULT_START_REMINDER_OFFSETS),
     },
     special: {
       inviteMode: tournament.invite_mode,
@@ -121,8 +116,8 @@ export function buildUpdatePayload(
     checkin_start: form.checkinStart || undefined,
     group_phase_start: groupStartPayload(form, tournament),
     bracket_start: form.bracketStart || undefined,
-    reminder_offsets: parseOffsets(form.reminderOffsets, DEFAULT_REMINDER_OFFSETS),
-    start_reminder_offsets: parseOffsets(form.startReminderOffsets, DEFAULT_START_REMINDER_OFFSETS),
+    reminder_offsets: offsetsOrDefault(form.reminderOffsets, DEFAULT_REMINDER_OFFSETS),
+    start_reminder_offsets: offsetsOrDefault(form.startReminderOffsets, DEFAULT_START_REMINDER_OFFSETS),
     rules: form.rules.trim() || null,
     ...specialPayload(state.special, tournament),
   }
