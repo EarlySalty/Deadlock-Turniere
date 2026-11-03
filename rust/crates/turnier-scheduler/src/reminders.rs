@@ -91,8 +91,8 @@ fn tournament_start_value(row: &StartReminderRow) -> Option<DateTime<Utc>> {
         row.tournament_mode.as_deref(),
         row.group_phase_start,
         row.bracket_start,
+        row.registration_end,
     )
-    .or(row.registration_end)
 }
 
 /// Registrierungs-Reminder an Profile mit `notify_registration_reminder = 1`, vor

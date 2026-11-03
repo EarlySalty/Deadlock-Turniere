@@ -224,10 +224,13 @@ Bei `tournament_mode == "bracket_only"` und Status `checkin` wird nur nach
 `bracket` gewechselt, wenn `bracket_start` fällig ist; sonst bleibt das Turnier in
 `checkin` hängen, auch wenn `group_phase_start` längst vorbei ist. 1:1 erhalten.
 
-### KI-SC06 [erhalten]: Dedupe-Insert nach dem Versand + Aktiv-Check-TOCTOU
+### KI-SC06 [erhalten]: Dedupe-Insert nach dem Versand
 Reminder werden versendet, dann erst per `INSERT OR IGNORE` markiert (Crash
-dazwischen → erneuter Versand). Der Single-Active-Check und der Statuswechsel
-laufen ohne gemeinsames Lock (TOCTOU). Beides 1:1 erhalten.
+dazwischen → erneuter Versand). Der frühere Single-Active-Check ist durch die
+Startabstand-Regel ersetzt: echte Turniere von `draft` bis `bracket` brauchen
+mindestens 4 Stunden Abstand zwischen ihren Starts (Gruppen- bzw. Bracket-Start,
+sonst `registration_end`), geprüft unter einem Advisory-Lock in derselben
+Transaktion wie der Schreibzugriff.
 
 > Beim Port mitbereinigt (safe): der Tot-Loop (eine Exception aus einem Check
 > beendete im Original den ganzen Scheduler-Task) ist behoben; jeder der vier

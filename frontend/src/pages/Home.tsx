@@ -26,8 +26,8 @@ const item = {
 const OPEN_STATUSES = ['registration', 'checkin', 'group_phase', 'bracket']
 
 function tournamentStart(t: Tournament): string | null {
-  if (t.tournament_mode === 'bracket_only') return t.bracket_start
-  return t.group_phase_start ?? t.bracket_start
+  const planned = t.tournament_mode === 'bracket_only' ? t.bracket_start : t.group_phase_start ?? t.bracket_start
+  return planned ?? t.registration_end
 }
 
 function startTime(t: Tournament): number {

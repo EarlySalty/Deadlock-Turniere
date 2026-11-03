@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   useAdminTournament,
   useAdminTournaments,
@@ -111,22 +111,21 @@ export default function Admin() {
   const hasBracket = Boolean(liveDetail?.bracket_matches.length)
   const liveLeague = isLeague(liveDetail?.tournament_mode)
 
+  const phaseTournamentId = useRef<number | null>(null)
+
   useEffect(() => {
     if (!liveDetail) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setActivePhase(null)
       return
     }
+    const switched = phaseTournamentId.current !== liveDetail.id
+    phaseTournamentId.current = liveDetail.id
     setActivePhase((current) => {
       const fallback = defaultPhaseFor(liveDetail.status, hasGroups, hasBracket)
-      return current ?? fallback
+      return switched ? fallback : current ?? fallback
     })
   }, [liveDetail, hasGroups, hasBracket])
-
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setActivePhase(null)
-  }, [liveSelectedId])
 
   if (isLoading) return <LoadingSpinner />
 

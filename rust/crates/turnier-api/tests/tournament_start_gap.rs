@@ -87,6 +87,30 @@ impl App {
     }
 }
 
+fn form_time(at: DateTime<Utc>) -> String {
+    at.format("%Y-%m-%dT%H:%M").to_string()
+}
+
+fn form_payload(name: &str, start: DateTime<Utc>) -> Value {
+    json!({
+        "name": name,
+        "team_size": 6,
+        "bracket_format": "single_elimination",
+        "series_format": 1,
+        "registration_start": form_time(start - Duration::days(3)),
+        "registration_end": form_time(start),
+        "checkin_start": form_time(start - Duration::minutes(30)),
+        "invite_mode": "always",
+        "tournament_game_mode": "standard",
+        "auto_lobby_enabled": true,
+        "exclude_from_leaderboard": false,
+        "reminder_offsets": [1440, 120, 15],
+        "start_reminder_offsets": [1440, 60],
+        "match_objective": "auto",
+        "no_show_grace_minutes": 10,
+    })
+}
+
 fn evening() -> DateTime<Utc> {
     Utc.with_ymd_and_hms(2026, 11, 21, 18, 0, 0)
         .single()
@@ -130,6 +154,58 @@ async fn turnierstarts_brauchen_vier_stunden_abstand() {
         .await;
     assert_eq!(moved, StatusCode::CONFLICT, "{body}");
     assert!(detail(&body).contains(&format!("Turnier #{first_id} Abendturnier")));
+}
+
+#[tokio::test]
+async fn formular_turnierstart_zaehlt_als_start() {
+    let app = app().await;
+    let (created, first) = app
+        .call(
+            Method::POST,
+            "/api/admin/tournaments",
+            form_payload("Formularturnier", evening()),
+        )
+        .await;
+    assert_eq!(created, StatusCode::CREATED, "{first}");
+    let first_id = first["id"].as_i64().expect("id");
+    assert!(first["group_phase_start"].is_null(), "{first}");
+    assert!(first["bracket_start"].is_null(), "{first}");
+
+    let (same_start, body) = app
+        .call(
+            Method::POST,
+            "/api/admin/tournaments",
+            form_payload("Gleicher Start", evening() + Duration::hours(2)),
+        )
+        .await;
+    assert_eq!(same_start, StatusCode::CONFLICT, "{body}");
+    assert!(detail(&body).contains(&format!("Turnier #{first_id} Formularturnier")));
+
+    let (bracket_partner, body) = app
+        .create("Bracket daneben", evening() + Duration::hours(1), false)
+        .await;
+    assert_eq!(bracket_partner, StatusCode::CONFLICT, "{body}");
+    assert!(detail(&body).contains(&format!("Turnier #{first_id} Formularturnier")));
+
+    let (later, second) = app
+        .call(
+            Method::POST,
+            "/api/admin/tournaments",
+            form_payload("Spätes Formular", evening() + Duration::hours(5)),
+        )
+        .await;
+    assert_eq!(later, StatusCode::CREATED, "{second}");
+    let second_id = second["id"].as_i64().expect("id");
+
+    let (moved, body) = app
+        .call(
+            Method::PUT,
+            &format!("/api/admin/tournaments/{second_id}"),
+            json!({ "registration_end": form_time(evening() + Duration::hours(3)) }),
+        )
+        .await;
+    assert_eq!(moved, StatusCode::CONFLICT, "{body}");
+    assert!(detail(&body).contains(&format!("Turnier #{first_id} Formularturnier")));
 }
 
 async fn running_league(pool: &Pool, start: DateTime<Utc>) -> i64 {

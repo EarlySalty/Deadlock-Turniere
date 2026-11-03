@@ -18,6 +18,7 @@ struct StartRow {
     tournament_mode: Option<String>,
     group_phase_start: Option<DateTime<Utc>>,
     bracket_start: Option<DateTime<Utc>>,
+    registration_end: Option<DateTime<Utc>>,
 }
 
 impl StartRow {
@@ -26,6 +27,7 @@ impl StartRow {
             self.tournament_mode.as_deref(),
             self.group_phase_start,
             self.bracket_start,
+            self.registration_end,
         )
     }
 
@@ -38,11 +40,14 @@ pub fn effective_start(
     tournament_mode: Option<&str>,
     group_phase_start: Option<DateTime<Utc>>,
     bracket_start: Option<DateTime<Utc>>,
+    registration_end: Option<DateTime<Utc>>,
 ) -> Option<DateTime<Utc>> {
-    if tournament_mode == Some("bracket_only") {
-        return bracket_start;
-    }
-    group_phase_start.or(bracket_start)
+    let planned = if tournament_mode == Some("bracket_only") {
+        bracket_start
+    } else {
+        group_phase_start.or(bracket_start)
+    };
+    planned.or(registration_end)
 }
 
 pub fn starts_too_close(left: DateTime<Utc>, right: DateTime<Utc>) -> bool {
@@ -96,7 +101,8 @@ async fn load_start_row(
     tournament_id: i64,
 ) -> TournamentResult<Option<StartRow>> {
     let row = sqlx::query_as(
-        "SELECT id, name, status, is_test, tournament_mode, group_phase_start, bracket_start \
+        "SELECT id, name, status, is_test, tournament_mode, group_phase_start, bracket_start, \
+         registration_end \
          FROM turnier.tournaments WHERE id = $1",
     )
     .bind(tournament_id)
@@ -110,7 +116,8 @@ async fn load_other_planned_rows(
     tournament_id: i64,
 ) -> TournamentResult<Vec<StartRow>> {
     let rows = sqlx::query_as(
-        "SELECT id, name, status, is_test, tournament_mode, group_phase_start, bracket_start \
+        "SELECT id, name, status, is_test, tournament_mode, group_phase_start, bracket_start, \
+         registration_end \
          FROM turnier.tournaments \
          WHERE id <> $1 AND is_test = false AND status = ANY($2) \
          ORDER BY id",
@@ -141,6 +148,7 @@ mod tests {
             tournament_mode: None,
             group_phase_start: Some(start),
             bracket_start: None,
+            registration_end: None,
         }
     }
 
@@ -175,12 +183,29 @@ mod tests {
     #[test]
     fn bracket_only_startet_mit_dem_bracket() {
         assert_eq!(
-            effective_start(Some("bracket_only"), Some(at(10, 0)), Some(at(12, 0))),
+            effective_start(
+                Some("bracket_only"),
+                Some(at(10, 0)),
+                Some(at(12, 0)),
+                Some(at(9, 0))
+            ),
             Some(at(12, 0))
         );
         assert_eq!(
-            effective_start(None, None, Some(at(12, 0))),
+            effective_start(None, None, Some(at(12, 0)), Some(at(9, 0))),
             Some(at(12, 0))
+        );
+    }
+
+    #[test]
+    fn anmeldeschluss_gilt_als_start_ohne_phasenzeiten() {
+        assert_eq!(
+            effective_start(Some("bracket_only"), None, None, Some(at(18, 0))),
+            Some(at(18, 0))
+        );
+        assert_eq!(
+            effective_start(Some("group_stage"), None, None, Some(at(18, 0))),
+            Some(at(18, 0))
         );
     }
 }
