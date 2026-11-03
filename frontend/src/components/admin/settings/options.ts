@@ -53,12 +53,12 @@ export const GAME_MODE_OPTIONS: Choice<TournamentGameMode>[] = [
   {
     value: 'mirror',
     label: 'Mirror Match',
-    description: 'Der Bot lost pro Match einen Helden aus, beide Teams spielen ihn (z. B. 6× Yamato gegen 6× Calico).',
+    description: 'Der Bot lost pro Match für jedes Team einen eigenen Helden aus, das ganze Team spielt ihn (z. B. 6× Yamato gegen 6× Calico).',
   },
   {
     value: 'all_same',
     label: 'All Same Hero',
-    description: 'Alle 12 Spieler spielen denselben zufälligen Helden.',
+    description: 'Alle Spieler beider Teams spielen denselben zufälligen Helden.',
   },
   {
     value: 'random_heroes',
@@ -68,25 +68,25 @@ export const GAME_MODE_OPTIONS: Choice<TournamentGameMode>[] = [
   {
     value: 'single_lane',
     label: 'Single Lane Battle',
-    description: '6 gegen 6 auf nur einer Lane, Heldenwahl frei. (In Vorbereitung.)',
+    description: 'In Vorbereitung: Der Bot kündigt den Modus nur an und schränkt die Lanes noch nicht ein. Heldenwahl frei.',
   },
 ]
 
 export const INVITE_MODE_OPTIONS: Choice<InviteMode>[] = [
   {
     value: 'always',
-    label: 'Spieler dürfen eigene Teams bilden',
-    description: 'Captains laden ihre Mitspieler jederzeit während der Anmeldung ein.',
+    label: 'Einladungen jederzeit',
+    description: 'Captains können angemeldete Spieler während der ganzen Anmeldung in ihr Team einladen.',
   },
   {
     value: 'window',
-    label: 'Nur im Zeitfenster',
-    description: 'Einladungen sind nur zwischen den beiden Zeitpunkten unten möglich.',
+    label: 'Einladungen nur im Zeitfenster',
+    description: 'Captains können nur zwischen den beiden Zeitpunkten unten einladen. Ohne beide Zeitpunkte ist keine Einladung möglich.',
   },
   {
     value: 'never',
-    label: 'Nicht erlaubt, nur Solo-Anmeldung (Admin bildet Teams)',
-    description: 'Spieler melden sich einzeln an und können niemanden einladen. Die Teams stellst du als Admin zusammen.',
+    label: 'Keine Einladungen',
+    description: 'Captains können niemanden einladen. Teams gründen, beitreten und sich bewerben geht weiterhin.',
   },
 ]
 

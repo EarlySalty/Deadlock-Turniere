@@ -83,12 +83,17 @@ function groupStartPayload(form: EditForm, tournament: Tournament): string | und
   return localInputToIso(form.groupPhaseStart)
 }
 
-function specialPayload(special: SpecialSettingsState): TournamentUpdate {
+function windowBoundPayload(windowed: boolean, value: string, stored: string | null | undefined): string | null | undefined {
+  if (windowed) return value || null
+  return stored ? null : undefined
+}
+
+function specialPayload(special: SpecialSettingsState, tournament: Tournament): TournamentUpdate {
   const windowed = special.inviteMode === 'window'
   return {
     invite_mode: special.inviteMode,
-    invite_window_start: windowed ? special.inviteWindowStart || undefined : undefined,
-    invite_window_end: windowed ? special.inviteWindowEnd || undefined : undefined,
+    invite_window_start: windowBoundPayload(windowed, special.inviteWindowStart, tournament.invite_window_start),
+    invite_window_end: windowBoundPayload(windowed, special.inviteWindowEnd, tournament.invite_window_end),
     no_show_grace_minutes: special.noShowGrace,
     exclude_from_leaderboard: special.excludeFromLeaderboard,
   }
@@ -119,7 +124,7 @@ export function buildUpdatePayload(
     reminder_offsets: parseOffsets(form.reminderOffsets, DEFAULT_REMINDER_OFFSETS),
     start_reminder_offsets: parseOffsets(form.startReminderOffsets, DEFAULT_START_REMINDER_OFFSETS),
     rules: form.rules.trim() || null,
-    ...specialPayload(state.special),
+    ...specialPayload(state.special, tournament),
   }
   if (canChangeTournamentMode && form.tournamentMode !== tournament.tournament_mode) {
     payload.force_tournament_mode = form.tournamentMode
