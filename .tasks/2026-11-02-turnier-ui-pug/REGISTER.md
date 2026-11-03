@@ -1,6 +1,6 @@
 | Package | Branch | SHA | Status | Blocker |
 |---|---|---|---|---|
-| LIGA-FIX | feat/turnier-liga | d1fa8c6 | fixer done, checks green (fmt, clippy, 128 DB tests, npm 19/19) | gate running (limit raised to 800 KB on 2026-11-03, gate_hook.py 4b41a22); side finding: test DB lacks `deadlock` role, wrapper /tmp/turnier-liga-dbtest.sh |
+| LIGA-FIX | feat/turnier-liga | d1fa8c6 | fixer done, checks green (fmt, clippy, 128 DB tests, npm 19/19) | gate ALLOW 2026-11-03 (limit 800 KB, gate_hook.py 4b41a22), on main d1fa8c6, live 01:22 CET (service active, health 200, new bundle served); side finding: test DB lacks `deadlock` role, wrapper /tmp/turnier-liga-dbtest.sh |
 | P1 multi-tournament | feat/multi-turnier | | started | waits for Liga on main before gate |
 | P2 reminders | feat/reminder-input | | started | same |
 | P3a settings sections | feat/settings-sections | pushed | built, waiting for Liga on main | wires P2 ReminderOffsetsInput during rebase; screenshots /tmp/p3a-shots; Mindestrang left to P3b |
@@ -9,3 +9,4 @@
 | P3b solo-only + rank | | | wave 2 | |
 | P6 Steam bot flag | | | wave 2 | |
 | P7 lobby automation test | | | wave 2 | |
+| P9 em-dash sweep | feat/no-em-dashes | | spawned 2026-11-03 | user: remove all em dashes in the repo (125 source files); conflicts with P1-P4 resolved by whoever lands later |
