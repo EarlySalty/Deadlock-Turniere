@@ -231,10 +231,6 @@ pub async fn leave_lobby(
     Ok(Json(result))
 }
 
-/// `reset` für beide Match-Arten (Status-Reset + Discord-Channel löschen).
-///
-/// Portiert `_reset_match_record`: 404 wenn Match fehlt, 400 bei
-/// abgeschlossenem/abgebrochenem Match, sonst Reset + Audit.
 pub async fn reset_match(
     state: &AppState,
     kind: MatchKind,
@@ -267,20 +263,7 @@ pub async fn reset_match(
     if refused {
         return Err(reset_refused());
     }
-    if league_group_id.is_some() {
-        let mut conn = state.pool.acquire().await?;
-        ensure_league_running(&mut conn, tournament_id).await?;
-    }
     let discord_channel_id: Option<i64> = row.get("discord_channel_id");
-    if let Some(channel_id) = discord_channel_id {
-        if let Err(err) = state
-            .notifier
-            .delete_match_channel(&channel_id.to_string())
-            .await
-        {
-            tracing::error!(error = %err, "Discord-Channel konnte beim Match-Reset nicht gelöscht werden");
-        }
-    }
 
     let (update_sql, action) = match kind {
         MatchKind::Bracket => (
@@ -321,8 +304,22 @@ pub async fn reset_match(
     )
     .await?;
     tx.commit().await?;
+    delete_reset_channel(state, discord_channel_id).await;
 
     Ok(Json(json!({ "success": true })))
+}
+
+async fn delete_reset_channel(state: &AppState, discord_channel_id: Option<i64>) {
+    let Some(channel_id) = discord_channel_id else {
+        return;
+    };
+    if let Err(err) = state
+        .notifier
+        .delete_match_channel(&channel_id.to_string())
+        .await
+    {
+        tracing::error!(error = %err, "Discord-Channel konnte beim Match-Reset nicht gelöscht werden");
+    }
 }
 
 fn reset_refused() -> WebError {

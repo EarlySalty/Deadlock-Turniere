@@ -12,7 +12,7 @@ import {
   useRevertCheckin,
   useUpdateTournament,
 } from '@/hooks/useTournament'
-import { LEAGUE_LABEL, isLeague } from '@/lib/league'
+import { LEAGUE_LABEL, isLeague, leagueFinishConfirm } from '@/lib/league'
 import type { Tournament } from '@/types/tournament'
 import ChoiceCards from './settings/ChoiceCards'
 import GameRulesFields from './settings/GameRulesFields'
@@ -49,9 +49,11 @@ const STATUS_ACTIONS: Record<string, { label: string; confirmMsg: string }> = {
   completed: { label: 'Archivieren', confirmMsg: 'Turnier ins Archiv verschieben?' },
 }
 
-const LEAGUE_FINISH_ACTION = {
-  label: 'Turnier abschließen',
-  confirmMsg: 'Turnier abschließen? Das geht erst, wenn alle Spiele gewertet sind. Danach lassen sich keine Ergebnisse mehr ändern.',
+function leagueFinishAction(countsForLeaderboard: boolean) {
+  return {
+    label: 'Turnier abschließen',
+    confirmMsg: `${leagueFinishConfirm(countsForLeaderboard)} Das geht erst, wenn alle Spiele gewertet sind.`,
+  }
 }
 
 const LEAGUE_STEPS = [
@@ -101,7 +103,9 @@ export default function TournamentManager({
   const leagueRunning = tournament.status === 'group_phase'
   const modeLocked = !canChangeTournamentMode || (leagueRunning && storedLeague)
   const action =
-    storedLeague && leagueRunning ? LEAGUE_FINISH_ACTION : STATUS_ACTIONS[tournament.status]
+    storedLeague && leagueRunning
+      ? leagueFinishAction(!tournament.exclude_from_leaderboard)
+      : STATUS_ACTIONS[tournament.status]
   const isLoading =
     detailsUpdateMutation.isPending ||
     advanceMutation.isPending ||

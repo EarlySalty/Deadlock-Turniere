@@ -180,30 +180,22 @@ where
     Ok(())
 }
 
-/// Verhindert destruktive Team-Löschung bei bestehender Turnier-Historie.
-///
-/// Das Original prüft 9 (Tabelle, Spalte)-Paare sequenziell; hier in EINER
-/// `EXISTS`-Abfrage zusammengefasst (safe-Fix, identisches Verhalten).
 pub async fn ensure_team_not_locked(
     tx: &mut sqlx::Transaction<'_, Postgres>,
     team_id: i64,
 ) -> WebResult<()> {
     let locked: Option<i64> = sqlx::query_scalar(
         r#"SELECT 1::BIGINT WHERE EXISTS (SELECT 1 FROM turnier."group_teams" WHERE team_id = $1)
-            OR EXISTS (SELECT 1 FROM turnier."group_matches" WHERE team1_id = $2 OR team2_id = $3 OR winner_id = $4)
-            OR EXISTS (SELECT 1 FROM turnier."bracket_matches" WHERE team1_id = $5 OR team2_id = $6 OR winner_id = $7)
-            OR EXISTS (SELECT 1 FROM turnier."match_results" WHERE winning_team = $8)
-            OR EXISTS (SELECT 1 FROM turnier."checkins" WHERE team_id = $9)"#,
+            OR EXISTS (SELECT 1 FROM turnier."group_matches" WHERE team1_id = $1 OR team2_id = $1 OR winner_id = $1)
+            OR EXISTS (SELECT 1 FROM turnier."bracket_matches" WHERE team1_id = $1 OR team2_id = $1 OR winner_id = $1)
+            OR EXISTS (
+                SELECT 1 FROM turnier."match_results" mr
+                LEFT JOIN turnier."group_matches" gm ON gm.id = mr.group_match_id
+                LEFT JOIN turnier."bracket_matches" bm ON bm.id = mr.bracket_match_id
+                WHERE $1 IN (gm.team1_id, gm.team2_id, bm.team1_id, bm.team2_id))
+            OR EXISTS (SELECT 1 FROM turnier."checkins" WHERE team_id = $1)"#,
     )
-    .bind(team_id) // group_teams
-    .bind(team_id) // group_matches team1
-    .bind(team_id) // group_matches team2
-    .bind(team_id) // group_matches winner
-    .bind(team_id) // bracket_matches team1
-    .bind(team_id) // bracket_matches team2
-    .bind(team_id) // bracket_matches winner
-    .bind(team_id) // match_results winning_team
-    .bind(team_id) // checkins
+    .bind(team_id)
     .fetch_optional(&mut **tx)
     .await?;
     if locked.is_some() {
