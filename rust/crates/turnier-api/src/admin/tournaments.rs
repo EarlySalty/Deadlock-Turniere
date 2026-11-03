@@ -92,7 +92,6 @@ fn mode_str(mode: TournamentMode) -> &'static str {
     }
 }
 
-/// `GET /api/admin/tournaments`: alle Turniere inkl. Drafts.
 async fn list_tournaments(
     State(state): State<AppState>,
     _mod: ModUser,
@@ -100,7 +99,6 @@ async fn list_tournaments(
     Ok(Json(load_all_tournaments_dto(&state.pool).await?))
 }
 
-/// `GET /api/admin/tournaments/{id}`: Turnier-Detail inkl. aller Unterobjekte.
 async fn get_tournament(
     State(state): State<AppState>,
     _mod: ModUser,
@@ -122,8 +120,6 @@ async fn get_tournament(
     }))
 }
 
-/// `GET /api/admin/tournaments/{id}/mini-groups`: Mini-Groups + zugehörige
-/// Bracket-Matches (eingebettet).
 async fn get_mini_groups(
     State(state): State<AppState>,
     _mod: ModUser,
@@ -158,7 +154,6 @@ async fn get_mini_groups(
     Ok(Json(out))
 }
 
-/// `POST /api/admin/tournaments/{id}/auto-lobby/run`: Auto-Lobby anstoßen.
 async fn run_auto_lobby(
     State(state): State<AppState>,
     _mod: ModUser,
@@ -172,7 +167,6 @@ async fn run_auto_lobby(
     Ok(Json(json!({ "ok": true, "tournament_id": tournament_id })))
 }
 
-/// `POST /api/admin/tournaments`: neues Turnier anlegen (201).
 async fn create_tournament(
     State(state): State<AppState>,
     ModUser(user): ModUser,
@@ -186,8 +180,6 @@ async fn create_tournament(
     let reminder_offsets = jsonb(serialize_reminder_offsets(&body.reminder_offsets))?;
     let start_reminder_offsets = jsonb(serialize_reminder_offsets(&body.start_reminder_offsets))?;
 
-    // Auto-Mode (Befund admin_routes.py:835: team_size statt Teamanzahl, 1:1
-    // erhalten, siehe bugs_preserved).
     let tournament_mode =
         determine_tournament_mode(body.team_size as usize, body.force_tournament_mode);
 
@@ -285,7 +277,6 @@ fn serde_value_str<T: serde::Serialize>(value: &T) -> String {
         .unwrap_or_default()
 }
 
-/// `PUT /api/admin/tournaments/{id}`: Turnier aktualisieren.
 async fn update_tournament(
     State(state): State<AppState>,
     ModUser(user): ModUser,
@@ -668,7 +659,6 @@ fn push_update_bind(
     }
 }
 
-/// `DELETE /api/admin/tournaments/{id}`: Turnier komplett löschen (Admin).
 async fn delete_tournament(
     State(state): State<AppState>,
     AdminUser(user): AdminUser,
@@ -693,7 +683,6 @@ async fn delete_tournament(
     ))
 }
 
-/// `POST /api/admin/tournaments/{id}/open-checkin`: Check-in öffnen.
 async fn open_checkin(
     State(state): State<AppState>,
     ModUser(user): ModUser,
@@ -730,7 +719,6 @@ async fn open_checkin(
     Ok(Json(load_tournament_dto(&state.pool, tournament_id).await?))
 }
 
-/// `POST /api/admin/tournaments/{id}/revert-checkin`: Check-in zurücksetzen.
 async fn revert_checkin(
     State(state): State<AppState>,
     ModUser(user): ModUser,
@@ -804,7 +792,6 @@ fn next_statuses_for_stored_mode(
     }
 }
 
-/// `POST /api/admin/tournaments/{id}/advance`: Phase weiterschalten.
 async fn advance_tournament(
     State(state): State<AppState>,
     ModUser(user): ModUser,
