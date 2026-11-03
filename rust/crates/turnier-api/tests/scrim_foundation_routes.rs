@@ -29,8 +29,11 @@ use tower::ServiceExt;
 use turnier_api::{build_router, AppState};
 use turnier_config::Config;
 
+#[cfg(feature = "testing")]
 type BrokerRequests = Arc<Mutex<Vec<Value>>>;
+#[cfg(feature = "testing")]
 type SelectionLockState = (BrokerRequests, PgPool, i32);
+#[cfg(feature = "testing")]
 type SelectionCommitState = (BrokerRequests, Option<(PgPool, i32)>);
 use turnier_discord::{BrokerClient, DiscordNotifier};
 use turnier_match::MatchManager;
