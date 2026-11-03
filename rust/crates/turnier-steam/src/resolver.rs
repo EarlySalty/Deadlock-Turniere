@@ -41,8 +41,8 @@ pub trait RankResolver: Send + Sync {
 /// Default-Implementierung des Resolvers.
 ///
 /// Hält den App-DB-Cache, optional den read-only Bridge-Reader (fehlt er, wird
-/// die Bridge-Stufe übersprungen) und optional den Discord-Client (fehlt er — kein
-/// Token/Guild — entfällt der Discord-Fallback, wie im Original).
+/// die Bridge-Stufe übersprungen) und optional den Discord-Client (fehlt er, kein
+/// Token/Guild, entfällt der Discord-Fallback, wie im Original).
 pub struct SteamRankResolver {
     cache: RankCache,
     bridge: Option<BridgeReader>,
@@ -84,8 +84,8 @@ impl SteamRankResolver {
     /// wenn ein Link existiert.
     ///
     /// VERHALTEN BEWUSST ERHALTEN: Ein verlinkter Account ohne Rangdaten
-    /// (`rank`/`rank_tier` NULL) wird dennoch als Profil zurückgegeben und gecacht
-    /// — exakt wie im Original (`rank_reader.py:258-268`). Das maskiert den
+    /// (`rank`/`rank_tier` NULL) wird dennoch als Profil zurückgegeben und gecacht,
+    /// exakt wie im Original (`rank_reader.py:258-268`). Das maskiert den
     /// Discord-Fallback für 24 h. Siehe known-issues.
     async fn resolve_via_bridge(&self, discord_id: &str) -> SteamResult<Option<RankProfile>> {
         let Some(bridge) = &self.bridge else {

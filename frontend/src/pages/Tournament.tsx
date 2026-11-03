@@ -935,7 +935,7 @@ export default function Tournament() {
         )}
       </motion.div>
 
-      {/* Confirmation Modal – Team wechseln */}
+      {/* Confirmation Modal: Team wechseln */}
       {pendingJoinTeam && userTeam && (
         <div className="fixed inset-0 bg-background/90 backdrop-blur-sm flex items-center justify-center z-[100]">
           <motion.div

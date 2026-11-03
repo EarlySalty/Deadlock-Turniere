@@ -1,4 +1,4 @@
-//! Auth-Router — delegierter Discord-OAuth-Flow (portiert `auth/discord_oauth.py`).
+//! Auth-Router: delegierter Discord-OAuth-Flow (portiert `auth/discord_oauth.py`).
 //!
 //! - `GET /auth/discord/login` → holt die Authorize-URL vom Broker und leitet
 //!   den Browser dorthin (307).
@@ -32,7 +32,7 @@ pub fn router() -> Router<AppState> {
         .route("/auth/discord/logout", get(logout))
 }
 
-/// `GET /auth/discord/login` — Redirect auf die Discord-Authorize-URL (307).
+/// `GET /auth/discord/login`: Redirect auf die Discord-Authorize-URL (307).
 async fn login(State(state): State<AppState>) -> WebResult<Response> {
     let authorize_url = state.oauth.initiate_login().await?;
     Ok(redirect(
@@ -49,7 +49,7 @@ struct CompleteQuery {
     state_id: Option<String>,
 }
 
-/// `GET /auth/discord/complete` — Session anlegen, Cookie setzen, aufs Frontend (302).
+/// `GET /auth/discord/complete`: Session anlegen, Cookie setzen, aufs Frontend (302).
 async fn complete(
     State(state): State<AppState>,
     Query(query): Query<CompleteQuery>,
@@ -78,7 +78,7 @@ async fn complete(
     ))
 }
 
-/// `GET /auth/discord/logout` — Session + Cookie löschen, aufs Frontend (302).
+/// `GET /auth/discord/logout`: Session + Cookie löschen, aufs Frontend (302).
 async fn logout(State(state): State<AppState>, jar: CookieJar) -> WebResult<Response> {
     if let Some(token) = jar.get(SESSION_COOKIE).map(|c| c.value().to_string()) {
         if !token.is_empty() {

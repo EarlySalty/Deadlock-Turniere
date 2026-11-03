@@ -2,7 +2,7 @@
 //!
 //! Idempotenz-Strategie (bewusste strukturelle Abweichung vom Original, siehe
 //! algorithm_notes): Statt additiv in bestehende `player_points`-Zeilen zu
-//! akkumulieren — was das Original bei Mehrfach-`completed` doppelt zählte —
+//! akkumulieren (was das Original bei Mehrfach-`completed` doppelt zählte),
 //! rechnet diese Funktion die GANZE `player_points`-Tabelle deterministisch aus
 //! ALLEN abgeschlossenen, nicht ausgeschlossenen Turnieren neu auf.
 //!

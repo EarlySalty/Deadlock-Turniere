@@ -8,7 +8,7 @@ license.workspace = true
 # Broker-Client-Schicht zwischen Turnier-Backend und dem zentralen
 # "Discord-Master-Broker" (separater interner HTTP-Dienst). Kapselt alle
 # Discord-Effekte (Channel anlegen/löschen, Embeds posten, DMs, Voice/Rollen)
-# als POST an interne Broker-Endpunkte. KEINE axum-/HTTPException-Kopplung —
+# als POST an interne Broker-Endpunkte. KEINE axum-/HTTPException-Kopplung;
 # eigener Fehler-Enum. Lifecycle einzelner Effekte wird in discord_tasks (turnier-db)
 # protokolliert.
 [dependencies]

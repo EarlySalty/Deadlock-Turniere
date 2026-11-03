@@ -28,8 +28,8 @@ struct Qualifier {
     origin_order: i64,
 }
 
-/// Generiert das Bracket aus den Gruppen-Standings (Top 2/Gruppe) oder — ohne
-/// Gruppen — aus allen Teams. Liefert die Anzahl erzeugter Matches.
+/// Generiert das Bracket aus den Gruppen-Standings (Top 2/Gruppe) oder (ohne
+/// Gruppen) aus allen Teams. Liefert die Anzahl erzeugter Matches.
 ///
 /// Portiert `generate_bracket(tournament_id, bracket_format)`: Das übergebene
 /// `bracket_format`-Argument wird (wie im Original) ignoriert und stattdessen aus

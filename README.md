@@ -91,7 +91,7 @@ Expected: `active`, one `turnier-bot` process from the path above, and `200` for
 
 ## Deutsche Deadlock Community
 
-Dieser Bot ist Teil der **[Deutschen Deadlock Community](https://deutsche-deadlock-community.de/)** — organisiert Community-Turniere.
+Dieser Bot ist Teil der **[Deutschen Deadlock Community](https://deutsche-deadlock-community.de/)** und organisiert Community-Turniere.
 
 - 🌐 Website: [deutsche-deadlock-community.de](https://deutsche-deadlock-community.de/)
 - 💬 Discord: [discord.gg/PhkP3WgY7w](https://discord.gg/PhkP3WgY7w)

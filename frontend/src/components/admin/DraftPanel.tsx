@@ -92,20 +92,20 @@ export default function DraftPanel({ matchId, team1Name, team2Name }: Props) {
           <p className="mb-1 text-xs font-medium uppercase tracking-wider text-muted">
             Bans ({draft?.bans.length ?? 0}/6)
           </p>
-          <p className="text-red-400">{draft?.bans.join(', ') || '—'}</p>
+          <p className="text-red-400">{draft?.bans.join(', ') || '-'}</p>
         </div>
         <div className="col-span-2 grid grid-cols-2 gap-2">
           <div>
             <p className="mb-1 text-xs font-medium uppercase tracking-wider text-muted">
               {team1Name} ({draft?.picks_team1.length ?? 0}/6)
             </p>
-            <p className="text-foreground">{draft?.picks_team1.join(', ') || '—'}</p>
+            <p className="text-foreground">{draft?.picks_team1.join(', ') || '-'}</p>
           </div>
           <div>
             <p className="mb-1 text-xs font-medium uppercase tracking-wider text-muted">
               {team2Name} ({draft?.picks_team2.length ?? 0}/6)
             </p>
-            <p className="text-foreground">{draft?.picks_team2.join(', ') || '—'}</p>
+            <p className="text-foreground">{draft?.picks_team2.join(', ') || '-'}</p>
           </div>
         </div>
       </div>

@@ -42,7 +42,7 @@ struct GroupsBody {
     slot_minutes: Option<i64>,
 }
 
-/// `POST /api/admin/tournaments/{id}/groups/generate` — Gruppen (Snake-Draft) +
+/// `POST /api/admin/tournaments/{id}/groups/generate`: Gruppen (Snake-Draft) +
 /// Gruppen-Matches generieren.
 async fn generate_groups_route(
     State(state): State<AppState>,
@@ -126,7 +126,7 @@ async fn generate_league_plan(
     })))
 }
 
-/// `POST /api/admin/tournaments/{id}/bracket/generate` — Bracket generieren.
+/// `POST /api/admin/tournaments/{id}/bracket/generate`: Bracket generieren.
 async fn generate_bracket_route(
     State(state): State<AppState>,
     ModUser(user): ModUser,

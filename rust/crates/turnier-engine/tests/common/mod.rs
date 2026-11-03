@@ -1,6 +1,6 @@
 //! Geteilte Test-Helfer: zentrale Wegwerf-PG-DB + Fake-Resolver.
 //!
-//! Nicht jede Testdatei nutzt jeden Helfer — `dead_code` ist hier erwartbar.
+//! Nicht jede Testdatei nutzt jeden Helfer; `dead_code` ist hier erwartbar.
 #![allow(dead_code)]
 
 use async_trait::async_trait;

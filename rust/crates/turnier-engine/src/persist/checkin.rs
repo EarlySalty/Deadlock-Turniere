@@ -19,7 +19,7 @@ use super::groups::{generate_group_matches_in_tx, generate_groups_in_tx};
 use super::{audit, parse_db_discord_id};
 
 mod sha2_min {
-    //! Minimaler, abhängigkeitsfreier SHA-256 — nur für den Snapshot-Token.
+    //! Minimaler, abhängigkeitsfreier SHA-256, nur für den Snapshot-Token.
     //! Reicht aus, weil der Token rein intern (Dry-Run ↔ Confirm) verglichen wird.
     pub struct Sha256 {
         state: [u32; 8],
@@ -169,15 +169,10 @@ struct SoloSignup {
 /// Solo-Anmeldungen vor dem Chunking umgeordnet werden.
 ///
 /// Injizierbar statt eines globalen RNG (Determinismus). Über Indizes statt des
-/// (crate-privaten) Zeilen-Typs — das hält die Trait objektsicher (`dyn`) und
+/// (crate-privaten) Zeilen-Typs; das hält die Trait objektsicher (`dyn`) und
 /// exponiert den internen Typ nicht. Spiegelt den Monkeypatch-Punkt des
 /// Python-Originals (`random.shuffle`), den auch der Paritätstest no-op
 /// überschreibt.
-// `Send`-Supertrait: damit `&mut dyn SoloShuffler` über die `await`-Punkte in
-// `assign_random_teams` gehalten werden darf, ohne das Future nicht-`Send` zu
-// machen — sonst wäre der aufrufende axum-Handler kein gültiger `Handler` (axum
-// verlangt `Send`-Futures; `tokio::test` nicht, daher fiel es erst in turnier-api auf).
-// Alle realen Shuffler (RngShuffler<StdRng>, NoShuffle) sind ohnehin `Send`.
 pub trait SoloShuffler: Send {
     /// Permutation der Indizes `0..len` (muss genau `len` Elemente enthalten).
     fn permutation(&mut self, len: usize) -> Vec<usize>;
@@ -195,7 +190,7 @@ impl<R: rand::RngCore + Send> SoloShuffler for RngShuffler<R> {
     }
 }
 
-/// No-op-Shuffler: Identitätspermutation (erhält die Eingabereihenfolge — für
+/// No-op-Shuffler: Identitätspermutation (erhält die Eingabereihenfolge, für
 /// deterministische Tests, entspricht dem `lambda values: None`-Monkeypatch).
 pub struct NoShuffle;
 impl SoloShuffler for NoShuffle {
@@ -459,7 +454,7 @@ async fn snapshot_token_in_tx(
 // Check-in-Finalisierung
 // ---------------------------------------------------------------------------
 
-/// Ergebnis von [`finalize_checkin`] — die für den Aufrufer relevanten Felder.
+/// Ergebnis von [`finalize_checkin`]: die für den Aufrufer relevanten Felder.
 #[derive(Debug, Clone)]
 pub struct FinalizeCheckinResult {
     pub warnings: Vec<TeamWarning>,
@@ -518,7 +513,7 @@ struct TournamentRow {
 }
 
 /// Mitglieds-Sicht im Check-in-Algorithmus. Es werden nur `discord_id` (für die
-/// Check-in-Prüfung) und `discord_name` (für Report-Felder) ausgewertet — die
+/// Check-in-Prüfung) und `discord_name` (für Report-Felder) ausgewertet; die
 /// übrigen Spalten der Solo-Pool-Einfügung kommen aus `signups_by_discord`, exakt
 /// wie im Original.
 #[derive(Clone)]

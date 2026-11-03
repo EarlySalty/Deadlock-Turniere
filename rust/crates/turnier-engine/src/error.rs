@@ -40,7 +40,7 @@ pub enum TournamentError {
 }
 
 /// Direkte Konvertierung aus `sqlx::Error`, damit `?` an Query-Aufrufen ohne
-/// manuelles Mapping funktioniert — über [`turnier_db::DbError`], damit es genau eine
+/// manuelles Mapping funktioniert, über [`turnier_db::DbError`], damit es genau eine
 /// Persistenz-Fehler-Repräsentation gibt.
 #[cfg(feature = "persist")]
 impl From<sqlx::Error> for TournamentError {

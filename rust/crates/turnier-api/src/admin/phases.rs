@@ -48,7 +48,7 @@ struct FinalizeBody {
     snapshot_token: Option<String>,
 }
 
-/// `POST /api/admin/tournaments/{id}/finalize-checkin?confirm=bool` — Check-in
+/// `POST /api/admin/tournaments/{id}/finalize-checkin?confirm=bool`: Check-in
 /// abschließen, Teams bereinigen, optional Gruppenphase starten.
 async fn finalize_checkin_route(
     State(state): State<AppState>,
@@ -183,16 +183,13 @@ impl SoloShuffler for TimeSeededShuffler {
     }
 }
 
-/// `POST /api/admin/tournaments/{id}/assign-random` — Solo-Anmeldungen zufällig
+/// `POST /api/admin/tournaments/{id}/assign-random`: Solo-Anmeldungen zufällig
 /// auf Teams verteilen (nur in der Registration).
 async fn assign_random(
     State(state): State<AppState>,
     _mod: ModUser,
     Path(tournament_id): Path<i64>,
 ) -> WebResult<Json<Value>> {
-    // Die DB-Row darf nicht über das `assign_random_teams`-await gehalten werden
-    // (sonst ist das Handler-Future nicht `Send`) — daher die benötigten Werte in
-    // einem Block extrahieren und die Row vorher fallenlassen.
     let (status, team_size): (String, i64) = {
         let tournament = load_tournament_or_404(&state.pool, tournament_id).await?;
         (tournament.get("status"), tournament.get("team_size"))

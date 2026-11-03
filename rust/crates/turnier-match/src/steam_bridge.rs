@@ -8,10 +8,10 @@
 //!
 //! Verhalten 1:1 erhalten (auch die als „behavior-change" markierten Befunde):
 //! `_fail_stale_running_tasks` läuft bei JEDEM `create_task`/`get_task`/
-//! `has_active_task` (Befund steam_bridge.py:21-34 — bewusst NICHT in einen
+//! `has_active_task` (Befund steam_bridge.py:21-34, bewusst NICHT in einen
 //! Reaper-Task entkoppelt). Die FAILED-Antwort von `poll_task_result` bleibt ein
-//! Ergebnis (kein Fehler) — modelliert als [`TaskOutcome::Failed`] (Befund
-//! steam_bridge.py:55-92 — bewusst erhalten).
+//! Ergebnis (kein Fehler), modelliert als [`TaskOutcome::Failed`] (Befund
+//! steam_bridge.py:55-92, bewusst erhalten).
 //!
 //! Degradiert sauber: fehlt der Pfad oder die Datei, liefert [`SteamBridge::open`]
 //! `Ok(None)` (mit Warnung) statt zu crashen.
@@ -25,7 +25,7 @@ use sqlx::sqlite::{SqliteConnectOptions, SqlitePool, SqlitePoolOptions};
 use sqlx::Row;
 use thiserror::Error;
 
-/// 120s — ab wann ein RUNNING-Task als hängend gilt (`STALE_RUNNING_TASK_TIMEOUT_MS`).
+/// 120s: ab wann ein RUNNING-Task als hängend gilt (`STALE_RUNNING_TASK_TIMEOUT_MS`).
 #[cfg(test)]
 const STALE_RUNNING_TASK_TIMEOUT_MS: i64 = 120_000;
 
@@ -65,12 +65,12 @@ fn now_ms() -> i64 {
 /// [`TaskOutcome::Failed`] (kein Fehler!), ein Timeout [`TaskOutcome::TimedOut`].
 #[derive(Debug, Clone)]
 pub enum TaskOutcome {
-    /// Task DONE — das dekodierte Result als JSON-Objekt (leeres Result → `{}`
+    /// Task DONE: das dekodierte Result als JSON-Objekt (leeres Result → `{}`
     /// mit implizitem `success:true` durch den Aufrufer).
     Done(Value),
-    /// Task FAILED — Fehlertext (im Original `{success:false, error, task_id}`).
+    /// Task FAILED: Fehlertext (im Original `{success:false, error, task_id}`).
     Failed { task_id: i64, error: String },
-    /// Timeout — der Task hat innerhalb des Limits nicht geantwortet.
+    /// Timeout: der Task hat innerhalb des Limits nicht geantwortet.
     TimedOut { task_id: i64, timeout_s: f64 },
 }
 
@@ -84,7 +84,7 @@ impl SteamBridge {
     /// Öffnet den Pool auf die Bridge-DB unter `db_path`.
     ///
     /// `Ok(None)`, wenn der Pfad leer ist ODER die Datei nicht existiert (mit
-    /// Warnung) — der Match-Flow degradiert dann sauber (im Original crashte der
+    /// Warnung); der Match-Flow degradiert dann sauber (im Original crashte der
     /// `aiosqlite.connect`; hier vorab gefangen). Die DB wird NICHT angelegt
     /// (`create_if_missing(false)`): sie gehört dem Steam-Worker.
     pub async fn open(db_path: &str) -> Result<Option<Self>, BridgeError> {
@@ -96,13 +96,13 @@ impl SteamBridge {
         settings: &turnier_config::BridgeConfig,
     ) -> Result<Option<Self>, BridgeError> {
         if db_path.trim().is_empty() {
-            tracing::warn!("Steam-Bridge-DB-Pfad nicht konfiguriert — Steam-Tasks übersprungen");
+            tracing::warn!("Steam-Bridge-DB-Pfad nicht konfiguriert, Steam-Tasks übersprungen");
             return Ok(None);
         }
         if !Path::new(db_path).exists() {
             tracing::warn!(
                 path = db_path,
-                "Steam-Bridge-DB nicht vorhanden — Steam-Tasks übersprungen"
+                "Steam-Bridge-DB nicht vorhanden, Steam-Tasks übersprungen"
             );
             return Ok(None);
         }

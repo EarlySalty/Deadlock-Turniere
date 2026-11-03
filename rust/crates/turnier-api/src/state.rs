@@ -73,7 +73,7 @@ impl AppState {
         {
             Ok(bridge) => bridge,
             Err(err) => {
-                tracing::warn!(error = %err, "Steam-Bridge konnte nicht geöffnet werden — Steam-Tasks deaktiviert");
+                tracing::warn!(error = %err, "Steam-Bridge konnte nicht geöffnet werden; Steam-Tasks deaktiviert");
                 None
             }
         };

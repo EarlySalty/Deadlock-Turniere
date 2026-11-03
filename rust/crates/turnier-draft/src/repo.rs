@@ -7,7 +7,7 @@
 //! Wichtigste Korrektheits-Verbesserung gegenüber dem Original: [`take_action`]
 //! läuft als EINE Transaktion mit optimistischem Compare-and-Swap auf
 //! `current_action_index`. Im Python-Original lagen SELECT (Index lesen),
-//! Doppel-Pick-Prüfung und die beiden UPDATEs ohne Isolation nebeneinander —
+//! Doppel-Pick-Prüfung und die beiden UPDATEs ohne Isolation nebeneinander;
 //! zwei gleichzeitige Aktionen konnten denselben Index lesen und sich gegenseitig
 //! überschreiben (last-write-wins). Hier scheitert die zweite Aktion mit
 //! [`DraftError::ActionConflict`]. Welche Picks gültig sind, bleibt unverändert.
@@ -157,7 +157,7 @@ struct LobbySessionRow {
 }
 
 /// Erstellt eine neue Draft-Session für `bracket_match_id` oder gibt eine
-/// bestehende (`pending`/`in_progress`) zurück. Idempotent — wie `start_draft`.
+/// bestehende (`pending`/`in_progress`) zurück. Idempotent, wie `start_draft`.
 ///
 /// Bei Neuanlage werden alle 18 Aktionszeilen der Standard-Sequenz in einem
 /// Multi-Row-INSERT materialisiert (Original: 18 Einzel-INSERTs in einer
@@ -694,7 +694,6 @@ async fn take_action_validated(
     let taken_by = parse_numeric_id(taken_by)?;
     let mut tx = pool.begin().await?;
 
-    // (1) Index der aktuellen Session lesen — nur wenn in_progress.
     let session: Option<(i64, Option<Json<Vec<SequenceStep>>>)> = sqlx::query_as(
         "SELECT current_action_index, sequence FROM turnier.draft_sessions \
          WHERE id = $1 AND status = 'in_progress'",
@@ -753,8 +752,6 @@ async fn take_action_validated(
         .execute(&mut *tx)
         .await?
     } else {
-        // completed_at NICHT anfassen, solange nicht abgeschlossen (im Original
-        // wurde es bei jeder Zwischenaktion unnötig auf NULL gesetzt — safe-Fix).
         sqlx::query(
             "UPDATE turnier.draft_sessions \
              SET current_action_index = $1 \

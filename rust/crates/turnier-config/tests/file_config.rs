@@ -328,7 +328,7 @@ fn runtime_environment_reads_are_limited_to_secrets() {
             path.display()
         );
         let secret_resolver = path.ends_with("turnier-config/src/secrets.rs");
-        for line in runtime.lines().filter(|line| {
+        for _line in runtime.lines().filter(|line| {
             line.contains("env::var")
                 || line.contains("getenv(")
                 || line.contains("try_from_default_env(")

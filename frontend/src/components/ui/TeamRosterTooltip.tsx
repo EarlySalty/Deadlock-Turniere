@@ -8,7 +8,7 @@ interface TeamRosterTooltipProps {
   members: TeamMemberPublic[]
   align?: 'left' | 'center' | 'right'
   disabled?: boolean
-  /** Wrapper als Block statt inline-block — nötig wenn Children volle Breite einnehmen sollen. */
+  /** Wrapper als Block statt inline-block; nötig wenn Children volle Breite einnehmen sollen. */
   block?: boolean
 }
 
@@ -97,7 +97,7 @@ export default function TeamRosterTooltip({
               >
                 <User size={12} className="text-muted shrink-0" />
                 <span className="truncate text-foreground/90">
-                  {member.discord_name ?? '—'}
+                  {member.discord_name ?? '-'}
                 </span>
                 {member.rank && (
                   <span className="ml-auto text-[10px] uppercase tracking-wide text-muted">

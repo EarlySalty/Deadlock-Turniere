@@ -2427,10 +2427,6 @@ async fn create_team(
     let service = service(&state);
     service.authorize_operator(actor.discord_id).await?;
     let team = service.create_team(mutation.idempotency_key, body).await?;
-    // Bei einer Wiederholung liegt die Rolle schon an. Der Idempotenzschutz des Brokers
-    // laeuft ueber eine Zwischenspeicherung mit Ablaufzeit, taugt also nicht als
-    // Dauerschutz — sonst legte ein spaeter Wiederholungsversuch eine zweite Rolle an
-    // und ueberschriebe die hinterlegte ID.
     let existing_role_id = service.roster_team(team.id).await?.discord_role_id;
     let discord_role_id = match existing_role_id {
         Some(role_id) => Some(role_id),
@@ -2521,7 +2517,7 @@ async fn announce_team(
         .is_some_and(|note| note.chars().count() > 500)
     {
         return Err(WebError::bad_request(
-            "Die Notiz ist zu lang — höchstens 500 Zeichen.",
+            "Die Notiz ist zu lang: höchstens 500 Zeichen.",
         ));
     }
     let team = service.roster_team(parse_db_id(&id, "team_id")?).await?;
@@ -2641,9 +2637,6 @@ async fn create_team_discord_role(
     match response {
         Ok(response) => response
             .pointer("/result/role_id")
-            // Discord-IDs kommen als Zahl oder als Zeichenkette — in JSON ist die
-            // Zeichenkette die uebliche Form, weil die IDs groesser als 2^53 werden.
-            // Nur Zahlen zu akzeptieren hiesse: Rolle angelegt, aber nicht gemerkt.
             .and_then(|value| {
                 value
                     .as_u64()
@@ -2774,7 +2767,7 @@ async fn post_team_announcement(
         return AnnounceTeamResponse {
             message_id: None,
             ok: false,
-            detail: "Kein Ankündigungskanal konfiguriert — es wurde nichts gepostet.".to_string(),
+            detail: "Kein Ankündigungskanal konfiguriert. Es wurde nichts gepostet.".to_string(),
         };
     };
     let allowed_role_ids = positive_config_id(state.config.scrim_signup_role_id)
@@ -2788,10 +2781,10 @@ async fn post_team_announcement(
         .unwrap_or_default();
     let description = match (team.default_from, team.default_to) {
         (Some(from), Some(to)) => format!(
-            "Das Team spielt üblicherweise **{}**. Wenn du zu der Zeit kannst und Lust hast, reagier hier mit ✅ — wir melden uns bei dir.",
+            "Das Team spielt üblicherweise **{}**. Wenn du zu der Zeit kannst und Lust hast, reagier hier mit ✅. Wir melden uns bei dir.",
             format_team_window(from, to)
         ),
-        _ => "Wenn du Lust hast, in diesem Team zu spielen, reagier hier mit ✅ — wir melden uns bei dir."
+        _ => "Wenn du Lust hast, in diesem Team zu spielen, reagier hier mit ✅. Wir melden uns bei dir."
             .to_string(),
     };
     let response = state
@@ -2893,7 +2886,7 @@ async fn post_team_announcement(
 }
 
 /// DM an eine Aushilfe, wortgleich zum bisherigen Weg (Website routes/scrim.rs).
-/// Sagt explizit, dass der Auswechselspieler-Status bleibt — sonst denken Leute,
+/// Sagt explizit, dass der Auswechselspieler-Status bleibt; sonst denken Leute,
 /// sie waeren fest im Team.
 fn substitute_dm_content(team_name: &str, window: &ScrimSlot) -> String {
     let day = match window.day {
@@ -2912,7 +2905,7 @@ fn substitute_dm_content(team_name: &str, window: &ScrimSlot) -> String {
         format_minutes(window.to)
     );
     format!(
-        "Hey! 👋 Du springst für **{team_name}** ein — **{time}**.\n\nDie Team-Rolle hast du gerade bekommen, damit siehst du den Team-Kanal und wirst bei Pings mitgenommen. Du bleibst weiterhin Auswechselspieler.\n\nWenn's doch nicht klappt, sag bitte kurz im Team-Kanal Bescheid, damit wir Ersatz finden. Viel Spaß! 🎮"
+        "Hey! 👋 Du springst für **{team_name}** ein: **{time}**.\n\nDie Team-Rolle hast du gerade bekommen, damit siehst du den Team-Kanal und wirst bei Pings mitgenommen. Du bleibst weiterhin Auswechselspieler.\n\nWenn's doch nicht klappt, sag bitte kurz im Team-Kanal Bescheid, damit wir Ersatz finden. Viel Spaß! 🎮"
     )
 }
 

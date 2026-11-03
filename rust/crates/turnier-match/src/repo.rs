@@ -2,7 +2,7 @@
 //!
 //! Ersetzt die stringly-typed Helfer `_match_table`/`_match_scope_column`/
 //! `_match_scope_value` des Originals. Jede Operation hat ZWEI feste Query-Zweige
-//! (Bracket vs. Group) — Tabellennamen tauchen nirgends als interpolierter String
+//! (Bracket vs. Group); Tabellennamen tauchen nirgends als interpolierter String
 //! im SQL auf. Das kapselt die Lobby-/Start-Reads, die Scope-gebundenen Updates,
 //! Teilnehmer-/Context-/Caster-Reads sowie die Group-Ergebnis-Persistenz.
 
@@ -30,7 +30,7 @@ const GROUP_ACCEPTS_WRITES: &str = "group_id IN ( \
 /// Snapshot einer Match-Zeile, vereinheitlicht für Bracket und Group.
 ///
 /// `scope_value` ist der Wert der Scope-Spalte (`tournament_id` für Bracket,
-/// `group_id` für Group) — er ersetzt `_match_scope_value`. `tournament_id` ist
+/// `group_id` für Group); er ersetzt `_match_scope_value`. `tournament_id` ist
 /// für beide Arten aufgelöst (bei Group via JOIN über `groups`).
 #[derive(Debug, Clone)]
 pub struct MatchRow {

@@ -98,7 +98,7 @@ export default function TestModePanel() {
       const result = await createTournament.mutateAsync(tournamentForm)
       showStatus({
         kind: 'success',
-        text: `Test-Turnier #${result.tournament_id} angelegt — wechsle in den Live-Tab, um es zu öffnen`,
+        text: `Test-Turnier #${result.tournament_id} angelegt. Wechsle in den Live-Tab, um es zu öffnen`,
       })
     } catch (err) {
       showStatus({ kind: 'error', text: `Fehler: ${(err as Error).message}` })
@@ -110,7 +110,7 @@ export default function TestModePanel() {
       const result = await simulateRound.mutateAsync(tournamentId)
       showStatus({
         kind: 'success',
-        text: `${result.simulated_matches} Matches gewürfelt — Lade Detail erneut, um Folge-Runden zu sehen`,
+        text: `${result.simulated_matches} Matches gewürfelt. Lade Detail erneut, um Folge-Runden zu sehen`,
       })
     } catch (err) {
       showStatus({ kind: 'error', text: `Fehler: ${(err as Error).message}` })
@@ -214,7 +214,7 @@ export default function TestModePanel() {
                   <div key={u.discord_id} className="flex justify-between gap-4 py-0.5">
                     <span className="font-mono">{u.discord_id}</span>
                     <span>{u.display_name}</span>
-                    <span className="text-muted">{u.rank ?? '—'}</span>
+                    <span className="text-muted">{u.rank ?? '-'}</span>
                   </div>
                 ))}
               </div>
@@ -231,7 +231,7 @@ export default function TestModePanel() {
           </div>
           <p className="text-xs text-muted">
             Falls nicht genug Test-User vorhanden sind, werden sie automatisch nachgeseedet.
-            Das Turnier wird direkt bis zur gewählten Phase advanced — ideal zum Bracket-Test.
+            Das Turnier wird direkt bis zur gewählten Phase advanced, ideal zum Bracket-Test.
           </p>
           <div className="grid gap-3 sm:grid-cols-2">
             <div className="flex flex-col gap-1">
@@ -371,7 +371,7 @@ export default function TestModePanel() {
                 >
                   <div className="flex flex-col">
                     <span className="text-sm font-semibold text-foreground">
-                      #{t.id} — {t.name}
+                      #{t.id} · {t.name}
                     </span>
                     <span className="text-xs text-muted">
                       Status: {t.status} · Game-Mode: {t.tournament_game_mode}

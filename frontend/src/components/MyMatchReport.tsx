@@ -60,7 +60,7 @@ function MatchReportRow({
         <div className="flex items-center gap-2">
           <CheckCircle2 size={15} />
           <span>
-            Match {match.id} gemeldet — ein Admin bestätigt das Ergebnis gleich.
+            Match {match.id} gemeldet. Ein Admin bestätigt das Ergebnis gleich.
           </span>
         </div>
       </div>
@@ -70,7 +70,7 @@ function MatchReportRow({
   return (
     <div className="rounded-lg border border-border bg-white/[0.02] p-3">
       <div className="text-sm font-semibold text-foreground">
-        Match {match.id} — Runde {match.round}
+        Match {match.id}, Runde {match.round}
       </div>
       <div className="mt-0.5 text-xs text-muted">
         {teamName(match.team1_id, teams)} vs {teamName(match.team2_id, teams)}
@@ -162,7 +162,7 @@ export default function MyMatchReport({
           Deine Matches melden
         </h3>
         <p className="mt-1 text-xs text-muted">
-          Tragt nach dem Spiel selbst ein, wer gewonnen hat — am besten mit der
+          Tragt nach dem Spiel selbst ein, wer gewonnen hat, am besten mit der
           Deadlock-Match-ID. Ein Admin bestätigt das Ergebnis anschließend.
         </p>
       </div>

@@ -93,7 +93,7 @@ for round in $(seq 1 "$MAX_ROUNDS"); do
       say "Arbeitsbaum oder HEAD hat sich während der Verifikation geändert -- kein Push."
       exit 6
     fi
-    # HEAD:main, nicht "main" — die Arbeit liegt auf einem Feature-Branch, der lokale
+    # HEAD:main, nicht "main"; die Arbeit liegt auf einem Feature-Branch, der lokale
     # main-Zeiger kennt sie nicht. "git push origin main" haette leer gepusht.
     say "Push nach main"
     if git push origin "$verified_head:main" >"$LOG_DIR/push.log" 2>&1; then
@@ -136,7 +136,7 @@ Vorgehen:
 - TDD: erst ein Test, der den Fehler zeigt, dann die Behebung.
 - Der Befund nennt EINE Stelle, der Fehler sitzt oft an mehreren. Bevor du fertig meldest:
   suche im Repo nach allen Stellen, die denselben Wert, dieselbe Grenze oder dasselbe Muster
-  genauso verwenden, und behebe sie mit. Nenne die geprüften Fundstellen im Bericht — auch die,
+  genauso verwenden, und behebe sie mit. Nenne die geprüften Fundstellen im Bericht, auch die,
   die in Ordnung waren.
 - Fehler an der Grenze zu Discord dürfen den Datenbankstand nicht zurückrollen,
   müssen aber via tracing::warn! mit Kontext protokolliert werden. Niemals still verschlucken.
@@ -149,7 +149,7 @@ Vorbestehend rot und NICHT zu reparieren: $KNOWN_RED (400 statt 409).
 Committe NICHT und pushe NICHT. Lass die Änderungen im Arbeitsbaum liegen.
 Nutzertexte formulierst du fertig aus, nach den Regeln in ~/.codex/AGENTS.md
 ("Texte, die Nutzer lesen"). Ein "Platzhalter" darf nur stehen bleiben, wenn der
-Inhalt wirklich unklar ist — dann nennst du Datei und Zeile ausdrücklich im Bericht.
+Inhalt wirklich unklar ist; dann nennst du Datei und Zeile ausdrücklich im Bericht.
 Berichte am Ende: was war die Ursache, was hast du geändert, welche Tests belegen es.
 EOF
 

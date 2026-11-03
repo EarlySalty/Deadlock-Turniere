@@ -41,7 +41,7 @@ export default function Home() {
       animate="show"
       className="space-y-12 pb-20"
     >
-      {/* Hero Section – gleiche visuelle Sprache wie die Streamer-Landing */}
+      {/* Hero Section: gleiche visuelle Sprache wie die Streamer-Landing */}
       <section className="relative overflow-hidden rounded-2xl border border-border bg-card/55 px-6 py-16 text-center shadow-[var(--shadow-card-soft)] md:py-20">
         <div className="absolute inset-0 bg-gradient-to-b from-primary/8 via-transparent to-transparent" />
         <div className="relative z-10 mx-auto max-w-3xl">
@@ -56,7 +56,7 @@ export default function Home() {
             Deadlock <span className="bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent">Turniere</span>
           </motion.h1>
           <motion.p variants={item} className="mx-auto mt-6 max-w-2xl text-lg leading-relaxed text-muted md:text-xl">
-            Anmeldung, Draft, Spielplan und Rangliste an einem Ort – für Community-Turniere ohne unnötigen Orga-Overhead.
+            Anmeldung, Draft, Spielplan und Rangliste an einem Ort, für Community-Turniere ohne unnötigen Orga-Overhead.
           </motion.p>
         </div>
       </section>

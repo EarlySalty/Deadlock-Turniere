@@ -10,7 +10,7 @@
 //! WICHTIG: Das Original prüft die NATO-Namen über das Präfix `"team "` +
 //! `name.lower()` (Kleinbuchstaben), reserviert dann aber über `casefold()` des
 //! VOLLEN Namens (`"Team Alpha".casefold()` = `"team alpha"`). Beide ergeben
-//! denselben Schlüssel — diese Äquivalenz bilden wir hier 1:1 ab.
+//! denselben Schlüssel; diese Äquivalenz bilden wir hier 1:1 ab.
 
 /// NATO-Alphabet-Namensvorrat (16 Namen), Reihenfolge wie `TEAM_NAMES`.
 pub const TEAM_NAMES: [&str; 16] = [
@@ -20,7 +20,7 @@ pub const TEAM_NAMES: [&str; 16] = [
 
 /// Casefold-Äquivalent für den `name_key` (siehe Modul-Doku).
 ///
-/// Pythons `str.casefold()` faltet aggressiver als `lower()` — relevant für
+/// Pythons `str.casefold()` faltet aggressiver als `lower()`, relevant für
 /// deutsche Teamnamen ist vor allem `ß` → `ss` (`to_lowercase()` lässt `ß`
 /// stehen). Wir bilden `to_lowercase()` + diese Faltung nach, damit die
 /// Duplikat-Erkennung (`UNIQUE(tournament_id, name_key)`) konsistent zu den
@@ -95,7 +95,7 @@ impl TeamNamePool {
     }
 
     /// Leitet einen Teamnamen vom Captain-Namen ab (oder vergibt einen
-    /// generischen). Portiert den NAMENS-Teil von `_team_name_from_captain` —
+    /// generischen). Portiert den NAMENS-Teil von `_team_name_from_captain`;
     /// der DB-Lookup des Captain-Namens passiert im Persistenz-Layer und wird
     /// hier als bereits aufgelöster `captain_name` übergeben.
     ///

@@ -50,7 +50,7 @@ export default function TournamentCasterPanel({
       {poolError && (
         <div className="flex items-center gap-2 rounded-lg border border-red-500/20 bg-red-500/10 p-3 text-sm text-red-400">
           <AlertCircle size={16} />
-          <span>Caster-Pool konnte nicht geladen werden — Discord-Bot offline?</span>
+          <span>Caster-Pool konnte nicht geladen werden. Discord-Bot offline?</span>
         </div>
       )}
 
@@ -106,7 +106,7 @@ export default function TournamentCasterPanel({
           <p className="text-xs text-muted">Lade...</p>
         ) : assignedCasters.length === 0 ? (
           <p className="text-xs text-muted">
-            Noch keine Caster eingetragen — die Matches werden ohne Caster-Einladung
+            Noch keine Caster eingetragen. Die Matches werden ohne Caster-Einladung
             erstellt.
           </p>
         ) : (

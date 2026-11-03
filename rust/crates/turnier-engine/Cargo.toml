@@ -5,9 +5,9 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 
-# Die Turnier-Engine — das Herz des Backends. Trennt strikt die REINEN
+# Die Turnier-Engine, das Herz des Backends. Trennt strikt die REINEN
 # Algorithmen (Seeding, Bracket-Verdrahtung Single/Double-Elim, Mini-Group-
-# Verteilung, Snake-Draft, Tiebreaker, Punkte-Platzierung — alles DB-frei und
+# Verteilung, Snake-Draft, Tiebreaker, Punkte-Platzierung: alles DB-frei und
 # voll unit-testbar) von der sqlx-Persistenz (build_*_bracket, generate_groups,
 # finalize_checkin, advance_bracket_winner). Jede öffentliche Persistenz-
 # Operation läuft in EINER Transaktion. Determinismus über injizierbaren

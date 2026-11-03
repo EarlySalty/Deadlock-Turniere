@@ -33,7 +33,7 @@ pub fn seed_slot_order(size: usize) -> Vec<usize> {
 /// Portiert die Verteilung aus `_generate_groups_in_db`: Teams sind absteigend
 /// nach Durchschnitts-Score sortiert (Index `i`, 0-basiert), `num_groups`
 /// Gruppen. Gerade „Runden" laufen vorwärts (A,B,C,D), ungerade rückwärts
-/// (D,C,B,A) — daher der „Schlangen"-Verlauf, der die Stärke balanciert.
+/// (D,C,B,A), daher der „Schlangen"-Verlauf, der die Stärke balanciert.
 pub fn snake_draft_group_index(i: usize, num_groups: usize) -> usize {
     let round_num = i / num_groups;
     if round_num % 2 == 0 {

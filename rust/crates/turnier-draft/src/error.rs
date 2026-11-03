@@ -72,7 +72,7 @@ pub enum DraftError {
 }
 
 /// Direkte Konvertierung aus `sqlx::Error`, damit `?` an Query-Aufrufen ohne
-/// manuelles Mapping funktioniert — über [`turnier_db::DbError`], damit es genau eine
+/// manuelles Mapping funktioniert, über [`turnier_db::DbError`], damit es genau eine
 /// Persistenz-Fehler-Repräsentation gibt.
 impl From<sqlx::Error> for DraftError {
     fn from(err: sqlx::Error) -> Self {

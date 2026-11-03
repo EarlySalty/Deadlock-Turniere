@@ -25,7 +25,7 @@ pub fn head_to_head_winner(h2h: &HeadToHead, left: i64, right: i64) -> Option<i6
 }
 
 /// Bricht einen 2er-Gleichstand: Head-to-Head → Point-Diff → Seed → min(id).
-/// Portiert `_break_two_way_tie` (der ungenutzte `wins`-Parameter entfällt —
+/// Portiert `_break_two_way_tie` (der ungenutzte `wins`-Parameter entfällt;
 /// bug-preserved als „toter Parameter").
 pub fn break_two_way_tie(
     left: i64,
@@ -240,7 +240,6 @@ mod tests {
         h2h.insert((2, 1), 2);
         let pd: HashMap<i64, i64> = [(1, 5), (2, -5)].into();
         let seed: HashMap<i64, i64> = [(1, 0), (2, 1)].into();
-        // H2H sagt 2 gewinnt — schlägt sogar die bessere Point-Diff von 1.
         assert_eq!(break_two_way_tie(1, 2, &pd, &seed, &h2h), 2);
     }
 

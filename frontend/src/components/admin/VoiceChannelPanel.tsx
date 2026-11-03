@@ -42,7 +42,7 @@ export default function VoiceChannelPanel({ tournamentId, currentMatchId }: Prop
         text:
           failed > 0
             ? `${total} verschoben, ${failed} fehlgeschlagen (User evtl. nicht im Voice)`
-            : `Teams aufgeteilt — ${total} Spieler verschoben`,
+            : `Teams aufgeteilt: ${total} Spieler verschoben`,
       })
     } catch {
       setStatus({ kind: 'error', text: 'Verschieben fehlgeschlagen' })
@@ -92,7 +92,7 @@ export default function VoiceChannelPanel({ tournamentId, currentMatchId }: Prop
           onClick={() => void handleMoveTeams()}
         >
           <Users size={14} />
-          {moveTeams.isPending ? 'Teams werden aufgeteilt...' : 'Runde starten — Teams aufteilen'}
+          {moveTeams.isPending ? 'Teams werden aufgeteilt...' : 'Runde starten: Teams aufteilen'}
         </Button>
         <Button
           variant="secondary"

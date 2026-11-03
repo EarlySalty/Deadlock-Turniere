@@ -1,9 +1,9 @@
-//! `turnier-bot` — Composition-Root und Binary des Turnier-Backends.
+//! `turnier-bot`: Composition-Root und Binary des Turnier-Backends.
 //!
 //! Verdrahtet die Crates zu einem laufenden Dienst: Config laden → Pool öffnen →
 //! [`AppState`] bauen → Scheduler-Loop starten → axum servieren. Mit `--check`
 //! bootet der Prozess bis AppState/Scheduler/Router, serviert aber nicht und
-//! startet keine Scheduler-Checks — für CI/Smoke-Tests.
+//! startet keine Scheduler-Checks, für CI/Smoke-Tests.
 
 use std::sync::Arc;
 

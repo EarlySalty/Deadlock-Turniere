@@ -1,5 +1,5 @@
 # ============================================================================
-# Deadlock Tournament Platform — Zentrales Service-Management Script
+# Deadlock Tournament Platform: Zentrales Service-Management Script
 # ============================================================================
 # Verwaltet alle Platform-Services (via NSSM) zentral.
 # Nutzung:
@@ -106,7 +106,7 @@ function Stop-SingleService ([string]$Alias) {
     $winName = $ServiceMap[$Alias]
 
     if (-not (Test-ServiceExists $winName)) {
-        Write-Warn "Service '$winName' ($Alias) ist nicht installiert — überspringe."
+        Write-Warn "Service '$winName' ($Alias) ist nicht installiert, überspringe."
         return $true
     }
 
@@ -144,7 +144,7 @@ function Start-SingleService ([string]$Alias) {
     $winName = $ServiceMap[$Alias]
 
     if (-not (Test-ServiceExists $winName)) {
-        Write-Warn "Service '$winName' ($Alias) ist nicht installiert — überspringe."
+        Write-Warn "Service '$winName' ($Alias) ist nicht installiert, überspringe."
         return $true
     }
 
@@ -222,7 +222,7 @@ else {
     $targetAliases = @($Service)
 }
 
-Write-Header "Deadlock Tournament Platform — Service Manager"
+Write-Header "Deadlock Tournament Platform: Service Manager"
 Write-Info "Aktion: $($Action.ToUpper())  |  Ziel: $Service"
 
 switch ($Action) {

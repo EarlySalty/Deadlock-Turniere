@@ -1,4 +1,4 @@
-//! Zeit-Fälligkeit und Reminder-Offsets — reine Logik (DB-frei).
+//! Zeit-Fälligkeit und Reminder-Offsets: reine Logik (DB-frei).
 //!
 //! Der zentrale PG-Port liest Zeitpunkte aus `TIMESTAMPTZ`-Spalten als
 //! [`DateTime<Utc>`] und vergleicht Instants direkt. String-Zeitstempel aus der
@@ -7,12 +7,12 @@
 use chrono::{DateTime, Duration, Utc};
 use serde_json::Value;
 
-/// Default-Reminder-Offsets (Minuten), abwärts sortiert — wie im Original.
+/// Default-Reminder-Offsets (Minuten), abwärts sortiert, wie im Original.
 pub use turnier_config::DEFAULT_REMINDER_OFFSETS;
 
 /// Breite des Reminder-Toleranzfensters (Minuten). Im Original fest 5 Minuten
 /// (`reminder_at + timedelta(minutes=5)`). Siehe `bugs_preserved`: zur 60-s-Loop-
-/// Kadenz überdimensioniert, holt verpasste Fenster nicht nach — bewusst 1:1.
+/// Kadenz überdimensioniert, holt verpasste Fenster nicht nach; bewusst 1:1.
 pub use turnier_config::REMINDER_WINDOW_MINUTES;
 
 /// Ist `now` im Reminder-Fenster `reminder_at <= now <= reminder_at + 5min`?
@@ -69,14 +69,13 @@ pub fn parse_reminder_offsets_with_default(value: Option<&Value>, defaults: &[i6
         return defaults.to_vec();
     }
 
-    // Dedupliziert, absteigend sortiert — wie `sorted({...}, reverse=True)`.
     offsets.sort_unstable();
     offsets.dedup();
     offsets.reverse();
     offsets
 }
 
-/// Wandelt einen JSON-Wert in `i64` um — wie Pythons `int(offset)`: ganze Zahlen
+/// Wandelt einen JSON-Wert in `i64` um, wie Pythons `int(offset)`: ganze Zahlen
 /// direkt, Floats abgeschnitten (Richtung Null), numerische Strings geparst.
 fn json_to_i64(v: &Value) -> Option<i64> {
     match v {
@@ -92,7 +91,7 @@ fn json_to_i64(v: &Value) -> Option<i64> {
 }
 
 /// Formatiert einen Offset als „Xh Ymin"-Label. Portiert `_offset_label`
-/// (Z.366-373) — die Einzelquelle, die auch die Registrierungs-Reminder nutzt
+/// (Z.366-373); die Einzelquelle, die auch die Registrierungs-Reminder nutzt
 /// (der duplizierte Inline-Block aus dem Original ist als safe-Fix
 /// zusammengeführt).
 pub fn offset_label(offset_minutes: i64) -> String {

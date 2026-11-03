@@ -38,7 +38,7 @@ struct MatchIdQuery {
     match_id: i64,
 }
 
-/// `POST .../voice/move-teams?match_id=int` — Team1→VC1, Team2→VC2.
+/// `POST .../voice/move-teams?match_id=int`: Team1→VC1, Team2→VC2.
 async fn move_teams(
     State(state): State<AppState>,
     _admin: AdminUser,
@@ -86,7 +86,7 @@ async fn move_teams(
     Ok(Json(json!({ "team1": result1, "team2": result2 })))
 }
 
-/// `POST .../voice/move-sammelpunkt` — alle Teilnehmer in den Sammelpunkt-VC.
+/// `POST .../voice/move-sammelpunkt`: alle Teilnehmer in den Sammelpunkt-VC.
 async fn move_sammelpunkt(
     State(state): State<AppState>,
     _admin: AdminUser,
@@ -125,7 +125,7 @@ struct VoiceMoveBody {
     channel_id: i64,
 }
 
-/// `POST /api/admin/voice/move-user` — einzelnen User in einen Voice-Kanal verschieben.
+/// `POST /api/admin/voice/move-user`: einzelnen User in einen Voice-Kanal verschieben.
 async fn move_user(
     State(state): State<AppState>,
     _admin: AdminUser,
@@ -139,7 +139,7 @@ async fn move_user(
     Ok(Json(serde_json::to_value(result).unwrap_or_default()))
 }
 
-/// `GET /api/admin/voice/channel-members/{channel_id}` — Mitglieder eines VC.
+/// `GET /api/admin/voice/channel-members/{channel_id}`: Mitglieder eines VC.
 async fn channel_members(
     State(state): State<AppState>,
     _admin: AdminUser,

@@ -1,6 +1,6 @@
 > **Historical.** This is a dated plan, snapshot or design note. It does not describe the current state. The code on `origin/main` and the root `README.md` are authoritative.
 
-# Turnier-Automatisierung — Design-Spec
+# Turnier-Automatisierung: Design-Spec
 
 **Datum:** 2026-06-29
 **Repos:** `Deadlock-Turniere` (tb-app / Rust, LIVE) + `Deadlock-Bots` (dl-bot / Rust, LIVE)
@@ -14,13 +14,13 @@ Turniere passieren **regelmäßig und mit gutem Zulauf, ohne dass ein Mensch sic
 
 Ausgangsproblem: Niemand hat Lust, sich um Turnier-Planung und -Umsetzung zu kümmern. Folge: Turniere finden zu selten statt.
 
-## 2. Betriebsmodell — Hybrid
+## 2. Betriebsmodell: Hybrid
 
 - **Bot schlägt vor:** autonom, vorerst **1 Vorschlag / 2 Wochen** (Kadenz = Config-Wert, nicht hartkodiert). Vorschlag muss von **mindestens 1 Caster** bestätigt werden.
 - **Mensch plant manuell:** weiterhin möglich; ein Admin-erstelltes Turnier startet direkt in `GEPLANT` (Admin = bereits autorisiert) und nutzt dieselbe Automatik danach (Event, Ankündigung, DM, Erinnerung).
 - **Regel:** Bot-Vorschläge brauchen das Caster-Gate. Manuelle Turniere nicht.
 
-## 3. Architektur — zwei Repos, dünner Relay
+## 3. Architektur: zwei Repos, dünner Relay
 
 ```
 ┌─────────────────────────────┐         Master-Broker (HTTP, :8770)        ┌──────────────────────────────┐
@@ -38,7 +38,7 @@ Ausgangsproblem: Niemand hat Lust, sich um Turnier-Planung und -Umsetzung zu kü
 
 **Leitprinzip:** dl-bot bleibt ein dünner Relay ohne Turnier-Logik. Alle Intelligenz (State, Templates, LLM-Feedback, Presets, Empfänger-Berechnung) lebt in tb-app. Minimale Kopplung; der dl-bot-Cutover wird nicht belastet.
 
-**Discord-Empfang:** dl-bot empfängt Button-/Modal-Klicks über sein vorhandenes Gateway (`interaction_create`) — kein Ed25519/Webhook nötig. **3-Sekunden-Regel:** dl-bot defert sofort (`DeferredMessageUpdate`), ruft tb-app, editiert die Nachricht erst danach. So unabhängig von der MiniMax-Laufzeit.
+**Discord-Empfang:** dl-bot empfängt Button-/Modal-Klicks über sein vorhandenes Gateway (`interaction_create`), kein Ed25519/Webhook nötig. **3-Sekunden-Regel:** dl-bot defert sofort (`DeferredMessageUpdate`), ruft tb-app, editiert die Nachricht erst danach. So unabhängig von der MiniMax-Laufzeit.
 
 ### Discord-IDs & Config (Single Source: Config, nicht hartkodiert)
 
@@ -55,9 +55,9 @@ Ausgangsproblem: Niemand hat Lust, sich um Turnier-Planung und -Umsetzung zu kü
 
 | Phase | Inhalt | DoD |
 |---|---|---|
-| **0 — Vorbedingung** | (a) Crate-Rename `tb-*` → `turnier-*` (erster, separat verifizierter Commit). (b) Adversarialer Py→Rust-Vollständigkeits-Audit + Lücken schließen. (c) Rust nach `main` mergen. | Build grün, Dienst läuft aus neuem Binary-Pfad, jede Python-Route/Funktion hat Rust-Pendant ODER dokumentierte bewusste Auslassung; `main` = Live-Stand |
-| **1 — Automatik-Grundloop** | Presets, Abos/Opt-out, Vorschlags-Scheduler (1/2 Wo), Caster-Freigabe (Buttons+Modal+MiniMax-💬), Template-Ankündigung, Scheduled-Event, DM-Broadcast (Grind/Fun minus Opt-out), Erinnerungen, Signal-Logging aller 4 Signale | Bot schlägt vor → Caster gibt frei → Turnier läuft automatisch durch; Signale werden geloggt |
-| **2 — Self-Learning** | Doppel-gegateter LLM-Loop (s. §9) | Datenbasierte Verbesserungs-Vorschläge an Caster, nie auto-apply |
+| **0: Vorbedingung** | (a) Crate-Rename `tb-*` → `turnier-*` (erster, separat verifizierter Commit). (b) Adversarialer Py→Rust-Vollständigkeits-Audit + Lücken schließen. (c) Rust nach `main` mergen. | Build grün, Dienst läuft aus neuem Binary-Pfad, jede Python-Route/Funktion hat Rust-Pendant ODER dokumentierte bewusste Auslassung; `main` = Live-Stand |
+| **1: Automatik-Grundloop** | Presets, Abos/Opt-out, Vorschlags-Scheduler (1/2 Wo), Caster-Freigabe (Buttons+Modal+MiniMax-💬), Template-Ankündigung, Scheduled-Event, DM-Broadcast (Grind/Fun minus Opt-out), Erinnerungen, Signal-Logging aller 4 Signale | Bot schlägt vor → Caster gibt frei → Turnier läuft automatisch durch; Signale werden geloggt |
+| **2: Self-Learning** | Doppel-gegateter LLM-Loop (s. §9) | Datenbasierte Verbesserungs-Vorschläge an Caster, nie auto-apply |
 
 ## 5. Zustandsmaschine (Phase 1)
 
@@ -70,7 +70,7 @@ Ausgangsproblem: Niemand hat Lust, sich um Turnier-Planung und -Umsetzung zu kü
                           Entwurf, neu posten
 ```
 
-**Begriffs-Mapping:** `ENTWURF`/`FREIGABE_OFFEN`/`VERWORFEN` sind Zustände von `tournament_proposals.state` (`draft`/`pending_approval`/`rejected`+`expired`). `GEPLANT`/`ANMELDUNG`/`LIVE`/`FERTIG` sind Zustände des bestehenden `tournaments.status` — der Vorschlag (`approved`) übergibt an den unveränderten Turnier-Lebenszyklus.
+**Begriffs-Mapping:** `ENTWURF`/`FREIGABE_OFFEN`/`VERWORFEN` sind Zustände von `tournament_proposals.state` (`draft`/`pending_approval`/`rejected`+`expired`). `GEPLANT`/`ANMELDUNG`/`LIVE`/`FERTIG` sind Zustände des bestehenden `tournaments.status`; der Vorschlag (`approved`) übergibt an den unveränderten Turnier-Lebenszyklus.
 
 Bei Freigabe (`approved`): `tournaments`-Zeile aus `config_json` erzeugen → `create-scheduled-event` → öffentliche Ankündigung (Template) → `dm-broadcast` an Grind/Fun minus Opt-out.
 
@@ -123,17 +123,17 @@ tb-app verarbeitet, antwortet mit Anzeige-Anweisung für dl-bot:
 
 **Öffentliche Ankündigung:** feste deutsche Templates mit Platzhaltern (Name, Modus, Termin, Anmelde-Link). Kein Runtime-LLM → null Umlaut-/Qualitätsrisiko.
 
-**Caster-Vorschlag — 3 Buttons:**
+**Caster-Vorschlag mit 3 Buttons:**
 - ✅ **„Annehmen & einplanen"** (1 Caster genügt)
 - ❌ **„Ablehnen / keine Zeit"**
 - 💬 **„Änderung vorschlagen"** (öffnet Freitext-Modal)
 
 **Opt-out in jeder Turnier-DM** (Wort „DMs" macht eindeutig: keine Nachrichten, kein Ausschluss vom Turnier):
 - 🔕 **„Keine DMs mehr über Fun-Turniere"** bzw. **„…über Comp-Turniere"** (je nach Kategorie der DM)
-- 🔕 **„Komplett abmelden – gar keine Turnier-DMs"**
+- 🔕 **„Komplett abmelden: gar keine Turnier-DMs"**
 - Bestätigung nach Klick: „Abgemeldet. Wieder anmelden jederzeit über die Website oder `/turnier abo`."
 
-## 9. Phase 2 — Self-Learning mit Doppel-Gate
+## 9. Phase 2: Self-Learning mit Doppel-Gate
 
 Vier geloggte Signale: Teilnehmer-/Team-Zahl, No-Show-/Abbruch-Quote, Post-Turnier-Umfrage (👍/👎), Freitext-Community-Feedback. In Phase 1 werden Teilnehmer/No-Show automatisch geloggt; die Umfrage wird gepostet; Freitext erst in Phase 2 destilliert.
 
@@ -149,10 +149,10 @@ MiniMax erzeugt Verbesserungsvorschlag (nur auf bestätigter Basis)
    ▼
 ② AUSGANGS-GATE: Caster nimmt an / lehnt ab                   ◀── erst Annahme ändert Preset/Termin
    ▼
-[Preset/Kadenz angepasst]  — NIE auto-apply
+[Preset/Kadenz angepasst]  - NIE auto-apply
 ```
 
-Glutensneak (YouTube) als Format-Inspiration fürs Preset-Seeding (welche Modi/Formate kommen an) — nicht Teil des Lern-Loops selbst.
+Glutensneak (YouTube) als Format-Inspiration fürs Preset-Seeding (welche Modi/Formate kommen an), nicht Teil des Lern-Loops selbst.
 
 ## 10. Modul-Benennung (Phase-0-Rename)
 
@@ -199,7 +199,7 @@ Crates deutsch-klar (`turnier-*`, im Repo menschen-lesbar), DB-Tabellen englisch
 
 ## 14. Dokumentation (Liefergegenstand)
 
-- **Intern:** `docs/` im Repo — Architektur, Datenmodell, Flows, Cross-Repo-Vertrag, Deploy. Lückenlos, für künftige Agenten.
+- **Intern:** `docs/` im Repo: Architektur, Datenmodell, Flows, Cross-Repo-Vertrag, Deploy. Lückenlos, für künftige Agenten.
 - **Community:** einfache Erklärung (Was sind Fun/Comp, wie abonniere/opt-oute ich, wie läuft ein Vorschlag) → in den **FAQ-Bot** (dort liegt die Turnier-Doku schon, CHANGELOG #9). Community-Text schreibt Claude.
 
 ## 15. Delegation & Reihenfolge

@@ -7,7 +7,7 @@
 //! Gegenüber dem Original:
 //! - Der TTL-Filter liegt direkt im SELECT (`cached_at + 86400 > unixepoch()`),
 //!   das spart das separate DELETE-on-expire (zweiter Roundtrip im Python). Eine
-//!   abgelaufene Zeile bleibt liegen und wird beim nächsten UPSERT überschrieben —
+//!   abgelaufene Zeile bleibt liegen und wird beim nächsten UPSERT überschrieben;
 //!   funktional identisch zum Original (abgelaufen ⇒ Cache-Miss).
 //! - Pro Aufruf wird genau eine Connection aus dem geteilten Pool verwendet statt
 //!   bis zu drei frischer Verbindungen.
