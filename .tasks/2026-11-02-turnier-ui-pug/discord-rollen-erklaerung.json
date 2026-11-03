@@ -1,0 +1,77 @@
+{
+  "_hinweis": "Nicht gepostet. Multipart-Upload mit files[0]=assets/welcome-banners/divider-information.png und files[1]=assets/welcome-banners/logo-badge.png aus Deadlock-Bots, siehe Skill deadlock-discord-branded-messages. Zielkanal siehe discord-rollen-erklaerung.md.",
+  "payload": {
+    "flags": 32768,
+    "allowed_mentions": {
+      "parse": []
+    },
+    "components": [
+      {
+        "type": 17,
+        "accent_color": 13150315,
+        "components": [
+          {
+            "type": 12,
+            "items": [
+              {
+                "media": {
+                  "url": "attachment://divider-information.png"
+                }
+              }
+            ]
+          },
+          {
+            "type": 9,
+            "components": [
+              {
+                "type": 10,
+                "content": "# Rollen und Bereiche\nDrei Bereiche auf dem Server schaltest du dir selbst frei. Nimm einfach, worauf du Lust hast. Du kannst das jederzeit wieder ändern."
+              }
+            ],
+            "accessory": {
+              "type": 11,
+              "media": {
+                "url": "attachment://logo-badge.png"
+              }
+            }
+          },
+          {
+            "type": 14,
+            "divider": true,
+            "spacing": 1
+          },
+          {
+            "type": 10,
+            "content": "## So wählst du\nÖffne <id:customize> ganz oben in der Kanalliste. Unter **Worauf hast du Lust?** hakst du an, was dich interessiert. Die passenden Kanäle erscheinen danach sofort in deiner Liste."
+          },
+          {
+            "type": 14,
+            "divider": true,
+            "spacing": 1
+          },
+          {
+            "type": 10,
+            "content": "### <:dl_ranked:1522518271306366996> Scrims\nTrainingsspiele zwischen festen Teams. Nach der Auswahl trägst du dich mit `/scrim-signup` ein, damit die Orga deinen Rang, deine Rolle und deine Zeiten kennt. Alles Weitere findest du in der Kategorie **Scrims**."
+          },
+          {
+            "type": 10,
+            "content": "### <:dl_brawl:1522518262708174928> Lustige Custom Games\nSpaßrunden abseits von Ranked. Mit der Rolle **Custom Games** bekommst du einen Ping, sobald eine Runde startet. Abgesprochen wird in <#1412411665713987635>."
+          },
+          {
+            "type": 10,
+            "content": "### <:dl_crown:1522518265421631538> Turniere\nMit der Rolle **Turnier Teilnehmer** siehst du die Kategorie **Turniere**. Lies zuerst <#1565499075682369577>, Neuigkeiten stehen in <#1565496544818372628>. Ein Team findest du in <#1565497013531967670>, Mitspieler in <#1565497064157216808>. Alles andere besprecht ihr in <#1565498999241445446>."
+          },
+          {
+            "type": 14,
+            "divider": true,
+            "spacing": 1
+          },
+          {
+            "type": 10,
+            "content": "-# Rolle wieder loswerden: In <id:customize> den Haken entfernen."
+          }
+        ]
+      }
+    ]
+  }
+}
