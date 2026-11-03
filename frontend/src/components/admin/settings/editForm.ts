@@ -1,4 +1,4 @@
-import { isLeague, localInputToIso, toLocalInput } from '@/lib/league'
+import { localInputToIso, toLocalInput } from '@/lib/league'
 import type { Tournament, TournamentMode, TournamentUpdate } from '@/types/tournament'
 import { lobbyChanged, lobbyFromStored, resolveLobbyPayload, type GameRulesState } from './gameRules'
 import { DATE_HINTS } from './options'
@@ -24,15 +24,8 @@ export interface EditState {
 
 export type UpdatePayloadResult = { ok: true; payload: TournamentUpdate } | { ok: false; error: string }
 
-function toInputDateTime(value: string | null | undefined): string {
-  if (!value) return ''
-  return value.replace(' ', 'T').slice(0, 16)
-}
-
 export function storedGroupStart(tournament: Tournament): string {
-  return isLeague(tournament.tournament_mode)
-    ? toLocalInput(tournament.group_phase_start)
-    : toInputDateTime(tournament.group_phase_start)
+  return toLocalInput(tournament.group_phase_start)
 }
 
 export function initialEditState(tournament: Tournament): EditState {
@@ -46,18 +39,18 @@ export function initialEditState(tournament: Tournament): EditState {
       finalSeriesFormat: tournament.final_series_format as SeriesFormat | null,
       bracketFormat: tournament.bracket_format,
       tournamentMode: tournament.tournament_mode,
-      registrationStart: toInputDateTime(tournament.registration_start),
-      registrationEnd: toInputDateTime(tournament.registration_end),
-      checkinStart: toInputDateTime(tournament.checkin_start ?? null),
+      registrationStart: toLocalInput(tournament.registration_start),
+      registrationEnd: toLocalInput(tournament.registration_end),
+      checkinStart: toLocalInput(tournament.checkin_start ?? null),
       groupPhaseStart: storedGroupStart(tournament),
-      bracketStart: toInputDateTime(tournament.bracket_start),
+      bracketStart: toLocalInput(tournament.bracket_start),
       reminderOffsets: offsetsOrDefault(tournament.reminder_offsets ?? [], DEFAULT_REMINDER_OFFSETS),
       startReminderOffsets: offsetsOrDefault(tournament.start_reminder_offsets ?? [], DEFAULT_START_REMINDER_OFFSETS),
     },
     special: {
       inviteMode: tournament.invite_mode,
-      inviteWindowStart: toInputDateTime(tournament.invite_window_start),
-      inviteWindowEnd: toInputDateTime(tournament.invite_window_end),
+      inviteWindowStart: toLocalInput(tournament.invite_window_start),
+      inviteWindowEnd: toLocalInput(tournament.invite_window_end),
       noShowGrace: tournament.no_show_grace_minutes,
       excludeFromLeaderboard: tournament.exclude_from_leaderboard,
     },
@@ -71,15 +64,12 @@ export function initialEditState(tournament: Tournament): EditState {
 }
 
 function groupStartPayload(form: EditForm, tournament: Tournament): string | undefined {
-  const league = isLeague(form.tournamentMode)
-  const storedLeague = isLeague(tournament.tournament_mode)
-  if (!league && !storedLeague) return form.groupPhaseStart || undefined
   if (form.groupPhaseStart === storedGroupStart(tournament)) return undefined
   return localInputToIso(form.groupPhaseStart)
 }
 
 function windowBoundPayload(windowed: boolean, value: string, stored: string | null | undefined): string | null | undefined {
-  if (windowed) return value || null
+  if (windowed) return localInputToIso(value) ?? null
   return stored ? null : undefined
 }
 
@@ -111,11 +101,11 @@ export function buildUpdatePayload(
     tournament_game_mode: gameRules.gameMode,
     auto_lobby_enabled: gameRules.autoLobby,
     match_objective: gameRules.matchObjective,
-    registration_start: form.registrationStart || undefined,
-    registration_end: form.registrationEnd || undefined,
-    checkin_start: form.checkinStart || undefined,
+    registration_start: localInputToIso(form.registrationStart),
+    registration_end: localInputToIso(form.registrationEnd),
+    checkin_start: localInputToIso(form.checkinStart),
     group_phase_start: groupStartPayload(form, tournament),
-    bracket_start: form.bracketStart || undefined,
+    bracket_start: localInputToIso(form.bracketStart),
     reminder_offsets: offsetsOrDefault(form.reminderOffsets, DEFAULT_REMINDER_OFFSETS),
     start_reminder_offsets: offsetsOrDefault(form.startReminderOffsets, DEFAULT_START_REMINDER_OFFSETS),
     rules: form.rules.trim() || null,

@@ -30,7 +30,7 @@ export default function Leaderboard() {
   if (isError || !entries) {
     return (
       <Card className="text-center py-10 opacity-60">
-        <p className="text-muted italic">Die Chroniken konnten nicht beschworen werden.</p>
+        <p className="text-muted italic">Die Rangliste konnte nicht geladen werden.</p>
       </Card>
     )
   }
@@ -44,7 +44,7 @@ export default function Leaderboard() {
       <div className="flex flex-col md:flex-row md:items-end justify-between gap-6 border-b border-white/5 pb-8">
         <div className="space-y-2">
           <h1 className="text-4xl font-bold tracking-tighter text-foreground font-display">Hall of <span className="text-primary">Legends</span></h1>
-          <p className="text-muted italic">"Diejenigen, die in der Arena unsterblich wurden."</p>
+          <p className="text-muted italic">Die besten Spieler aus unseren Turnieren.</p>
         </div>
         <div className="hidden md:flex gap-4">
           <div className="px-4 py-2 rounded-lg border border-white/5 bg-white/5">
@@ -57,8 +57,8 @@ export default function Leaderboard() {
       {entries.length === 0 ? (
         <Card className="text-center py-20 opacity-40 italic">
           <Trophy size={48} className="mx-auto text-muted mb-4 opacity-20" />
-          <p className="text-muted text-xl">Noch wurde keine Geschichte geschrieben.</p>
-          <p className="text-muted text-sm mt-2 uppercase tracking-widest">Die Arena wartet auf ihren ersten Helden</p>
+          <p className="text-muted text-xl">Noch keine Ergebnisse.</p>
+          <p className="text-muted text-sm mt-2 uppercase tracking-widest">Die Rangliste füllt sich nach dem ersten Turnier</p>
         </Card>
       ) : (
         <Card className="p-0 overflow-hidden border-white/5">

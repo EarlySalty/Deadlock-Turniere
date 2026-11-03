@@ -69,7 +69,7 @@ export function BasicsFields({ idPrefix, value, onChange, required = false }: Fi
             value={value.rules}
             onChange={(event) => onChange({ rules: event.target.value })}
             rows={6}
-            placeholder="Die Gesetze der Arena..."
+            placeholder="Regeln für dieses Turnier..."
             className={`${INPUT_CLASS} resize-y`}
           />
         </Field>

@@ -14,7 +14,7 @@ import Badge from '@/components/ui/Badge'
 import Button from '@/components/ui/Button'
 import LoadingSpinner from '@/components/ui/LoadingSpinner'
 import ConsentModal from '@/components/ConsentModal'
-import { LEAGUE_LABEL, isLeague } from '@/lib/league'
+import { LEAGUE_LABEL, isLeague, plannedTournamentStart } from '@/lib/league'
 import GroupStandings from '@/components/groups/GroupStandings'
 import GroupMatchList from '@/components/groups/GroupMatchList'
 import BracketView from '@/components/bracket/BracketView'
@@ -237,12 +237,13 @@ export default function Tournament() {
   if (!tournament) {
     return (
       <Card className="text-center py-20 opacity-60">
-        <p className="text-muted italic">Die Arena scheint leer zu sein...</p>
+        <p className="text-muted italic">Dieses Turnier wurde nicht gefunden.</p>
       </Card>
     )
   }
 
   const isRegistration = tournament.status === 'registration'
+  const tournamentStart = plannedTournamentStart(tournament)
   const isSignupOpen = ['registration', 'checkin'].includes(tournament.status)
   const isCheckinPhase = tournament.status === 'checkin'
 
@@ -379,7 +380,7 @@ export default function Tournament() {
              <div className="p-2 rounded-lg bg-primary/10 border border-primary/20">
                 <Trophy size={20} className="text-primary" />
              </div>
-             <p className="text-[10px] font-bold text-primary uppercase tracking-[0.3em]">Herausforderung</p>
+             <p className="text-[10px] font-bold text-primary uppercase tracking-[0.3em]">Turnier</p>
           </div>
           <h1 className="text-4xl md:text-5xl font-bold text-foreground font-display tracking-tight">{tournament.name}</h1>
           {tournament.description && (
@@ -392,7 +393,7 @@ export default function Tournament() {
               <p className="text-sm font-bold text-foreground uppercase">{tournament.team_size} gegen {tournament.team_size}</p>
             </div>
             <div className="space-y-1">
-              <p className="text-[10px] uppercase font-bold text-muted tracking-widest">Kader</p>
+              <p className="text-[10px] uppercase font-bold text-muted tracking-widest">Anmeldungen</p>
               <p className="text-sm font-bold text-foreground uppercase">{tournament.teams.length} Teams gemeldet</p>
             </div>
             <div className="space-y-1">
@@ -430,11 +431,11 @@ export default function Tournament() {
               <div className="space-y-1">
                 <div className="flex items-center gap-2 text-amber-500">
                   <ClipboardCheck size={18} />
-                  <span className="text-xs font-bold uppercase tracking-widest">Appell</span>
+                  <span className="text-xs font-bold uppercase tracking-widest">Anwesenheit</span>
                 </div>
                 <h3 className="text-lg font-bold text-foreground uppercase font-display">Check-in aktiv</h3>
                 <p className="text-xs text-muted italic">
-                  Bestätige deine Anwesenheit, sonst wirst du aus der Arena verbannt.
+                  Bestätige deine Teilnahme, sonst wirst du aus dem Turnier entfernt.
                 </p>
               </div>
               <div className="flex items-center justify-between">
@@ -448,7 +449,7 @@ export default function Tournament() {
                     disabled={hasCheckedIn || checkinMutation.isPending}
                     onClick={handleCheckin}
                   >
-                    {hasCheckedIn ? 'Bereit gemeldet' : 'Appell bestätigen'}
+                    {hasCheckedIn ? 'Eingecheckt' : 'Check-in bestätigen'}
                   </Button>
                 )}
               </div>
@@ -541,22 +542,22 @@ export default function Tournament() {
                 <Card className="p-8 space-y-6">
                   <h2 className="text-xl font-bold font-display uppercase tracking-widest text-foreground flex items-center gap-3">
                     <Info size={20} className="text-primary" />
-                    Chronologie
+                    Zeitplan
                   </h2>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-8">
                     {tournament.registration_start && (
                       <div className="space-y-2">
-                        <p className="text-[10px] uppercase font-bold text-muted tracking-widest">Rekrutierung beginnt</p>
+                        <p className="text-[10px] uppercase font-bold text-muted tracking-widest">Anmeldung ab</p>
                         <p className="text-lg font-bold text-foreground">
                           {new Date(tournament.registration_start).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
                         </p>
                       </div>
                     )}
-                    {tournament.registration_end && (
+                    {tournamentStart && (
                       <div className="space-y-2">
-                        <p className="text-[10px] uppercase font-bold text-primary tracking-widest">Prüfungsbeginn</p>
+                        <p className="text-[10px] uppercase font-bold text-primary tracking-widest">Turnierbeginn</p>
                         <p className="text-lg font-bold text-primary">
-                          {new Date(tournament.registration_end).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                          {new Date(tournamentStart).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
                         </p>
                       </div>
                     )}
@@ -566,26 +567,26 @@ export default function Tournament() {
                 {isSignupOpen && (
                    <Card className="p-8 border-primary/10 bg-primary/5 space-y-6">
                      <div className="flex items-center justify-between">
-                        <h2 className="text-xl font-bold font-display uppercase tracking-widest text-foreground">Deine Einschreibung</h2>
+                        <h2 className="text-xl font-bold font-display uppercase tracking-widest text-foreground">Deine Anmeldung</h2>
                         <Button variant="ghost" size="sm" onClick={() => setActiveTab('teams')}>
-                          Zum Kader <Users size={14} />
+                          Zu den Teams <Users size={14} />
                         </Button>
                      </div>
 
                      {!isLoggedIn ? (
                         <div className="text-center py-6 space-y-4">
-                           <p className="text-muted italic">Du musst dich erst identifizieren, um teilzunehmen.</p>
+                           <p className="text-muted italic">Melde dich an, um teilzunehmen.</p>
                            <LoginButton />
                         </div>
                      ) : !userTeam && !userHasSoloSignup ? (
                         <div className="space-y-4">
-                          <p className="text-muted italic text-sm">Melde dich als einzelner Krieger an oder gründe eine Legion.</p>
+                          <p className="text-muted italic text-sm">Melde dich allein an oder gründe ein Team.</p>
                           <div className="flex flex-wrap gap-4">
                             <Button variant="primary" onClick={handleSignupSolo} disabled={signupSoloMutation.isPending}>
-                              Solo einschreiben
+                              Solo anmelden
                             </Button>
                             <Button variant="secondary" onClick={() => setActiveTab('teams')}>
-                              Legion gründen
+                              Team gründen
                             </Button>
                           </div>
                         </div>
@@ -625,16 +626,16 @@ export default function Tournament() {
 
               <div className="space-y-6">
                 <Card className="p-6">
-                  <h3 className="text-xs font-bold uppercase tracking-widest text-muted mb-4 border-b border-white/5 pb-2">Statusberichte</h3>
+                  <h3 className="text-xs font-bold uppercase tracking-widest text-muted mb-4 border-b border-white/5 pb-2">Hinweise</h3>
                   <div className="space-y-4">
                     {tournament.invite_mode === 'window' && (
                        <div className="space-y-1">
-                          <p className="text-[10px] uppercase font-bold text-amber-500 tracking-widest">Rekrutierungs-Fenster</p>
+                          <p className="text-[10px] uppercase font-bold text-amber-500 tracking-widest">Einladungsfenster</p>
                           <p className="text-xs text-foreground italic">Nur zu bestimmten Zeiten offen.</p>
                        </div>
                     )}
                     <div className="space-y-1">
-                       <p className="text-[10px] uppercase font-bold text-muted tracking-widest">Arena-Regeln</p>
+                       <p className="text-[10px] uppercase font-bold text-muted tracking-widest">Fairplay</p>
                        <p className="text-xs text-foreground italic">Unsportlichkeit führt zum Ausschluss.</p>
                     </div>
                     {tournament.rules && (
@@ -659,7 +660,7 @@ export default function Tournament() {
           <div className="max-w-4xl mx-auto space-y-8">
             <div className="flex items-center gap-3 border-l-2 border-primary pl-4 py-1">
                <Book size={24} className="text-primary" />
-               <h2 className="text-2xl font-bold tracking-widest text-foreground uppercase font-display">Die Gesetze der Arena</h2>
+               <h2 className="text-2xl font-bold tracking-widest text-foreground uppercase font-display">Regelwerk</h2>
             </div>
             
             <Card className="p-8 md:p-12 border-white/5 bg-white/[0.02] relative overflow-hidden">
@@ -673,8 +674,8 @@ export default function Tournament() {
                   ) : (
                     <div className="text-center py-20 opacity-40 italic">
                        <ScrollText size={48} className="mx-auto mb-4 opacity-20" />
-                       <p className="text-xl">Keine spezifischen Gesetze für dieses Turnier verkündet.</p>
-                       <p className="text-sm mt-2">Es gelten die allgemeinen Bestimmungen des Regelwerks.</p>
+                       <p className="text-xl">Für dieses Turnier gibt es keine eigenen Regeln.</p>
+                       <p className="text-sm mt-2">Es gilt das allgemeine Regelwerk.</p>
                     </div>
                   )}
                </div>
@@ -689,7 +690,7 @@ export default function Tournament() {
               <div className="space-y-6">
                  {isSignupOpen && isLoggedIn && !userTeam && !userHasSoloSignup && (
                     <Card className="p-6 space-y-6 border-primary/10">
-                      <h3 className="text-sm font-bold uppercase tracking-widest text-foreground">Legion gründen</h3>
+                      <h3 className="text-sm font-bold uppercase tracking-widest text-foreground">Team gründen</h3>
                       <div className="space-y-4">
                         <Button variant="primary" className="w-full" onClick={() => setShowCreateTeam(!showCreateTeam)} disabled={createTeamMutation.isPending}>
                           Team gründen
@@ -705,7 +706,7 @@ export default function Tournament() {
                               type="text"
                               value={teamName}
                               onChange={(e) => setTeamName(e.target.value)}
-                              placeholder="Name der Legion..."
+                              placeholder="Teamname..."
                               className="w-full bg-white/5 border border-white/10 rounded-lg px-4 py-3 text-sm focus:outline-none focus:border-primary/50"
                             />
                             <div className="flex gap-2">
@@ -728,7 +729,7 @@ export default function Tournament() {
                         <Shield size={24} className="text-primary opacity-20" />
                       </div>
                       <div>
-                        <p className="text-[10px] font-bold text-primary uppercase tracking-widest mb-1">Deine Legion</p>
+                        <p className="text-[10px] font-bold text-primary uppercase tracking-widest mb-1">Dein Team</p>
                         <h3 className="text-xl font-bold uppercase tracking-tight text-foreground">{userTeam.name}</h3>
                       </div>
 
@@ -749,7 +750,7 @@ export default function Tournament() {
                           onClick={() => handleLeaveTeam(userTeam.id)}
                           disabled={isMutating || (isUserCaptain && userTeam.members.length > 1)}
                         >
-                          Legion verlassen
+                          Team verlassen
                          </Button>
                       )}
                     </Card>
@@ -798,7 +799,7 @@ export default function Tournament() {
                 )}
 
                 <div className="flex items-center justify-between">
-                  <h3 className="text-sm font-bold uppercase tracking-widest text-muted">Gemeldete Legionen</h3>
+                  <h3 className="text-sm font-bold uppercase tracking-widest text-muted">Gemeldete Teams</h3>
                   <span className="text-xs font-bold text-foreground bg-white/5 px-2 py-1 rounded-lg border border-white/5">
                     {tournament.teams.length}
                   </span>
@@ -900,7 +901,7 @@ export default function Tournament() {
             {resultEntries.length === 0 ? (
               <Card className="p-20 text-center opacity-40 italic">
                 <ScrollText size={48} className="mx-auto mb-4 opacity-20" />
-                <p className="text-xl">Die Annalen sind noch leer.</p>
+                <p className="text-xl">Noch keine Ergebnisse.</p>
               </Card>
             ) : (
               <div className="space-y-4">
@@ -943,10 +944,10 @@ export default function Tournament() {
             animate={{ scale: 1, opacity: 1 }}
             className="glass-card p-8 max-w-sm w-full mx-4 shadow-2xl border-primary/20"
           >
-            <h3 className="text-xl font-bold text-foreground font-display uppercase tracking-widest mb-4">Loyalität wechseln?</h3>
+            <h3 className="text-xl font-bold text-foreground font-display uppercase tracking-widest mb-4">Team wechseln?</h3>
             <p className="text-sm text-muted italic mb-8 leading-relaxed">
-              Du bist bereits Teil der Legion <span className="text-primary font-bold">"{userTeam.name}"</span>.
-              Willst du ihr den Rücken kehren und dich <span className="text-foreground font-bold">"{pendingJoinTeam.name}"</span> anschließen?
+              Du bist bereits im Team <span className="text-primary font-bold">"{userTeam.name}"</span>.
+              Willst du es verlassen und <span className="text-foreground font-bold">"{pendingJoinTeam.name}"</span> beitreten?
             </p>
             <div className="flex gap-4">
               <Button variant="ghost" className="flex-1" onClick={() => setPendingJoinTeam(null)} disabled={joinTeamMutation.isPending}>Bleiben</Button>
@@ -996,7 +997,7 @@ function TournamentRangliste({ tournament }: { tournament: TournamentDetailPubli
               <thead>
                 <tr className="bg-white/5 text-left border-b border-white/10">
                   <th className="px-6 py-4 font-bold uppercase tracking-widest text-muted text-[10px] w-20 text-center">Rang</th>
-                  <th className="px-6 py-4 font-bold uppercase tracking-widest text-muted text-[10px]">Legion</th>
+                  <th className="px-6 py-4 font-bold uppercase tracking-widest text-muted text-[10px]">Team</th>
                   <th className="px-6 py-4 font-bold uppercase tracking-widest text-muted text-[10px] text-right">Resultat</th>
                 </tr>
               </thead>
@@ -1036,7 +1037,7 @@ function TournamentRangliste({ tournament }: { tournament: TournamentDetailPubli
               <thead>
                 <tr className="bg-white/5 text-left border-b border-white/10">
                   <th className="px-6 py-4 font-bold uppercase tracking-widest text-muted text-[10px] w-20 text-center">#</th>
-                  <th className="px-6 py-4 font-bold uppercase tracking-widest text-muted text-[10px]">Legion</th>
+                  <th className="px-6 py-4 font-bold uppercase tracking-widest text-muted text-[10px]">Team</th>
                   <th className="px-6 py-4 font-bold uppercase tracking-widest text-muted text-[10px] text-center">S</th>
                   <th className="px-6 py-4 font-bold uppercase tracking-widest text-muted text-[10px] text-center">N</th>
                   <th className="px-6 py-4 font-bold uppercase tracking-widest text-muted text-[10px] text-right">Pkt</th>

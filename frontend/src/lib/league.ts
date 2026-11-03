@@ -1,4 +1,4 @@
-import type { GroupMatch, TournamentMode } from '@/types/tournament'
+import type { GroupMatch, Tournament, TournamentMode } from '@/types/tournament'
 
 export const LEAGUE_LABEL = 'Jeder gegen jeden'
 export const LEAGUE_SCORING_TEXT =
@@ -48,6 +48,11 @@ export function slotMinutesOf(rounds: LeagueRound[]): number {
   if (!first?.scheduledAt || !second?.scheduledAt) return DEFAULT_SLOT_MINUTES
   const minutes = (Date.parse(second.scheduledAt) - Date.parse(first.scheduledAt)) / 60000
   return minutes > 0 ? minutes : DEFAULT_SLOT_MINUTES
+}
+
+export function plannedTournamentStart(t: Tournament): string | null {
+  const planned = t.tournament_mode === 'bracket_only' ? t.bracket_start : t.group_phase_start ?? t.bracket_start
+  return planned ?? t.registration_end
 }
 
 export function toLocalInput(value: string | null | undefined): string {

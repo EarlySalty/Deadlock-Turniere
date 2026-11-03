@@ -1,4 +1,4 @@
-import { LEAGUE_LABEL, isLeague } from '@/lib/league'
+import { LEAGUE_LABEL, isLeague, plannedTournamentStart } from '@/lib/league'
 import { Link } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import { useTournaments } from '@/hooks/useTournament'
@@ -25,13 +25,8 @@ const item = {
 
 const OPEN_STATUSES = ['registration', 'checkin', 'group_phase', 'bracket']
 
-function tournamentStart(t: Tournament): string | null {
-  const planned = t.tournament_mode === 'bracket_only' ? t.bracket_start : t.group_phase_start ?? t.bracket_start
-  return planned ?? t.registration_end
-}
-
 function startTime(t: Tournament): number {
-  const start = tournamentStart(t)
+  const start = plannedTournamentStart(t)
   return start ? new Date(start).getTime() : Number.POSITIVE_INFINITY
 }
 
@@ -101,7 +96,7 @@ export default function Home() {
           ) : (
             <Card className="text-center py-20 opacity-60 italic">
               <Trophy size={48} className="mx-auto text-muted mb-4 opacity-20" />
-              <p className="text-muted text-xl">Die Arena ist momentan still.</p>
+              <p className="text-muted text-xl">Gerade läuft kein Turnier.</p>
               <p className="text-muted text-sm mt-2 uppercase tracking-widest">Warten auf die nächste Beschwörung</p>
             </Card>
           )}
@@ -110,7 +105,7 @@ export default function Home() {
         <motion.section variants={item} className="space-y-6">
           <h2 className="text-2xl font-bold flex items-center gap-3 tracking-widest text-muted">
             <Archive size={20} />
-            Chroniken
+            Vergangene Turniere
           </h2>
 
           <div className="flex flex-col gap-4">
@@ -131,7 +126,7 @@ export default function Home() {
                 </Card>
               </Link>
             )) : (
-              <p className="text-center py-10 text-muted italic text-sm">Noch keine Geschichte geschrieben.</p>
+              <p className="text-center py-10 text-muted italic text-sm">Noch keine vergangenen Turniere.</p>
             )}
           </div>
         </motion.section>
@@ -141,7 +136,7 @@ export default function Home() {
 }
 
 function OpenTournamentCard({ tournament: t }: { tournament: Tournament }) {
-  const start = tournamentStart(t)
+  const start = plannedTournamentStart(t)
   return (
     <Link to={`/${t.id}`}>
       <Card hoverable className="p-8 border-primary/20 bg-primary/5 group relative overflow-hidden">

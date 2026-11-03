@@ -24,15 +24,15 @@ export default function Login() {
             <div className="inline-flex p-4 rounded-lg bg-primary/10 border border-primary/20 mb-6">
               <Swords size={40} className="text-primary shadow-[var(--glow-primary)]" />
             </div>
-            <h1 className="text-3xl font-bold text-foreground font-display tracking-widest uppercase">Identifikation</h1>
+            <h1 className="text-3xl font-bold text-foreground font-display tracking-widest uppercase">Anmelden</h1>
             <p className="text-muted italic mt-2 text-sm">
-              "Wer bist du, der die Arena betreten will?"
+              Melde dich mit Discord an, um an Turnieren teilzunehmen.
             </p>
           </div>
 
           <div className="space-y-6">
             <p className="text-xs text-muted leading-relaxed uppercase tracking-wider">
-              Verknüpfe dein Discord-Siegel, um dich für die kommenden Prüfungen zu rüsten.
+              Wir nutzen dein Discord-Konto, um dich deinem Team und deinen Spielen zuzuordnen.
             </p>
 
             <div className="py-4">

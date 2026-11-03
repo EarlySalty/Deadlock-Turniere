@@ -150,7 +150,7 @@ export default function PlayerProfile() {
                     className="absolute inset-0 bg-black/60 flex flex-col items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
                   >
                     <Camera size={24} className="text-primary mb-1" />
-                    <span className="text-[10px] font-bold uppercase tracking-widest text-white">Siegel ändern</span>
+                    <span className="text-[10px] font-bold uppercase tracking-widest text-white">Bild ändern</span>
                   </button>
                 )}
               </div>
@@ -210,7 +210,7 @@ export default function PlayerProfile() {
                       value={bioValue}
                       onChange={(e) => setBioValue(e.target.value)}
                       className="w-full bg-white/5 border border-white/10 rounded-lg p-4 text-sm italic text-muted focus:outline-none focus:border-primary/50 min-h-[100px]"
-                      placeholder="Deine Geschichte..."
+                      placeholder="Über dich..."
                     />
                     <div className="flex gap-2">
                       <Button size="sm" onClick={handleBioSave} disabled={updateProfile.isPending}>Sichern</Button>
@@ -264,7 +264,7 @@ export default function PlayerProfile() {
         <div className="space-y-6">
           <h2 className="text-xl font-bold font-display uppercase tracking-widest text-foreground flex items-center gap-3">
             <ScrollText size={20} className="text-primary" />
-            Chroniken
+            Turnierverlauf
           </h2>
           <div className="space-y-4">
             {profile.tournament_history && profile.tournament_history.length > 0 ? (
@@ -281,7 +281,7 @@ export default function PlayerProfile() {
                 </Card>
               ))
             ) : (
-              <p className="text-sm italic text-muted">Noch keine Schlachten geschlagen.</p>
+              <p className="text-sm italic text-muted">Noch keine Turniere gespielt.</p>
             )}
           </div>
         </div>
@@ -297,8 +297,8 @@ export default function PlayerProfile() {
                <div className="space-y-4">
                   <div className="flex items-center justify-between gap-4 border-b border-white/5 pb-4">
                     <div>
-                      <p className="text-sm font-bold text-foreground uppercase tracking-wide">Auto-Rekrutierung</p>
-                      <p className="text-[10px] text-muted italic">Einladungen automatisch annehmen.</p>
+                      <p className="text-sm font-bold text-foreground uppercase tracking-wide">Einladungen automatisch annehmen</p>
+                      <p className="text-[10px] text-muted italic">Teameinladungen werden ohne Rückfrage angenommen.</p>
                     </div>
                     <input
                       type="checkbox"

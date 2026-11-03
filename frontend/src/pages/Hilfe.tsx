@@ -103,9 +103,9 @@ Jeder Spieler trägt selbst die Verantwortung, sich vor Turnierbeginn über Abla
             <BookOpen size={32} className="text-primary" />
           </div>
         </div>
-        <h1 className="text-4xl font-bold tracking-tighter text-foreground font-display">Der <span className="text-primary">Regelwerk</span></h1>
+        <h1 className="text-4xl font-bold tracking-tighter text-foreground font-display">Das <span className="text-primary">Regelwerk</span></h1>
         <p className="text-muted italic max-w-lg mx-auto">
-          "Die universellen Gesetze der Arena. Lerne sie, oder werde Teil der Geschichte."
+          Diese Regeln gelten für alle Turniere.
         </p>
       </div>
 
@@ -183,9 +183,9 @@ Jeder Spieler trägt selbst die Verantwortung, sich vor Turnierbeginn über Abla
 
       <Card className="border-amber-500/20 bg-amber-500/5 p-8 text-center space-y-4">
         <AlertTriangle size={32} className="mx-auto text-amber-500" />
-        <h2 className="text-xl font-bold text-foreground uppercase tracking-widest">Probleme in der Arena?</h2>
+        <h2 className="text-xl font-bold text-foreground uppercase tracking-widest">Probleme im Turnier?</h2>
         <p className="text-sm text-muted max-w-md mx-auto italic">
-          Kontaktiere die Ältesten (Moderatoren) auf unserem Discord-Server.
+          Schreib den Moderatoren auf unserem Discord-Server.
         </p>
         <div className="pt-4">
           <a

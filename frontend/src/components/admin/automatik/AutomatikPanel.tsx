@@ -13,6 +13,7 @@ import {
 import Button from '@/components/ui/Button'
 import Card from '@/components/ui/Card'
 import DateTimeInput from '@/components/ui/DateTimeInput'
+import { localInputToIso } from '@/lib/league'
 import LoadingSpinner from '@/components/ui/LoadingSpinner'
 import {
   useApplyProposalEvent,
@@ -118,7 +119,7 @@ export default function AutomatikPanel() {
       {
         preset_id: manualPresetId,
         name: manualName.trim(),
-        proposed_start: manualStart || null,
+        proposed_start: localInputToIso(manualStart) ?? null,
       },
       {
         onSuccess: (proposal) => {
