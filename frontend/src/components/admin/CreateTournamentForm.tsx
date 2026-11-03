@@ -78,6 +78,7 @@ export default function CreateTournamentForm({ template }: CreateTournamentFormP
   const [rulesOpen, setRulesOpen] = useState(false)
   const [customJsonError, setCustomJsonError] = useState('')
   const [successMsg, setSuccessMsg] = useState('')
+  const [templateSource, setTemplateSource] = useState(template?.sourceName ?? null)
   const createMutation = useCreateTournament()
   const league = values.tournamentFormat === 'league'
 
@@ -127,6 +128,7 @@ export default function CreateTournamentForm({ template }: CreateTournamentFormP
           setSuccessMsg(`Turnier "${tournament.name}" wurde erfolgreich erstellt!`)
           setValues(defaultCreateValues())
           setDates(EMPTY_DATES)
+          setTemplateSource(null)
         },
       },
     )
@@ -139,11 +141,11 @@ export default function CreateTournamentForm({ template }: CreateTournamentFormP
         <h2 className="text-lg font-semibold text-foreground">Neues Turnier erstellen</h2>
       </div>
 
-      {template && (
+      {templateSource && (
         <div className="mb-5 flex items-start gap-2 rounded-lg border border-primary/30 bg-primary/5 p-3 text-sm text-foreground">
           <Copy size={16} className="mt-0.5 shrink-0 text-primary" />
           <span>
-            Einstellungen aus „{template.sourceName}“ übernommen. Teams und Anmeldungen werden nicht kopiert,
+            Einstellungen aus „{templateSource}“ übernommen. Teams und Anmeldungen werden nicht kopiert,
             die Termine setzt du neu.
           </span>
         </div>

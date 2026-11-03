@@ -39,7 +39,7 @@ export const FORMAT_OPTIONS: Choice<TournamentFormat>[] = [
   {
     value: 'auto',
     label: 'Automatisch',
-    description: 'Je nach Teamgröße und Anmeldungen wählt das System Gruppenphase + Bracket oder nur Bracket.',
+    description: 'Der Server entscheidet beim Anlegen allein nach der Teamgröße: ab 16 Spielern pro Team Gruppenphase + Bracket, sonst nur Bracket.',
   },
   ...MODE_OPTIONS,
 ]
