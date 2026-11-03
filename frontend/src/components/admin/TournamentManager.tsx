@@ -2,7 +2,6 @@ import { useState } from 'react'
 import Card from '@/components/ui/Card'
 import Badge from '@/components/ui/Badge'
 import Button from '@/components/ui/Button'
-import DateTimeInput from '@/components/ui/DateTimeInput'
 import {
   useAdvanceTournament,
   useAssignRandomTeams,
@@ -13,19 +12,15 @@ import {
   useRevertCheckin,
   useUpdateTournament,
 } from '@/hooks/useTournament'
-import {
-  LEAGUE_LABEL,
-  isLeague,
-  leagueFinishConfirm,
-  localInputToIso,
-  toLocalInput,
-} from '@/lib/league'
-import type {
-  Tournament,
-  TournamentGameMode,
-  TournamentMode,
-  TournamentUpdate,
-} from '@/types/tournament'
+import { LEAGUE_LABEL, isLeague, leagueFinishConfirm } from '@/lib/league'
+import type { Tournament } from '@/types/tournament'
+import ChoiceCards from './settings/ChoiceCards'
+import GameRulesFields from './settings/GameRulesFields'
+import SpecialSettingsFields from './settings/SpecialSettingsFields'
+import { SettingsSection, SubHeading } from './settings/SettingsSection'
+import { BasicsFields, DateFields, MatchFormatFields, ReminderFields } from './settings/StandardFields'
+import { buildUpdatePayload, editDateEntries, initialEditState, type EditForm } from './settings/editForm'
+import { MODE_OPTIONS } from './settings/options'
 import {
   AlertCircle,
   ArrowRight,
@@ -34,19 +29,10 @@ import {
   GitBranch,
   PencilLine,
   Shuffle,
-  Swords,
   Trash2,
   Trophy,
   Users,
 } from 'lucide-react'
-
-const GAME_MODE_LABELS: Record<TournamentGameMode, string> = {
-  standard: 'Standard',
-  mirror: 'Mirror Match',
-  all_same: 'All Same Hero',
-  random_heroes: 'Random Heroes',
-  single_lane: 'Single Lane Battle',
-}
 
 interface TournamentManagerProps {
   tournament: Tournament
@@ -77,22 +63,14 @@ const LEAGUE_STEPS = [
   'Sind alle Spiele gewertet, schließt du das Turnier ab. Die Tabelle ist die Endplatzierung.',
 ]
 
-function toInputDateTime(value: string | null | undefined): string {
-  if (!value) return ''
-  return value.replace(' ', 'T').slice(0, 16)
-}
+type SetupTab = 'settings' | 'rules'
 
-function toReminderOffsetString(value: number[] | null | undefined): string {
-  return (value && value.length > 0 ? value : [1440, 120, 15]).join(', ')
-}
+const SETUP_TABS: { key: SetupTab; label: string }[] = [
+  { key: 'settings', label: 'Einstellungen' },
+  { key: 'rules', label: 'Spielregeln' },
+]
 
-function parseReminderOffsets(value: string): number[] {
-  const parsed = value
-    .split(',')
-    .map((entry) => Number(entry.trim()))
-    .filter((entry) => Number.isFinite(entry) && entry >= 0)
-  return parsed.length > 0 ? parsed : [1440, 120, 15]
-}
+const lastSetupTab = new Map<number, SetupTab>()
 
 export default function TournamentManager({
   tournament,
@@ -111,33 +89,17 @@ export default function TournamentManager({
   const generateBracketMutation = useGenerateBracket()
 
   const storedLeague = isLeague(tournament.tournament_mode)
-  const storedStartInput = storedLeague
-    ? toLocalInput(tournament.group_phase_start)
-    : toInputDateTime(tournament.group_phase_start)
-  const [form, setForm] = useState({
-    name: tournament.name,
-    description: tournament.description ?? '',
-    team_size: tournament.team_size,
-    series_format: tournament.series_format as 1 | 3 | 5,
-    final_series_format: tournament.final_series_format as 1 | 3 | 5 | null,
-    bracket_format: tournament.bracket_format,
-    tournament_mode: tournament.tournament_mode,
-    tournament_game_mode: tournament.tournament_game_mode,
-    auto_lobby_enabled: tournament.auto_lobby_enabled,
-    registration_start: toInputDateTime(tournament.registration_start),
-    registration_end: toInputDateTime(tournament.registration_end),
-    checkin_start: toInputDateTime(tournament.checkin_start ?? null),
-    group_phase_start: storedStartInput,
-    bracket_start: toInputDateTime(tournament.bracket_start),
-    exclude_from_leaderboard: tournament.exclude_from_leaderboard,
-    reminder_offsets: toReminderOffsetString(tournament.reminder_offsets),
-    rules: tournament.rules ?? '',
-  })
+  const [initial] = useState(() => initialEditState(tournament))
+  const [form, setForm] = useState<EditForm>(initial.form)
+  const [special, setSpecial] = useState(initial.special)
+  const [gameRules, setGameRules] = useState(initial.gameRules)
+  const [customJsonError, setCustomJsonError] = useState('')
+  const [setupTab, setSetupTab] = useState<SetupTab>(() => lastSetupTab.get(tournament.id) ?? 'settings')
   const [successMessage, setSuccessMessage] = useState('')
   const [deleteConfirmationId, setDeleteConfirmationId] = useState<number | null>(null)
   const deleteConfirmed = deleteConfirmationId === tournament.id
 
-  const league = isLeague(form.tournament_mode)
+  const league = isLeague(form.tournamentMode)
   const leagueRunning = tournament.status === 'group_phase'
   const modeLocked = !canChangeTournamentMode || (leagueRunning && storedLeague)
   const action =
@@ -164,43 +126,22 @@ export default function TournamentManager({
     generateGroupsMutation.error ||
     generateBracketMutation.error
 
-  const handleChange = (
-    key: keyof typeof form,
-    value: string | number | boolean | null
-  ) => {
-    setForm((current) => ({ ...current, [key]: value }))
-  }
+  const update = (patch: Partial<EditForm>) => setForm((current) => ({ ...current, ...patch }))
 
-  const groupStartPayload = () => {
-    if (!league && !storedLeague) return form.group_phase_start || undefined
-    if (form.group_phase_start === storedStartInput) return undefined
-    return localInputToIso(form.group_phase_start)
+  const selectTab = (tab: SetupTab) => {
+    lastSetupTab.set(tournament.id, tab)
+    setSetupTab(tab)
   }
 
   const handleSave = () => {
-    const payload: TournamentUpdate = {
-      name: form.name.trim(),
-      description: form.description.trim() || undefined,
-      team_size: form.team_size,
-      series_format: form.series_format as 1 | 3 | 5,
-      final_series_format: (form.final_series_format as 1 | 3 | 5 | null) ?? null,
-      bracket_format: form.bracket_format,
-      tournament_game_mode: form.tournament_game_mode,
-      auto_lobby_enabled: form.auto_lobby_enabled,
-      registration_start: form.registration_start || undefined,
-      registration_end: form.registration_end || undefined,
-      checkin_start: form.checkin_start || undefined,
-      group_phase_start: groupStartPayload(),
-      bracket_start: form.bracket_start || undefined,
-      exclude_from_leaderboard: form.exclude_from_leaderboard,
-      reminder_offsets: parseReminderOffsets(form.reminder_offsets),
-      rules: form.rules.trim() || null,
-    }
-    if (canChangeTournamentMode && form.tournament_mode !== tournament.tournament_mode) {
-      payload.force_tournament_mode = form.tournament_mode as TournamentMode
+    const result = buildUpdatePayload({ form, special, gameRules }, initial, tournament, canChangeTournamentMode)
+    if (!result.ok) {
+      setCustomJsonError(result.error)
+      selectTab('rules')
+      return
     }
     detailsUpdateMutation.mutate(
-      { id: tournament.id, data: payload },
+      { id: tournament.id, data: result.payload },
       { onSuccess: () => setSuccessMessage('Turnierdaten gespeichert.') }
     )
   }
@@ -270,7 +211,7 @@ export default function TournamentManager({
   }
 
   return (
-    <Card className="p-6 space-y-6">
+    <Card className="space-y-6 sm:p-2">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
         <div className="space-y-2">
           <div className="flex items-center gap-3">
@@ -279,7 +220,7 @@ export default function TournamentManager({
             <Badge status={tournament.status} mode={tournament.tournament_mode} />
           </div>
           <p className="text-sm text-muted">
-            Metadaten pflegen, Phasen steuern und Generierung sicher auslösen.
+            Einstellungen und Spielregeln pflegen, Phasen steuern und Generierung sicher auslösen.
           </p>
         </div>
 
@@ -314,278 +255,78 @@ export default function TournamentManager({
         </div>
       )}
 
-      <div className="grid gap-4 lg:grid-cols-2">
-        <div className="space-y-4">
-          <div>
-            <label htmlFor="admin-tournament-name" className="mb-1.5 block text-sm font-medium text-foreground">
-              Turniername
-            </label>
-            <input
-              id="admin-tournament-name"
-              type="text"
-              value={form.name}
-              onChange={(event) => handleChange('name', event.target.value)}
-              className="w-full rounded-lg border border-border bg-background px-3 py-2 text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
-            />
-          </div>
-
-          <div>
-            <label htmlFor="admin-tournament-description" className="mb-1.5 block text-sm font-medium text-foreground">
-              Beschreibung
-            </label>
-            <textarea
-              id="admin-tournament-description"
-              rows={4}
-              value={form.description}
-              onChange={(event) => handleChange('description', event.target.value)}
-              className="w-full rounded-lg border border-border bg-background px-3 py-2 text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
-            />
-          </div>
-
-          <div>
-            <label htmlFor="admin-tournament-rules" className="mb-1.5 block text-sm font-medium text-foreground">
-              Regelwerk (Markdown unterstützt)
-            </label>
-            <textarea
-              id="admin-tournament-rules"
-              rows={10}
-              value={form.rules}
-              onChange={(event) => handleChange('rules', event.target.value)}
-              className="w-full rounded-lg border border-border bg-background px-3 py-2 text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
-            />
-          </div>
-        </div>
-
-        <div className="grid gap-4 sm:grid-cols-2">
-          <div>
-            <label htmlFor="admin-team-size" className="mb-1.5 block text-sm font-medium text-foreground">
-              Teamgröße
-            </label>
-            <input
-              id="admin-team-size"
-              type="number"
-              min={1}
-              max={20}
-              value={form.team_size}
-              onChange={(event) => handleChange('team_size', Number(event.target.value))}
-              className="w-full rounded-lg border border-border bg-background px-3 py-2 text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
-            />
-          </div>
-
-          {!league && <div>
-            <label htmlFor="admin-bracket-format" className="mb-1.5 block text-sm font-medium text-foreground">
-              Bracket-Format
-            </label>
-            <select
-              id="admin-bracket-format"
-              value={form.bracket_format}
-              onChange={(event) => handleChange('bracket_format', event.target.value)}
-              className="w-full rounded-lg border border-border bg-background px-3 py-2 text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
-            >
-              <option value="single_elimination">Single Elimination</option>
-              <option value="double_elimination">Double Elimination</option>
-            </select>
-          </div>}
-
-          {!league && <div>
-            <label htmlFor="admin-series-format" className="mb-1.5 block text-sm font-medium text-foreground">
-              Serienformat (Standard)
-            </label>
-            <select
-              id="admin-series-format"
-              value={form.series_format}
-              onChange={(event) => handleChange('series_format', Number(event.target.value) as 1 | 3 | 5)}
-              className="w-full rounded-lg border border-border bg-background px-3 py-2 text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
-            >
-              <option value={1}>Bo1</option>
-              <option value={3}>Bo3</option>
-              <option value={5}>Bo5</option>
-            </select>
-          </div>}
-
-          {!league && <div>
-            <label htmlFor="admin-final-series-format" className="mb-1.5 block text-sm font-medium text-foreground">
-              Finale Match Format
-            </label>
-            <select
-              id="admin-final-series-format"
-              value={form.final_series_format ?? 'same'}
-              onChange={(event) => {
-                const v = event.target.value
-                handleChange('final_series_format', v === 'same' ? null : Number(v))
-              }}
-              className="w-full rounded-lg border border-border bg-background px-3 py-2 text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
-            >
-              <option value="same">Wie Serienformat</option>
-              <option value={1}>Bo1</option>
-              <option value={3}>Bo3</option>
-              <option value={5}>Bo5</option>
-            </select>
-            <p className="mt-1 text-xs text-muted">Überschreibt das Format nur für das Finale.</p>
-          </div>}
-
-          <div>
-            <label htmlFor="admin-tournament-mode" className="mb-1.5 block text-sm font-medium text-foreground">
-              Turniermodus
-            </label>
-            <select
-              id="admin-tournament-mode"
-              value={form.tournament_mode}
-              onChange={(event) => handleChange('tournament_mode', event.target.value)}
-              disabled={modeLocked}
-              className="w-full rounded-lg border border-border bg-background px-3 py-2 text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 disabled:opacity-60"
-            >
-              <option value="bracket_only">Nur Bracket</option>
-              <option value="group_stage">Gruppenphase + Bracket</option>
-              <option value="league" disabled={leagueRunning && !storedLeague}>{LEAGUE_LABEL}</option>
-            </select>
-            <p className="mt-1 text-xs text-muted">
-              {league
-                ? 'Jedes Team spielt einmal gegen jedes andere. Am Ende entscheidet die Tabelle, ein Bracket gibt es nicht. Festlegen geht bis zum Abschluss des Check-ins.'
-                : 'Änderbar in Check-in oder in der Gruppenphase, solange noch kein Gruppenmatch gespielt wurde.'}
-            </p>
-          </div>
-
-          <div>
-            <label htmlFor="admin-game-mode" className="mb-1.5 block text-sm font-medium text-foreground">
-              <Swords size={14} className="mr-1 inline text-primary" />
-              Game-Modus
-            </label>
-            <select
-              id="admin-game-mode"
-              value={form.tournament_game_mode}
-              onChange={(event) =>
-                handleChange('tournament_game_mode', event.target.value as TournamentGameMode)
-              }
-              className="w-full rounded-lg border border-border bg-background px-3 py-2 text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
-            >
-              {(Object.keys(GAME_MODE_LABELS) as TournamentGameMode[]).map((mode) => (
-                <option key={mode} value={mode}>
-                  {GAME_MODE_LABELS[mode]}
-                </option>
-              ))}
-            </select>
-            <p className="mt-1 text-xs text-muted">
-              Hero-Auswahl-Logik (Mirror, AllSame, Random) bzw. Single-Lane-Battle. Änderungen wirken
-              auf alle ab jetzt erstellten Lobbys.
-            </p>
-          </div>
-
-          <label className="flex items-start gap-3 rounded-lg border border-border px-3 py-2 cursor-pointer sm:col-span-2">
-            <input
-              type="checkbox"
-              checked={form.auto_lobby_enabled}
-              onChange={(event) => handleChange('auto_lobby_enabled', event.target.checked)}
-              className="mt-0.5 h-4 w-4 accent-primary"
-            />
-            <div>
-              <div className="text-sm font-medium text-foreground">Lobbys automatisch erstellen</div>
-              <div className="text-xs text-muted">
-                {league
-                  ? 'Wenn an: Bot legt die Lobbys einer Runde an, sobald ihr Termin erreicht ist und die Runde davor gewertet ist. Aus = nur manuell per „Lobby erstellen“.'
-                  : 'Wenn an: Bot legt Lobbys nach Bracket-/Gruppen-Generierung und nach jedem Match-Ergebnis automatisch an. Aus = nur manuell per „Lobby erstellen".'}
-              </div>
-            </div>
-          </label>
-
-          <div>
-            <label htmlFor="admin-reg-start" className="mb-1.5 block text-sm font-medium text-foreground">
-              Anmeldung Start
-            </label>
-            <DateTimeInput
-              id="admin-reg-start"
-              value={form.registration_start}
-              onChange={(event) => handleChange('registration_start', event.target.value)}
-              className="w-full rounded-lg border border-border bg-background px-3 py-2 text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
-            />
-          </div>
-
-          <div>
-            <label htmlFor="admin-reg-end" className="mb-1.5 block text-sm font-medium text-foreground">
-              Turnier-Start
-            </label>
-            <DateTimeInput
-              id="admin-reg-end"
-              value={form.registration_end}
-              onChange={(event) => handleChange('registration_end', event.target.value)}
-              className="w-full rounded-lg border border-border bg-background px-3 py-2 text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
-            />
-            <p className="mt-1 text-xs text-muted">
-              Anmeldeschluss = Turnier-Start. Reminder werden vor diesem Zeitpunkt verschickt.
-            </p>
-          </div>
-
-          <div>
-            <label htmlFor="form-checkin-start" className="mb-1.5 block text-sm font-medium text-foreground">
-              Check-in Start
-            </label>
-            <DateTimeInput
-              id="form-checkin-start"
-              value={form.checkin_start}
-              onChange={(event) => handleChange('checkin_start', event.target.value)}
-              className="w-full rounded-lg border border-border bg-background px-3 py-2 text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
-            />
-            <p className="mt-1 text-xs text-muted">
-              Falls leer: Check-in startet automatisch mit Turnier-Start.
-            </p>
-          </div>
-
-          <div>
-            <label htmlFor="admin-group-start" className="mb-1.5 block text-sm font-medium text-foreground">
-              {league ? 'Erste Runde beginnt' : 'Gruppenphase Start'}
-            </label>
-            <DateTimeInput
-              id="admin-group-start"
-              value={form.group_phase_start}
-              onChange={(event) => handleChange('group_phase_start', event.target.value)}
-              className="w-full rounded-lg border border-border bg-background px-3 py-2 text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
-            />
-            {league && (
-              <p className="mt-1 text-xs text-muted">
-                Verschiebt den ganzen Spielplan, sobald er steht. Die Minuten pro Runde stellst du unter „Spielplan“ ein.
-              </p>
-            )}
-          </div>
-
-          <div>
-            <label htmlFor="admin-reminder-offsets" className="mb-1.5 block text-sm font-medium text-foreground">
-              Reminder vor Turnier-Start
-            </label>
-            <input
-              id="admin-reminder-offsets"
-              type="text"
-              value={form.reminder_offsets}
-              onChange={(event) => handleChange('reminder_offsets', event.target.value)}
-              className="w-full rounded-lg border border-border bg-background px-3 py-2 text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
-            />
-          </div>
-
-          <label className="flex items-center gap-3 rounded-lg border border-border px-3 py-2 cursor-pointer sm:col-span-2">
-            <input
-              type="checkbox"
-              checked={form.exclude_from_leaderboard}
-              onChange={(event) => handleChange('exclude_from_leaderboard', event.target.checked)}
-              className="h-4 w-4 accent-primary"
-            />
-            <div>
-              <div className="text-sm font-medium text-foreground">Von Rangliste ausschließen</div>
-              <div className="text-xs text-muted">Für Testturniere oder Events ohne Punktevergabe.</div>
-            </div>
-          </label>
-
-          {!league && <div>
-            <label htmlFor="admin-bracket-start" className="mb-1.5 block text-sm font-medium text-foreground">
-              Bracket Start
-            </label>
-            <DateTimeInput
-              id="admin-bracket-start"
-              value={form.bracket_start}
-              onChange={(event) => handleChange('bracket_start', event.target.value)}
-              className="w-full rounded-lg border border-border bg-background px-3 py-2 text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
-            />
-          </div>}
-        </div>
+      <div role="tablist" aria-label="Turnier bearbeiten" className="flex flex-wrap gap-1 border-b border-border">
+        {SETUP_TABS.map((tab) => (
+          <button
+            key={tab.key}
+            type="button"
+            role="tab"
+            aria-selected={setupTab === tab.key}
+            onClick={() => selectTab(tab.key)}
+            className={`border-b-2 px-4 py-2.5 text-sm font-medium transition-colors ${
+              setupTab === tab.key
+                ? 'border-primary text-primary'
+                : 'border-transparent text-muted hover:text-foreground'
+            }`}
+          >
+            {tab.label}
+          </button>
+        ))}
       </div>
+
+      {setupTab === 'settings' ? (
+        <div className="space-y-5">
+          <SettingsSection
+            title="Standard-Einstellungen"
+            description="Das Wichtigste für jedes Turnier: Name, Ablauf, Termine und Erinnerungen."
+          >
+            <BasicsFields idPrefix="admin" value={form} onChange={update} />
+            <div className="space-y-4">
+              <SubHeading>Ablauf</SubHeading>
+              <ChoiceCards
+                name="admin-tournament-mode"
+                legend="Turniermodus"
+                options={MODE_OPTIONS}
+                value={form.tournamentMode}
+                onChange={(tournamentMode) => update({ tournamentMode })}
+                disabled={modeLocked}
+                isOptionDisabled={(mode) => mode === 'league' && leagueRunning && !storedLeague}
+                hint={
+                  league
+                    ? 'Festlegen geht bis zum Abschluss des Check-ins.'
+                    : 'Änderbar im Check-in oder in der Gruppenphase, solange noch kein Gruppenspiel gespielt wurde.'
+                }
+              />
+              <MatchFormatFields idPrefix="admin" value={form} onChange={update} league={league} />
+            </div>
+            <DateFields idPrefix="admin" entries={editDateEntries(form, update, league)} />
+            <ReminderFields idPrefix="admin" value={form} onChange={update} />
+          </SettingsSection>
+
+          <SettingsSection
+            title="Spezielle Einstellungen"
+            description="Nur ändern, wenn das Turnier von den üblichen Regeln abweicht."
+          >
+            <SpecialSettingsFields idPrefix="admin" value={special} onChange={setSpecial} />
+          </SettingsSection>
+        </div>
+      ) : (
+        <SettingsSection
+          title="Spielregeln"
+          description="Was in jeder Lobby gilt. Änderungen wirken auf alle Lobbys, die ab jetzt erstellt werden."
+        >
+          <GameRulesFields
+            idPrefix="admin"
+            value={gameRules}
+            onChange={(next) => {
+              setGameRules(next)
+              setCustomJsonError('')
+            }}
+            league={league}
+            customJsonError={customJsonError}
+          />
+        </SettingsSection>
+      )}
 
       <div className="flex flex-wrap gap-2">
         <Button

@@ -25,6 +25,10 @@ import GroupMatchAdminPanel from '@/components/admin/GroupMatchAdminPanel'
 import VoiceChannelPanel from '@/components/admin/VoiceChannelPanel'
 import TournamentCasterPanel from '@/components/admin/TournamentCasterPanel'
 import ArchivedTournamentView from '@/components/admin/ArchivedTournamentView'
+import {
+  templateFromTournament,
+  type CreateTemplate,
+} from '@/components/admin/settings/createFormValues'
 import TestModePanel from '@/components/admin/TestModePanel'
 import AutomatikPanel from '@/components/admin/automatik/AutomatikPanel'
 import ObserverPanel from '@/components/admin/ObserverPanel'
@@ -67,6 +71,8 @@ export default function Admin() {
   const [selectedLiveId, setSelectedLiveId] = useState<number | null>(null)
   const [selectedArchiveId, setSelectedArchiveId] = useState<number | null>(null)
   const [showCreateForm, setShowCreateForm] = useState(false)
+  const [createTemplate, setCreateTemplate] = useState<CreateTemplate | null>(null)
+  const [createFormKey, setCreateFormKey] = useState(0)
   const [activePhase, setActivePhase] = useState<AdminPhase | null>(null)
   const deleteMutation = useDeleteTournament()
 
@@ -170,6 +176,13 @@ export default function Admin() {
     if (selectedArchiveId === id) setSelectedArchiveId(null)
   }
 
+  const openCreateForm = (template: CreateTemplate | null) => {
+    setCreateTemplate(template)
+    setCreateFormKey((key) => key + 1)
+    setShowCreateForm(true)
+    setAdminMode('live')
+  }
+
   const handleSelectLive = (id: number) => {
     setSelectedLiveId(id)
     setShowCreateForm(false)
@@ -232,7 +245,7 @@ export default function Admin() {
               selectedId={liveSelectedId}
               creating={showCreateForm}
               onSelect={handleSelectLive}
-              onCreate={() => setShowCreateForm(true)}
+              onCreate={() => openCreateForm(null)}
             />
           </aside>
 
@@ -252,7 +265,7 @@ export default function Admin() {
                     Abbrechen
                   </button>
                 </div>
-                <CreateTournamentForm />
+                <CreateTournamentForm key={createFormKey} template={createTemplate ?? undefined} />
               </section>
             ) : loadingLiveDetail && liveSelectedId ? (
               <LoadingSpinner />
@@ -443,7 +456,7 @@ export default function Admin() {
               <Card className="p-8 text-center">
                 <Trophy size={32} className="mx-auto mb-3 text-muted" />
                 <p className="text-muted">Gerade ist kein Turnier geplant.</p>
-                <Button variant="primary" size="sm" className="mt-4" onClick={() => setShowCreateForm(true)}>
+                <Button variant="primary" size="sm" className="mt-4" onClick={() => openCreateForm(null)}>
                   <Plus size={14} />
                   Turnier erstellen
                 </Button>
@@ -518,13 +531,16 @@ export default function Admin() {
                 <Archive size={32} className="mx-auto mb-3 text-muted" />
                 <p className="text-muted">
                   Wähle links ein archiviertes Turnier, um Bracket, Teams und Caster-Liste
-                  einzusehen. Read-Only, keine Bearbeitung möglich.
+                  einzusehen. Nur lesen, keine Bearbeitung möglich.
                 </p>
               </Card>
             ) : loadingArchiveDetail ? (
               <LoadingSpinner />
             ) : archiveDetail ? (
-              <ArchivedTournamentView tournament={archiveDetail} />
+              <ArchivedTournamentView
+                tournament={archiveDetail}
+                onUseAsTemplate={() => openCreateForm(templateFromTournament(archiveDetail))}
+              />
             ) : (
               <Card className="p-8 text-center">
                 <p className="text-muted">Turnier konnte nicht geladen werden.</p>
