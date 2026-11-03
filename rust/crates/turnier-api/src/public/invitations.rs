@@ -65,7 +65,7 @@ struct SignupRow {
     team_id: Option<i64>,
 }
 
-/// `POST .../invite-by-signup/{signup_id}` — Captain lädt einen Solo-Signup ein.
+/// `POST .../invite-by-signup/{signup_id}`: Captain lädt einen Solo-Signup ein.
 /// Respektiert invite_mode/-window und invite_auto_accept.
 async fn invite_to_team_by_signup(
     State(state): State<AppState>,
@@ -215,7 +215,7 @@ async fn invite_to_team_by_signup(
     Ok(Json(json!({ "status": "invited" })))
 }
 
-/// `GET /api/tournaments/{tournament_id}/my-invitations` — offene Einladungen.
+/// `GET /api/tournaments/{tournament_id}/my-invitations`: offene Einladungen.
 async fn get_my_invitations(
     State(state): State<AppState>,
     AuthUser(user): AuthUser,
@@ -271,7 +271,7 @@ struct InvitationRow {
     status: String,
 }
 
-/// `POST .../invitations/{invite_id}/accept` — Einladung annehmen.
+/// `POST .../invitations/{invite_id}/accept`: Einladung annehmen.
 async fn accept_team_invitation(
     State(state): State<AppState>,
     AuthUser(user): AuthUser,
@@ -315,7 +315,7 @@ async fn accept_team_invitation(
     .await?;
 
     let (rank, discord_name) = if let Some(signup) = signup {
-        // `user.discord_name or signup.discord_name` — leerer String fällt zurück
+        // `user.discord_name or signup.discord_name`: leerer String fällt zurück
         // (Python-`or`-Semantik 1:1).
         let discord_name = user
             .discord_name
@@ -359,8 +359,8 @@ async fn accept_team_invitation(
     ))
 }
 
-/// `POST .../invitations/{invite_id}/reject` — Einladung ablehnen.
-/// KEIN `_ensure_registration_open`-Gate (anders als accept — 1:1 erhalten).
+/// `POST .../invitations/{invite_id}/reject`: Einladung ablehnen.
+/// KEIN `_ensure_registration_open`-Gate (anders als accept, 1:1 erhalten).
 async fn reject_team_invitation(
     State(state): State<AppState>,
     AuthUser(user): AuthUser,
@@ -397,7 +397,7 @@ async fn reject_team_invitation(
     ))
 }
 
-/// `POST /api/tournaments/{tournament_id}/teams/{team_id}/apply` — auf Team
+/// `POST /api/tournaments/{tournament_id}/teams/{team_id}/apply`: auf Team
 /// bewerben (nur `recruitment_status = 'application'`).
 async fn apply_to_team(
     State(state): State<AppState>,
@@ -463,7 +463,7 @@ async fn apply_to_team(
     Ok(Json(json!({ "status": "applied", "team_id": team_id })))
 }
 
-/// `GET .../teams/{team_id}/applications` — Bewerbungen eines Teams (Captain|Mod).
+/// `GET .../teams/{team_id}/applications`: Bewerbungen eines Teams (Captain|Mod).
 async fn get_team_applications(
     State(state): State<AppState>,
     AuthUser(user): AuthUser,
@@ -512,7 +512,7 @@ struct ApplicationRow {
     status: String,
 }
 
-/// `POST .../applications/{app_id}/accept` — Bewerbung annehmen (Captain|Mod).
+/// `POST .../applications/{app_id}/accept`: Bewerbung annehmen (Captain|Mod).
 async fn accept_team_application(
     State(state): State<AppState>,
     AuthUser(user): AuthUser,
@@ -596,8 +596,8 @@ async fn accept_team_application(
     ))
 }
 
-/// `POST .../applications/{app_id}/reject` — Bewerbung ablehnen (Captain|Mod).
-/// KEIN registration-Gate (anders als accept — 1:1 erhalten).
+/// `POST .../applications/{app_id}/reject`: Bewerbung ablehnen (Captain|Mod).
+/// KEIN registration-Gate (anders als accept, 1:1 erhalten).
 async fn reject_team_application(
     State(state): State<AppState>,
     AuthUser(user): AuthUser,

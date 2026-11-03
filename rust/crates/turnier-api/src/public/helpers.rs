@@ -163,7 +163,7 @@ pub fn parse_timestamp(value: Option<&str>) -> Option<DateTime<Utc>> {
 }
 
 // ---------------------------------------------------------------------------
-// Rang-Anreicherung (gebatcht — gegen N+1)
+// Rang-Anreicherung (gebatcht, gegen N+1)
 // ---------------------------------------------------------------------------
 
 /// Ein roher Member-/Signup-Datensatz vor der Rang-Anreicherung.
@@ -173,7 +173,7 @@ struct RankFields {
     rank_score: i64,
 }
 
-/// Wendet ein Discord-first-Profil auf die Rangfelder an — exakt wie
+/// Wendet ein Discord-first-Profil auf die Rangfelder an, exakt wie
 /// `_enrich_rank_data` (routes.py:45): nur nicht-leere Profilwerte überschreiben.
 fn apply_profile(fields: &mut RankFields, profile: Option<&RankProfile>) {
     let Some(profile) = profile else { return };
@@ -345,7 +345,7 @@ pub async fn load_teams_for_tournament(
 
 /// Lädt Teams in der öffentlichen Sicht (ohne discord_id/captain in Members,
 /// mit `has_pending_applications`-Flag). Entspricht `_load_teams_public`
-/// (routes.py:159). Bewusst OHNE Rang-Anreicherung — 1:1 zum Original.
+/// (routes.py:159). Bewusst OHNE Rang-Anreicherung, 1:1 zum Original.
 pub async fn load_teams_public(pool: &Pool, tournament_id: i64) -> WebResult<Vec<TeamPublic>> {
     let team_rows: Vec<TeamRow> =
         sqlx::query_as(r#"SELECT * FROM turnier."teams" WHERE tournament_id = $1"#)
@@ -443,7 +443,7 @@ async fn enrich_for_ids(
     match state.rank_resolver.rank_profiles(&ids).await {
         Ok(map) => Ok(map),
         Err(err) => {
-            tracing::warn!(error = %err, "Rang-Anreicherung fehlgeschlagen — ohne Profil weiter");
+            tracing::warn!(error = %err, "Rang-Anreicherung fehlgeschlagen, ohne Profil weiter");
             Ok(HashMap::new())
         }
     }
@@ -1031,7 +1031,7 @@ pub async fn load_team_or_404(
     })
 }
 
-/// Prüft, ob die Anmeldung offen ist (status in registration|checkin) — 400 sonst.
+/// Prüft, ob die Anmeldung offen ist (status in registration|checkin), 400 sonst.
 /// Entspricht `_ensure_registration_open` (routes.py:441).
 pub fn ensure_registration_open(status: &str) -> WebResult<()> {
     if status != "registration" && status != "checkin" {
@@ -1300,7 +1300,7 @@ pub async fn add_user_to_team(
     rank: &RankInput,
 ) -> WebResult<()> {
     let discord_id_i64 = db::parse_discord_id(discord_id)?;
-    // Name-Resolution liest aus mehreren Tabellen — über den Pool (read-only).
+    // Name-Resolution liest aus mehreren Tabellen; über den Pool (read-only).
     // Entspricht dem Original, das im selben Connection-Kontext liest.
     let resolved_name = resolve_discord_name(pool, discord_id, discord_name).await?;
     sqlx::query(

@@ -1,4 +1,4 @@
-# ADR 0001 — Strangler-freier Big-Bang-Port nach `/rust`, geteilte DB
+# ADR 0001: Strangler-freier Big-Bang-Port nach `/rust`, geteilte DB
 
 > **Partly superseded.** The shared SQLite database decision in this record was replaced by central PostgreSQL, see ADR 0002. The big-bang port itself is the live state.
 
@@ -24,7 +24,7 @@ sauber gefixt, ohne neue einzuführen.
   Diff-Test garantiert Gleichheit.
 - **Bug-Politik**: sichere Aufräumarbeiten werden mitgemacht; verhaltensändernde
   oder entscheidungsbedürftige Befunde werden 1:1 erhalten und in
-  `docs/known-issues.md` als Opt-in-Folgefix dokumentiert — keine stille
+  `docs/known-issues.md` als Opt-in-Folgefix dokumentiert; keine stille
   Semantik-Änderung.
 
 ## Konsequenzen

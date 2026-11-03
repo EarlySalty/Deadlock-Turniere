@@ -1,6 +1,6 @@
 //! Integrationstest gegen eine Wegwerf-PG-DB: die `discord_tasks`-Queries und der
 //! Notify-Flag-SELECT müssen exakt zum Migrationsschema passen. KEINE externen
-//! Dienste (kein Broker, kein Discord) — nur Persistenz.
+//! Dienste (kein Broker, kein Discord), nur Persistenz.
 
 use chrono::{DateTime, Utc};
 use serde_json::json;

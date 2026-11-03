@@ -36,7 +36,7 @@ pub async fn advance_bracket_winner(
     .fetch_optional(&mut *tx)
     .await?;
     let Some(snapshot) = snapshot else {
-        // Match nicht gefunden — wie im Original stilles Return (kein Fehler).
+        // Match nicht gefunden: wie im Original stilles Return (kein Fehler).
         tx.commit().await?;
         return Ok(());
     };
@@ -191,7 +191,7 @@ async fn advance_in_tx(
         return Ok(());
     }
 
-    // 5) Legacy-Fallback (nur winners): über round/position. Bug-preserved —
+    // 5) Legacy-Fallback (nur winners): über round/position. Bug-preserved:
     //    für vom Generator erzeugte Brackets ein toter Pfad (immer source-gemappt).
     if m.bracket_type != "winners" {
         return Ok(());

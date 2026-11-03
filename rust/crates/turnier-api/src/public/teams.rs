@@ -53,7 +53,7 @@ struct CreateTeamBody {
     name: Option<String>,
 }
 
-/// `POST /api/tournaments/{tournament_id}/teams` — Team erstellen (201).
+/// `POST /api/tournaments/{tournament_id}/teams`: Team erstellen (201).
 /// Der aktuelle User wird Captain.
 async fn create_team(
     State(state): State<AppState>,
@@ -152,7 +152,7 @@ async fn create_team(
     Ok((StatusCode::CREATED, Json(team)))
 }
 
-/// `POST /api/tournaments/{tournament_id}/teams/{team_id}/join` — Team beitreten.
+/// `POST /api/tournaments/{tournament_id}/teams/{team_id}/join`: Team beitreten.
 /// Tritt automatisch aus dem alten Team aus (Captain nur wenn allein).
 async fn join_team(
     State(state): State<AppState>,
@@ -299,7 +299,7 @@ struct RecruitingBody {
     recruitment_status: Option<String>,
 }
 
-/// `PATCH /api/tournaments/{tournament_id}/teams/{team_id}/recruiting` —
+/// `PATCH /api/tournaments/{tournament_id}/teams/{team_id}/recruiting`:
 /// Recruiting-Status setzen (Captain oder Mod).
 async fn update_team_recruiting(
     State(state): State<AppState>,
@@ -327,14 +327,14 @@ async fn update_team_recruiting(
     Ok(Json(helpers::load_team_response(&state, team_id).await?))
 }
 
-/// `DELETE /api/tournaments/{tournament_id}/teams/{team_id}/members/{discord_id}` —
+/// `DELETE /api/tournaments/{tournament_id}/teams/{team_id}/members/{discord_id}`:
 /// Captain kickt ein Mitglied (nur `status = 'registration'`).
 async fn kick_team_member(
     State(state): State<AppState>,
     AuthUser(user): AuthUser,
     Path((tournament_id, team_id, discord_id)): Path<(i64, i64, String)>,
 ) -> WebResult<Json<Value>> {
-    // Discord-ID-Regex ^\d{17,19}$ — BEWUSST 1:1 erhalten (Original-Smell
+    // Discord-ID-Regex ^\d{17,19}$, BEWUSST 1:1 erhalten (Original-Smell
     // „behavior-change": inkonsistent zu _looks_like_discord_id 16–21).
     if !is_strict_discord_id(&discord_id) {
         return Err(WebError::bad_request("Ungültige Discord-ID"));
@@ -385,7 +385,7 @@ async fn kick_team_member(
     })))
 }
 
-/// `DELETE /api/tournaments/{tournament_id}/teams/{team_id}/leave` — Team verlassen.
+/// `DELETE /api/tournaments/{tournament_id}/teams/{team_id}/leave`: Team verlassen.
 /// Captain kann nur austreten, wenn er allein ist (→ Team-Auflösung).
 async fn leave_team(
     State(state): State<AppState>,
@@ -440,7 +440,7 @@ async fn leave_team(
             .execute(&mut *tx)
             .await?;
         // Bei vorhandenem Signup: team_id zurücksetzen; sonst NEUEN Eintrag mit
-        // user.discord_name (NICHT member.discord_name) — 1:1 zum Original.
+        // user.discord_name (NICHT member.discord_name), 1:1 zum Original.
         let has_signup: Option<(i64,)> = sqlx::query_as(
             r#"SELECT id FROM turnier."tournament_signups"
              WHERE tournament_id = $1 AND discord_id = $2"#,
@@ -493,9 +493,9 @@ async fn leave_team(
     ))
 }
 
-/// `POST /api/tournaments/{tournament_id}/teams/{team_id}/invite/{target_discord_id}`
-/// — Captain fügt einen solo-angemeldeten Spieler SOFORT ins Team ein
-/// (KEIN team_invitations-Eintrag — BEWUSST 1:1 erhalten, „needs-decision").
+/// `POST /api/tournaments/{tournament_id}/teams/{team_id}/invite/{target_discord_id}`:
+/// Captain fügt einen solo-angemeldeten Spieler SOFORT ins Team ein
+/// (KEIN team_invitations-Eintrag; BEWUSST 1:1 erhalten, „needs-decision").
 async fn invite_to_team(
     State(state): State<AppState>,
     AuthUser(user): AuthUser,
@@ -545,7 +545,7 @@ async fn invite_to_team(
         ));
     };
 
-    // discord_name aus früherer team_members-Mitgliedschaft — BEWUSST ad-hoc
+    // discord_name aus früherer team_members-Mitgliedschaft; BEWUSST ad-hoc
     // (ohne ORDER BY/Fallback-Kette, „safe"-Smell 1:1 erhalten).
     let name_row: Option<(Option<String>,)> = sqlx::query_as(
         r#"SELECT discord_name FROM turnier."team_members"
@@ -637,8 +637,8 @@ struct SoloSignupRow {
     rank_score: Option<i64>,
 }
 
-/// Setzt `team_id` eines vorhandenen Solo-Signups auf NULL oder legt — falls
-/// keiner existiert — einen neuen NULL-Team-Signup mit den gesicherten
+/// Setzt `team_id` eines vorhandenen Solo-Signups auf NULL oder legt (falls
+/// keiner existiert) einen neuen NULL-Team-Signup mit den gesicherten
 /// Member-Daten an. Geteilte Auto-Leave-Routine (Befund „safe": Duplikation).
 async fn reset_or_create_solo_signup(
     tx: &mut sqlx::Transaction<'_, Postgres>,
@@ -718,7 +718,7 @@ async fn load_team_member_by_id(
     })
 }
 
-/// Strenge Discord-ID-Prüfung `^\d{17,19}$` (kick/invite — 1:1 zum Original).
+/// Strenge Discord-ID-Prüfung `^\d{17,19}$` (kick/invite, 1:1 zum Original).
 fn is_strict_discord_id(value: &str) -> bool {
     let len = value.len();
     (17..=19).contains(&len) && value.chars().all(|c| c.is_ascii_digit())

@@ -1,4 +1,4 @@
-//! `turnier-draft` — Pick/Ban-Draft-Subsystem des Turnier-Backends.
+//! `turnier-draft`: Pick/Ban-Draft-Subsystem des Turnier-Backends.
 //!
 //! Strikte Trennung in zwei Schichten:
 //!

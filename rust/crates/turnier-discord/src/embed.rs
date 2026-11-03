@@ -2,7 +2,7 @@
 //!
 //! Dadurch lassen sich die Discord-Feldlängengrenzen typgeprüft kappen:
 //! Embed-Titel ≤ 256, Beschreibung ≤ 4096, Feld-Name ≤ 256, Feld-Wert ≤ 1024.
-//! Das Python-Original kappte gar nicht — über die Längengrenze hinausgehende
+//! Das Python-Original kappte gar nicht; über die Längengrenze hinausgehende
 //! Inhalte hätte der Broker/Discord abgelehnt. Hier wird defensiv gekürzt
 //! (zeichenweise, nicht byteweise, damit Mehrbyte-UTF-8 nicht zerschnitten
 //! wird), ohne die fachliche Bedeutung zu ändern.
@@ -36,7 +36,7 @@ impl Field {
 }
 
 /// Ein Discord-Embed (`{title?, description?, fields}`). `title`/`description`
-/// werden ausgelassen, wenn nicht gesetzt — exakt wie im Original, das die
+/// werden ausgelassen, wenn nicht gesetzt, exakt wie im Original, das die
 /// Schlüssel je nach Aufruf weglässt.
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct Embed {

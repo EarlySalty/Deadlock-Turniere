@@ -1,4 +1,4 @@
-//! Leaderboard-Router — öffentliche Rangliste + Spielerprofil (portiert
+//! Leaderboard-Router: öffentliche Rangliste + Spielerprofil (portiert
 //! `tournament/leaderboard_routes.py`). Beide Endpunkte sind ohne Login erreichbar.
 
 use axum::extract::{Path, State};
@@ -31,7 +31,7 @@ struct LeaderboardRow {
     rank: Option<String>,
 }
 
-/// `GET /api/leaderboard` — globale Rangliste nach Punkten.
+/// `GET /api/leaderboard`: globale Rangliste nach Punkten.
 async fn get_leaderboard(State(state): State<AppState>) -> WebResult<Json<Vec<LeaderboardEntry>>> {
     let rows: Vec<LeaderboardRow> = sqlx::query_as(
         r#"SELECT pp.discord_id, pp.total_points, pp.tournaments_played,
@@ -87,7 +87,7 @@ struct HistoryRow {
     team_name: Option<String>,
 }
 
-/// `GET /api/players/{discord_name}` — öffentliches Spielerprofil.
+/// `GET /api/players/{discord_name}`: öffentliches Spielerprofil.
 async fn get_player_profile(
     State(state): State<AppState>,
     Path(discord_name): Path<String>,

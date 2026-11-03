@@ -45,7 +45,7 @@ pub fn build_match_channel_name(team1_name: &str, team2_name: &str) -> String {
 
 /// Deterministische Transliteration der praktisch vorkommenden lateinischen
 /// Akzente/Umlaute auf ASCII. Alles, was kein bekanntes Mapping hat und nicht
-/// ASCII ist, wird verworfen — genau wie der `encode("ascii", "ignore")`-Schritt
+/// ASCII ist, wird verworfen, genau wie der `encode("ascii", "ignore")`-Schritt
 /// des Originals nach NFKD-Zerlegung (kombinierende Akzente fallen weg).
 fn transliterate_to_ascii(value: &str) -> String {
     let mut out = String::with_capacity(value.len());

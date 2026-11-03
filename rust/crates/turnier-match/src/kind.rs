@@ -1,4 +1,4 @@
-//! [`MatchKind`] — der typsichere Ersatz für den stringly-typed `match_type`.
+//! [`MatchKind`][]: der typsichere Ersatz für den stringly-typed `match_type`.
 //!
 //! Das Python-Original reicht `match_type: str` (`"bracket"` | `"group"`) durch
 //! die gesamte Manager-Kette und entscheidet damit über Tabellennamen

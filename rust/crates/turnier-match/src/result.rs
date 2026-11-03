@@ -1,4 +1,4 @@
-//! Ergebnisverarbeitung — Bracket und Group VEREINHEITLICHT.
+//! Ergebnisverarbeitung: Bracket und Group VEREINHEITLICHT.
 //!
 //! Bündelt, was im Original auf `result_processor.apply_bracket_match_result`
 //! und `manager._apply_group_match_result` verteilt war: beide Pfade liegen hier
@@ -13,13 +13,13 @@
 //!   uneinheitliche Semantik (Befund result_processor.py:162 / manager.py:955)
 //!   wird NICHT vereinheitlicht (needs-decision).
 //! - `winning_team`-Konvention: Bracket 0-basiert (0=team1, 1=team2), Group
-//!   1-basiert (1/2) — beide Konventionen bleiben (needs-decision).
+//!   1-basiert (1/2); beide Konventionen bleiben (needs-decision).
 //! - Status-Guard: der redundante zweite NOT-IN-Teil (Befund
 //!   result_processor.py:73-81) bleibt erhalten (behavior-change).
 //! - `_reset_bracket_downstream`: rekursiv OHNE Zyklus-/Tiefenschutz (Befund
 //!   result_processor.py:252-283) bleibt erhalten (behavior-change).
 //! - `discord_channel_id` wird aus dem Pre-Update-Snapshot gelesen (Befund
-//!   result_processor.py:166) — bewusst erhalten.
+//!   result_processor.py:166), bewusst erhalten.
 
 use serde_json::Value;
 use sqlx::{Postgres, Row, Transaction};
@@ -47,7 +47,7 @@ const VALID_MANUAL_RESULT_STATUSES: [&str; 4] =
 pub struct ApplyResultOutcome {
     pub match_id: i64,
     pub winner_id: i64,
-    /// Slot/ID je nach Pfad (Bracket: 0/1, Group: 1/2 — siehe Modul-Doku).
+    /// Slot/ID je nach Pfad (Bracket: 0/1, Group: 1/2; siehe Modul-Doku).
     pub winning_team: i64,
     pub duration_s: Option<i64>,
     /// Spieler-Stats (Bracket: zurückgegebene Liste; Group nutzt dieses Feld nicht).
@@ -242,7 +242,7 @@ impl MatchManager {
         .execute(&mut *tx)
         .await?;
         // Bug-preserved (needs-decision): hier wird winner_id_value in winning_team
-        // geschrieben (nicht der Slot) — exakt wie das Original.
+        // geschrieben (nicht der Slot), exakt wie das Original.
         sqlx::query(
             "INSERT INTO turnier.match_results \
                  (bracket_match_id, winning_team, duration_s, player_stats, source, created_at) \
@@ -258,7 +258,7 @@ impl MatchManager {
         .await?;
         tx.commit().await.map_err(turnier_db::DbError::from)?;
 
-        // Channel-Cleanup (fire-and-forget) — Snapshot-Quelle bewusst Pre-Update.
+        // Channel-Cleanup (fire-and-forget); Snapshot-Quelle bewusst Pre-Update.
         let discord_channel_id = match_row.discord_channel_id.map(discord_id_to_string);
         if let Some(channel_id) = discord_channel_id.clone().filter(|s| !s.is_empty()) {
             self.spawn_delete_channel_later(channel_id);
@@ -434,7 +434,7 @@ impl MatchManager {
             .execute(&mut *tx)
             .await?;
         // Bug-preserved (needs-decision): Group-Pfad schreibt den Slot (1/2) in
-        // winning_team — anders als der Bracket-Pfad.
+        // winning_team, anders als der Bracket-Pfad.
         sqlx::query(
             "INSERT INTO turnier.match_results \
                  (group_match_id, winning_team, duration_s, player_stats, source, created_at) \
@@ -461,7 +461,7 @@ impl MatchManager {
 
     /// Setzt den Downstream eines Bracket-Matches rekursiv zurück.
     /// Portiert `_reset_bracket_downstream`. Bug-preserved (behavior-change): KEIN
-    /// Zyklus-/Tiefenschutz — bei fehlerhaften Source-Verweisen droht (wie im
+    /// Zyklus-/Tiefenschutz: bei fehlerhaften Source-Verweisen droht (wie im
     /// Original) Endlosrekursion. Bewusst 1:1 erhalten.
     fn reset_bracket_downstream<'a>(
         &'a self,

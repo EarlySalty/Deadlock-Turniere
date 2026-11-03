@@ -1,4 +1,4 @@
-//! `turnier-match` — der Match-Lebenszyklus des Turnier-Backends.
+//! `turnier-match`: der Match-Lebenszyklus des Turnier-Backends.
 //!
 //! Orchestriert Steam-Custom-Lobbys (erstellen/starten/verlassen) über die
 //! externe `steam_tasks`-Bridge-DB, Hero-Assignments je Spielmodus, Live-Event-
@@ -6,22 +6,22 @@
 //! (Bracket + Group) mit Gewinner-Propagation ins Bracket.
 //!
 //! ## Modul-Schnitt (der Python-Monolith `manager.py` ist aufgebrochen)
-//! - [`kind`] — [`MatchKind`] (Enum statt stringly-typed `match_type`).
-//! - [`repo`] — Repository-Abstraktion über `bracket_matches`/`group_matches`
+//! - [`kind`][]: [`MatchKind`] (Enum statt stringly-typed `match_type`).
+//! - [`repo`][]: Repository-Abstraktion über `bracket_matches`/`group_matches`
 //!   (kapselt das SQL, keine Tabellennamen als String).
-//! - [`modes`] — Spielmodi/Hero-Assignment (+ Heldenliste aus [`turnier_draft`]).
-//! - [`presets`] — Event-ConVar-Presets + Normalisierung.
-//! - [`series`] — Best-of-N-Serien.
-//! - [`steam_bridge`] — Task-Queue gegen die externe Bridge-DB.
-//! - [`lobby`] — Lobby-Lebenszyklus (create/start/leave, Spectator/Ready, Invites).
-//! - [`result`] — Ergebnisverarbeitung Bracket+Group VEREINHEITLICHT.
-//! - [`auto_lobby`] — Auto-Lobby-Planung.
+//! - [`modes`][]: Spielmodi/Hero-Assignment (+ Heldenliste aus [`turnier_draft`]).
+//! - [`presets`][]: Event-ConVar-Presets + Normalisierung.
+//! - [`series`][]: Best-of-N-Serien.
+//! - [`steam_bridge`][]: Task-Queue gegen die externe Bridge-DB.
+//! - [`lobby`][]: Lobby-Lebenszyklus (create/start/leave, Spectator/Ready, Invites).
+//! - [`result`][]: Ergebnisverarbeitung Bracket+Group VEREINHEITLICHT.
+//! - [`auto_lobby`][]: Auto-Lobby-Planung.
 //!
 //! ## Effekt-Schichten als injizierte Abhängigkeiten
 //! Discord ([`turnier_discord::DiscordNotifier`]) und die Steam-Bridge
 //! ([`steam_bridge::SteamBridge`]) sind im [`MatchManager`] als `Option`
 //! gehalten: fehlt der Dienst (z. B. Bridge-DB nicht vorhanden), degradiert der
-//! Flow sauber. Discord-Versand ist best-effort wie im Original — Fehler werden
+//! Flow sauber. Discord-Versand ist best-effort wie im Original; Fehler werden
 //! geloggt, der Match-Flow läuft weiter.
 //!
 //! Funktional 1:1 zum Python-Original (`backend/match/*.py`). Die als
@@ -63,9 +63,9 @@ pub use steam_bridge::{BridgeError, InviteResult, SteamBridge, TaskOutcome};
 /// Methoden.
 pub struct MatchManager {
     pub(crate) pool: Pool,
-    /// Discord-Notifier — `None`, wenn Discord-Effekte unterdrückt werden sollen.
+    /// Discord-Notifier: `None`, wenn Discord-Effekte unterdrückt werden sollen.
     pub(crate) notifier: Option<DiscordNotifier>,
-    /// Steam-Bridge — `None`, wenn die Bridge-DB fehlt (sauberes Degradieren).
+    /// Steam-Bridge: `None`, wenn die Bridge-DB fehlt (sauberes Degradieren).
     pub(crate) bridge: Option<steam_bridge::SteamBridge>,
     /// `DISCORD_CASTER_VOICE_CHANNEL_ID` für den Caster-Voice-Move beim Start.
     pub(crate) caster_voice_channel_id: i64,

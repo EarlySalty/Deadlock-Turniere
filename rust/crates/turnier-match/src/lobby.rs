@@ -3,7 +3,7 @@
 //!
 //! Portiert die Lobby-/Start-/Leave-/ConVar-Pfade aus `match/manager.py`. Alle
 //! Methoden hängen am [`MatchManager`]. Discord-Versand ist best-effort (Fehler
-//! geloggt, Flow läuft weiter) — exakt je Aufrufstelle wie im Original.
+//! geloggt, Flow läuft weiter), exakt je Aufrufstelle wie im Original.
 //!
 //! Status-Mengen (Befund manager.py): `VALID_LOBBY_STATUSES={pending,checkin}`,
 //! `VALID_START_STATUSES={lobby_created}`, `VALID_RESULT_STATUSES={in_progress}`,
@@ -335,7 +335,7 @@ impl MatchManager {
         create_payload.insert("tournament_id".into(), json!(tournament_id));
         create_payload.insert("match_id".into(), json!(match_id));
         create_payload.insert("match_type".into(), json!(kind.as_str()));
-        // game_mode/region_mode: Befund manager.py:130-148 — die Parameter wurden
+        // game_mode/region_mode: Befund manager.py:130-148; die Parameter wurden
         // nie abweichend gesetzt; der Port reicht die Default-Werte (1/1) durch.
         create_payload.insert("game_mode".into(), json!(1));
         create_payload.insert("region_mode".into(), json!(1));
@@ -523,7 +523,7 @@ impl MatchManager {
         let team1_ids = team_discord_ids(participants, m.team1_id);
         let team2_ids = team_discord_ids(participants, m.team2_id);
 
-        // Objective-Text (eigener try im Original — Fehler non-critical).
+        // Objective-Text (eigener try im Original; Fehler non-critical).
         let objective_text = match repo::get_objective_inputs(&self.pool, tournament_id).await {
             Ok(Some((objective, team_size))) => {
                 let (_, text) = resolve_match_objective(objective.as_deref(), team_size);
@@ -557,7 +557,7 @@ impl MatchManager {
             )
             .await
         {
-            // Eigener try im Original — non-critical, Channel-ID bleibt erhalten.
+            // Eigener try im Original; non-critical, Channel-ID bleibt erhalten.
             tracing::error!(
                 match_id, error = %err,
                 "Lobby-Announcement fehlgeschlagen (non-critical)"
@@ -1101,7 +1101,7 @@ fn first_truthy(result: &Value, keys: &[&str]) -> Option<Value> {
 }
 
 /// `result["match_id"]` ∨ `result["deadlock_match_id"]` als String (Befund
-/// manager.py:411-414 — einheitlicher Helfer). Liefert den ersten nicht-leeren Wert.
+/// manager.py:411-414, einheitlicher Helfer). Liefert den ersten nicht-leeren Wert.
 fn extract_deadlock_match_id(result: &Value) -> Option<String> {
     for key in ["match_id", "deadlock_match_id"] {
         match result.get(key) {

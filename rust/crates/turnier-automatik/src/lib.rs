@@ -1,4 +1,4 @@
-//! `turnier-automatik` — Fundament der automatischen Turnierplanung.
+//! `turnier-automatik`: Fundament der automatischen Turnierplanung.
 //!
 //! Diese Crate ist in Phase 1a bewusst eine reine Bibliothek: DB-Zugriffe ueber
 //! den geteilten [`turnier_db::Pool`], plus reine, unit-testbare Logik fuer

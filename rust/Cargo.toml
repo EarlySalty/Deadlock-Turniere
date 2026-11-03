@@ -1,4 +1,4 @@
-# Deadlock-Turniere — Rust-Neuentwicklung (alles unter /rust).
+# Deadlock-Turniere: Rust-Neuentwicklung (alles unter /rust).
 #
 # Cargo-Workspace: ein Manifest, viele kleine Crates mit je EINER klaren
 # Zuständigkeit (keine Monolithen). Versionen zentral in [workspace.dependencies],

@@ -93,7 +93,7 @@ struct ResultBody {
     winner_id: Option<i64>,
 }
 
-/// `POST .../matches/{match_id}/result` — manuelles Ergebnis (Bracket ODER Group).
+/// `POST .../matches/{match_id}/result`: manuelles Ergebnis (Bracket ODER Group).
 async fn set_match_result(
     State(state): State<AppState>,
     ModUser(user): ModUser,
@@ -273,7 +273,7 @@ fn group_match_changed(match_id: i64) -> WebError {
     ))
 }
 
-/// `POST .../matches/{match_id}/games/{game_number}/start` — Serien-Spiel N
+/// `POST .../matches/{match_id}/games/{game_number}/start`: Serien-Spiel N
 /// sicherstellen (Admin).
 async fn start_series_game(
     State(state): State<AppState>,
@@ -311,7 +311,7 @@ struct GameResultBody {
     duration_s: Option<i64>,
 }
 
-/// `POST .../matches/{match_id}/games/{game_number}/result` — Serien-Spiel-Ergebnis
+/// `POST .../matches/{match_id}/games/{game_number}/result`: Serien-Spiel-Ergebnis
 /// (Admin). Bei Serien-Ende wird der Bracket-Winner gesetzt.
 async fn submit_series_game_result(
     State(state): State<AppState>,
@@ -406,7 +406,7 @@ async fn submit_series_game_result(
     Ok(Json(series_result.to_value()))
 }
 
-/// `POST .../matches/{match_id}/create-lobby` — Steam-Lobby für Bracket-Match.
+/// `POST .../matches/{match_id}/create-lobby`: Steam-Lobby für Bracket-Match.
 async fn create_lobby(
     State(state): State<AppState>,
     ModUser(user): ModUser,
@@ -422,7 +422,7 @@ async fn create_lobby(
     .await
 }
 
-/// `POST .../matches/{match_id}/start` — Bracket-Match über Steam-Bot starten.
+/// `POST .../matches/{match_id}/start`: Bracket-Match über Steam-Bot starten.
 async fn start_match(
     State(state): State<AppState>,
     ModUser(user): ModUser,
@@ -438,7 +438,7 @@ async fn start_match(
     .await
 }
 
-/// `POST .../matches/{match_id}/fetch-result` — Match-Ergebnis aus Deadlock laden.
+/// `POST .../matches/{match_id}/fetch-result`: Match-Ergebnis aus Deadlock laden.
 async fn fetch_result(
     State(state): State<AppState>,
     ModUser(user): ModUser,
@@ -454,7 +454,7 @@ async fn fetch_result(
     .await
 }
 
-/// `POST .../matches/{match_id}/leave-lobby` — Steam-Bot Bracket-Lobby verlassen.
+/// `POST .../matches/{match_id}/leave-lobby`: Steam-Bot Bracket-Lobby verlassen.
 async fn leave_lobby(
     State(state): State<AppState>,
     ModUser(user): ModUser,
@@ -470,7 +470,7 @@ async fn leave_lobby(
     .await
 }
 
-/// `POST .../matches/{match_id}/reset` — Bracket-Match auf pending zurücksetzen (Admin).
+/// `POST .../matches/{match_id}/reset`: Bracket-Match auf pending zurücksetzen (Admin).
 async fn reset_match(
     State(state): State<AppState>,
     AdminUser(user): AdminUser,
@@ -486,7 +486,7 @@ async fn reset_match(
     .await
 }
 
-/// `POST .../matches/{match_id}/manual-lobby` — party_code/steam_party_id setzen.
+/// `POST .../matches/{match_id}/manual-lobby`: party_code/steam_party_id setzen.
 async fn manual_lobby(
     State(state): State<AppState>,
     ModUser(user): ModUser,
@@ -504,7 +504,7 @@ async fn manual_lobby(
     .await
 }
 
-/// `GET .../matches/{match_id}/event-presets` — Live-Event-Presets fürs Panel.
+/// `GET .../matches/{match_id}/event-presets`: Live-Event-Presets fürs Panel.
 async fn event_presets(
     State(state): State<AppState>,
     _mod: ModUser,
@@ -541,7 +541,7 @@ struct ConvarsBody {
     convars: Option<Value>,
 }
 
-/// `POST .../matches/{match_id}/apply-convars` — freie ConVars anwenden.
+/// `POST .../matches/{match_id}/apply-convars`: freie ConVars anwenden.
 async fn apply_convars(
     State(state): State<AppState>,
     ModUser(user): ModUser,
@@ -591,7 +591,7 @@ fn default_true() -> bool {
     true
 }
 
-/// `POST .../matches/{match_id}/apply-event-preset` — Event-Preset anwenden.
+/// `POST .../matches/{match_id}/apply-event-preset`: Event-Preset anwenden.
 async fn apply_event_preset(
     State(state): State<AppState>,
     ModUser(user): ModUser,

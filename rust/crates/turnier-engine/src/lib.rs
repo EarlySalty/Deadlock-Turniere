@@ -1,4 +1,4 @@
-//! `turnier-engine` — die Turnier-Engine, das Herz des Backends.
+//! `turnier-engine`: die Turnier-Engine, das Herz des Backends.
 //!
 //! Strikte Trennung in zwei Schichten:
 //!

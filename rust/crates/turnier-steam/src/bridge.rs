@@ -92,13 +92,13 @@ impl BridgeReader {
         cache_seconds: u64,
     ) -> SteamResult<Option<Self>> {
         if db_path.trim().is_empty() {
-            tracing::warn!("Steam-Bridge-DB-Pfad nicht konfiguriert — Bridge-Lookup übersprungen");
+            tracing::warn!("Steam-Bridge-DB-Pfad nicht konfiguriert, Bridge-Lookup übersprungen");
             return Ok(None);
         }
         if !Path::new(db_path).exists() {
             tracing::warn!(
                 path = db_path,
-                "Steam-Bridge-DB nicht vorhanden — Bridge-Lookup übersprungen, Fallback auf Discord-Rollen"
+                "Steam-Bridge-DB nicht vorhanden; Bridge-Lookup übersprungen, Fallback auf Discord-Rollen"
             );
             return Ok(None);
         }
@@ -119,7 +119,7 @@ impl BridgeReader {
                 tracing::warn!(
                     path = db_path,
                     error = %err,
-                    "Steam-Bridge-DB kann nicht geöffnet werden — Bridge-Lookup übersprungen, Fallback auf Discord-Rollen"
+                    "Steam-Bridge-DB kann nicht geöffnet werden; Bridge-Lookup übersprungen, Fallback auf Discord-Rollen"
                 );
                 return Ok(None);
             }
@@ -174,7 +174,7 @@ impl BridgeReader {
     ///
     /// `guild_id` wird im Python als `int(...)` gebunden; da `guild_id` in der
     /// Bridge-DB numerisch ist und wir die ID als String halten, binden wir den
-    /// rohen ID-String — SQLite vergleicht numerische Spalten gegen numerische
+    /// rohen ID-String; SQLite vergleicht numerische Spalten gegen numerische
     /// Text-Literale wertgleich.
     pub async fn load_subrank_roles(&self) -> SteamResult<Vec<(i64, i64, i64)>> {
         if let Some(cached) = self.cached_roles() {

@@ -796,7 +796,7 @@ impl PgScrimReadRepository {
             })?;
         let mut tx = self.pool.begin().await?;
 
-        // Gleicher Advisory-Key wie der Live-Reaktions-Hook (dl-community/reaction_roles.rs:475) — serialisiert Web-Signup gegen Discord-Reaktion. store.rs nutzt abweichend 42060004001 (Reconcile = separater Bot-Task).
+        // Gleicher Advisory-Key wie der Live-Reaktions-Hook (dl-community/reaction_roles.rs:475), serialisiert Web-Signup gegen Discord-Reaktion. store.rs nutzt abweichend 42060004001 (Reconcile = separater Bot-Task).
         sqlx::query("SELECT pg_advisory_xact_lock($1)")
             .bind(SELF_SERVICE_ADVISORY_LOCK)
             .execute(&mut *tx)
@@ -1535,7 +1535,7 @@ impl PgScrimReadRepository {
             PatchValue::Value(note) if note.chars().count() <= 1_000 => Some(Some(note.as_str())),
             PatchValue::Value(_) => {
                 return Err(ScrimError::InvalidProposal(
-                    "Die Notiz ist zu lang — höchstens 1000 Zeichen.".to_string(),
+                    "Die Notiz ist zu lang: höchstens 1000 Zeichen.".to_string(),
                 ));
             }
         };
@@ -2063,7 +2063,7 @@ impl PgScrimReadRepository {
                     "components": [
                         {
                             "type": 10,
-                            "content": "Hey! 👋 Für ein Scrim wird noch jemand gesucht — du stehst als möglicher Ersatz auf der Liste. Wenn du Zeit und Lust hast, antworte bitte direkt über die Buttons."
+                            "content": "Hey! 👋 Für ein Scrim wird noch jemand gesucht. Du stehst als möglicher Ersatz auf der Liste. Wenn du Zeit und Lust hast, antworte bitte direkt über die Buttons."
                         },
                         {
                             "type": 1,
@@ -3146,7 +3146,7 @@ async fn coach_sync_plans(
 /// gesamte Sollzustand.
 ///
 /// Ein reiner Vergleich sieht nach einem fehlgeschlagenen Discord-Aufruf nichts mehr, weil die
-/// Datenbank den Zielzustand bereits traegt — die Rolle bliebe dauerhaft fehlend. Zusaetzliche
+/// Datenbank den Zielzustand bereits traegt; die Rolle bliebe dauerhaft fehlend. Zusaetzliche
 /// Add-Aktionen sind gefahrlos, ein zweites Vergeben derselben Rolle aendert nichts.
 ///
 /// Bewusst kein voller Abgleich gegen alle verwalteten Rollen: ein Coach kann in einem anderen
@@ -3278,7 +3278,7 @@ fn role_diff(before: &RoleSnapshot, after: &RoleSnapshot) -> DiscordRoleSyncPlan
 
 /// Stellt den Soll-Zustand her, statt ihn nur zu ergaenzen.
 ///
-/// Die Ist-Rollen auf Discord kennen wir nicht — wohl aber die Menge der Rollen, die wir
+/// Die Ist-Rollen auf Discord kennen wir nicht, wohl aber die Menge der Rollen, die wir
 /// selbst verwalten (alle Team-Rollen plus Anmelde- und Reserve-Rolle). Innerhalb dieser
 /// Menge koennen wir gefahrlos entfernen, was nicht ins Soll gehoert; alles andere am
 /// Discord-Mitglied bleibt unberuehrt.
@@ -4152,7 +4152,7 @@ fn validated_message(message: Option<&str>) -> ScrimResult<String> {
     match message.map(str::trim).filter(|message| !message.is_empty()) {
         Some(message) if message.chars().count() <= 2_000 => Ok(message.to_string()),
         Some(_) => Err(ScrimError::InvalidProposal(
-            "Die Nachricht ist zu lang — höchstens 2000 Zeichen.".to_string(),
+            "Die Nachricht ist zu lang: höchstens 2000 Zeichen.".to_string(),
         )),
         None => Ok("Kurze Erinnerung: eure Rückmeldung zum Scrim fehlt noch.".to_string()),
     }
@@ -4503,7 +4503,7 @@ mod tests {
     };
 
     /// Nach einem fehlgeschlagenen Discord-Aufruf traegt die Datenbank schon den Zielzustand.
-    /// Ein reiner Vergleich faende dann nichts mehr — die Rolle bliebe dauerhaft fehlend.
+    /// Ein reiner Vergleich faende dann nichts mehr; die Rolle bliebe dauerhaft fehlend.
     #[test]
     fn unchanged_roles_are_set_again_so_a_failed_sync_can_heal() {
         let snapshot = |ids: [u64; 1]| RoleSnapshot {
@@ -4530,7 +4530,7 @@ mod tests {
         );
     }
 
-    /// Weggefallene Rollen kommen weiterhin nur aus dem Vergleich — nie mehr entziehen als das.
+    /// Weggefallene Rollen kommen weiterhin nur aus dem Vergleich; nie mehr entziehen als das.
     #[test]
     fn removals_still_come_only_from_the_comparison() {
         let before = RoleSnapshot {
@@ -4558,7 +4558,7 @@ mod tests {
 
     /// Der Dispatch landet im Command-Receipt und wird beim Replay wieder herausgelesen.
     /// Geht dabei die Discord-Zustellung verloren, wird eine fehlgeschlagene DM nie
-    /// nachgeholt — genau das soll dieser Rundlauf verhindern.
+    /// nachgeholt; genau das soll dieser Rundlauf verhindern.
     #[test]
     fn dispatch_survives_the_receipt_round_trip() {
         let dispatch = MutationDispatch {
@@ -4751,7 +4751,7 @@ mod tests {
     /// Ein falsch eingetippter Lobbycode muss korrigierbar bleiben.
     ///
     /// Das Setzen selbst schaltet den Zustand auf `lobby_open`. Zaehlte der als
-    /// bot-gesteuert, waere jede Korrektur nach dem ersten Setzen gesperrt — und die
+    /// bot-gesteuert, waere jede Korrektur nach dem ersten Setzen gesperrt, und die
     /// mitgefuehrte Korrekturhistorie koennte nie greifen.
     #[test]
     fn lobby_code_stays_correctable_while_the_lobby_is_only_open() {

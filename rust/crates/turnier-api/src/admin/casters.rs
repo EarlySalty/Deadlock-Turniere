@@ -151,7 +151,7 @@ async fn load_tournament_casters_inner(
         .collect())
 }
 
-/// `GET /api/admin/casters` — alle verfügbaren Caster aus der Discord-Rolle (strict).
+/// `GET /api/admin/casters`: alle verfügbaren Caster aus der Discord-Rolle (strict).
 async fn list_available_casters(
     State(state): State<AppState>,
     _mod: ModUser,
@@ -175,7 +175,7 @@ async fn list_available_casters(
     Ok(Json(casters))
 }
 
-/// `GET .../tournaments/{id}/casters` — zugewiesene Turnier-Caster listen.
+/// `GET .../tournaments/{id}/casters`: zugewiesene Turnier-Caster listen.
 async fn list_tournament_casters(
     State(state): State<AppState>,
     _mod: ModUser,
@@ -193,7 +193,7 @@ struct CasterAssignBody {
     discord_id: String,
 }
 
-/// `POST .../tournaments/{id}/casters` — Caster zuweisen (muss Rollenmitglied sein).
+/// `POST .../tournaments/{id}/casters`: Caster zuweisen (muss Rollenmitglied sein).
 async fn assign_tournament_caster(
     State(state): State<AppState>,
     ModUser(user): ModUser,
@@ -231,7 +231,7 @@ async fn assign_tournament_caster(
     ))
 }
 
-/// `DELETE .../tournaments/{id}/casters/{discord_id}` — Turnier-Caster entfernen.
+/// `DELETE .../tournaments/{id}/casters/{discord_id}`: Turnier-Caster entfernen.
 async fn remove_tournament_caster(
     State(state): State<AppState>,
     ModUser(user): ModUser,
@@ -258,8 +258,8 @@ async fn remove_tournament_caster(
     ))
 }
 
-/// `GET .../matches/{match_id}/casters` — Match-Caster (gibt faktisch die
-/// Turnier-Caster zurück; Befund admin_routes.py:2970 — 1:1 erhalten).
+/// `GET .../matches/{match_id}/casters`: Match-Caster (gibt faktisch die
+/// Turnier-Caster zurück; Befund admin_routes.py:2970, 1:1 erhalten).
 async fn list_match_casters(
     State(state): State<AppState>,
     _mod: ModUser,
@@ -271,24 +271,24 @@ async fn list_match_casters(
     ))
 }
 
-/// `POST .../matches/{match_id}/casters` — 410 Gone (deprecated).
+/// `POST .../matches/{match_id}/casters`: 410 Gone (deprecated).
 async fn assign_match_caster_gone(
     _mod: ModUser,
     Path((_tournament_id, _match_id)): Path<(i64, i64)>,
 ) -> WebResult<Json<Value>> {
     Err(WebError::new(
         StatusCode::GONE,
-        "Caster werden auf Turnier-Ebene verwaltet — siehe /admin/tournaments/{id}/casters",
+        "Caster werden auf Turnier-Ebene verwaltet, siehe /admin/tournaments/{id}/casters",
     ))
 }
 
-/// `DELETE .../matches/{match_id}/casters/{discord_id}` — 410 Gone (deprecated).
+/// `DELETE .../matches/{match_id}/casters/{discord_id}`: 410 Gone (deprecated).
 async fn remove_match_caster_gone(
     _mod: ModUser,
     Path((_tournament_id, _match_id, _discord_id)): Path<(i64, i64, String)>,
 ) -> WebResult<Json<Value>> {
     Err(WebError::new(
         StatusCode::GONE,
-        "Caster werden auf Turnier-Ebene verwaltet — siehe /admin/tournaments/{id}/casters",
+        "Caster werden auf Turnier-Ebene verwaltet, siehe /admin/tournaments/{id}/casters",
     ))
 }

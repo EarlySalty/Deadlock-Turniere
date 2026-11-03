@@ -1,11 +1,11 @@
-//! `turnier-api` — die HTTP-Schicht (axum) des Turnier-Backends.
+//! `turnier-api`: die HTTP-Schicht (axum) des Turnier-Backends.
 //!
 //! Verdrahtet die Domänen-Crates zu einer API: [`AppState`] hält die Handles,
 //! [`build_router`] baut den Router aus den Router-Modulen, die Extractoren
 //! ([`AuthUser`]/[`ModUser`]/[`AdminUser`]) setzen die Auth-Gates durch und
 //! [`WebError`] übersetzt Domänenfehler in FastAPI-kompatible Responses.
 //!
-//! Diese Crate enthält keine Geschäftslogik — sie liest Requests, ruft die
+//! Diese Crate enthält keine Geschäftslogik; sie liest Requests, ruft die
 //! Domänen-Crates und formt Responses.
 
 pub mod app;
@@ -15,7 +15,7 @@ pub mod extract;
 mod proposal_lock;
 pub mod state;
 
-// Router-Module (je eine Datei/Ordner — getrennt befüllbar).
+// Router-Module (je eine Datei/Ordner, getrennt befüllbar).
 pub mod account;
 pub mod admin;
 pub mod auth;

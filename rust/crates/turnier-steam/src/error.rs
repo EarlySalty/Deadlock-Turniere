@@ -1,7 +1,7 @@
 //! Fehler-Typ des Rang-Resolvers.
 //!
 //! Im Python-Original verschluckte ein flächendeckendes `except Exception:
-//! return None` jede Ursache (DB gesperrt, Pfad falsch, Schema-Mismatch) — ein
+//! return None` jede Ursache (DB gesperrt, Pfad falsch, Schema-Mismatch); ein
 //! echter Fehler war nicht von „kein Rang" zu unterscheiden. Hier sind die
 //! Ursachen typisiert; die einzelnen Pfade loggen Fehler per `tracing::warn` und
 //! behandeln nur das echte „nicht gefunden" als `None`.

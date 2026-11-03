@@ -1,6 +1,6 @@
 //! Punkte-Berechnung für die globale Rangliste (reine Logik).
 //!
-//! Portiert `recalculate_player_points` aus `points.py` — aber mit EINER
+//! Portiert `recalculate_player_points` aus `points.py`, aber mit EINER
 //! bewussten strukturellen Änderung gegenüber dem Original: idempotenter
 //! Voll-Recompute statt additiver Akkumulation (siehe Modul- und
 //! Persistenz-Doku). Die ERGEBNISWERTE pro Turnier (Platzierungs-, Teilnahme-

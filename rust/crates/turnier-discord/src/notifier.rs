@@ -234,8 +234,8 @@ impl DiscordNotifier {
     /// Postet das Lobby-Embed (Code + Teilnehmer-Mentions) in den Match-Channel
     /// und protokolliert als `SEND_MATCH_INFO`.
     ///
-    /// `channel_id` wird als Snowflake erwartet; eine ungültige ID führt — wie
-    /// im Original (`int(channel_id)` warf) — zu einem Fehler (kein Versand),
+    /// `channel_id` wird als Snowflake erwartet; eine ungültige ID führt, wie
+    /// im Original (`int(channel_id)` warf), zu einem Fehler (kein Versand),
     /// hier deterministisch als [`BrokerError::Http`]-freier `BadJson`-Fehler
     /// über die Validierung statt Panic.
     pub async fn send_match_lobby_info(
@@ -297,7 +297,7 @@ impl DiscordNotifier {
             );
 
         // allowed_user_ids durchgängig als u64-Snowflakes (Original mischte
-        // str/int; Befund discord_notifier.py:194/209 — "behavior-change", hier
+        // str/int; Befund discord_notifier.py:194/209, "behavior-change", hier
         // vereinheitlicht auf int wie vom Port vorgegeben).
         let allowed = parse_all(participant_ids);
         let payload = json!({
@@ -342,7 +342,7 @@ impl DiscordNotifier {
     }
 
     /// Wartet `delay_seconds` (Default aus Config) und löscht dann den Channel.
-    /// Fehler werden nur geloggt — wie das `fire-and-forget` des Originals.
+    /// Fehler werden nur geloggt, wie das `fire-and-forget` des Originals.
     ///
     /// Hinweis (needs-decision, Befund discord_notifier.py:308-313): diese
     /// Verzögerung lebt im Prozess; bei Neustart/Crash geht sie verloren. Das
@@ -390,7 +390,7 @@ impl DiscordNotifier {
             }
 
             // Profil-loses Verhalten EXAKT wie im Original (Befund
-            // discord_notifier.py:283-284 — "behavior-change", bewusst erhalten):
+            // discord_notifier.py:283-284, "behavior-change", bewusst erhalten):
             // fehlt das Profil, gilt für BEIDE Schalter das EVENT-Default.
             let (dm_master, event_flag) = match flags.iter().find(|(id, _, _)| id == discord_id) {
                 Some((_, dm, ev)) => (*dm, *ev),
@@ -441,14 +441,14 @@ impl DiscordNotifier {
 
     /// Lädt für die gegebenen IDs den DM-Master-Schalter und das event-relevante
     /// Flag. Nur die ZWEI benötigten Spalten werden selektiert (Befund
-    /// discord_notifier.py:269-276 — "safe"). Rückgabe je gefundenem Profil:
+    /// discord_notifier.py:269-276, "safe"). Rückgabe je gefundenem Profil:
     /// `(discord_id, notify_discord_dm, notify_event)`.
     async fn load_notify_flags(
         &self,
         ids: &[String],
         event: NotificationEvent,
     ) -> sqlx::Result<Vec<(String, bool, bool)>> {
-        // event.column() ist whitelisted (festes Enum) — keine User-Eingabe in
+        // event.column() ist whitelisted (festes Enum); keine User-Eingabe in
         // der Spalten-Konkatenation.
         let parsed_ids = ids
             .iter()
@@ -534,7 +534,7 @@ impl DiscordNotifier {
         let mut summary = CasterNotifyResult::default();
 
         // channel_url nur, wenn guild_id gesetzt UND channel_id numerisch ist.
-        // Im Original: int(channel_id) im f-String — eine ungültige channel_id
+        // Im Original: int(channel_id) im f-String; eine ungültige channel_id
         // hätte dort eine Exception geworfen. Hier: ungültige channel_id ⇒ keine
         // URL (Fallback "#<channel_id>"), kein Panic.
         let channel_num = parse_snowflake(channel_id);
@@ -600,7 +600,7 @@ impl DiscordNotifier {
 
         // all_ids = beide Teams zusammen, gültige Snowflakes (Original ließ
         // ungültige via `if uid`-Filter heraus; hier verwerfen wir nicht
-        // parsebare zusätzlich — dieselbe Wirkung: nur gültige int-IDs).
+        // parsebare zusätzlich, dieselbe Wirkung: nur gültige int-IDs).
         let combined: Vec<String> = team1_discord_ids
             .iter()
             .chain(team2_discord_ids.iter())
@@ -609,7 +609,7 @@ impl DiscordNotifier {
         let all_ids = parse_all(&combined);
 
         let mut embed = Embed::new()
-            .title(format!("Match {match_id} — Lobby bereit"))
+            .title(format!("Match {match_id}: Lobby bereit"))
             .field("Lobby-Code", format!("`{party_code}`"), false)
             .field(format!("🔵 {team1_name}"), team1_mentions, true)
             .field(format!("🔴 {team2_name}"), team2_mentions, true);
@@ -667,12 +667,12 @@ impl DiscordNotifier {
             .take(10)
             .map(|p| {
                 let name = p.display_name();
-                format!("**{}** — {}/{}/{}", name, p.kills, p.deaths, p.assists)
+                format!("**{}**: {}/{}/{}", name, p.kills, p.deaths, p.assists)
             })
             .collect();
 
         let mut embed = Embed::new()
-            .title(format!("Match {match_id} — Ergebnis"))
+            .title(format!("Match {match_id}: Ergebnis"))
             .description(format!("**Sieger: {winner_name}**\nDauer: {duration_str}"))
             .field(
                 "Match ID (Deadlock)",

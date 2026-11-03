@@ -33,7 +33,7 @@ pub fn router() -> Router<AppState> {
         )
 }
 
-/// `GET /api/tournaments` — alle nicht-draft-Turniere ohne Test-Turniere, absteigend nach created_at.
+/// `GET /api/tournaments`: alle nicht-draft-Turniere ohne Test-Turniere, absteigend nach created_at.
 async fn list_tournaments(State(state): State<AppState>) -> WebResult<Json<Vec<Tournament>>> {
     let tournaments = helpers::list_tournament_dtos(
         &state.pool,
@@ -43,7 +43,7 @@ async fn list_tournaments(State(state): State<AppState>) -> WebResult<Json<Vec<T
     Ok(Json(tournaments))
 }
 
-/// `GET /api/tournaments/{tournament_id}` — öffentliches Turnier-Detail.
+/// `GET /api/tournaments/{tournament_id}`: öffentliches Turnier-Detail.
 /// 404 auch bei `status = 'draft'` und bei Test-Turnieren.
 async fn get_tournament(
     State(state): State<AppState>,
@@ -80,7 +80,7 @@ async fn get_tournament(
     )))
 }
 
-/// `GET /api/tournaments/{tournament_id}/me` — eigener Anmeldestatus
+/// `GET /api/tournaments/{tournament_id}/me`: eigener Anmeldestatus
 /// (kein `discord_id` im Response).
 async fn get_my_tournament_status(
     State(state): State<AppState>,
@@ -132,7 +132,7 @@ async fn get_my_tournament_status(
     })))
 }
 
-/// `GET /api/tournaments/{tournament_id}/bracket` — Bracket-Matches.
+/// `GET /api/tournaments/{tournament_id}/bracket`: Bracket-Matches.
 /// 404 nur bei nicht-existentem Turnier (KEIN draft-404, 1:1 zum Original).
 async fn get_bracket(
     State(state): State<AppState>,
@@ -152,7 +152,7 @@ async fn get_bracket(
     ))
 }
 
-/// `GET /api/tournaments/{tournament_id}/groups` — Gruppen-Standings.
+/// `GET /api/tournaments/{tournament_id}/groups`: Gruppen-Standings.
 /// 404 nur bei nicht-existentem Turnier (KEIN draft-404, 1:1 zum Original).
 async fn get_groups(
     State(state): State<AppState>,
@@ -172,7 +172,7 @@ async fn get_groups(
     ))
 }
 
-/// `GET /api/tournaments/{tournament_id}/checkin-status` — Check-in-Übersicht.
+/// `GET /api/tournaments/{tournament_id}/checkin-status`: Check-in-Übersicht.
 /// `total_registered` = Union aus Signups + Team-Mitgliedern.
 async fn get_checkin_status(
     State(state): State<AppState>,

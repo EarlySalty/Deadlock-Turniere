@@ -3,7 +3,7 @@
 //! Deckt den Lebenszyklus ab: Session starten (idempotent) → Aktionen ausführen
 //! → Zustand ableiten → Abschluss → die Validierungs- und Konfliktfälle
 //! (unbekannter Held, Doppel-Pick, abgeschlossene Session, Compare-and-Swap-
-//! Konflikt). Keine externen Dienste — nur DB.
+//! Konflikt). Keine externen Dienste, nur DB.
 
 use turnier_db::{test_pool, Pool, TestDb};
 use turnier_draft::{
@@ -250,15 +250,15 @@ async fn aktion_auf_fehlende_session_meldet_not_active() {
 /// dem Schreiben einer Aktion durch eine parallele Aktion verschoben wird, muss
 /// `take_action` mit [`DraftError::ActionConflict`] scheitern statt blind zu
 /// überschreiben. Hier wird der parallele Vorgriff durch ein direktes UPDATE
-/// simuliert, das den Index manipuliert — analog zu einer zweiten Aktion, die
+/// simuliert, das den Index manipuliert, analog zu einer zweiten Aktion, die
 /// denselben Index gelesen und bereits vorgerückt hat.
 ///
 /// Mechanik: Wir setzen den materialisierten Sequenz-Eintrag an Index 0 manuell
 /// auf einen anderen `current_action_index` als den, den `take_action` aus der
-/// Session liest — das ist nicht möglich, ohne die Session selbst zu fassen.
+/// Session liest; das ist nicht möglich, ohne die Session selbst zu fassen.
 /// Stattdessen prüfen wir die CAS-Bedingung direkt: nach einer regulären Aktion
 /// steht der Index auf 1; ein nachgereichtes UPDATE mit der alten CAS-Bedingung
-/// (`current_action_index = 0`) betrifft 0 Zeilen — exakt die Logik, die
+/// (`current_action_index = 0`) betrifft 0 Zeilen, exakt die Logik, die
 /// `take_action` als Konflikt wertet.
 #[tokio::test]
 async fn compare_and_swap_erkennt_konflikt() {
@@ -273,7 +273,7 @@ async fn compare_and_swap_erkennt_konflikt() {
         .unwrap();
 
     // Ein UPDATE mit der veralteten CAS-Bedingung (current_action_index = 0)
-    // betrifft jetzt 0 Zeilen — genau die Bedingung, die take_action als
+    // betrifft jetzt 0 Zeilen, genau die Bedingung, die take_action als
     // ActionConflict behandelt.
     let res = sqlx::query(
         "UPDATE turnier.draft_sessions SET current_action_index = 1 \

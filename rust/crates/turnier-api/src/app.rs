@@ -52,12 +52,12 @@ pub fn build_router(state: AppState) -> Router {
         .with_state(state)
 }
 
-/// `GET /api/me` — die aktuelle Nutzer-Session.
+/// `GET /api/me`: die aktuelle Nutzer-Session.
 async fn me(AuthUser(user): AuthUser) -> Json<UserSession> {
     Json(user)
 }
 
-/// `GET /api/health` — Health-Check.
+/// `GET /api/health`: Health-Check.
 async fn health(State(state): State<AppState>) -> Json<serde_json::Value> {
     Json(json!({ "status": "ok", "service": "deadlock-turniere",
         "config_schema": state.config.schema_version,
@@ -85,7 +85,7 @@ fn build_cors(state: &AppState) -> CorsLayer {
 }
 
 /// TrustedHost-Äquivalent: lässt nur Requests mit erlaubtem `Host`-Header durch
-/// (`config.allowed_hosts()`), sonst 400 — wie Starlettes `TrustedHostMiddleware`.
+/// (`config.allowed_hosts()`), sonst 400, wie Starlettes `TrustedHostMiddleware`.
 async fn host_guard(State(state): State<AppState>, req: Request, next: Next) -> Response {
     let allowed = state.config.allowed_hosts();
     let host = req

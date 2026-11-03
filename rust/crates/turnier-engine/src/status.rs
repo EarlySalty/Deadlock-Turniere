@@ -26,7 +26,7 @@ pub fn determine_tournament_mode(
 /// Die erlaubten Folge-Status zu einem gegebenen Status.
 ///
 /// Portiert `VALID_STATUS_TRANSITIONS`. `Draft` ist hier nicht als Schlüssel
-/// gelistet zu lassen wäre falsch — das Original kennt jeden Schlüssel; wir
+/// gelistet zu lassen wäre falsch: das Original kennt jeden Schlüssel; wir
 /// liefern für `Archived` eine leere Liste (kein Folgestatus).
 pub fn valid_next_statuses(status: TournamentStatus) -> &'static [TournamentStatus] {
     use TournamentStatus::*;

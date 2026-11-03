@@ -1,10 +1,10 @@
 //! Persistenz-Schicht der Turnier-Engine (sqlx).
 //!
-//! Jede öffentliche Operation läuft in EINER `sqlx::Transaction` — anders als das
+//! Jede öffentliche Operation läuft in EINER `sqlx::Transaction`; anders als das
 //! Python-Original, das `_audit` mitten in offenen Transaktionen committen ließ
 //! (siehe bugs_preserved/Port-Notes). Die Bracket-Verdrahtung nutzt die reinen
 //! Algorithmen aus [`crate::engine`]; die echten Match-IDs kommen aus der DB
-//! (AUTOINCREMENT), weshalb der Aufbau hier — nicht im reinen Layer — sitzt.
+//! (AUTOINCREMENT), weshalb der Aufbau hier (nicht im reinen Layer) sitzt.
 //!
 //! Laufzeit-geprüfte Queries (`sqlx::query`/`query_as`), keine `query!`-Makros.
 
@@ -149,7 +149,7 @@ async fn clear_bracket_tree(
             .fetch_all(&mut **tx)
             .await?;
     if !mini_group_ids.is_empty() {
-        // Einzeln löschen — vermeidet dynamische IN-Platzhalter und ist für die
+        // Einzeln löschen: vermeidet dynamische IN-Platzhalter und ist für die
         // hier üblichen kleinen Mengen unkritisch.
         for (mg_id,) in &mini_group_ids {
             sqlx::query("DELETE FROM turnier.bracket_mini_group_teams WHERE mini_group_id = $1")
@@ -166,7 +166,7 @@ async fn clear_bracket_tree(
 }
 
 /// Schreibt einen Audit-Log-Eintrag in DERSELBEN Transaktion (kein eigenes
-/// Commit — das ist der bewusste Unterschied zum Original-`_audit`).
+/// Commit; das ist der bewusste Unterschied zum Original-`_audit`).
 async fn audit(
     tx: &mut Transaction<'_, Postgres>,
     action: &str,

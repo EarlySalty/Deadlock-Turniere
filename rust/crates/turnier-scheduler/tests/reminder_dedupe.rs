@@ -5,7 +5,7 @@
 //! echten Versand: nach dem ersten Lauf steht genau EIN Dedupe-Eintrag, ein
 //! zweiter Lauf im selben Fenster fügt keinen weiteren hinzu.
 //!
-//! Die Zeit ist injiziert (`now` als Parameter) — keine echte Zeitabhängigkeit.
+//! Die Zeit ist injiziert (`now` als Parameter); keine echte Zeitabhängigkeit.
 
 mod common;
 
@@ -81,7 +81,7 @@ async fn registration_reminder_wird_genau_einmal_dedupliziert() {
     let notifier = fake_notifier(pool.clone(), &config);
 
     // Turnier in 'registration' mit registration_end um 12:00 und nur einem
-    // Offset (60 min) — der Reminder ist um 11:00 fällig.
+    // Offset (60 min): der Reminder ist um 11:00 fällig.
     let id = insert_tournament(&pool, "T", "registration", false).await;
     configure_registration_reminder(&pool, id).await;
     insert_optin_profile(&pool, 111).await;

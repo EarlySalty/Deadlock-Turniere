@@ -1,15 +1,15 @@
-//! Draft-Router — Pick/Ban-Endpunkte (portiert `draft/routes.py`).
+//! Draft-Router: Pick/Ban-Endpunkte (portiert `draft/routes.py`).
 //!
-//! - `GET  /api/draft/heroes` — Live-Heldenliste (öffentlich).
-//! - `POST /api/draft/lobbies` — freie Lobby anlegen (öffentlich).
-//! - `GET  /api/draft/lobbies/{code}` — freie Lobby ansehen (öffentlich).
-//! - `POST /api/draft/lobbies/{code}/action` — Lobby-Aktion (öffentlich).
-//! - `POST /api/draft/matches/{match_id}/start` — Draft starten (Admin).
-//! - `GET  /api/draft/sessions/{session_id}` — Zustand lesen (Admin).
-//! - `POST /api/draft/sessions/{session_id}/action` — Aktion ausführen (Admin).
+//! - `GET  /api/draft/heroes`: Live-Heldenliste (öffentlich).
+//! - `POST /api/draft/lobbies`: freie Lobby anlegen (öffentlich).
+//! - `GET  /api/draft/lobbies/{code}`: freie Lobby ansehen (öffentlich).
+//! - `POST /api/draft/lobbies/{code}/action`: Lobby-Aktion (öffentlich).
+//! - `POST /api/draft/matches/{match_id}/start`: Draft starten (Admin).
+//! - `GET  /api/draft/sessions/{session_id}`: Zustand lesen (Admin).
+//! - `POST /api/draft/sessions/{session_id}/action`: Aktion ausführen (Admin).
 //!
 //! `taken_by` wird wie im Original aus dem Request-Body übernommen (nicht aus der
-//! Session — Parität, siehe `docs/known-issues.md` KI-DR01).
+//! Session, Parität, siehe `docs/known-issues.md` KI-DR01).
 
 use std::net::SocketAddr;
 use std::time::{Duration, Instant};
@@ -56,7 +56,7 @@ pub fn router() -> Router<AppState> {
         )
 }
 
-/// `GET /api/draft/heroes` — Live-Heldenliste mit statischem Fallback.
+/// `GET /api/draft/heroes`: Live-Heldenliste mit statischem Fallback.
 async fn list_heroes(State(state): State<AppState>) -> Json<Value> {
     let heroes = state
         .heroes
@@ -209,7 +209,7 @@ fn validate_room(
     })
 }
 
-/// `POST /api/draft/lobbies/{code}/action` — Captain-Aktion ausführen.
+/// `POST /api/draft/lobbies/{code}/action`: Captain-Aktion ausführen.
 async fn submit_lobby_action(
     State(state): State<AppState>,
     Path(code): Path<String>,
@@ -505,7 +505,7 @@ fn enforce_lobby_rate_limit(state: &AppState, ip: std::net::IpAddr) -> WebResult
     Ok(())
 }
 
-/// `POST /api/draft/matches/{match_id}/start` — Draft für ein Bracket-Match starten.
+/// `POST /api/draft/matches/{match_id}/start`: Draft für ein Bracket-Match starten.
 async fn start_match_draft(
     State(state): State<AppState>,
     AdminUser(user): AdminUser,
@@ -530,7 +530,7 @@ async fn start_match_draft(
     ))
 }
 
-/// `GET /api/draft/sessions/{session_id}` — den Draft-Zustand lesen.
+/// `GET /api/draft/sessions/{session_id}`: den Draft-Zustand lesen.
 async fn get_session(
     State(state): State<AppState>,
     _admin: AdminUser,
@@ -551,7 +551,7 @@ struct DraftActionRequest {
     force: bool,
 }
 
-/// `POST /api/draft/sessions/{session_id}/action` — eine Ban/Pick-Aktion ausführen.
+/// `POST /api/draft/sessions/{session_id}/action`: eine Ban/Pick-Aktion ausführen.
 ///
 /// Antwort ist die flache Verschmelzung aus Draft-Zustand und Aktions-Ergebnis
 /// (`{**state, **result}` im Original).

@@ -25,7 +25,7 @@ pub fn router() -> Router<AppState> {
         )
 }
 
-/// `POST /api/tournaments/{tournament_id}/signup` — Solo-Anmeldung (201).
+/// `POST /api/tournaments/{tournament_id}/signup`: Solo-Anmeldung (201).
 /// Bei `team_size == 1` wird automatisch ein 1-Mann-Team angelegt.
 async fn solo_signup(
     State(state): State<AppState>,
@@ -89,7 +89,7 @@ async fn solo_signup(
     .map_err(|err| map_unique_conflict(err, "Du bist bereits für dieses Turnier angemeldet"))?;
 
     if team_size == 1 {
-        // Bei 1vs1 ist jeder Teilnehmer sein eigenes Team — direkt anlegen.
+        // Bei 1vs1 ist jeder Teilnehmer sein eigenes Team, direkt anlegen.
         // BEWUSST 1:1 erhalten: Such-Schleife für eindeutigen name_key statt
         // UNIQUE-Retry (Original-Smell „behavior-change", routes.py:1119-1150).
         let resolved_name =
@@ -161,7 +161,7 @@ async fn solo_signup(
     ))
 }
 
-/// `DELETE /api/tournaments/{tournament_id}/signup` — Solo-Anmeldung zurückziehen.
+/// `DELETE /api/tournaments/{tournament_id}/signup`: Solo-Anmeldung zurückziehen.
 /// Nur bei `status = 'registration'` und wenn `team_id` NULL ist.
 async fn cancel_solo_signup(
     State(state): State<AppState>,
@@ -188,7 +188,7 @@ async fn cancel_solo_signup(
     };
     if team_id.is_some() {
         return Err(WebError::bad_request(
-            "Du bist bereits in einem Team — verlasse zuerst das Team",
+            "Du bist bereits in einem Team. Verlasse zuerst das Team",
         ));
     }
 
@@ -205,7 +205,7 @@ async fn cancel_solo_signup(
     ))
 }
 
-/// `POST /api/tournaments/{tournament_id}/checkin` — Spieler-Check-in.
+/// `POST /api/tournaments/{tournament_id}/checkin`: Spieler-Check-in.
 /// Nur bei `status = 'checkin'`. Erzeugt fehlenden Signup für Team-Mitglieder.
 async fn checkin_player(
     State(state): State<AppState>,
@@ -246,7 +246,7 @@ async fn checkin_player(
                 "Du bist für dieses Turnier nicht angemeldet",
             ));
         };
-        // `user.discord_name or membership.discord_name` — leerer String fällt
+        // `user.discord_name or membership.discord_name`: leerer String fällt
         // zurück (Python-`or`-Semantik 1:1).
         let discord_name = user
             .discord_name

@@ -1,4 +1,4 @@
-//! Test-Modus-Router — portiert `admin/test_mode.py`.
+//! Test-Modus-Router: portiert `admin/test_mode.py`.
 //!
 //! Stellt Moderatoren ein HTTP-Toolkit bereit, um Turnier-Abläufe ohne echte
 //! Spieler zu testen: synthetische Test-User (reservierter Snowflake-Bereich) inkl. Zufallsrang
@@ -9,7 +9,7 @@
 //!
 //! ## Gate (Abweichung vom Python-Original)
 //! Im Python-Original wird der Router in `main.py` UNBEDINGT gemountet (kein
-//! Env-/Prod-Guard — siehe `bugs_preserved`). Der Port hängt die Registrierung
+//! Env-/Prod-Guard; siehe `bugs_preserved`). Der Port hängt die Registrierung
 //! an das Env-Flag `TURNIER_ENABLE_TEST_MODE` (Default **true** = wie Python
 //! immer an); ist es explizit ausgeschaltet, liefert [`router`] einen leeren
 //! Router. So bleibt das Default-Verhalten 1:1, ohne den Prod-Kill-Switch zu
@@ -19,7 +19,7 @@
 //! Läuft über die ECHTEN Engine-Funktionen
 //! ([`turnier_engine::finalize_checkin`], [`turnier_scheduler::advance_tournament_status`],
 //! [`turnier_match::MatchManager::apply_group_match_result`] /
-//! [`turnier_match::MatchManager::apply_bracket_match_result`]) — keine privaten
+//! [`turnier_match::MatchManager::apply_bracket_match_result`]); keine privaten
 //! `_`-Funktionen nachgebaut.
 
 use std::collections::HashSet;
@@ -62,7 +62,7 @@ const TEST_DISCORD_ID_LIMIT: i64 = TEST_DISCORD_ID_BASE + 1_000_000;
 
 /// Router der Test-Modus-Endpunkte. Liefert einen leeren Router, wenn der
 /// Test-Modus in der TOML ausgeschaltet ist (`turnier_enable_test_mode = false`); Default
-/// ist an — wie im Python-Original, das den Router immer mountet.
+/// ist an, wie im Python-Original, das den Router immer mountet.
 pub fn router(config: &Config) -> Router<AppState> {
     if !config.turnier_enable_test_mode {
         return Router::new();
@@ -153,15 +153,15 @@ struct TestWipeResponse {
 // Mini-PRNG (kein rand-Dependency in turnier-api)
 // ---------------------------------------------------------------------------
 
-/// Globaler Zähler, der mit der Systemzeit zum SplitMix64-Seed gemischt wird —
+/// Globaler Zähler, der mit der Systemzeit zum SplitMix64-Seed gemischt wird;
 /// stellt sicher, dass aufeinanderfolgende Aufrufe verschiedene Sequenzen
 /// liefern (wie ein ungeseedeter `random`-Aufruf). Test-Tooling, daher genügt
 /// einfache Streuung statt kryptografischer Qualität.
 static RNG_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 /// Selbstständiger SplitMix64-Generator. Ersetzt `random.randint/choice/shuffle`
-/// (1:1 im Effekt: gleichverteilte Zufallsauswahl, ohne Seed/Reproduzierbarkeit
-/// — wie im Original, siehe `bugs_preserved`).
+/// (1:1 im Effekt: gleichverteilte Zufallsauswahl, ohne Seed/Reproduzierbarkeit,
+/// wie im Original, siehe `bugs_preserved`).
 struct Rng(u64);
 
 impl Rng {
@@ -184,7 +184,7 @@ impl Rng {
         z ^ (z >> 31)
     }
 
-    /// Ganzzahl in `[low, high]` (beide inklusive — wie `random.randint`).
+    /// Ganzzahl in `[low, high]` (beide inklusive, wie `random.randint`).
     fn randint(&mut self, low: i64, high: i64) -> i64 {
         debug_assert!(high >= low);
         let span = (high - low + 1) as u64;
@@ -234,7 +234,7 @@ struct PoolUserRow {
 }
 
 /// Erzeugt einen eindeutigen 6-stelligen Suffix (`random.randint`, max 1000
-/// Versuche; sonst Fehler — 1:1 zum Original `_test_suffix`).
+/// Versuche; sonst Fehler, 1:1 zum Original `_test_suffix`).
 fn test_suffix(rng: &mut Rng, existing_ids: &mut HashSet<i64>) -> WebResult<(String, i64)> {
     for _ in 0..1000 {
         let suffix_number = rng.randint(0, 999_999);
@@ -322,7 +322,7 @@ async fn create_test_users_in_db(
     Ok(created)
 }
 
-/// Lädt alle Test-User mit Rang (LEFT JOIN ohne Eindeutigkeits-Garantie — kann
+/// Lädt alle Test-User mit Rang (LEFT JOIN ohne Eindeutigkeits-Garantie; kann
 /// bei mehrfachen rank_cache-Zeilen duplizieren, 1:1 zum Original
 /// `_load_test_users`).
 async fn load_test_users<'e, E>(executor: E) -> WebResult<Vec<TestUserRow>>
@@ -417,7 +417,7 @@ where
 /// Löscht alle Test-User (zählt vorher) aus sessions/user_consents/
 /// player_points/rank_cache/user_profiles. Portiert `_delete_test_users`.
 ///
-/// bug-preserved: räumt NUR diese fünf Tabellen — team_applications,
+/// bug-preserved: räumt NUR diese fünf Tabellen; team_applications,
 /// team_invitations, checkins, match_result_reports (reported_by/resolved_by)
 /// und turnierfremde Signups/Check-ins bleiben als Orphans liegen (siehe
 /// `bugs_preserved`).
@@ -734,7 +734,7 @@ where
 // Endpunkte: Test-User
 // ---------------------------------------------------------------------------
 
-/// `POST /api/admin/test/users` — `count` Test-User anlegen (require_mod).
+/// `POST /api/admin/test/users`: `count` Test-User anlegen (require_mod).
 async fn create_test_users(
     State(state): State<AppState>,
     ModUser(user): ModUser,
@@ -761,7 +761,7 @@ async fn create_test_users(
     Ok(Json(TestUsersCreateResponse { created }))
 }
 
-/// `GET /api/admin/test/users` — alle Test-User mit Rang (require_mod). Kein Audit.
+/// `GET /api/admin/test/users`: alle Test-User mit Rang (require_mod). Kein Audit.
 async fn list_test_users(
     State(state): State<AppState>,
     _user: ModUser,
@@ -780,7 +780,7 @@ async fn list_test_users(
     Ok(Json(out))
 }
 
-/// `DELETE /api/admin/test/users` — alle Test-User löschen, sofern nicht in
+/// `DELETE /api/admin/test/users`: alle Test-User löschen, sofern nicht in
 /// aktiven Turnieren referenziert (sonst 409) (require_mod).
 async fn delete_test_users(
     State(state): State<AppState>,
@@ -805,7 +805,7 @@ async fn delete_test_users(
 // Endpunkt: Test-Turnier anlegen
 // ---------------------------------------------------------------------------
 
-/// `POST /api/admin/test/tournaments` — vollständiges Test-Turnier generieren
+/// `POST /api/admin/test/tournaments`: vollständiges Test-Turnier generieren
 /// und optional bis group_phase/bracket vorrücken (require_mod).
 async fn create_test_tournament(
     State(state): State<AppState>,
@@ -849,7 +849,7 @@ async fn create_test_tournament(
     // Pool auffüllen, falls zu wenige Test-User existieren.
     // bug-preserved: missing = required - count(aller bestehenden Test-User),
     // anschließend wird per LIMIT eine beliebige (nach discord_id sortierte)
-    // Teilmenge genommen — fragil, aber 1:1 zum Original.
+    // Teilmenge genommen; fragil, aber 1:1 zum Original.
     let existing_users = load_test_users(&mut *tx).await?;
     let missing_users = required_users - existing_users.len() as i64;
     if missing_users > 0 {
@@ -1039,7 +1039,7 @@ async fn advance_test_tournament(
         )
         .await?;
         // bug-preserved (needs-decision): advance_to_group_phase wird hart True
-        // übergeben, auch für bracket_only — 1:1 zum Original.
+        // übergeben, auch für bracket_only, 1:1 zum Original.
         turnier_engine::finalize_checkin(
             &state.pool,
             tournament_id,
@@ -1095,7 +1095,7 @@ struct OpenGroupMatch {
     team2_id: Option<i64>,
 }
 
-/// `POST /api/admin/test/tournaments/{tournament_id}/simulate-round` — eine
+/// `POST /api/admin/test/tournaments/{tournament_id}/simulate-round`: eine
 /// Runde mit Zufalls-Gewinnern über die echte Ergebnis-Pipeline simulieren
 /// (require_mod).
 async fn simulate_test_tournament_round(
@@ -1191,7 +1191,7 @@ async fn simulate_test_tournament_round(
         }
     }
 
-    // bug-preserved: Audit in SEPARATER Transaktion nach den Match-Applies —
+    // bug-preserved: Audit in SEPARATER Transaktion nach den Match-Applies;
     // kein Gesamt-Rollback (1:1 zum Original).
     audit(
         &state.pool,
@@ -1208,7 +1208,7 @@ async fn simulate_test_tournament_round(
 // Endpunkt: Wipe
 // ---------------------------------------------------------------------------
 
-/// `DELETE /api/admin/test/wipe` — alle is_test-Turniere + alle Test-User löschen
+/// `DELETE /api/admin/test/wipe`: alle is_test-Turniere + alle Test-User löschen
 /// (ignoriert den 409-Guard des Einzel-User-Pfads) (require_mod).
 async fn wipe_test_data(
     State(state): State<AppState>,

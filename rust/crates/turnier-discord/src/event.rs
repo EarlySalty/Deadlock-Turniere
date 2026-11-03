@@ -4,11 +4,11 @@
 //! (`_NOTIFICATION_EVENT_COLUMNS` + `_NOTIFICATION_DEFAULTS`) durch ein echtes
 //! Enum. Jede Variante kennt ihre `user_profiles`-Spalte UND ihr Default-Flag,
 //! sodass die Defaults nur EINMAL definiert sind (behebt die doppelte/driftende
-//! Default-Quelle, Befund discord_notifier.py:28-34/270-275 — "safe").
+//! Default-Quelle, Befund discord_notifier.py:28-34/270-275, "safe").
 
 /// Default des DM-Master-Schalters (`notify_discord_dm`). Im Schema
 /// `NOT NULL DEFAULT 1`; für profil-lose User gilt im Original das EVENT-Default
-/// (siehe [`NotificationEvent::default_flag`]) — dieses Verhalten wird in
+/// (siehe [`NotificationEvent::default_flag`]); dieses Verhalten wird in
 /// [`notify_users`](crate::notifier::notify_users) bewusst 1:1 erhalten.
 pub const NOTIFY_DM_DEFAULT: bool = true;
 
@@ -48,7 +48,7 @@ impl NotificationEvent {
         }
     }
 
-    /// Die zugehörige `user_profiles`-Spalte (whitelisted — fließt in keine
+    /// Die zugehörige `user_profiles`-Spalte (whitelisted, fließt in keine
     /// dynamische SQL-Konkatenation auf Werteebene ein).
     pub fn column(self) -> &'static str {
         match self {

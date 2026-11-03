@@ -1,4 +1,4 @@
-//! Reine Zustandsmaschine der Pick/Ban-Sequenz — DB-frei, voll unit-testbar.
+//! Reine Zustandsmaschine der Pick/Ban-Sequenz, DB-frei, voll unit-testbar.
 //!
 //! Hier liegt das Wissen über die feste Reihenfolge (6 Bans + 12 Picks, je 6 pro
 //! Team) und über das Fortschreiten anhand eines `current_action_index`. Die
@@ -30,7 +30,7 @@ impl ActionType {
 }
 
 /// Team-Slot einer Draft-Position. INTEGER-Spalte `draft_actions.team_slot`
-/// (`1` | `2`). Bewusst kein Enum mit String-Mapping — die Spalte ist numerisch;
+/// (`1` | `2`). Bewusst kein Enum mit String-Mapping: die Spalte ist numerisch;
 /// der Typ kapselt nur die beiden gültigen Werte.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum TeamSlot {
@@ -222,7 +222,7 @@ pub fn step_at(sequence: &[SequenceStep], index: usize) -> Option<SequenceStep> 
 }
 
 /// `true`, wenn ein `current_action_index` das Sequenz-Ende erreicht/überschritten
-/// hat — die Session ist dann abgeschlossen. Spiegelt `next_idx >= len(...)`.
+/// hat; die Session ist dann abgeschlossen. Spiegelt `next_idx >= len(...)`.
 pub fn is_complete(sequence: &[SequenceStep], index: usize) -> bool {
     index >= sequence.len()
 }

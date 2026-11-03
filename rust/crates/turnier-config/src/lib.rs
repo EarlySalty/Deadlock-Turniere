@@ -198,7 +198,7 @@ fn hostname_of(value: &str) -> Option<String> {
     } else {
         candidate
     };
-    // Port abschneiden (nur bei genau einem ':' — IPv6 mit mehreren ':' ignorieren).
+    // Port abschneiden (nur bei genau einem ':'; IPv6 mit mehreren ':' ignorieren).
     let host = host.trim_start_matches('[').trim_end_matches(']');
     let host = if host.matches(':').count() == 1 {
         host.split(':').next().unwrap_or(host)

@@ -8,7 +8,7 @@
 //! Im Original propagiert eine Exception aus `_run_all_checks` aus
 //! `start_scheduler` heraus und TÖTET den Task dauerhaft. Hier ist jeder der vier
 //! Checks einzeln fehlertolerant (Result loggen, weitermachen); der Loop stirbt
-//! nie — er endet nur über das `shutdown`-Signal (entspricht `CancelledError`).
+//! nie; er endet nur über das `shutdown`-Signal (entspricht `CancelledError`).
 
 use std::sync::Arc;
 
@@ -62,7 +62,7 @@ impl Scheduler {
         })
     }
 
-    /// Führt alle Checks EINMAL aus — jeder fehlertolerant. Ein Fehler in
+    /// Führt alle Checks EINMAL aus, jeder fehlertolerant. Ein Fehler in
     /// einem Check beendet weder die anderen noch den Loop.
     pub async fn run_all_checks(&self, now: DateTime<Utc>) {
         if let Err(err) = self.check_and_advance_tournaments(now).await {
@@ -304,7 +304,7 @@ impl Scheduler {
             return true;
         }
 
-        // Checkin-/Registration-Notifications — best-effort (Fehler nur geloggt).
+        // Checkin-/Registration-Notifications: best-effort (Fehler nur geloggt).
         if let Err(err) = self.notify_after_advance(row.id, next_status).await {
             tracing::error!(
                 tournament_id = row.id,
@@ -387,7 +387,7 @@ pub async fn start_scheduler(scheduler: Scheduler, mut shutdown: watch::Receiver
     let mut ticker = tokio::time::interval(std::time::Duration::from_secs(
         scheduler.settings.tick_seconds,
     ));
-    // Den sofort feuernden ersten Tick verwerfen — der erste Lauf ist schon erfolgt.
+    // Den sofort feuernden ersten Tick verwerfen; der erste Lauf ist schon erfolgt.
     ticker.tick().await;
     let mut routine_ticker = tokio::time::interval(std::time::Duration::from_secs(
         scheduler.settings.routine_seconds,

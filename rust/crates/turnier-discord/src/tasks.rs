@@ -1,9 +1,9 @@
 //! Lifecycle-Protokollierung einzelner Discord-Effekte in `discord_tasks`.
 //!
 //! Das Python-Original schrieb erst `PENDING` und ersetzte das SOFORT durch
-//! `RUNNING` — der `PENDING`-Zustand war faktisch nie beobachtbar (kein externer
+//! `RUNNING`; der `PENDING`-Zustand war faktisch nie beobachtbar (kein externer
 //! Worker liest die Tabelle; der Versand läuft synchron inline; Befund
-//! discord_notifier.py:161/193/224/293 — "safe"). Der Port fügt deshalb direkt
+//! discord_notifier.py:161/193/224/293, "safe"). Der Port fügt deshalb direkt
 //! mit `status='RUNNING'` ein und schreibt nur den Abschluss als einzelnes
 //! UPDATE. Die beobachtbaren End-Zeilen (`DONE`/`FAILED` mit
 //! `result_payload`/`error`) bleiben identisch.

@@ -58,7 +58,7 @@ fn objective_label(code: &str) -> Option<&'static str> {
     match code {
         "first_guardian" => Some("Erster zerstörter Guardian gewinnt"),
         "first_walker" => Some("Erster zerstörter Walker gewinnt"),
-        "base" => Some("Reguläres Spielende — gegnerische Basis zerstören"),
+        "base" => Some("Reguläres Spielende: gegnerische Basis zerstören"),
         _ => None,
     }
 }
@@ -155,7 +155,7 @@ pub fn compute_assignments<R: Rng + ?Sized>(rng: &mut R, ctx: &ModeContext) -> M
         TournamentGameMode::Mirror => {
             let heroes = pick_unique_heroes(rng, 2);
             // Fallback bei <2 Heroes: identischer Hero für beide Teams (Befund
-            // game_modes.py:147-163 — semantisch ok, hier 1:1 erhalten).
+            // game_modes.py:147-163, semantisch ok, hier 1:1 erhalten).
             let h0 = heroes.first().copied().unwrap_or("");
             let h1 = heroes.get(1).copied().unwrap_or(h0);
             let t1 = ctx.team1_id;
@@ -201,7 +201,7 @@ pub fn compute_assignments<R: Rng + ?Sized>(rng: &mut R, ctx: &ModeContext) -> M
 
         TournamentGameMode::RandomHeroes => {
             // Reihenfolge wie das Original: alle Teilnehmer mit nicht-leerer ID
-            // (Duplikate NICHT entfernt — Variable heißt im Original irreführend
+            // (Duplikate NICHT entfernt; Variable heißt im Original irreführend
             // "unique_player_ids", filtert aber nur leere; 1:1 erhalten).
             let player_ids: Vec<String> = ctx
                 .participants
@@ -264,7 +264,7 @@ pub fn compute_assignments<R: Rng + ?Sized>(rng: &mut R, ctx: &ModeContext) -> M
     }
 }
 
-/// JSON-Schlüssel einer Team-ID — `str(team_id)` (Python stringifiziert die ID
+/// JSON-Schlüssel einer Team-ID: `str(team_id)` (Python stringifiziert die ID
 /// als Dict-Key; `None` → `"None"`, was im Original durch das f-string ebenso
 /// entstünde, in der Praxis aber nur bei gesetzten Teams aufgerufen wird).
 fn id_key(team_id: Option<i64>) -> String {
@@ -358,7 +358,7 @@ async fn load_match_mode_context(
     // Team-Namen-Fallback NUR wenn Teilnehmer existieren (im Original wird im
     // leeren-team-Zweig der rohe Name ohne Fallback zurückgegeben; da wir den
     // Kontext aber nur für die reine Berechnung nutzen und der Fallback dort
-    // ohnehin nicht durchschlägt, vereinheitlichen wir auf den Fallback —
+    // ohnehin nicht durchschlägt, vereinheitlichen wir auf den Fallback,
     // identische Wirkung, weil announcement_lines bei leeren Teams nie die
     // Namen verwenden).
     let team1_label = team1_name
