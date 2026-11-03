@@ -240,7 +240,6 @@ mod tests {
         h2h.insert((2, 1), 2);
         let pd: HashMap<i64, i64> = [(1, 5), (2, -5)].into();
         let seed: HashMap<i64, i64> = [(1, 0), (2, 1)].into();
-        // H2H sagt 2 gewinnt, schlägt sogar die bessere Point-Diff von 1.
         assert_eq!(break_two_way_tie(1, 2, &pd, &seed, &h2h), 2);
     }
 

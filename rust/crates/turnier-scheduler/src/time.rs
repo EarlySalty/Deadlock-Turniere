@@ -69,7 +69,6 @@ pub fn parse_reminder_offsets_with_default(value: Option<&Value>, defaults: &[i6
         return defaults.to_vec();
     }
 
-    // Dedupliziert, absteigend sortiert, wie `sorted({...}, reverse=True)`.
     offsets.sort_unstable();
     offsets.dedup();
     offsets.reverse();

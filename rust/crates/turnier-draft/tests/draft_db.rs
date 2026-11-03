@@ -272,9 +272,6 @@ async fn compare_and_swap_erkennt_konflikt() {
         .await
         .unwrap();
 
-    // Ein UPDATE mit der veralteten CAS-Bedingung (current_action_index = 0)
-    // betrifft jetzt 0 Zeilen, genau die Bedingung, die take_action als
-    // ActionConflict behandelt.
     let res = sqlx::query(
         "UPDATE turnier.draft_sessions SET current_action_index = 1 \
          WHERE id = $1 AND current_action_index = 0 AND status = 'in_progress'",

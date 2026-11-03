@@ -296,9 +296,6 @@ impl DiscordNotifier {
                 false,
             );
 
-        // allowed_user_ids durchgängig als u64-Snowflakes (Original mischte
-        // str/int; Befund discord_notifier.py:194/209, "behavior-change", hier
-        // vereinheitlicht auf int wie vom Port vorgegeben).
         let allowed = parse_all(participant_ids);
         let payload = json!({
             "channel_id": channel,
@@ -389,9 +386,6 @@ impl DiscordNotifier {
                 continue;
             }
 
-            // Profil-loses Verhalten EXAKT wie im Original (Befund
-            // discord_notifier.py:283-284, "behavior-change", bewusst erhalten):
-            // fehlt das Profil, gilt für BEIDE Schalter das EVENT-Default.
             let (dm_master, event_flag) = match flags.iter().find(|(id, _, _)| id == discord_id) {
                 Some((_, dm, ev)) => (*dm, *ev),
                 None => (event.default_flag(), event.default_flag()),
@@ -448,8 +442,6 @@ impl DiscordNotifier {
         ids: &[String],
         event: NotificationEvent,
     ) -> sqlx::Result<Vec<(String, bool, bool)>> {
-        // event.column() ist whitelisted (festes Enum); keine User-Eingabe in
-        // der Spalten-Konkatenation.
         let parsed_ids = ids
             .iter()
             .filter_map(|id| parse_discord_id(id).ok().map(|value| (value, id.as_str())))
@@ -533,10 +525,6 @@ impl DiscordNotifier {
             .collect::<Vec<_>>();
         let mut summary = CasterNotifyResult::default();
 
-        // channel_url nur, wenn guild_id gesetzt UND channel_id numerisch ist.
-        // Im Original: int(channel_id) im f-String; eine ungültige channel_id
-        // hätte dort eine Exception geworfen. Hier: ungültige channel_id ⇒ keine
-        // URL (Fallback "#<channel_id>"), kein Panic.
         let channel_num = parse_snowflake(channel_id);
         let channel_url = if !self.guild_id.is_empty() {
             channel_num.map(|c| format!("https://discord.com/channels/{}/{}", self.guild_id, c))
@@ -598,9 +586,6 @@ impl DiscordNotifier {
         let team1_mentions = mentions_or_dash(team1_discord_ids);
         let team2_mentions = mentions_or_dash(team2_discord_ids);
 
-        // all_ids = beide Teams zusammen, gültige Snowflakes (Original ließ
-        // ungültige via `if uid`-Filter heraus; hier verwerfen wir nicht
-        // parsebare zusätzlich, dieselbe Wirkung: nur gültige int-IDs).
         let combined: Vec<String> = team1_discord_ids
             .iter()
             .chain(team2_discord_ids.iter())

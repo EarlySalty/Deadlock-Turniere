@@ -315,8 +315,6 @@ async fn accept_team_invitation(
     .await?;
 
     let (rank, discord_name) = if let Some(signup) = signup {
-        // `user.discord_name or signup.discord_name`: leerer String fällt zurück
-        // (Python-`or`-Semantik 1:1).
         let discord_name = user
             .discord_name
             .clone()

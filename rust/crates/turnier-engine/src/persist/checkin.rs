@@ -173,11 +173,6 @@ struct SoloSignup {
 /// exponiert den internen Typ nicht. Spiegelt den Monkeypatch-Punkt des
 /// Python-Originals (`random.shuffle`), den auch der Paritätstest no-op
 /// überschreibt.
-// `Send`-Supertrait: damit `&mut dyn SoloShuffler` über die `await`-Punkte in
-// `assign_random_teams` gehalten werden darf, ohne das Future nicht-`Send` zu
-// machen; sonst wäre der aufrufende axum-Handler kein gültiger `Handler` (axum
-// verlangt `Send`-Futures; `tokio::test` nicht, daher fiel es erst in turnier-api auf).
-// Alle realen Shuffler (RngShuffler<StdRng>, NoShuffle) sind ohnehin `Send`.
 pub trait SoloShuffler: Send {
     /// Permutation der Indizes `0..len` (muss genau `len` Elemente enthalten).
     fn permutation(&mut self, len: usize) -> Vec<usize>;

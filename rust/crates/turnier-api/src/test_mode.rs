@@ -846,10 +846,6 @@ async fn create_test_tournament(
     // --- Turnier-Erstellung als EINE Transaktion (Rollback automatisch bei Fehler) ---
     let mut tx = state.pool.begin().await?;
 
-    // Pool auffüllen, falls zu wenige Test-User existieren.
-    // bug-preserved: missing = required - count(aller bestehenden Test-User),
-    // anschließend wird per LIMIT eine beliebige (nach discord_id sortierte)
-    // Teilmenge genommen; fragil, aber 1:1 zum Original.
     let existing_users = load_test_users(&mut *tx).await?;
     let missing_users = required_users - existing_users.len() as i64;
     if missing_users > 0 {
@@ -1038,8 +1034,6 @@ async fn advance_test_tournament(
             },
         )
         .await?;
-        // bug-preserved (needs-decision): advance_to_group_phase wird hart True
-        // übergeben, auch für bracket_only, 1:1 zum Original.
         turnier_engine::finalize_checkin(
             &state.pool,
             tournament_id,
@@ -1191,8 +1185,6 @@ async fn simulate_test_tournament_round(
         }
     }
 
-    // bug-preserved: Audit in SEPARATER Transaktion nach den Match-Applies;
-    // kein Gesamt-Rollback (1:1 zum Original).
     audit(
         &state.pool,
         "test_tournament_simulate_round",

@@ -796,7 +796,6 @@ impl PgScrimReadRepository {
             })?;
         let mut tx = self.pool.begin().await?;
 
-        // Gleicher Advisory-Key wie der Live-Reaktions-Hook (dl-community/reaction_roles.rs:475), serialisiert Web-Signup gegen Discord-Reaktion. store.rs nutzt abweichend 42060004001 (Reconcile = separater Bot-Task).
         sqlx::query("SELECT pg_advisory_xact_lock($1)")
             .bind(SELF_SERVICE_ADVISORY_LOCK)
             .execute(&mut *tx)

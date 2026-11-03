@@ -89,9 +89,6 @@ async fn solo_signup(
     .map_err(|err| map_unique_conflict(err, "Du bist bereits für dieses Turnier angemeldet"))?;
 
     if team_size == 1 {
-        // Bei 1vs1 ist jeder Teilnehmer sein eigenes Team, direkt anlegen.
-        // BEWUSST 1:1 erhalten: Such-Schleife für eindeutigen name_key statt
-        // UNIQUE-Retry (Original-Smell „behavior-change", routes.py:1119-1150).
         let resolved_name =
             helpers::sanitize_discord_name(user.discord_name.as_deref(), Some(&user.discord_id))
                 .unwrap_or_else(|| user.discord_id.clone());
@@ -246,8 +243,6 @@ async fn checkin_player(
                 "Du bist für dieses Turnier nicht angemeldet",
             ));
         };
-        // `user.discord_name or membership.discord_name`: leerer String fällt
-        // zurück (Python-`or`-Semantik 1:1).
         let discord_name = user
             .discord_name
             .clone()

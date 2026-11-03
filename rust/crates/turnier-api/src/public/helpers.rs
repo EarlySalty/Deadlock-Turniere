@@ -162,10 +162,6 @@ pub fn parse_timestamp(value: Option<&str>) -> Option<DateTime<Utc>> {
     None
 }
 
-// ---------------------------------------------------------------------------
-// Rang-Anreicherung (gebatcht, gegen N+1)
-// ---------------------------------------------------------------------------
-
 /// Ein roher Member-/Signup-Datensatz vor der Rang-Anreicherung.
 struct RankFields {
     steam_id: Option<String>,
@@ -1300,8 +1296,6 @@ pub async fn add_user_to_team(
     rank: &RankInput,
 ) -> WebResult<()> {
     let discord_id_i64 = db::parse_discord_id(discord_id)?;
-    // Name-Resolution liest aus mehreren Tabellen; über den Pool (read-only).
-    // Entspricht dem Original, das im selben Connection-Kontext liest.
     let resolved_name = resolve_discord_name(pool, discord_id, discord_name).await?;
     sqlx::query(
         r#"INSERT INTO turnier."team_members"

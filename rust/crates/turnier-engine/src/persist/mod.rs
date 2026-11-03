@@ -149,8 +149,6 @@ async fn clear_bracket_tree(
             .fetch_all(&mut **tx)
             .await?;
     if !mini_group_ids.is_empty() {
-        // Einzeln löschen: vermeidet dynamische IN-Platzhalter und ist für die
-        // hier üblichen kleinen Mengen unkritisch.
         for (mg_id,) in &mini_group_ids {
             sqlx::query("DELETE FROM turnier.bracket_mini_group_teams WHERE mini_group_id = $1")
                 .bind(mg_id)

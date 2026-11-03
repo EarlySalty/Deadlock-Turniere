@@ -304,7 +304,6 @@ impl Scheduler {
             return true;
         }
 
-        // Checkin-/Registration-Notifications: best-effort (Fehler nur geloggt).
         if let Err(err) = self.notify_after_advance(row.id, next_status).await {
             tracing::error!(
                 tournament_id = row.id,
@@ -387,7 +386,6 @@ pub async fn start_scheduler(scheduler: Scheduler, mut shutdown: watch::Receiver
     let mut ticker = tokio::time::interval(std::time::Duration::from_secs(
         scheduler.settings.tick_seconds,
     ));
-    // Den sofort feuernden ersten Tick verwerfen; der erste Lauf ist schon erfolgt.
     ticker.tick().await;
     let mut routine_ticker = tokio::time::interval(std::time::Duration::from_secs(
         scheduler.settings.routine_seconds,

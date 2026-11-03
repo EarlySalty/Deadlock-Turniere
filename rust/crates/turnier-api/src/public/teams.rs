@@ -334,8 +334,6 @@ async fn kick_team_member(
     AuthUser(user): AuthUser,
     Path((tournament_id, team_id, discord_id)): Path<(i64, i64, String)>,
 ) -> WebResult<Json<Value>> {
-    // Discord-ID-Regex ^\d{17,19}$, BEWUSST 1:1 erhalten (Original-Smell
-    // „behavior-change": inkonsistent zu _looks_like_discord_id 16–21).
     if !is_strict_discord_id(&discord_id) {
         return Err(WebError::bad_request("Ungültige Discord-ID"));
     }
@@ -439,8 +437,6 @@ async fn leave_team(
             .bind(team_id)
             .execute(&mut *tx)
             .await?;
-        // Bei vorhandenem Signup: team_id zurücksetzen; sonst NEUEN Eintrag mit
-        // user.discord_name (NICHT member.discord_name), 1:1 zum Original.
         let has_signup: Option<(i64,)> = sqlx::query_as(
             r#"SELECT id FROM turnier."tournament_signups"
              WHERE tournament_id = $1 AND discord_id = $2"#,
@@ -545,8 +541,6 @@ async fn invite_to_team(
         ));
     };
 
-    // discord_name aus früherer team_members-Mitgliedschaft; BEWUSST ad-hoc
-    // (ohne ORDER BY/Fallback-Kette, „safe"-Smell 1:1 erhalten).
     let name_row: Option<(Option<String>,)> = sqlx::query_as(
         r#"SELECT discord_name FROM turnier."team_members"
          WHERE discord_id = $1 AND discord_name != '' LIMIT 1"#,

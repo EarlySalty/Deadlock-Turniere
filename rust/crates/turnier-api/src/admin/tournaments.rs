@@ -187,8 +187,6 @@ async fn create_tournament(
     let reminder_offsets = jsonb(serialize_reminder_offsets(&body.reminder_offsets))?;
     let start_reminder_offsets = jsonb(serialize_reminder_offsets(&body.start_reminder_offsets))?;
 
-    // Auto-Mode (Befund admin_routes.py:835: team_size statt Teamanzahl, 1:1
-    // erhalten, siehe bugs_preserved).
     let tournament_mode =
         determine_tournament_mode(body.team_size as usize, body.force_tournament_mode);
 

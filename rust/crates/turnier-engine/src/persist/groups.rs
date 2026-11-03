@@ -67,8 +67,6 @@ pub async fn generate_groups_in_tx(
     // stabil; bei Score-Gleichstand bleibt die DB-Reihenfolge erhalten).
     team_scores.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
 
-    // Gruppen-Anzahl anpassen (max = Teams/2, min = 2); zweites Clamping wie im
-    // Original (bug-preserved: getrennt von auto_num_groups).
     let actual_groups = target_groups.min(team_scores.len() / 2).max(2);
 
     // Bestehende Gruppen + Matches/Teams löschen.

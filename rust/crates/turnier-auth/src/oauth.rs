@@ -176,8 +176,6 @@ impl OAuthClient {
             })?;
 
         let status = response.status();
-        // Body als Text lesen; wir brauchen ihn sowohl für Fehler-Details als
-        // auch für das JSON-Parsen, und reqwest gibt den Body nur einmal her.
         let text = response.text().await.map_err(|exc| {
             AuthError::BadGateway(format!(
                 "Deadlock-Bots OAuth-Service nicht erreichbar: {}",
@@ -404,9 +402,6 @@ mod tests {
 
     #[test]
     fn fehlende_config_meldet_503() {
-        // Leere Basis-URL = nicht konfiguriert (wie der Default-Leerstring im
-        // Original). Whitespace-only wäre (wie bei Pythons `if base_url:` nach
-        // `rstrip("/")`) KEIN „nicht konfiguriert", daher bewusst echtes "".
         let client = OAuthClient {
             http: reqwest::Client::new(),
             base_url: String::new(),

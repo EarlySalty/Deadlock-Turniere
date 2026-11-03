@@ -146,7 +146,6 @@ pub async fn resolve_session(
     };
 
     if Utc::now() > row.expires_at {
-        // Opportunistisch aufräumen; der Original-Code ließ die Zeile stehen.
         let _ = delete_session(pool, token).await;
         return Err(AuthError::Unauthorized("Session abgelaufen"));
     }

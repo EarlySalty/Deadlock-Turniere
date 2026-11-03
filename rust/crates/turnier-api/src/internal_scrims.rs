@@ -2427,10 +2427,6 @@ async fn create_team(
     let service = service(&state);
     service.authorize_operator(actor.discord_id).await?;
     let team = service.create_team(mutation.idempotency_key, body).await?;
-    // Bei einer Wiederholung liegt die Rolle schon an. Der Idempotenzschutz des Brokers
-    // laeuft ueber eine Zwischenspeicherung mit Ablaufzeit, taugt also nicht als
-    // Dauerschutz: sonst legte ein spaeter Wiederholungsversuch eine zweite Rolle an
-    // und ueberschriebe die hinterlegte ID.
     let existing_role_id = service.roster_team(team.id).await?.discord_role_id;
     let discord_role_id = match existing_role_id {
         Some(role_id) => Some(role_id),
@@ -2641,9 +2637,6 @@ async fn create_team_discord_role(
     match response {
         Ok(response) => response
             .pointer("/result/role_id")
-            // Discord-IDs kommen als Zahl oder als Zeichenkette; in JSON ist die
-            // Zeichenkette die uebliche Form, weil die IDs groesser als 2^53 werden.
-            // Nur Zahlen zu akzeptieren hiesse: Rolle angelegt, aber nicht gemerkt.
             .and_then(|value| {
                 value
                     .as_u64()

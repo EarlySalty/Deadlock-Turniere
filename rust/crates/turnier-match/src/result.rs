@@ -241,8 +241,6 @@ impl MatchManager {
         .bind(tournament_id)
         .execute(&mut *tx)
         .await?;
-        // Bug-preserved (needs-decision): hier wird winner_id_value in winning_team
-        // geschrieben (nicht der Slot), exakt wie das Original.
         sqlx::query(
             "INSERT INTO turnier.match_results \
                  (bracket_match_id, winning_team, duration_s, player_stats, source, created_at) \
@@ -258,7 +256,6 @@ impl MatchManager {
         .await?;
         tx.commit().await.map_err(turnier_db::DbError::from)?;
 
-        // Channel-Cleanup (fire-and-forget); Snapshot-Quelle bewusst Pre-Update.
         let discord_channel_id = match_row.discord_channel_id.map(discord_id_to_string);
         if let Some(channel_id) = discord_channel_id.clone().filter(|s| !s.is_empty()) {
             self.spawn_delete_channel_later(channel_id);
@@ -433,8 +430,6 @@ impl MatchManager {
             .bind(match_id)
             .execute(&mut *tx)
             .await?;
-        // Bug-preserved (needs-decision): Group-Pfad schreibt den Slot (1/2) in
-        // winning_team, anders als der Bracket-Pfad.
         sqlx::query(
             "INSERT INTO turnier.match_results \
                  (group_match_id, winning_team, duration_s, player_stats, source, created_at) \

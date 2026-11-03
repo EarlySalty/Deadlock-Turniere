@@ -139,8 +139,6 @@ impl From<sqlx::Error> for SteamTaskError {
 impl From<MatchError> for SteamTaskError {
     fn from(err: MatchError) -> Self {
         match err {
-            // NotFound erhalten, damit ein fehlendes Match über die Steam-/Lobby-
-            // Pfade als 404 (statt 502) endet, wie Pythons _get_bracket_match.
             MatchError::NotFound(m) => SteamTaskError::NotFound(m),
             MatchError::State(m) | MatchError::Invalid(m) => SteamTaskError::InvalidResult(m),
             MatchError::Db(e) => SteamTaskError::Db(e),

@@ -694,7 +694,6 @@ async fn take_action_validated(
     let taken_by = parse_numeric_id(taken_by)?;
     let mut tx = pool.begin().await?;
 
-    // (1) Index der aktuellen Session lesen, nur wenn in_progress.
     let session: Option<(i64, Option<Json<Vec<SequenceStep>>>)> = sqlx::query_as(
         "SELECT current_action_index, sequence FROM turnier.draft_sessions \
          WHERE id = $1 AND status = 'in_progress'",
@@ -753,8 +752,6 @@ async fn take_action_validated(
         .execute(&mut *tx)
         .await?
     } else {
-        // completed_at NICHT anfassen, solange nicht abgeschlossen (im Original
-        // wurde es bei jeder Zwischenaktion unnötig auf NULL gesetzt, safe-Fix).
         sqlx::query(
             "UPDATE turnier.draft_sessions \
              SET current_action_index = $1 \

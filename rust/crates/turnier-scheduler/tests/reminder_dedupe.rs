@@ -80,8 +80,6 @@ async fn registration_reminder_wird_genau_einmal_dedupliziert() {
     let config = test_config();
     let notifier = fake_notifier(pool.clone(), &config);
 
-    // Turnier in 'registration' mit registration_end um 12:00 und nur einem
-    // Offset (60 min): der Reminder ist um 11:00 fällig.
     let id = insert_tournament(&pool, "T", "registration", false).await;
     configure_registration_reminder(&pool, id).await;
     insert_optin_profile(&pool, 111).await;
