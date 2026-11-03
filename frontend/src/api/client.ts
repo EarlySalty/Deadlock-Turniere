@@ -668,12 +668,6 @@ export const submitSeriesGameResult = (
     }
   )
 
-// --- Freie Draft-Lobbys (oeffentlich, kein Login) ---
-//
-// Eigener Request-Pfad statt request<T>: der wirft bei JEDEM 401 pauschal
-// "Nicht authentifiziert" und verschluckt den Body. Hier sind 401/403 aber
-// fachliche Antworten ("kein Captain", "anderes Team ist am Zug"), die will
-// der Spieler wortwoertlich sehen.
 async function lobbyRequest<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
     headers: { 'Content-Type': 'application/json', ...options?.headers },

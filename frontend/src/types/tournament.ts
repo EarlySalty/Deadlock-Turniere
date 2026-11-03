@@ -765,7 +765,6 @@ export interface PlayerProfile {
 
 // --- Freie Draft-Lobbys ---
 
-/** Held aus GET /api/draft/heroes: live von der Deadlock-API, mit Bild. */
 export interface DraftHero {
   id: number
   name: string
@@ -795,10 +794,6 @@ export interface CreateLobbyBody {
   reserve_seconds: number
 }
 
-/**
- * Zustand einer freien Lobby (GET /api/draft/lobbies/{code}).
- * Enthaelt bewusst KEINE Tokens, der Zuschauer-Link darf nicht draften koennen.
- */
 export interface LobbyState {
   id: number
   code: string | null

@@ -1,9 +1,3 @@
-//! `turnier-core`: die reine Domänenschicht des Turnier-Backends.
-//!
-//! Enthält Enums (das frühere Magic-String-Vokabular), Wire-DTOs (1:1 zu den
-//! Pydantic-Modellen) und kleine Grenzkonventions-Helfer. Keine Geschäftslogik,
-//! keine Persistenz. Jede andere Crate baut auf diesen Verträgen auf.
-
 pub mod bracket;
 pub mod enums;
 pub mod group;

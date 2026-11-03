@@ -14,8 +14,6 @@ use turnier_db::Pool;
 use crate::db;
 use crate::error::{WebError, WebResult};
 
-/// Typisierte Rohzeile eines Turniers. Enum-Spalten werden, wie überall in der
-/// Codebase, als `String` dekodiert und im Mapping konvertiert.
 #[derive(sqlx::FromRow)]
 struct TournamentRow {
     id: i64,
