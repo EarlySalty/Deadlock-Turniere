@@ -1,5 +1,6 @@
 import type {
   UserSession,
+  AdminTournamentSummary,
   Tournament,
   TournamentDetail,
   TournamentDetailPublic,
@@ -101,7 +102,7 @@ export const fetchTournament = (id: number) => request<TournamentDetailPublic>(`
 export const fetchMyTournamentStatus = (id: number) => request<MyTournamentStatus>(`/tournaments/${id}/me`)
 
 // Tournaments (admin)
-export const fetchAdminTournaments = () => request<Tournament[]>('/admin/tournaments')
+export const fetchAdminTournaments = () => request<AdminTournamentSummary[]>('/admin/tournaments')
 export const fetchAdminTournament = (id: number) => request<TournamentDetail>(`/admin/tournaments/${id}`)
 
 // Teams

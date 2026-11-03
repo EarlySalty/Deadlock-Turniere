@@ -12,8 +12,8 @@ use serde_json::{json, Value};
 use sqlx::{Postgres, QueryBuilder, Row};
 
 use turnier_core::{
-    LobbySettingsPreset, Patch, Tournament, TournamentCreate, TournamentDetail, TournamentMode,
-    TournamentStatus, TournamentUpdate,
+    AdminTournamentSummary, LobbySettingsPreset, Patch, Tournament, TournamentCreate,
+    TournamentDetail, TournamentMode, TournamentStatus, TournamentUpdate,
 };
 use turnier_engine::league::DEFAULT_SLOT_MINUTES;
 use turnier_engine::{
@@ -34,7 +34,7 @@ use super::loaders::{
     load_bracket_matches, load_groups_for_tournament, load_mini_groups_for_tournament,
     load_signups_for_tournament, load_teams_for_tournament,
 };
-use super::tournament_row::{load_all_tournaments_dto, load_tournament_dto};
+use super::tournament_row::{load_admin_tournament_summaries, load_tournament_dto};
 
 /// Router der Turnier-CRUD- und Status-Endpunkte.
 pub fn router() -> Router<AppState> {
@@ -95,8 +95,8 @@ fn mode_str(mode: TournamentMode) -> &'static str {
 async fn list_tournaments(
     State(state): State<AppState>,
     _mod: ModUser,
-) -> WebResult<Json<Vec<Tournament>>> {
-    Ok(Json(load_all_tournaments_dto(&state.pool).await?))
+) -> WebResult<Json<Vec<AdminTournamentSummary>>> {
+    Ok(Json(load_admin_tournament_summaries(&state.pool).await?))
 }
 
 async fn get_tournament(

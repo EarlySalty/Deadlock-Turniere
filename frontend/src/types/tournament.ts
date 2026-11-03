@@ -70,6 +70,13 @@ export interface Tournament {
   rules: string | null
 }
 
+export interface AdminTournamentSummary extends Tournament {
+  team_count: number
+  player_count: number
+  signup_count: number
+  open_signup_count: number
+}
+
 // --- Admin types (with discord_id) ---
 
 export interface TeamMember {
@@ -761,7 +768,6 @@ export interface PlayerProfile {
 
 // --- Freie Draft-Lobbys ---
 
-/** Held aus GET /api/draft/heroes, live von der Deadlock-API, mit Bild. */
 export interface DraftHero {
   id: number
   name: string
@@ -791,10 +797,6 @@ export interface CreateLobbyBody {
   reserve_seconds: number
 }
 
-/**
- * Zustand einer freien Lobby (GET /api/draft/lobbies/{code}).
- * Enthaelt bewusst KEINE Tokens: Der Zuschauer-Link darf nicht draften koennen.
- */
 export interface LobbyState {
   id: number
   code: string | null

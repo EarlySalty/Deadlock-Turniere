@@ -29,8 +29,8 @@ pub use team::{
 };
 pub use time::now_utc;
 pub use tournament::{
-    Patch, Tournament, TournamentCreate, TournamentDetail, TournamentDetailPublic,
-    TournamentSignup, TournamentSignupPublic, TournamentUpdate,
+    AdminTournamentSummary, Patch, Tournament, TournamentCreate, TournamentDetail,
+    TournamentDetailPublic, TournamentSignup, TournamentSignupPublic, TournamentUpdate,
 };
 pub use user::{
     ConsentCreate, ConsentStatus, LeaderboardEntry, PlayerProfile, TournamentHistoryEntry,
