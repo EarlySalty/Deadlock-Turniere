@@ -7,12 +7,14 @@ import MiniGroupPanel from '@/components/bracket/MiniGroupPanel'
 import GroupMatchList from '@/components/groups/GroupMatchList'
 import { LEAGUE_LABEL, isLeague } from '@/lib/league'
 import TournamentCasterPanel from '@/components/admin/TournamentCasterPanel'
-import { Archive, Trophy, Users2, ListChecks } from 'lucide-react'
+import Button from '@/components/ui/Button'
+import { Archive, Copy, Trophy, Users2, ListChecks } from 'lucide-react'
 
 type ArchiveTab = 'overview' | 'bracket' | 'groups' | 'teams' | 'caster'
 
 interface ArchivedTournamentViewProps {
   tournament: TournamentDetail
+  onUseAsTemplate: () => void
 }
 
 const TABS: { key: ArchiveTab; label: string; icon: typeof Trophy }[] = [
@@ -23,7 +25,7 @@ const TABS: { key: ArchiveTab; label: string; icon: typeof Trophy }[] = [
   { key: 'caster', label: 'Caster', icon: Users2 },
 ]
 
-export default function ArchivedTournamentView({ tournament }: ArchivedTournamentViewProps) {
+export default function ArchivedTournamentView({ tournament, onUseAsTemplate }: ArchivedTournamentViewProps) {
   const [active, setActive] = useState<ArchiveTab>('overview')
 
   const visibleTabs = TABS.filter((tab) => {
@@ -46,8 +48,8 @@ export default function ArchivedTournamentView({ tournament }: ArchivedTournamen
   return (
     <div className="space-y-4">
       <Card className="border-amber-500/30 bg-amber-500/5 p-4">
-        <div className="flex items-start gap-3">
-          <Archive size={20} className="mt-0.5 flex-shrink-0 text-amber-400" />
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start">
+          <Archive size={20} className="mt-0.5 hidden flex-shrink-0 text-amber-400 sm:block" />
           <div className="flex-1">
             <h2 className="flex flex-wrap items-center gap-2 text-lg font-semibold text-foreground">
               {tournament.name}
@@ -62,6 +64,15 @@ export default function ArchivedTournamentView({ tournament }: ArchivedTournamen
             </h2>
             <p className="mt-1 text-xs text-muted">
               Status: {tournament.status} · Game-Mode: {tournament.tournament_game_mode}
+            </p>
+          </div>
+          <div className="sm:text-right">
+            <Button variant="secondary" size="sm" onClick={onUseAsTemplate}>
+              <Copy size={14} />
+              Als Vorlage nutzen
+            </Button>
+            <p className="mt-1 max-w-xs text-xs text-muted">
+              Neues Turnier mit diesen Einstellungen, ohne Teams und Termine.
             </p>
           </div>
         </div>
@@ -179,7 +190,7 @@ export default function ArchivedTournamentView({ tournament }: ArchivedTournamen
                         )}
                         {m.discord_name ?? m.discord_id}
                       </span>
-                      <span className="text-xs">{m.rank ?? '—'}</span>
+                      <span className="text-xs">{m.rank ?? '-'}</span>
                     </li>
                   ))}
                 </ul>
