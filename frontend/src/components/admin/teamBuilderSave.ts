@@ -7,18 +7,13 @@ import {
   removeAdminTeamMember,
   renameAdminTeam,
 } from '@/api/client'
-import type { SaveStep } from '@/lib/teamBuilder'
+import type { CaptainWish, SaveStep } from '@/lib/teamBuilder'
 
 export interface SaveContext {
   tournamentId: number
   teamIds: Map<string, number>
   teamNames: Map<string, string>
   playerNames: Map<string, string>
-}
-
-export interface CaptainWish {
-  teamKey: string
-  discordId: string
 }
 
 export class SaveStepError extends Error {}

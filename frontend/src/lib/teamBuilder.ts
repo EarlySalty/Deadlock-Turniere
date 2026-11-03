@@ -154,16 +154,73 @@ export function buildView(teams: Team[], signups: TournamentSignup[], edits: Bui
   }
 }
 
-function structuralSteps(snapshot: ServerSnapshot, edits: BuilderEdits): SaveStep[] {
-  const creates: SaveStep[] = edits.newTeams.map((team) => ({
-    kind: 'create',
+export function nameKey(name: string): string {
+  return name.trim().toLowerCase().replace(/ß/g, 'ss')
+}
+
+interface NameOp {
+  teamKey: string
+  name: string
+  create: boolean
+}
+
+function nameOps(snapshot: ServerSnapshot, edits: BuilderEdits): NameOp[] {
+  const creates = edits.newTeams.map((team) => ({
     teamKey: team.key,
     name: edits.names[team.key] ?? team.name,
+    create: true,
   }))
-  const renames: SaveStep[] = snapshot.teams
+  const renames = snapshot.teams
     .filter((team) => edits.names[team.key] !== undefined && edits.names[team.key] !== team.name)
-    .map((team) => ({ kind: 'rename', teamKey: team.key, name: edits.names[team.key] }))
+    .map((team) => ({ teamKey: team.key, name: edits.names[team.key], create: false }))
   return [...creates, ...renames]
+}
+
+function nameStep(op: NameOp): SaveStep {
+  return { kind: op.create ? 'create' : 'rename', teamKey: op.teamKey, name: op.name }
+}
+
+function isNameFree(occupied: Map<string, string>, op: NameOp): boolean {
+  const owner = occupied.get(nameKey(op.name))
+  return owner === undefined || owner === op.teamKey
+}
+
+function takeName(occupied: Map<string, string>, teamKey: string, name: string) {
+  for (const [key, owner] of occupied) if (owner === teamKey) occupied.delete(key)
+  occupied.set(nameKey(name), teamKey)
+}
+
+function cycleBreaker(occupied: Map<string, string>, pending: NameOp[]): NameOp | undefined {
+  const owners = pending.map((op) => occupied.get(nameKey(op.name)))
+  return pending.find((op) => !op.create && owners.includes(op.teamKey))
+}
+
+function temporaryName(occupied: Map<string, string>, pending: NameOp[]): string {
+  const reserved = new Set([...occupied.keys(), ...pending.map((op) => nameKey(op.name))])
+  let index = 1
+  while (reserved.has(nameKey(`Umbenennung ${index}`))) index += 1
+  return `Umbenennung ${index}`
+}
+
+function nameSteps(snapshot: ServerSnapshot, edits: BuilderEdits): SaveStep[] {
+  const occupied = new Map(snapshot.teams.map((team) => [nameKey(team.name), team.key]))
+  const steps: SaveStep[] = []
+  let pending = nameOps(snapshot, edits)
+  while (pending.length > 0) {
+    const ready = pending.find((op) => isNameFree(occupied, op))
+    if (ready) {
+      steps.push(nameStep(ready))
+      takeName(occupied, ready.teamKey, ready.name)
+      pending = pending.filter((op) => op !== ready)
+      continue
+    }
+    const blocker = cycleBreaker(occupied, pending)
+    if (!blocker) return [...steps, ...pending.map(nameStep)]
+    const name = temporaryName(occupied, pending)
+    steps.push({ kind: 'rename', teamKey: blocker.teamKey, name })
+    takeName(occupied, blocker.teamKey, name)
+  }
+  return steps
 }
 
 interface PendingMove {
@@ -241,24 +298,65 @@ export function planSave(snapshot: ServerSnapshot, edits: BuilderEdits, teamSize
   const removals = removalSteps(snapshot, edits)
   for (const step of removals) shift(counts, step.teamKey, -1)
   return [
-    ...structuralSteps(snapshot, edits),
+    ...nameSteps(snapshot, edits),
     ...removals,
     ...orderMoves(pendingMoves(snapshot, edits), counts, teamSize),
   ]
+}
+
+interface SimulatedTeam {
+  members: string[]
+  captain: string | null
+}
+
+function leaveTeam(team: SimulatedTeam | undefined, discordId: string) {
+  if (!team) return
+  team.members = team.members.filter((id) => id !== discordId)
+  if (team.captain === discordId) team.captain = team.members[0] ?? null
+}
+
+function joinTeam(team: SimulatedTeam | undefined, discordId: string) {
+  if (!team) return
+  if (team.members.length === 0 || team.captain === null) team.captain = discordId
+  team.members.push(discordId)
+}
+
+function simulateStep(teams: Map<string, SimulatedTeam>, step: SaveStep) {
+  if (step.kind === 'remove') leaveTeam(teams.get(step.teamKey), step.discordId)
+  if (step.kind === 'move') leaveTeam(teams.get(step.fromKey), step.discordId)
+  if (step.kind === 'move' || step.kind === 'assign') joinTeam(teams.get(step.teamKey), step.discordId)
+}
+
+export function captainsAfterSteps(
+  snapshot: ServerSnapshot,
+  edits: BuilderEdits,
+  steps: SaveStep[],
+): Map<string, string | null> {
+  const teams = new Map<string, SimulatedTeam>(
+    snapshot.teams.map((team) => [team.key, { members: [...team.members], captain: team.captainId }]),
+  )
+  for (const team of edits.newTeams) teams.set(team.key, { members: [], captain: null })
+  for (const step of steps) simulateStep(teams, step)
+  return new Map([...teams].map(([key, team]) => [key, team.captain]))
+}
+
+export interface CaptainWish {
+  teamKey: string
+  discordId: string
+}
+
+export function displayedCaptains(view: BuilderView): CaptainWish[] {
+  return view.teams.flatMap((team) => (team.captainId ? [{ teamKey: team.key, discordId: team.captainId }] : []))
 }
 
 export function captainChanges(
   view: BuilderView,
   snapshot: ServerSnapshot,
   edits: BuilderEdits,
-): { teamKey: string; discordId: string }[] {
-  const current = new Map(snapshot.teams.map((team) => [team.key, team.captainId]))
-  return view.teams
-    .filter((team) => {
-      const wanted = edits.captains[team.key]
-      return wanted !== undefined && team.captainId === wanted && current.get(team.key) !== wanted
-    })
-    .map((team) => ({ teamKey: team.key, discordId: edits.captains[team.key] }))
+  steps: SaveStep[],
+): CaptainWish[] {
+  const after = captainsAfterSteps(snapshot, edits, steps)
+  return displayedCaptains(view).filter((wish) => after.get(wish.teamKey) !== wish.discordId)
 }
 
 export function countChanges(
@@ -267,5 +365,34 @@ export function countChanges(
   edits: BuilderEdits,
   teamSize: number,
 ): number {
-  return planSave(snapshot, edits, teamSize).length + captainChanges(view, snapshot, edits).length
+  const steps = planSave(snapshot, edits, teamSize)
+  return steps.length + captainChanges(view, snapshot, edits, steps).length
+}
+
+export function pinCaptains(edits: BuilderEdits, view: BuilderView): BuilderEdits {
+  const captains = { ...edits.captains }
+  for (const wish of displayedCaptains(view)) captains[wish.teamKey] = wish.discordId
+  return { ...edits, captains }
+}
+
+export function rebaseEdits(edits: BuilderEdits, teamIds: Map<string, number>): BuilderEdits {
+  const created = new Map(
+    edits.newTeams.flatMap((team) => {
+      const id = teamIds.get(team.key)
+      return id === undefined ? [] : [[team.key, serverTeamKey(id)] as const]
+    }),
+  )
+  const rekey = (key: string) => created.get(key) ?? key
+  const names = Object.fromEntries(Object.entries(edits.names).map(([key, name]) => [rekey(key), name]))
+  for (const team of edits.newTeams) {
+    if (created.has(team.key)) names[rekey(team.key)] = edits.names[team.key] ?? team.name
+  }
+  return {
+    newTeams: edits.newTeams.filter((team) => !created.has(team.key)),
+    names,
+    placements: Object.fromEntries(
+      Object.entries(edits.placements).map(([id, key]) => [id, key === null ? null : rekey(key)]),
+    ),
+    captains: Object.fromEntries(Object.entries(edits.captains).map(([key, id]) => [rekey(key), id])),
+  }
 }

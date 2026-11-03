@@ -1,6 +1,13 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { EMPTY_EDITS, buildView, planSave, snapshotOf } from '../src/lib/teamBuilder.ts'
+import {
+  EMPTY_EDITS,
+  buildView,
+  captainChanges,
+  planSave,
+  rebaseEdits,
+  snapshotOf,
+} from '../src/lib/teamBuilder.ts'
 
 const member = (id, role = 'member') => ({
   discord_id: id,
@@ -67,4 +74,65 @@ test('Entfernen aus einem Team kommt vor dem Auffüllen desselben Teams', () => 
   const view = buildView(teams, [signup(20, 'x')], edits)
   assert.deepEqual(view.pool.map((p) => p.discordId), ['a'])
   assert.deepEqual(view.teams[0].members.map((p) => p.discordId), ['b', 'x'])
+})
+
+const named = (id, name, ids = []) => ({ ...team(id, ids), name, name_key: name.toLowerCase() })
+
+test('Namenstausch läuft über einen freien Zwischennamen', () => {
+  const teams = [named(1, 'Alpha'), named(2, 'Beta')]
+  const edits = { ...EMPTY_EDITS, names: { s1: 'Beta', s2: 'Alpha' } }
+  const steps = planSave(snapshotOf(teams, []), edits, 6)
+  assert.deepEqual(
+    steps.map((s) => `${s.teamKey}:${s.name}`),
+    ['s1:Umbenennung 1', 's2:Alpha', 's1:Beta'],
+  )
+})
+
+test('Ein Name wird erst frei, dann neu vergeben', () => {
+  const teams = [named(1, 'Alpha'), named(2, 'Straße')]
+  const edits = {
+    ...EMPTY_EDITS,
+    newTeams: [
+      { key: 'n1', name: 'ALPHA' },
+      { key: 'n2', name: 'Strasse' },
+    ],
+    names: { s1: 'Gamma', s2: 'Delta' },
+  }
+  const steps = planSave(snapshotOf(teams, []), edits, 6)
+  assert.deepEqual(
+    steps.map((s) => `${s.kind}:${s.teamKey}`),
+    ['rename:s1', 'create:n1', 'rename:s2', 'create:n2'],
+  )
+})
+
+test('Der zuerst eingesetzte Spieler bleibt Captain, auch nach dem Speichern', () => {
+  const signups = [signup(11, 'a'), signup(12, 'b')]
+  const edits = { ...EMPTY_EDITS, newTeams: [{ key: 'n1', name: 'Neu' }], placements: { b: 'n1', a: 'n1' } }
+  const snapshot = snapshotOf([], signups)
+  const view = buildView([], signups, edits)
+  assert.equal(view.teams[0].captainId, 'b')
+  const steps = planSave(snapshot, edits, 6)
+  assert.deepEqual(captainChanges(view, snapshot, edits, steps), [{ teamKey: 'n1', discordId: 'b' }])
+})
+
+test('Nach einem Teilfehler wird ein schon angelegtes Team nicht erneut angelegt', () => {
+  const edits = {
+    ...EMPTY_EDITS,
+    newTeams: [{ key: 'n1', name: 'Neu' }],
+    placements: { b: 'n1', a: 'n1' },
+    captains: { n1: 'b' },
+  }
+  const rebased = rebaseEdits(edits, new Map([['n1', 5]]))
+  const teams = [{ ...named(5, 'Neu', ['a']) }]
+  const signups = [signup(11, 'a', 5), signup(12, 'b')]
+  const snapshot = snapshotOf(teams, signups)
+  const steps = planSave(snapshot, rebased, 6)
+  assert.deepEqual(
+    steps.map((s) => `${s.kind}:${s.discordId}:${s.teamKey}`),
+    ['assign:b:s5'],
+  )
+  const view = buildView(teams, signups, rebased)
+  assert.equal(view.teams.length, 1)
+  assert.equal(view.teams[0].captainId, 'b')
+  assert.deepEqual(captainChanges(view, snapshot, rebased, steps), [{ teamKey: 's5', discordId: 'b' }])
 })

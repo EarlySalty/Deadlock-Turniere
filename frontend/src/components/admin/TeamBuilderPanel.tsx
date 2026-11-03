@@ -7,8 +7,12 @@ import {
   EMPTY_EDITS,
   buildView,
   captainChanges,
+  displayedCaptains,
   finalLocations,
+  nameKey,
+  pinCaptains,
   planSave,
+  rebaseEdits,
   snapshotOf,
   type BuilderEdits,
   type BuilderPlayer,
@@ -44,9 +48,9 @@ function matchesFilter(player: BuilderPlayer, filter: string): boolean {
 }
 
 function validateTeamName(name: string, teams: BuilderTeamView[], ownKey: string | null): string | null {
-  const trimmed = name.trim()
-  if (trimmed.length < 2 || trimmed.length > 32) return 'Der Teamname braucht 2 bis 32 Zeichen.'
-  const taken = teams.some((t) => t.key !== ownKey && t.name.trim().toLowerCase() === trimmed.toLowerCase())
+  const length = [...name.trim()].length
+  if (length < 2 || length > 32) return 'Der Teamname braucht 2 bis 32 Zeichen.'
+  const taken = teams.some((t) => t.key !== ownKey && nameKey(t.name) === nameKey(name))
   return taken ? 'Diesen Teamnamen gibt es schon.' : null
 }
 
@@ -58,8 +62,8 @@ function withPlacement(
 ): BuilderEdits {
   const base = finalLocations(snapshot, EMPTY_EDITS).get(discordId)
   const placements = { ...edits.placements }
-  if (base === teamKey) delete placements[discordId]
-  else placements[discordId] = teamKey
+  delete placements[discordId]
+  if (base !== teamKey) placements[discordId] = teamKey
   const captains = Object.fromEntries(
     Object.entries(edits.captains).filter(([key, id]) => id !== discordId || key === teamKey),
   )
@@ -419,53 +423,66 @@ export default function TeamBuilderPanel({ tournamentId, teamSize, teams, signup
   const snapshot = useMemo(() => snapshotOf(teams, signups), [teams, signups])
   const view = useMemo(() => buildView(teams, signups, edits), [teams, signups, edits])
   const steps = useMemo(() => planSave(snapshot, edits, teamSize), [snapshot, edits, teamSize])
-  const captains = useMemo(() => captainChanges(view, snapshot, edits), [view, snapshot, edits])
+  const captains = useMemo(() => captainChanges(view, snapshot, edits, steps), [view, snapshot, edits, steps])
   const changeCount = steps.length + captains.length
   const saving = progress !== null
 
+  const edit = (change: (current: BuilderEdits) => BuilderEdits) => {
+    if (!saving) setEdits(change)
+  }
+
   const place = (discordId: string, teamKey: string | null) => {
+    if (saving) return
     const target = view.teams.find((t) => t.key === teamKey)
     const alreadyThere = target?.members.some((m) => m.discordId === discordId) ?? false
     if (target && !alreadyThere && target.members.length >= teamSize) {
       setNotice({ tone: 'error', text: `„${target.name}“ ist schon voll.` })
       return
     }
-    setEdits((current) => withPlacement(current, snapshot, discordId, teamKey))
+    edit((current) => withPlacement(current, snapshot, discordId, teamKey))
     setSelectedId(null)
     setNotice(null)
   }
 
-  const select = (discordId: string) => setSelectedId((current) => (current === discordId ? null : discordId))
+  const select = (discordId: string) => {
+    if (!saving) setSelectedId((current) => (current === discordId ? null : discordId))
+  }
 
   const createTeam = (name: string) =>
-    setEdits((current) => ({ ...current, newTeams: [...current.newTeams, { key: `n${Date.now()}`, name }] }))
+    edit((current) => ({ ...current, newTeams: [...current.newTeams, { key: `n${Date.now()}`, name }] }))
 
   const rename = (teamKey: string, name: string) => {
     const isNew = edits.newTeams.some((t) => t.key === teamKey)
-    setEdits((current) =>
+    edit((current) =>
       isNew
         ? { ...current, newTeams: current.newTeams.map((t) => (t.key === teamKey ? { ...t, name: name.trim() } : t)) }
         : withName(current, snapshot, teamKey, name),
     )
   }
 
+  const refresh = async () => {
+    await queryClient.invalidateQueries({ queryKey: ['admin', 'tournaments'] })
+    await queryClient.invalidateQueries({ queryKey: ['tournaments'] })
+  }
+
   const save = async () => {
     const players = [...view.pool, ...view.teams.flatMap((t) => t.members)]
     const ctx = saveContext(tournamentId, snapshot, view.teams, players)
-    const wishes = view.teams
-      .filter((t) => edits.captains[t.key] && t.captainId === edits.captains[t.key])
-      .map((t) => ({ teamKey: t.key, discordId: edits.captains[t.key] }))
+    const pinned = pinCaptains(edits, view)
     setNotice(null)
+    setSelectedId(null)
+    setProgress({ done: 0, total: steps.length })
     try {
-      await saveTeamBuilder(ctx, steps, wishes, (done, total) => setProgress({ done, total }))
+      await saveTeamBuilder(ctx, steps, displayedCaptains(view), (done, total) => setProgress({ done, total }))
+      await refresh()
+      setEdits(EMPTY_EDITS)
       setNotice({ tone: 'ok', text: 'Teams gespeichert.' })
     } catch (error) {
-      setNotice({ tone: 'error', text: error instanceof Error ? error.message : 'Speichern fehlgeschlagen.' })
+      await refresh().catch(() => undefined)
+      setEdits(rebaseEdits(pinned, ctx.teamIds))
+      const text = error instanceof Error ? error.message : 'Speichern fehlgeschlagen.'
+      setNotice({ tone: 'error', text: `${text} Die übrigen Änderungen sind noch offen.` })
     } finally {
-      await queryClient.invalidateQueries({ queryKey: ['admin', 'tournaments'] })
-      await queryClient.invalidateQueries({ queryKey: ['tournaments'] })
-      setEdits(EMPTY_EDITS)
-      setSelectedId(null)
       setProgress(null)
     }
   }
@@ -489,33 +506,35 @@ export default function TeamBuilderPanel({ tournamentId, teamSize, teams, signup
         </div>
       </div>
 
-      <NewTeamForm teams={view.teams} onCreate={createTeam} />
+      <fieldset disabled={saving} className="min-w-0 space-y-4">
+        <NewTeamForm teams={view.teams} onCreate={createTeam} />
 
-      <div className="grid gap-4 md:grid-cols-[minmax(0,17rem)_minmax(0,1fr)]">
-        <PoolColumn pool={view.pool} selectedId={selectedId} onSelect={select} onPlace={place} />
-        {view.teams.length === 0 ? (
-          <p className="rounded-xl border border-dashed border-border p-4 text-sm text-muted">
-            Noch kein Team. Lege oben eins an.
-          </p>
-        ) : (
-          <div className="grid content-start gap-3 grid-cols-[repeat(auto-fill,minmax(15rem,1fr))]">
-            {view.teams.map((team) => (
-              <TeamCard
-                key={team.key}
-                team={team}
-                teamSize={teamSize}
-                selectedId={selectedId}
-                allTeams={view.teams}
-                onSelect={select}
-                onPlace={place}
-                onCaptain={(key, id) => setEdits((current) => withCaptain(current, snapshot, key, id))}
-                onRename={rename}
-                onDiscard={(key) => setEdits((current) => withoutNewTeam(current, key))}
-              />
-            ))}
-          </div>
-        )}
-      </div>
+        <div className="grid gap-4 md:grid-cols-[minmax(0,17rem)_minmax(0,1fr)]">
+          <PoolColumn pool={view.pool} selectedId={selectedId} onSelect={select} onPlace={place} />
+          {view.teams.length === 0 ? (
+            <p className="rounded-xl border border-dashed border-border p-4 text-sm text-muted">
+              Noch kein Team. Lege oben eins an.
+            </p>
+          ) : (
+            <div className="grid content-start gap-3 grid-cols-[repeat(auto-fill,minmax(15rem,1fr))]">
+              {view.teams.map((team) => (
+                <TeamCard
+                  key={team.key}
+                  team={team}
+                  teamSize={teamSize}
+                  selectedId={selectedId}
+                  allTeams={view.teams}
+                  onSelect={select}
+                  onPlace={place}
+                  onCaptain={(key, id) => edit((current) => withCaptain(current, snapshot, key, id))}
+                  onRename={rename}
+                  onDiscard={(key) => edit((current) => withoutNewTeam(current, key))}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+      </fieldset>
 
       {notice && (
         <div
