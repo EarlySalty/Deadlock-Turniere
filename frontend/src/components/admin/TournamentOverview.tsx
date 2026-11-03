@@ -33,9 +33,7 @@ function CreateEntry({ active, onCreate }: CreateEntryProps) {
         <Plus size={14} />
         Turnier erstellen
       </Button>
-      <p className="text-xs text-muted">
-        Name, Termine und Format festlegen. Das Turnier erscheint danach hier in der Liste.
-      </p>
+      <p className="text-xs text-muted">Name, Termine und Format festlegen.</p>
     </div>
   )
 }
@@ -75,7 +73,7 @@ export function TournamentSidebar({ tournaments, selectedId, creating, onSelect,
                   <span className="block truncate text-sm font-medium text-foreground">{t.name}</span>
                   <span className="mt-1 flex items-center gap-2">
                     <Badge status={t.status} mode={t.tournament_mode} />
-                    <span className="truncate text-[11px] text-muted">{formatDate(tournamentStart(t))}</span>
+                    <span className="truncate text-[11px] text-muted">Start {formatDate(tournamentStart(t))}</span>
                   </span>
                 </button>
               </li>
@@ -129,7 +127,7 @@ export function CollapsedTournamentRow({ tournament: t, onSelect }: { tournament
       <Badge status={t.status} mode={t.tournament_mode} />
       <span className="flex items-center gap-1 text-xs text-muted">
         <CalendarDays size={12} />
-        {formatDate(tournamentStart(t))}
+        Start {formatDate(tournamentStart(t))}
       </span>
       <span className="flex items-center gap-1 text-xs text-muted">
         <Users size={12} />

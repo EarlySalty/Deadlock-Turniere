@@ -6,7 +6,9 @@ import {
   captainChanges,
   planSave,
   rebaseEdits,
+  restoreTemporaryNames,
   snapshotOf,
+  temporaryRenames,
 } from '../src/lib/teamBuilder.ts'
 
 const member = (id, role = 'member') => ({
@@ -135,4 +137,24 @@ test('Nach einem Teilfehler wird ein schon angelegtes Team nicht erneut angelegt
   assert.equal(view.teams.length, 1)
   assert.equal(view.teams[0].captainId, 'b')
   assert.deepEqual(captainChanges(view, snapshot, rebased, steps), [{ teamKey: 's5', discordId: 'b' }])
+})
+
+test('Wird das Zielteam gelöscht, landet der Spieler wieder in der Liste', () => {
+  const teams = [team(1, ['a'])]
+  const signups = [signup(11, 'b')]
+  const edits = { ...EMPTY_EDITS, placements: { b: 's5' } }
+  const view = buildView(teams, signups, edits)
+  assert.deepEqual(view.pool.map((p) => p.discordId), ['b'])
+  assert.deepEqual(planSave(snapshotOf(teams, signups), edits, 6), [])
+})
+
+test('Verwerfen nach Teilfehler lässt keinen Zwischennamen stehen', () => {
+  const before = [named(1, 'Alpha'), named(2, 'Beta')]
+  const edits = { ...EMPTY_EDITS, names: { s1: 'Beta', s2: 'Alpha' } }
+  const snapshot = snapshotOf(before, [])
+  const renames = temporaryRenames(snapshot, edits, planSave(snapshot, edits, 6))
+  const stuck = snapshotOf([named(1, 'Umbenennung 1'), named(2, 'Beta')], [])
+  assert.deepEqual(restoreTemporaryNames(stuck, renames).names, { s1: 'Alpha' })
+  const swapped = snapshotOf([named(1, 'Umbenennung 1'), named(2, 'Alpha')], [])
+  assert.deepEqual(restoreTemporaryNames(swapped, renames).names, { s1: 'Beta' })
 })

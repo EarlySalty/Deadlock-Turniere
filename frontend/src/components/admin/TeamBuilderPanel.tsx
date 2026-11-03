@@ -1,4 +1,4 @@
-import { useMemo, useState, type DragEvent } from 'react'
+import { useEffect, useMemo, useState, type DragEvent } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { AlertCircle, Pencil, Plus, Save, Star, Trash2, Undo2, UserMinus, Users } from 'lucide-react'
 import Card from '@/components/ui/Card'
@@ -13,13 +13,17 @@ import {
   pinCaptains,
   planSave,
   rebaseEdits,
+  restoreTemporaryNames,
   snapshotOf,
+  temporaryRenames,
   type BuilderEdits,
   type BuilderPlayer,
   type BuilderTeamView,
   type ServerSnapshot,
+  type TemporaryRename,
 } from '@/lib/teamBuilder'
 import { saveTeamBuilder, type SaveContext } from '@/components/admin/teamBuilderSave'
+import { readDraft, writeDraft } from '@/components/admin/teamBuilderDrafts'
 import type { Team, TournamentSignup } from '@/types/tournament'
 
 interface TeamBuilderPanelProps {
@@ -413,9 +417,22 @@ function saveContext(tournamentId: number, snapshot: ServerSnapshot, teams: Buil
   }
 }
 
+function useUnloadWarning(active: boolean) {
+  useEffect(() => {
+    if (!active) return
+    const warn = (event: BeforeUnloadEvent) => {
+      event.preventDefault()
+      event.returnValue = ''
+    }
+    window.addEventListener('beforeunload', warn)
+    return () => window.removeEventListener('beforeunload', warn)
+  }, [active])
+}
+
 export default function TeamBuilderPanel({ tournamentId, teamSize, teams, signups }: TeamBuilderPanelProps) {
   const queryClient = useQueryClient()
-  const [edits, setEdits] = useState<BuilderEdits>(EMPTY_EDITS)
+  const [edits, setEdits] = useState<BuilderEdits>(() => readDraft(tournamentId).edits)
+  const [renames, setRenames] = useState<TemporaryRename[]>(() => readDraft(tournamentId).renames)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null)
   const [notice, setNotice] = useState<{ tone: 'ok' | 'error'; text: string } | null>(null)
@@ -426,6 +443,9 @@ export default function TeamBuilderPanel({ tournamentId, teamSize, teams, signup
   const captains = useMemo(() => captainChanges(view, snapshot, edits, steps), [view, snapshot, edits, steps])
   const changeCount = steps.length + captains.length
   const saving = progress !== null
+
+  useEffect(() => writeDraft(tournamentId, { edits, renames }), [tournamentId, edits, renames])
+  useUnloadWarning(changeCount > 0)
 
   const edit = (change: (current: BuilderEdits) => BuilderEdits) => {
     if (!saving) setEdits(change)
@@ -469,6 +489,7 @@ export default function TeamBuilderPanel({ tournamentId, teamSize, teams, signup
     const players = [...view.pool, ...view.teams.flatMap((t) => t.members)]
     const ctx = saveContext(tournamentId, snapshot, view.teams, players)
     const pinned = pinCaptains(edits, view)
+    const pendingRenames = [...renames, ...temporaryRenames(snapshot, edits, steps)]
     setNotice(null)
     setSelectedId(null)
     setProgress({ done: 0, total: steps.length })
@@ -476,10 +497,12 @@ export default function TeamBuilderPanel({ tournamentId, teamSize, teams, signup
       await saveTeamBuilder(ctx, steps, displayedCaptains(view), (done, total) => setProgress({ done, total }))
       await refresh()
       setEdits(EMPTY_EDITS)
+      setRenames([])
       setNotice({ tone: 'ok', text: 'Teams gespeichert.' })
     } catch (error) {
       await refresh().catch(() => undefined)
       setEdits(rebaseEdits(pinned, ctx.teamIds))
+      setRenames(pendingRenames)
       const text = error instanceof Error ? error.message : 'Speichern fehlgeschlagen.'
       setNotice({ tone: 'error', text: `${text} Die übrigen Änderungen sind noch offen.` })
     } finally {
@@ -488,7 +511,10 @@ export default function TeamBuilderPanel({ tournamentId, teamSize, teams, signup
   }
 
   const reset = () => {
-    setEdits(EMPTY_EDITS)
+    const restore = restoreTemporaryNames(snapshot, renames)
+    const restoring = Object.keys(restore.names).length > 0
+    setEdits(restoring ? restore : EMPTY_EDITS)
+    if (!restoring) setRenames([])
     setSelectedId(null)
     setNotice(null)
   }

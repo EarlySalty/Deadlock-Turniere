@@ -109,6 +109,7 @@ export default function Admin() {
   const {
     data: liveDetail,
     isLoading: loadingLiveDetail,
+    error: liveDetailError,
     refetch: refetchLiveDetail,
   } = useAdminTournament(adminMode === 'live' && liveSelectedId ? liveSelectedId : 0)
 
@@ -265,6 +266,14 @@ export default function Admin() {
                     Abbrechen
                   </button>
                 </div>
+                {liveTournaments.length > 0 && (
+                  <Card className="p-4">
+                    <p className="text-sm text-warning">
+                      Solange ein aktives Turnier existiert, blockiert der Server das
+                      Anlegen eines weiteren.
+                    </p>
+                  </Card>
+                )}
                 <CreateTournamentForm key={createFormKey} template={createTemplate ?? undefined} />
               </section>
             ) : loadingLiveDetail && liveSelectedId ? (
@@ -452,6 +461,12 @@ export default function Admin() {
                   </section>
                 )}
               </>
+            ) : liveDetailError && !liveDetail ? (
+              <Card className="p-8 text-center">
+                <p className="text-sm text-red-300">
+                  Turnier konnte nicht geladen werden: {liveDetailError.message}
+                </p>
+              </Card>
             ) : liveTournaments.length === 0 ? (
               <Card className="p-8 text-center">
                 <Trophy size={32} className="mx-auto mb-3 text-muted" />

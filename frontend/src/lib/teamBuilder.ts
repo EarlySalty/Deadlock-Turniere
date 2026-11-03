@@ -105,10 +105,16 @@ function baseLocations(snapshot: ServerSnapshot): Map<string, string | null> {
   return locations
 }
 
+function knownTeamKeys(snapshot: ServerSnapshot, edits: BuilderEdits): Set<string> {
+  return new Set([...snapshot.teams.map((team) => team.key), ...edits.newTeams.map((team) => team.key)])
+}
+
 export function finalLocations(snapshot: ServerSnapshot, edits: BuilderEdits): Map<string, string | null> {
   const locations = baseLocations(snapshot)
+  const teamKeys = knownTeamKeys(snapshot, edits)
   for (const [id, target] of Object.entries(edits.placements)) {
-    if (locations.has(id)) locations.set(id, target)
+    if (!locations.has(id)) continue
+    if (target === null || teamKeys.has(target)) locations.set(id, target)
   }
   return locations
 }
@@ -359,14 +365,36 @@ export function captainChanges(
   return displayedCaptains(view).filter((wish) => after.get(wish.teamKey) !== wish.discordId)
 }
 
-export function countChanges(
-  view: BuilderView,
-  snapshot: ServerSnapshot,
-  edits: BuilderEdits,
-  teamSize: number,
-): number {
-  const steps = planSave(snapshot, edits, teamSize)
-  return steps.length + captainChanges(view, snapshot, edits, steps).length
+export interface TemporaryRename {
+  teamKey: string
+  temporary: string
+  original: string
+  intended: string
+}
+
+export function temporaryRenames(snapshot: ServerSnapshot, edits: BuilderEdits, steps: SaveStep[]): TemporaryRename[] {
+  return snapshot.teams.flatMap((team) => {
+    const intended = edits.names[team.key]
+    const step = steps.find((s) => s.kind === 'rename' && s.teamKey === team.key && s.name !== intended)
+    if (!step || step.kind !== 'rename' || intended === undefined) return []
+    return [{ teamKey: team.key, temporary: step.name, original: team.name, intended }]
+  })
+}
+
+function restoredName(snapshot: ServerSnapshot, rename: TemporaryRename): string {
+  const taken = snapshot.teams.some(
+    (team) => team.key !== rename.teamKey && nameKey(team.name) === nameKey(rename.original),
+  )
+  return taken ? rename.intended : rename.original
+}
+
+export function restoreTemporaryNames(snapshot: ServerSnapshot, renames: TemporaryRename[]): BuilderEdits {
+  const names: Record<string, string> = {}
+  for (const rename of renames) {
+    const team = snapshot.teams.find((t) => t.key === rename.teamKey)
+    if (team && team.name === rename.temporary) names[team.key] = restoredName(snapshot, rename)
+  }
+  return { ...EMPTY_EDITS, names }
 }
 
 export function pinCaptains(edits: BuilderEdits, view: BuilderView): BuilderEdits {

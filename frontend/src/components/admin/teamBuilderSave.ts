@@ -8,6 +8,7 @@ import {
   renameAdminTeam,
 } from '@/api/client'
 import type { CaptainWish, SaveStep } from '@/lib/teamBuilder'
+import type { Team } from '@/types/tournament'
 
 export interface SaveContext {
   tournamentId: number
@@ -66,13 +67,23 @@ async function runStep(ctx: SaveContext, step: SaveStep): Promise<void> {
   await assignSignupToAdminTeam(tournamentId, teamIdOf(ctx, step.teamKey), signupId)
 }
 
+function captainTarget(ctx: SaveContext, teams: Team[], wish: CaptainWish): Team {
+  const teamName = ctx.teamNames.get(wish.teamKey) ?? 'Team'
+  const team = teams.find((t) => t.id === ctx.teamIds.get(wish.teamKey))
+  if (!team) throw new SaveStepError(`„${teamName}“ wurde nicht gefunden.`)
+  if (!team.members.some((m) => m.discord_id === wish.discordId)) {
+    const player = ctx.playerNames.get(wish.discordId) ?? 'Der Spieler'
+    throw new SaveStepError(`${player} ist nicht mehr in „${teamName}“.`)
+  }
+  return team
+}
+
 async function applyCaptains(ctx: SaveContext, wishes: CaptainWish[]): Promise<void> {
   if (wishes.length === 0) return
   const detail = await fetchAdminTournament(ctx.tournamentId)
   for (const wish of wishes) {
-    const team = detail.teams.find((t) => t.id === ctx.teamIds.get(wish.teamKey))
-    if (!team || team.captain_discord_id === wish.discordId) continue
-    if (!team.members.some((m) => m.discord_id === wish.discordId)) continue
+    const team = captainTarget(ctx, detail.teams, wish)
+    if (team.captain_discord_id === wish.discordId) continue
     await changeAdminCaptain(ctx.tournamentId, team.id, wish.discordId)
   }
 }
