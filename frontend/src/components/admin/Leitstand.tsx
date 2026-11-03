@@ -56,8 +56,8 @@ function ActionRow({
               <span className={item.grace_expired ? 'text-red-300' : 'text-warning'}>
                 No-Show gemeldet: {item.no_show_name ?? 'Team'} nicht erschienen
                 {item.grace_expired
-                  ? ' — Frist abgelaufen'
-                  : ` — Frist läuft (${item.grace_minutes} min)`}
+                  ? ', Frist abgelaufen'
+                  : `, Frist läuft (${item.grace_minutes} min)`}
               </span>
             </div>
           ) : (
@@ -134,7 +134,7 @@ export default function Leitstand({ tournamentId }: LeitstandProps) {
 
       {items.length === 0 ? (
         <p className="text-xs text-muted">
-          Nichts zu tun — es liegen keine gemeldeten Ergebnisse oder No-Shows vor.
+          Nichts zu tun, es liegen keine gemeldeten Ergebnisse oder No-Shows vor.
         </p>
       ) : (
         <div className="space-y-2">

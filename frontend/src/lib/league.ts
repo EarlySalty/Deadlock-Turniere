@@ -5,6 +5,13 @@ export const LEAGUE_SCORING_TEXT =
   'Sieg: +2 Punkte, Niederlage: -1 Punkt. Bei Punktgleichheit entscheidet die Zahl der Siege, danach der direkte Vergleich.'
 export const DEFAULT_SLOT_MINUTES = 50
 
+export function leagueFinishConfirm(countsForLeaderboard: boolean): string {
+  const placement = countsForLeaderboard
+    ? 'Die Tabelle wird zur Endplatzierung und die Ranglistenpunkte werden vergeben.'
+    : 'Die Tabelle wird zur Endplatzierung.'
+  return `Turnier abschließen? Es startet kein Bracket. ${placement} Danach lassen sich keine Ergebnisse mehr ändern.`
+}
+
 export interface LeagueRound {
   round: number
   scheduledAt: string | null

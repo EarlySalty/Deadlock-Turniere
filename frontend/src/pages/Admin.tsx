@@ -331,6 +331,7 @@ export default function Admin() {
                             groups={liveDetail.groups}
                             teams={liveDetail.teams}
                             autoLobby={liveDetail.auto_lobby_enabled}
+                            countsForLeaderboard={!liveDetail.exclude_from_leaderboard}
                             onRefresh={() => void refetchLiveDetail()}
                           />
                         ) : (
@@ -517,7 +518,7 @@ export default function Admin() {
                 <Archive size={32} className="mx-auto mb-3 text-muted" />
                 <p className="text-muted">
                   Wähle links ein archiviertes Turnier, um Bracket, Teams und Caster-Liste
-                  einzusehen. Read-Only — keine Bearbeitung möglich.
+                  einzusehen. Read-Only, keine Bearbeitung möglich.
                 </p>
               </Card>
             ) : loadingArchiveDetail ? (

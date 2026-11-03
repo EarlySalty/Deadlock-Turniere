@@ -1,4 +1,4 @@
-//! `turnier-core` — die reine Domänenschicht des Turnier-Backends.
+//! `turnier-core`: die reine Domänenschicht des Turnier-Backends.
 //!
 //! Enthält Enums (das frühere Magic-String-Vokabular), Wire-DTOs (1:1 zu den
 //! Pydantic-Modellen) und kleine Grenzkonventions-Helfer. Keine Geschäftslogik,
