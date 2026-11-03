@@ -8,7 +8,7 @@ import Button from '@/components/ui/Button'
 import { Trophy, LogOut, Settings, BarChart2, User, Swords, Users, Menu, X } from 'lucide-react'
 
 const navItems = [
-  { label: 'Arena', path: '/', icon: Swords },
+  { label: 'Turniere', path: '/', icon: Swords },
   { label: 'Draft', path: '/draft', icon: Swords },
   { label: 'Comp-Finder', path: '/comp', icon: Users },
   { label: 'Rangliste', path: '/rangliste', icon: BarChart2 },

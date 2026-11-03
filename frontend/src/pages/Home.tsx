@@ -86,7 +86,7 @@ export default function Home() {
         <motion.section variants={item} className="lg:col-span-2 space-y-6">
           <h2 className="text-2xl font-bold flex items-center gap-3 tracking-widest text-primary/80">
             <Trophy size={24} />
-            Aktives Geschehen
+            Aktuelle Turniere
           </h2>
 
           {open.length > 0 ? (
@@ -97,7 +97,7 @@ export default function Home() {
             <Card className="text-center py-20 opacity-60 italic">
               <Trophy size={48} className="mx-auto text-muted mb-4 opacity-20" />
               <p className="text-muted text-xl">Gerade läuft kein Turnier.</p>
-              <p className="text-muted text-sm mt-2 uppercase tracking-widest">Warten auf die nächste Beschwörung</p>
+              <p className="text-muted text-sm mt-2 uppercase tracking-widest">Das nächste Turnier wird hier angekündigt</p>
             </Card>
           )}
         </motion.section>

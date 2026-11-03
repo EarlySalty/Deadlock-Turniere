@@ -157,7 +157,7 @@ Jeder Spieler trägt selbst die Verantwortung, sich vor Turnierbeginn über Abla
       <section className="space-y-6">
         <div className="flex items-center gap-3 border-l-2 border-primary pl-4 py-1">
           <Settings size={20} className="text-primary" />
-          <h2 className="text-xl font-bold tracking-widest text-foreground uppercase">Admin-Direktiven</h2>
+          <h2 className="text-xl font-bold tracking-widest text-foreground uppercase">Admin-Aktionen</h2>
         </div>
         <Card className="p-0 overflow-hidden border-white/5">
           <table className="w-full text-sm">

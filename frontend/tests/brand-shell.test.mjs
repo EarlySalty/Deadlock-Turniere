@@ -17,7 +17,7 @@ test('Turnier-Shell nutzt die Deutsche-Deadlock-Community-Marke', () => {
 })
 
 test('Navigation bleibt auf Desktop und Mobil erreichbar', () => {
-  assert.match(header, /Arena/)
+  assert.match(header, /Turniere/)
   assert.match(header, /Rangliste/)
   assert.match(header, /Regelwerk/)
   assert.match(header, /turnier-mobile-navigation/)

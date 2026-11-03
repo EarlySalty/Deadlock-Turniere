@@ -45,7 +45,7 @@ export default function PlayerProfile() {
   const avatarInputRef = useRef<HTMLInputElement>(null)
 
   if (!username) {
-    return <Card className="text-center py-20 opacity-60"><p className="text-muted italic">Kein Benutzername im Archiv gefunden.</p></Card>
+    return <Card className="text-center py-20 opacity-60"><p className="text-muted italic">Kein Benutzername angegeben.</p></Card>
   }
 
   if (isLoading) return <LoadingSpinner />
@@ -54,8 +54,8 @@ export default function PlayerProfile() {
     return (
       <Card className="text-center py-20 opacity-60">
         <User size={48} className="mx-auto text-muted mb-4 opacity-20" />
-        <p className="text-muted italic">Dieser Held existiert nur in Legenden.</p>
-        <Link to="/" className="text-primary text-xs font-bold uppercase tracking-widest hover:underline mt-6 inline-block">Zurück zur Arena</Link>
+        <p className="text-muted italic">Dieser Spieler wurde nicht gefunden.</p>
+        <Link to="/" className="text-primary text-xs font-bold uppercase tracking-widest hover:underline mt-6 inline-block">Zurück zu den Turnieren</Link>
       </Card>
     )
   }
@@ -167,7 +167,7 @@ export default function PlayerProfile() {
 
             <div className="flex-1 space-y-4">
               <div className="space-y-1">
-                <p className="text-[10px] font-bold text-primary uppercase tracking-[0.4em]">Profil-Dossier</p>
+                <p className="text-[10px] font-bold text-primary uppercase tracking-[0.4em]">Spielerprofil</p>
                 {editName && isOwnProfile ? (
                   <div className="flex items-center justify-center md:justify-start gap-2">
                     <input
@@ -195,7 +195,7 @@ export default function PlayerProfile() {
 
               <div className="flex flex-wrap justify-center md:justify-start gap-4">
                 <div className="px-3 py-1 rounded-lg border border-primary/20 bg-primary/5 text-[10px] font-bold text-primary uppercase tracking-widest">
-                  {profile.rank ?? 'Rekrut'}
+                  {profile.rank ?? 'Ohne Rang'}
                 </div>
                 <div className="px-3 py-1 rounded-lg border border-white/10 bg-white/5 text-[10px] font-bold text-muted uppercase tracking-widest">
                   Score: {profile.rank_score}
@@ -213,14 +213,14 @@ export default function PlayerProfile() {
                       placeholder="Über dich..."
                     />
                     <div className="flex gap-2">
-                      <Button size="sm" onClick={handleBioSave} disabled={updateProfile.isPending}>Sichern</Button>
-                      <Button variant="ghost" size="sm" onClick={() => setEditBio(false)}>Abbruch</Button>
+                      <Button size="sm" onClick={handleBioSave} disabled={updateProfile.isPending}>Speichern</Button>
+                      <Button variant="ghost" size="sm" onClick={() => setEditBio(false)}>Abbrechen</Button>
                     </div>
                   </div>
                 ) : (
                   <div className="group relative">
                     <p className="text-sm italic text-muted leading-relaxed">
-                      {profile.bio ? `"${profile.bio}"` : '"Noch wurde keine Legende über diesen Spieler geschrieben."'}
+                      {profile.bio ? `"${profile.bio}"` : '"Noch keine Beschreibung."'}
                     </p>
                     {isOwnProfile && (
                       <button onClick={handleBioEdit} className="absolute -top-6 right-0 text-muted hover:text-primary opacity-0 group-hover:opacity-100 transition-all">
@@ -250,7 +250,7 @@ export default function PlayerProfile() {
         <Card className="text-center p-6 space-y-2 border-white/5">
           <Swords size={20} className="mx-auto text-blue-400" />
           <p className="text-2xl font-bold text-foreground">{profile.matches_played}</p>
-          <p className="text-[10px] uppercase font-bold text-muted tracking-widest">Einsätze</p>
+          <p className="text-[10px] uppercase font-bold text-muted tracking-widest">Matches</p>
         </Card>
         <Card className="text-center p-6 space-y-2 border-white/5">
           <Target size={20} className="mx-auto text-green-400" />
@@ -291,7 +291,7 @@ export default function PlayerProfile() {
           <div className="space-y-6">
             <h2 className="text-xl font-bold font-display uppercase tracking-widest text-foreground flex items-center gap-3">
               <Settings size={20} className="text-primary" />
-              Präferenzen
+              Einstellungen
             </h2>
             <Card className="p-6 space-y-6 border-white/5">
                <div className="space-y-4">
@@ -309,7 +309,7 @@ export default function PlayerProfile() {
                   </div>
                   <div className="flex items-center justify-between gap-4">
                     <div>
-                      <p className="text-sm font-bold text-foreground uppercase tracking-wide">Discord Bot-Botschaften</p>
+                      <p className="text-sm font-bold text-foreground uppercase tracking-wide">Discord-Benachrichtigungen</p>
                       <p className="text-[10px] text-muted italic">Benachrichtigungen via DM erhalten.</p>
                     </div>
                     <input
@@ -323,7 +323,7 @@ export default function PlayerProfile() {
 
                {settingsSaved && (
                  <p className="text-[10px] text-green-400 font-bold uppercase tracking-widest animate-pulse">
-                   Direktive gespeichert.
+                   Einstellung gespeichert.
                  </p>
                )}
 

@@ -43,7 +43,7 @@ export default function Leaderboard() {
     >
       <div className="flex flex-col md:flex-row md:items-end justify-between gap-6 border-b border-white/5 pb-8">
         <div className="space-y-2">
-          <h1 className="text-4xl font-bold tracking-tighter text-foreground font-display">Hall of <span className="text-primary">Legends</span></h1>
+          <h1 className="text-4xl font-bold tracking-tighter text-foreground font-display">Die <span className="text-primary">Rangliste</span></h1>
           <p className="text-muted italic">Die besten Spieler aus unseren Turnieren.</p>
         </div>
         <div className="hidden md:flex gap-4">
@@ -67,8 +67,8 @@ export default function Leaderboard() {
               <thead>
                 <tr className="bg-white/5 text-left border-b border-white/10">
                   <th className="px-6 py-4 font-bold uppercase tracking-widest text-muted text-[10px] w-16 text-center">Rang</th>
-                  <th className="px-6 py-4 font-bold uppercase tracking-widest text-muted text-[10px]">Held</th>
-                  <th className="px-6 py-4 font-bold uppercase tracking-widest text-muted text-[10px] hidden sm:table-cell">Rang-Stufe</th>
+                  <th className="px-6 py-4 font-bold uppercase tracking-widest text-muted text-[10px]">Spieler</th>
+                  <th className="px-6 py-4 font-bold uppercase tracking-widest text-muted text-[10px] hidden sm:table-cell">Rang</th>
                   <th className="px-6 py-4 font-bold uppercase tracking-widest text-muted text-[10px] text-right">
                     <span className="inline-flex items-center gap-1.5">
                       <Star size={12} className="text-primary" />
@@ -76,7 +76,7 @@ export default function Leaderboard() {
                     </span>
                   </th>
                   <th className="px-6 py-4 font-bold uppercase tracking-widest text-muted text-[10px] text-right hidden md:table-cell">
-                    Einsätze
+                    Matches
                   </th>
                   <th className="px-6 py-4 font-bold uppercase tracking-widest text-muted text-[10px] text-right hidden md:table-cell">
                     Siege

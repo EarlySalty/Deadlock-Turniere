@@ -397,7 +397,7 @@ export default function Tournament() {
               <p className="text-sm font-bold text-foreground uppercase">{tournament.teams.length} Teams gemeldet</p>
             </div>
             <div className="space-y-1">
-              <p className="text-[10px] uppercase font-bold text-muted tracking-widest">{league ? 'Format' : 'Regelwerk'}</p>
+              <p className="text-[10px] uppercase font-bold text-muted tracking-widest">Format</p>
               <p className="text-sm font-bold text-foreground uppercase">{league ? LEAGUE_LABEL : tournament.bracket_format === 'single_elimination' ? 'Single Elim.' : 'Double Elim.'}</p>
             </div>
             {tournament.tournament_game_mode !== 'standard' && (
@@ -463,7 +463,7 @@ export default function Tournament() {
             <div className="space-y-4">
               <div className="flex items-center gap-2 text-primary">
                 <Mail size={18} />
-                <h3 className="text-xs font-bold uppercase tracking-widest">Einberufung</h3>
+                <h3 className="text-xs font-bold uppercase tracking-widest">Einladungen</h3>
               </div>
               <div className="space-y-3">
                 {myInvitations.map((invite) => (
@@ -483,7 +483,7 @@ export default function Tournament() {
                         disabled={isMutating}
                         onClick={() => acceptInviteMutation.mutate(invite.id, { onSuccess: () => setSuccessMsg('Team beigetreten!') })}
                       >
-                        Folgen
+                        Annehmen
                       </Button>
                       <button
                         className="p-2 text-muted hover:text-danger transition-colors"
@@ -711,7 +711,7 @@ export default function Tournament() {
                             />
                             <div className="flex gap-2">
                               <Button type="submit" size="sm" className="flex-1" disabled={createTeamMutation.isPending}>
-                                Beschwören
+                                Gründen
                               </Button>
                               <Button variant="ghost" size="sm" onClick={() => setShowCreateTeam(false)}>
                                 Abbrechen
@@ -979,7 +979,7 @@ function TournamentRangliste({ tournament }: { tournament: TournamentDetailPubli
     return (
       <Card className="p-20 text-center opacity-40 italic">
         <BarChart2 size={48} className="mx-auto text-muted mb-4 opacity-20" />
-        <p className="text-xl">Noch keine Rangordnung festgelegt.</p>
+        <p className="text-xl">Noch keine Platzierungen.</p>
       </Card>
     )
   }
