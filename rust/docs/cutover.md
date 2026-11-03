@@ -1,6 +1,6 @@
 > **Historical.** This is a dated plan, snapshot or design note. It does not describe the current state. The code on `origin/main` and the root `README.md` are authoritative. It is the cutover checklist from the Python-to-Rust migration; the Rust backend is live.
 
-# Cutover — Python → Rust
+# Cutover: Python → Rust
 
 Stand der Rust-Neuentwicklung unter `/rust` und was vor dem Scharfschalten noetig
 ist. Der Python-Stand im Repo-Root bleibt unveraendert, ist nach dem PG-Cutover
@@ -26,7 +26,7 @@ Postgres/TimescaleDB.
   Freigabe inklusive passender Oracle-Erwartung.
 - Migration == Live-Schema (Diff-Test) + idempotent auf Live-DB-Kopie.
 - Engine-Parität über die 7 portierten Python-Tests (Double-Elim-Verdrahtung,
-  Seeding, Mini-Groups, auto-num-groups, Team-Naming) — wertgenau gegen das
+  Seeding, Mini-Groups, auto-num-groups, Team-Naming), wertgenau gegen das
   Original geprüft.
 - Endpunkt-Abdeckung: POST/DELETE/PATCH deckungsgleich zur Python-Routenzahl.
 
@@ -99,11 +99,11 @@ numerisch, betrifft nur Admin-Tooling/Tests mit Dummy-Werten. Row-Count-Vergleic
 SQLite vs. zentrale Postgres vor dem Cutover: alle 9 stichprobenartig geprüften
 Tabellen (`tournaments`, `teams`, `team_members`, `tournament_signups`,
 `bracket_matches`, `group_matches`, `sessions`, `user_consents`, `rank_cache`)
-identisch — kein Delta seit dem SP1-ETL-Snapshot, kein Reconciliation-Bedarf.
+identisch; kein Delta seit dem SP1-ETL-Snapshot, kein Reconciliation-Bedarf.
 
 ## Bewusst zurückgestellt / dokumentiert
 
-Siehe [`known-issues.md`](known-issues.md) — alle beim Port gefundenen Alt-Bugs
+Siehe [`known-issues.md`](known-issues.md): alle beim Port gefundenen Alt-Bugs
 sind dort als Opt-in-Folgefixe gelistet (Verhalten 1:1 erhalten).
 
 ## Live-Cutover-Beweis (2026-07-02 02:56:53 CEST)

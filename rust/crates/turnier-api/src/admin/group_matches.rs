@@ -1,7 +1,7 @@
 //! Group-Match-Leitstand: Steam-Lobby-Operationen für Gruppen-Matches.
 //!
 //! DRY mit `matches.rs` über die [`super::steam_ops`]-Funktionen
-//! (`MatchKind::Group`) — kein Copy-Paste der Bracket-Variante.
+//! (`MatchKind::Group`), kein Copy-Paste der Bracket-Variante.
 
 use axum::extract::{Path, State};
 use axum::routing::post;
@@ -45,7 +45,7 @@ pub fn router() -> Router<AppState> {
         )
 }
 
-/// `POST .../group-matches/{match_id}/create-lobby` — Steam-Lobby für Group-Match.
+/// `POST .../group-matches/{match_id}/create-lobby`: Steam-Lobby für Group-Match.
 async fn create_lobby(
     State(state): State<AppState>,
     ModUser(user): ModUser,
@@ -61,7 +61,7 @@ async fn create_lobby(
     .await
 }
 
-/// `POST .../group-matches/{match_id}/start` — Group-Match über Steam-Bot starten.
+/// `POST .../group-matches/{match_id}/start`: Group-Match über Steam-Bot starten.
 async fn start_match(
     State(state): State<AppState>,
     ModUser(user): ModUser,
@@ -77,7 +77,7 @@ async fn start_match(
     .await
 }
 
-/// `POST .../group-matches/{match_id}/fetch-result` — Group-Ergebnis aus Deadlock laden.
+/// `POST .../group-matches/{match_id}/fetch-result`: Group-Ergebnis aus Deadlock laden.
 async fn fetch_result(
     State(state): State<AppState>,
     ModUser(user): ModUser,
@@ -93,7 +93,7 @@ async fn fetch_result(
     .await
 }
 
-/// `POST .../group-matches/{match_id}/leave-lobby` — Steam-Bot Gruppen-Lobby verlassen.
+/// `POST .../group-matches/{match_id}/leave-lobby`: Steam-Bot Gruppen-Lobby verlassen.
 async fn leave_lobby(
     State(state): State<AppState>,
     ModUser(user): ModUser,
@@ -109,7 +109,7 @@ async fn leave_lobby(
     .await
 }
 
-/// `POST .../group-matches/{match_id}/reset` — Group-Match auf pending zurücksetzen (Admin).
+/// `POST .../group-matches/{match_id}/reset`: Group-Match auf pending zurücksetzen (Admin).
 async fn reset_match(
     State(state): State<AppState>,
     AdminUser(user): AdminUser,
@@ -125,7 +125,7 @@ async fn reset_match(
     .await
 }
 
-/// `POST .../group-matches/{match_id}/manual-lobby` — party_code/steam_party_id setzen.
+/// `POST .../group-matches/{match_id}/manual-lobby`: party_code/steam_party_id setzen.
 async fn manual_lobby(
     State(state): State<AppState>,
     ModUser(user): ModUser,

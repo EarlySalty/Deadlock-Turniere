@@ -107,7 +107,7 @@ fn member_role(member_count: i64, captain_discord_id: i64) -> &'static str {
     }
 }
 
-/// `POST /api/admin/tournaments/{id}/teams` — leeres Team anlegen (201).
+/// `POST /api/admin/tournaments/{id}/teams`: leeres Team anlegen (201).
 async fn create_team(
     State(state): State<AppState>,
     ModUser(user): ModUser,
@@ -159,7 +159,7 @@ async fn create_team(
     Ok((StatusCode::CREATED, Json(team)))
 }
 
-/// `PUT /api/admin/tournaments/{id}/teams/{team_id}` — Team umbenennen.
+/// `PUT /api/admin/tournaments/{id}/teams/{team_id}`: Team umbenennen.
 async fn rename_team(
     State(state): State<AppState>,
     ModUser(user): ModUser,
@@ -214,7 +214,7 @@ struct RecruitingBody {
     recruitment_status: Option<String>,
 }
 
-/// `PATCH .../teams/{team_id}/recruiting` — Recruiting-Status setzen.
+/// `PATCH .../teams/{team_id}/recruiting`: Recruiting-Status setzen.
 async fn update_recruiting(
     State(state): State<AppState>,
     ModUser(user): ModUser,
@@ -257,7 +257,7 @@ async fn update_recruiting(
     ))
 }
 
-/// `GET .../teams/{team_id}/applications` — Bewerbungen eines Teams listen.
+/// `GET .../teams/{team_id}/applications`: Bewerbungen eines Teams listen.
 async fn list_applications(
     State(state): State<AppState>,
     _mod: ModUser,
@@ -297,7 +297,7 @@ async fn list_applications(
     Ok(Json(apps))
 }
 
-/// `POST .../applications/{app_id}/accept` — Bewerbung annehmen, Spieler ins Team.
+/// `POST .../applications/{app_id}/accept`: Bewerbung annehmen, Spieler ins Team.
 async fn accept_application(
     State(state): State<AppState>,
     ModUser(user): ModUser,
@@ -426,7 +426,7 @@ async fn accept_application(
     })))
 }
 
-/// `POST .../applications/{app_id}/reject` — Bewerbung ablehnen.
+/// `POST .../applications/{app_id}/reject`: Bewerbung ablehnen.
 async fn reject_application(
     State(state): State<AppState>,
     ModUser(user): ModUser,
@@ -471,7 +471,7 @@ async fn reject_application(
     })))
 }
 
-/// `DELETE .../teams/{team_id}` — Team löschen (nur ohne Turnier-Historie).
+/// `DELETE .../teams/{team_id}`: Team löschen (nur ohne Turnier-Historie).
 async fn delete_team(
     State(state): State<AppState>,
     ModUser(user): ModUser,
@@ -544,7 +544,7 @@ struct DiscordIdBody {
     discord_id: Option<String>,
 }
 
-/// `PUT .../teams/{team_id}/captain` — Captain innerhalb des Teams wechseln.
+/// `PUT .../teams/{team_id}/captain`: Captain innerhalb des Teams wechseln.
 async fn change_captain(
     State(state): State<AppState>,
     ModUser(user): ModUser,
@@ -595,7 +595,7 @@ async fn change_captain(
     Ok(Json(load_team_detail(&state, team_id).await?))
 }
 
-/// `DELETE .../teams/{team_id}/members/{discord_id}` — Mitglied entfernen.
+/// `DELETE .../teams/{team_id}/members/{discord_id}`: Mitglied entfernen.
 async fn remove_member(
     State(state): State<AppState>,
     ModUser(user): ModUser,
@@ -655,7 +655,7 @@ struct MoveBody {
     discord_id: Option<String>,
 }
 
-/// `POST .../teams/{team_id}/members/move` — Mitglied zwischen Teams verschieben.
+/// `POST .../teams/{team_id}/members/move`: Mitglied zwischen Teams verschieben.
 async fn move_member(
     State(state): State<AppState>,
     ModUser(user): ModUser,
@@ -760,7 +760,7 @@ struct AssignBody {
     signup_id: Option<i64>,
 }
 
-/// `POST .../teams/{team_id}/signups/assign` — Solo-Signup einem Team zuweisen.
+/// `POST .../teams/{team_id}/signups/assign`: Solo-Signup einem Team zuweisen.
 async fn assign_signup(
     State(state): State<AppState>,
     ModUser(user): ModUser,
@@ -858,7 +858,7 @@ struct AddMemberBody {
     discord_name: Option<String>,
 }
 
-/// `POST .../teams/{team_id}/add-member` — Ersatzspieler direkt hinzufügen (Admin,
+/// `POST .../teams/{team_id}/add-member`: Ersatzspieler direkt hinzufügen (Admin,
 /// nur ab group_phase/bracket).
 async fn add_member(
     State(state): State<AppState>,
@@ -976,9 +976,9 @@ async fn add_member(
     Ok(Json(load_team_detail(&state, team_id).await?))
 }
 
-/// `DELETE .../signups/{signup_id}` — nicht zugewiesenes Solo-Signup löschen.
+/// `DELETE .../signups/{signup_id}`: nicht zugewiesenes Solo-Signup löschen.
 ///
-/// Gibt das gelöschte Signup zurück (Befund admin_routes.py:2096 — 1:1 erhalten,
+/// Gibt das gelöschte Signup zurück (Befund admin_routes.py:2096, 1:1 erhalten,
 /// behavior-change: ein nicht mehr existierendes Objekt mit ID).
 async fn delete_signup(
     State(state): State<AppState>,

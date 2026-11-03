@@ -1,4 +1,4 @@
-//! Discord-REST-Anbindung für den Rollen-Fallback — als injizierbarer Trait,
+//! Discord-REST-Anbindung für den Rollen-Fallback, als injizierbarer Trait,
 //! damit Tests ihn faken können (kein echter Netzaufruf).
 //!
 //! Portiert den HTTP-Teil von `get_discord_role_rank` (`rank_reader.py`):
@@ -21,7 +21,7 @@ const DISCORD_API: &str = "https://discord.com/api/v10";
 pub trait DiscordMemberClient: Send + Sync {
     /// Liefert die Rollen-IDs (als Strings, wie von Discord geliefert) des Members
     /// `discord_id` in der konfigurierten Guild. `None` bedeutet „Member nicht
-    /// auflösbar" (z. B. 404, fehlendes Token) — exakt wie das Python-Original,
+    /// auflösbar" (z. B. 404, fehlendes Token), exakt wie das Python-Original,
     /// das bei Nicht-200 / Fehler `None` zurückgibt.
     async fn member_role_ids(&self, discord_id: &str) -> SteamResult<Option<Vec<String>>>;
 }
@@ -43,7 +43,7 @@ pub struct ReqwestDiscordClient {
 
 impl ReqwestDiscordClient {
     /// Erstellt den Client mit 10-s-Timeout. Gibt `None`, wenn Token oder Guild-ID
-    /// fehlen — dann ist der Discord-Fallback wie im Original deaktiviert
+    /// fehlen; dann ist der Discord-Fallback wie im Original deaktiviert
     /// (`if not DISCORD_BOT_TOKEN or not DISCORD_GUILD_ID: return None`).
     pub fn new(bot_token: &str, guild_id: &str) -> Option<Self> {
         Self::with_timeout(

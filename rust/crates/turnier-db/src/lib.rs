@@ -1,4 +1,4 @@
-//! `turnier-db` — Persistenz-Fundament des Turnier-Backends.
+//! `turnier-db`: Persistenz-Fundament des Turnier-Backends.
 //!
 //! Stellt den geteilten `PgPool` zur zentralen Postgres/TimescaleDB bereit.
 //! Domänen-Crates führen ihre eigenen Queries gegen den hier erzeugten Pool aus;

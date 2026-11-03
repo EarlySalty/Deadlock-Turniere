@@ -2,7 +2,7 @@
 //!
 //! Bewusst ENTKOPPELT von FastAPI/axum: das Python-Original warf in den
 //! Helfern teils `HTTPException` (Konfig fehlt) und teils `RuntimeError`
-//! (Transport/HTTP) — beides wird hier auf einen klaren Enum reduziert.
+//! (Transport/HTTP); beides wird hier auf einen klaren Enum reduziert.
 
 use thiserror::Error;
 
@@ -27,7 +27,7 @@ pub enum BrokerError {
     Http { status: u16, detail: String },
 
     /// Die Antwort war kein (Objekt-)JSON. Im Original zwei getrennte
-    /// `RuntimeError`-Meldungen — hier ein Variant mit der jeweiligen Meldung.
+    /// `RuntimeError`-Meldungen; hier ein Variant mit der jeweiligen Meldung.
     #[error("{0}")]
     BadJson(&'static str),
 }
@@ -35,6 +35,6 @@ pub enum BrokerError {
 /// Bequemer Result-Alias der Broker-Schicht.
 pub type BrokerResult<T> = Result<T, BrokerError>;
 
-/// Ungültige (nicht numerische) Snowflake-ID — verursacht KEINE Panic, sondern
+/// Ungültige (nicht numerische) Snowflake-ID, verursacht KEINE Panic, sondern
 /// landet deterministisch in der `failed`-Bucket der jeweiligen Operation.
 pub const INVALID_ID_ERROR: &str = "Ungültige Discord-ID";

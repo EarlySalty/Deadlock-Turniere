@@ -1,6 +1,6 @@
 > **Historical.** This is a dated plan, snapshot or design note. It does not describe the current state. The code on `origin/main` and the root `README.md` are authoritative. It also describes the Python backend (`backend/`), which is legacy and not run on v50671.
 
-# Steam Bridge — Custom Match Integration
+# Steam Bridge: Custom Match Integration
 
 ## 1. Übersicht & Architektur
 
@@ -47,7 +47,7 @@ Das Tournament Backend und der Steam Bot kommunizieren **nicht direkt**, sondern
 
 ---
 
-## 2. steam_tasks Tabelle — Schema & Protokoll
+## 2. steam_tasks Tabelle: Schema & Protokoll
 
 ### Schema
 
@@ -125,16 +125,16 @@ WHERE id = ? AND status = 'PENDING';
 **GC Message:** `CMsgClientToGCPartyCreate` (ID: 9123)
 
 Protobuf-Felder:
-- `is_private_lobby = true` (field 5, bool) — Erzwingt Private Lobby
-- `game_mode = 1` (field 13, ECitadelGameMode) — Normal-Modus
-- `region_mode = 1` (field 6, ECitadelRegionMode) — Europa
-- Optional: `private_lobby_settings` (field 9, PrivateLobbySettings) — Map, Cheats, Min-Players, etc.
+- `is_private_lobby = true` (field 5, bool): Erzwingt Private Lobby
+- `game_mode = 1` (field 13, ECitadelGameMode): Normal-Modus
+- `region_mode = 1` (field 6, ECitadelRegionMode): Europa
+- Optional: `private_lobby_settings` (field 9, PrivateLobbySettings): Map, Cheats, Min-Players, etc.
 
 **GC Response:** `CMsgClientToGCPartyCreateResponse` (ID: 9124)
-- `result` (field 1, EResponse) — `1` = Success
-- `party_id` (field 2, fixed64) — Die Party-ID für alle weiteren Operationen
+- `result` (field 1, EResponse): `1` = Success
+- `party_id` (field 2, fixed64): Die Party-ID für alle weiteren Operationen
 
-**SO Cache Push:** Nach der Party-Erstellung pusht der GC automatisch ein `CSOCitadelParty`-Objekt in den SO Cache des Bots. Dieses enthält den **join_code** — der Party-Code den Spieler im Spiel eingeben müssen.
+**SO Cache Push:** Nach der Party-Erstellung pusht der GC automatisch ein `CSOCitadelParty`-Objekt in den SO Cache des Bots. Dieses enthält den **join_code**: der Party-Code den Spieler im Spiel eingeben müssen.
 
 **Wichtig:** Die Response-Message (9124) enthält die `party_id`, aber **nicht** den `join_code`. Der `join_code` kommt nur über den SO Cache Push als Teil des `CSOCitadelParty`-Objekts. Der Bot muss also:
 1. Auf die Response (9124) warten -> `party_id` merken
@@ -181,7 +181,7 @@ Protobuf-Felder:
 | `uint_value` | uint32 | `31` | Slot 31 = Spectator |
 
 **GC Response:** `CMsgClientToGCPartyActionResponse` (ID: 9130)
-- `result` (field 1) — EResponse, `1` = Success
+- `result` (field 1): EResponse, `1` = Success
 
 **Result (Bot -> Backend):**
 ```json
@@ -194,7 +194,7 @@ Protobuf-Felder:
 
 ### 3.3 GC_LOBBY_READY
 
-**Zweck:** Setzt den Bot auf "Ready"-Status. Notwendig bevor das Match gestartet werden kann — der GC verlangt, dass alle Members (inkl. Spectator) ready sind.
+**Zweck:** Setzt den Bot auf "Ready"-Status. Notwendig bevor das Match gestartet werden kann; der GC verlangt, dass alle Members (inkl. Spectator) ready sind.
 
 **Payload (Backend -> Bot):**
 ```json
@@ -211,7 +211,7 @@ Protobuf-Felder:
 | `ready_state` | bool | `true` | Ready-Status setzen |
 
 **GC Response:** `CMsgClientToGCPartySetReadyStateResponse` (ID: 9143)
-- `result` (field 1) — EResponse, `1` = Success
+- `result` (field 1): EResponse, `1` = Success
 
 **Result (Bot -> Backend):**
 ```json
@@ -240,7 +240,7 @@ Protobuf-Felder:
 | `party_id` | fixed64 | (aus Payload) | Die Party-ID |
 
 **GC Response:** `CMsgClientToGCPartyStartMatchResponse` (ID: 9132)
-- `result` (field 1) — EResponse, `1` = Success
+- `result` (field 1): EResponse, `1` = Success
 
 **SO Cache Update:** Nach dem Match-Start updated der GC das `CSOCitadelParty`-Objekt mit Match-Informationen. Wenn der Dedicated Server zugewiesen wird, wird eine `match_id` verfügbar (entweder im Party-Objekt oder als separates `CSOCitadelLobby`-Objekt).
 
@@ -261,7 +261,7 @@ Protobuf-Felder:
 
 ### 3.5 GC_LOBBY_LEAVE
 
-**Zweck:** Bot verlässt die Lobby nach dem Match-Start. Optional — der Bot kann auch in der Lobby bleiben um weiterhin SO Cache Updates (z.B. Match-Ende) zu erhalten.
+**Zweck:** Bot verlässt die Lobby nach dem Match-Start. Optional: der Bot kann auch in der Lobby bleiben um weiterhin SO Cache Updates (z.B. Match-Ende) zu erhalten.
 
 **Payload (Backend -> Bot):**
 ```json
@@ -277,7 +277,7 @@ Protobuf-Felder:
 | `party_id` | fixed64 | (aus Payload) | Die Party-ID |
 
 **GC Response:** `CMsgClientToGCPartyLeaveResponse` (ID: 9126)
-- `result` (field 1) — EResponse
+- `result` (field 1): EResponse
 
 **Result (Bot -> Backend):**
 ```json
@@ -300,11 +300,11 @@ Protobuf-Felder:
 ```
 
 **GC Message:** `CMsgClientToGCGetMatchMetaData` oder vergleichbare Match-Query-Message.
-- `match_id` (field 1) — Die Deadlock Match-ID
+- `match_id` (field 1): Die Deadlock Match-ID
 
 **Match-Ergebnis enthält:**
-- `winning_team` — 0 (Amber/Team 1) oder 1 (Sapphire/Team 2)
-- `duration_s` — Match-Dauer in Sekunden
+- `winning_team`: 0 (Amber/Team 1) oder 1 (Sapphire/Team 2)
+- `duration_s`: Match-Dauer in Sekunden
 - Spieler-Stats pro Player (Kills, Deaths, Assists, Net Worth, Last Hits, Hero)
 
 **Result (Bot -> Backend):**
@@ -425,7 +425,7 @@ EAction (PartyAction, für CMsgClientToGCPartyAction):
   k_eShuffleLobby    = 4    // Teams zufällig mischen
 ```
 
-**Hinweis zu k_eSetPlayerSlot:** Der Wert des `action_id`-Feldes ist kontextabhängig. In der aktuellen Protobuf-Definition (Stand: SteamDatabase) hat `k_eSetPlayerSlot` den enum-Wert `10`. Dies kann sich ändern — immer die aktuelle .proto-Datei prüfen.
+**Hinweis zu k_eSetPlayerSlot:** Der Wert des `action_id`-Feldes ist kontextabhängig. In der aktuellen Protobuf-Definition (Stand: SteamDatabase) hat `k_eSetPlayerSlot` den enum-Wert `10`. Dies kann sich ändern; immer die aktuelle .proto-Datei prüfen.
 
 ### 4.4 CSOCitadelParty Struktur (SO Cache)
 
@@ -461,14 +461,14 @@ message CSOCitadelParty {
 ```
 
 **Wichtige Felder für die Integration:**
-- `party_id` — Wird für ALLE nachfolgenden Operationen benötigt
-- `join_code` — Der Code den Spieler im Deadlock-Client eingeben um der Lobby beizutreten
-- `members` — Zeigt wer in der Lobby ist, in welchem Team und Slot
-- `members[].is_ready` — Zeigt ob ein Spieler ready ist (relevant für Match-Start)
+- `party_id`: Wird für ALLE nachfolgenden Operationen benötigt
+- `join_code`: Der Code den Spieler im Deadlock-Client eingeben um der Lobby beizutreten
+- `members`: Zeigt wer in der Lobby ist, in welchem Team und Slot
+- `members[].is_ready`: Zeigt ob ein Spieler ready ist (relevant für Match-Start)
 
 ---
 
-## 5. Implementierung Phase A — Steam Bot (Node.js)
+## 5. Implementierung Phase A: Steam Bot (Node.js)
 
 ### 5.1 Dateien und Pfade
 
@@ -480,7 +480,7 @@ message CSOCitadelParty {
 | `src/tasks.js` | **ÄNDERN** | Neue Task-Types im Switch registrieren |
 | `src/events.js` | **ÄNDERN** | GC Response Handler + SO Cache Handler |
 
-### 5.2 custom_lobby.js — Modul-Struktur
+### 5.2 custom_lobby.js: Modul-Struktur
 
 Folgt dem bestehenden Pattern im Bot: Export ist eine Funktion die `sharedCtx` empfängt und ein Objekt mit Handler-Funktionen zurückgibt.
 
@@ -711,9 +711,9 @@ module.exports = function customLobbyModule(sharedCtx) {
     // Message-ID und Response-ID hängen von der konkreten Proto-Definition ab
     // CMsgClientToGCGetMatchMetaData und Response
     const response = await sendAndWaitForResponse(
-      /* sendMsgId */ 9091, // Beispiel — exakte ID aus Proto prüfen
+      /* sendMsgId */ 9091, // Beispiel, exakte ID aus Proto prüfen
       encoded,
-      /* responseMsgId */ 9092, // Beispiel — exakte ID aus Proto prüfen
+      /* responseMsgId */ 9092, // Beispiel, exakte ID aus Proto prüfen
       30000 // Längerer Timeout, da GC den Match ggf. erst laden muss
     );
 
@@ -721,7 +721,7 @@ module.exports = function customLobbyModule(sharedCtx) {
       return { success: false, error: 'Match result not available' };
     }
 
-    // Response parsen — Struktur hängt von der konkreten Proto ab
+    // Response parsen: Struktur hängt von der konkreten Proto ab
     const players = (response.players || []).map(p => ({
       account_id: p.account_id,
       team: p.team,
@@ -759,33 +759,33 @@ module.exports = function customLobbyModule(sharedCtx) {
   function encodePartyCreate(data) {
     // TODO: Implementierung mit protobufjs oder manuellem Encoding
     // Felder: is_private_lobby (field 5, bool), game_mode (field 13), region_mode (field 6)
-    throw new Error('Not implemented — Proto encoding needed');
+    throw new Error('Not implemented: Proto encoding needed');
   }
 
   function encodePartyAction(data) {
     // Felder: party_id (field 1, fixed64), target_account_id (field 2, uint32),
     //         action_id (field 3, uint32), uint_value (field 4, uint32)
-    throw new Error('Not implemented — Proto encoding needed');
+    throw new Error('Not implemented: Proto encoding needed');
   }
 
   function encodeSetReadyState(data) {
     // Felder: party_id (field 1, fixed64), ready_state (field 2, bool)
-    throw new Error('Not implemented — Proto encoding needed');
+    throw new Error('Not implemented: Proto encoding needed');
   }
 
   function encodeStartMatch(data) {
     // Felder: party_id (field 1, fixed64)
-    throw new Error('Not implemented — Proto encoding needed');
+    throw new Error('Not implemented: Proto encoding needed');
   }
 
   function encodePartyLeave(data) {
     // Felder: party_id (field 1, fixed64)
-    throw new Error('Not implemented — Proto encoding needed');
+    throw new Error('Not implemented: Proto encoding needed');
   }
 
   function encodeGetMatchMetaData(data) {
     // Felder: match_id (field 1)
-    throw new Error('Not implemented — Proto encoding needed');
+    throw new Error('Not implemented: Proto encoding needed');
   }
 
   // ============================================================
@@ -838,7 +838,7 @@ module.exports = function customLobbyModule(sharedCtx) {
 };
 ```
 
-### 5.3 tasks.js — Neue Cases im Switch
+### 5.3 tasks.js: Neue Cases im Switch
 
 Im bestehenden `processNextTask()` Switch-Block die neuen Task-Types registrieren:
 
@@ -871,7 +871,7 @@ const customLobbyModule = require('./custom_lobby');
 sharedCtx.customLobby = customLobbyModule(sharedCtx);
 ```
 
-### 5.4 events.js — SO Cache Handler und GC Response Routing
+### 5.4 events.js: SO Cache Handler und GC Response Routing
 
 In der bestehenden `receivedFromGC` Handler-Funktion müssen die neuen Response-Messages geroutet werden:
 
@@ -1002,7 +1002,7 @@ client.on('receivedFromGC', (appId, msgType, payload) => {
 
 ---
 
-## 6. Implementierung Phase B — Tournament Backend (Python)
+## 6. Implementierung Phase B: Tournament Backend (Python)
 
 ### 6.1 Dateien
 
@@ -1013,18 +1013,18 @@ client.on('receivedFromGC', (appId, msgType, payload) => {
 | `backend/tournament/admin_routes.py` | **ÄNDERN** | Neue Admin-API Endpoints |
 | `backend/config.py` | **ÄNDERN** | `STEAM_BRIDGE_DB_PATH` hinzufügen |
 
-### 6.2 config.py — Neue Einstellung
+### 6.2 config.py: Neue Einstellung
 
 ```python
 # In backend/config.py oder settings:
 STEAM_BRIDGE_DB_PATH = r"C:\Users\Nani-Admin\Documents\Deadlock\service\deadlock.sqlite3"
 ```
 
-### 6.3 steam_bridge.py — Task Queue Client
+### 6.3 steam_bridge.py: Task Queue Client
 
 ```python
 """
-Steam Bridge — Task Queue Client.
+Steam Bridge: Task Queue Client.
 Kommuniziert mit dem Steam Bot über die steam_tasks SQLite-Tabelle.
 """
 
@@ -1107,11 +1107,11 @@ async def get_task_status(task_id: int) -> dict | None:
         return None
 ```
 
-### 6.4 manager.py — Match Lifecycle
+### 6.4 manager.py: Match Lifecycle
 
 ```python
 """
-Match Manager — Steuert den Lifecycle von Custom Matches.
+Match Manager: Steuert den Lifecycle von Custom Matches.
 Orchestriert die Kommunikation mit dem Steam Bot über steam_bridge.
 """
 
@@ -1368,7 +1368,7 @@ async def leave_lobby(tid: int, mid: int, user=Depends(require_mod)):
         raise HTTPException(status_code=502, detail=str(e))
 ```
 
-### 6.6 bracket_matches Tabelle — Benötigte Spalten
+### 6.6 bracket_matches Tabelle: Benötigte Spalten
 
 Die `bracket_matches` Tabelle muss um folgende Spalten erweitert werden (falls nicht vorhanden):
 
@@ -1382,7 +1382,7 @@ ALTER TABLE bracket_matches ADD COLUMN match_stats TEXT;          -- JSON mit Sp
 
 ---
 
-## 7. Implementierung Phase C — Frontend
+## 7. Implementierung Phase C: Frontend
 
 ### 7.1 Match-Admin Panel
 
@@ -1605,7 +1605,7 @@ Fallback:  Admin kann jederzeit manuell Ergebnis eingeben
 
 ## 11. Testplan
 
-### 11.1 Manueller Test (Phase A — Steam Bot)
+### 11.1 Manueller Test (Phase A: Steam Bot)
 
 Direkt in der SQLite-Datenbank einen Task erstellen und prüfen ob der Bot ihn verarbeitet:
 
@@ -1633,7 +1633,7 @@ VALUES (
 SELECT id, status, result, error FROM steam_tasks ORDER BY id DESC LIMIT 1;
 ```
 
-### 11.2 API-Test (Phase B — Backend)
+### 11.2 API-Test (Phase B: Backend)
 
 ```bash
 # Lobby erstellen (als Admin eingeloggt):

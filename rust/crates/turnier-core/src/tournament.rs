@@ -163,7 +163,7 @@ impl TournamentCreate {
     }
 }
 
-/// Partielle Änderung eines Turniers — jedes Feld optional (`None` = unverändert).
+/// Partielle Änderung eines Turniers: jedes Feld optional (`None` = unverändert).
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct TournamentUpdate {
     #[serde(default)]
@@ -291,7 +291,7 @@ pub struct TournamentSignup {
     pub signed_up_at: String,
 }
 
-/// Öffentliche (anonymisierte) Anmeldungs-Sicht — ohne `discord_id`/`steam_id`.
+/// Öffentliche (anonymisierte) Anmeldungs-Sicht, ohne `discord_id`/`steam_id`.
 #[derive(Debug, Clone, Serialize)]
 pub struct TournamentSignupPublic {
     pub id: i64,

@@ -13,7 +13,7 @@
 //!
 //! **Sicherheits-Invariante (extern):** Der CSRF-/Replay-Schutz hängt vollständig
 //! daran, dass der Broker `state_id` bei `consume-result` genau einmal einlöst
-//! (Single-Use + ablaufend). Diese Crate erzwingt das nicht selbst — sie ist auf
+//! (Single-Use + ablaufend). Diese Crate erzwingt das nicht selbst; sie ist auf
 //! das Broker-Verhalten angewiesen (Map-Befund `needs-decision`).
 
 use std::time::Duration;
@@ -36,9 +36,9 @@ pub struct OAuthClient {
     http: reqwest::Client,
     base_url: String,
     token: String,
-    /// `<TURNIER_PUBLIC_URL>` — Basis für die Complete-Redirect-URL.
+    /// `<TURNIER_PUBLIC_URL>`: Basis für die Complete-Redirect-URL.
     public_url: String,
-    /// `<DISCORD_GUILD_ID>` — geht als Metadata an `initiate`.
+    /// `<DISCORD_GUILD_ID>`: geht als Metadata an `initiate`.
     guild_id: String,
 }
 
@@ -48,7 +48,7 @@ impl std::fmt::Debug for OAuthClient {
     }
 }
 
-/// Metadata-Block der `initiate`-Anfrage (verschachtelt — daher eigenes Struct
+/// Metadata-Block der `initiate`-Anfrage (verschachtelt, daher eigenes Struct
 /// statt der `dict[str, str]`-Typ-Lüge des Originals).
 #[derive(Debug, Serialize)]
 struct InitiateMetadata {
@@ -176,8 +176,6 @@ impl OAuthClient {
             })?;
 
         let status = response.status();
-        // Body als Text lesen — wir brauchen ihn sowohl für Fehler-Details als
-        // auch für das JSON-Parsen, und reqwest gibt den Body nur einmal her.
         let text = response.text().await.map_err(|exc| {
             AuthError::BadGateway(format!(
                 "Deadlock-Bots OAuth-Service nicht erreichbar: {}",
@@ -276,7 +274,7 @@ impl OAuthClient {
 /// Normalisiert die rohen Rollen-Werte: `str(role).strip()`, leere weg.
 ///
 /// Der Broker liefert Snowflake-IDs i. d. R. als Strings, gelegentlich als
-/// Zahlen — beide Fälle werden (wie Pythons `str(role)`) in ihre String-Form
+/// Zahlen; beide Fälle werden (wie Pythons `str(role)`) in ihre String-Form
 /// gebracht.
 fn normalize_roles(raw: &[serde_json::Value]) -> Vec<String> {
     raw.iter()
@@ -289,7 +287,7 @@ fn normalize_roles(raw: &[serde_json::Value]) -> Vec<String> {
         .collect()
 }
 
-/// Extrahiert die Fehler-Detail-Meldung aus einem Non-200-Body — 1:1 zur
+/// Extrahiert die Fehler-Detail-Meldung aus einem Non-200-Body, 1:1 zur
 /// Original-Logik: JSON-`error`/`detail` (gestripped, falls non-empty), sonst
 /// gestrippter Plaintext, sonst Default.
 fn error_detail_from_body(text: &str) -> String {
@@ -319,7 +317,7 @@ fn error_detail_from_body(text: &str) -> String {
 }
 
 /// Kurzer, stabiler Bezeichner der reqwest-Fehlerklasse (für die Detail-Meldung,
-/// analog zu `exc.__class__.__name__` im Original — nie der volle Fehlertext, um
+/// analog zu `exc.__class__.__name__` im Original; nie der volle Fehlertext, um
 /// keine internen Details zu leaken).
 fn reqwest_error_kind(exc: &reqwest::Error) -> &'static str {
     if exc.is_timeout() {
@@ -404,9 +402,6 @@ mod tests {
 
     #[test]
     fn fehlende_config_meldet_503() {
-        // Leere Basis-URL = nicht konfiguriert (wie der Default-Leerstring im
-        // Original). Whitespace-only wäre — wie bei Pythons `if base_url:` nach
-        // `rstrip("/")` — KEIN „nicht konfiguriert", daher bewusst echtes "".
         let client = OAuthClient {
             http: reqwest::Client::new(),
             base_url: String::new(),

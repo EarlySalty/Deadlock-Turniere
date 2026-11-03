@@ -1,4 +1,4 @@
-//! Rang-Domäne — die einzige Quelle der Wahrheit für Tier↔Name und `rank_score`.
+//! Rang-Domäne: die einzige Quelle der Wahrheit für Tier↔Name und `rank_score`.
 //!
 //! Im Python-Original lag dieselbe Rangliste in drei Quellen (`MAIN_RANK_ROLE_IDS`,
 //! `RANK_NAMES_BY_TIER`, `seeding.RANK_KEYS`) und die Score-Formel in drei
@@ -35,7 +35,7 @@ pub fn rank_name_for_tier(tier: i64) -> Option<&'static str> {
 
 /// Liefert das Tier zu einem Rang-Namen (Groß-/Kleinschreibung egal), sonst `None`.
 ///
-/// Spiegelt `seeding.RANK_VALUES.get(rank.lower(), 0)` — ein unbekannter Name
+/// Spiegelt `seeding.RANK_VALUES.get(rank.lower(), 0)`; ein unbekannter Name
 /// ergibt `None` (≙ Tier 0 im Python-Default).
 pub fn tier_for_rank_name(name: &str) -> Option<i64> {
     let needle = name.trim().to_lowercase();
@@ -48,7 +48,7 @@ pub fn tier_for_rank_name(name: &str) -> Option<i64> {
 /// Klemmt einen Subrang auf das gültige Intervall 1..=6.
 ///
 /// Entspricht exakt `max(1, min(6, int(subrank or 3)))` aus `seeding.py`. Wichtig:
-/// Pythons `subrank or 3` nutzt Falsy-Semantik — sowohl `None` ALS AUCH `0` werden
+/// Pythons `subrank or 3` nutzt Falsy-Semantik: sowohl `None` ALS AUCH `0` werden
 /// zu 3 (nicht etwa 0→1). Erst danach wird auf 1..=6 geklemmt (negative Werte → 1,
 /// Werte > 6 → 6).
 fn clamp_subrank(subrank: Option<i64>) -> i64 {
@@ -59,7 +59,7 @@ fn clamp_subrank(subrank: Option<i64>) -> i64 {
     base.clamp(1, 6)
 }
 
-/// Balance-Score aus Tier und Subrang — die EINE Score-Funktion des Subsystems.
+/// Balance-Score aus Tier und Subrang: die EINE Score-Funktion des Subsystems.
 ///
 /// Formel exakt wie im Python-Original (`reader._rank_score` / `seeding.rank_score`):
 /// - Subrang wird auf 1..=6 geklemmt (Default 3 bei `None`).

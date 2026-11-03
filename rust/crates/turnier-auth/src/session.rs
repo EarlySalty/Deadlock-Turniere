@@ -1,6 +1,6 @@
 //! Opake Server-Sessions: Token-Erzeugung, Persistenz und Auflösung.
 //!
-//! Sessions sind KEINE JWTs (trotz `JWT_SECRET` in der Config) — sie sind reine
+//! Sessions sind KEINE JWTs (trotz `JWT_SECRET` in der Config); sie sind reine
 //! Zufalls-Tokens in der DB-Tabelle `sessions`. Diese Crate erzeugt das Token
 //! wie das Python-Original (`secrets.token_urlsafe(48)` = 48 Zufalls-Bytes,
 //! base64url ohne Padding), persistiert die Zeile mit 7-Tage-Ablauf und löst sie
@@ -25,7 +25,7 @@ const TOKEN_BYTES: usize = 48;
 /// Eine roh aus der DB gelesene Session-Zeile.
 ///
 /// Die `is_admin`/`is_mod`-Flags werden NICHT gespeichert, sondern beim Auflösen
-/// frisch aus `discord_roles` gegen die Config-Rollen berechnet — exakt wie im
+/// frisch aus `discord_roles` gegen die Config-Rollen berechnet, exakt wie im
 /// Original.
 #[derive(Debug, Clone, sqlx::FromRow)]
 struct SessionRow {
@@ -58,7 +58,7 @@ fn parse_roles(raw: Option<&str>) -> Vec<String> {
 
 /// Legt eine neue Session an (Login-Completion). Gibt das erzeugte Token zurück.
 ///
-/// `roles` wird kommasepariert gespeichert (un-normalisiert wie im Original —
+/// `roles` wird kommasepariert gespeichert (un-normalisiert wie im Original;
 /// Map-Befund `needs-decision`: Rollen werden als CSV-String eingefroren). Der
 /// Ablauf wird als RFC3339-UTC geschrieben.
 pub async fn create_session(
@@ -146,7 +146,6 @@ pub async fn resolve_session(
     };
 
     if Utc::now() > row.expires_at {
-        // Opportunistisch aufräumen — der Original-Code ließ die Zeile stehen.
         let _ = delete_session(pool, token).await;
         return Err(AuthError::Unauthorized("Session abgelaufen"));
     }
@@ -167,7 +166,7 @@ pub async fn resolve_session(
 /// Parst `expires_at` als RFC3339-UTC.
 ///
 /// Das eigene Schema schreibt ausschließlich tz-aware ISO (`to_rfc3339()`), daher
-/// gibt es — anders als der defensive naive-Fallback im Original — hier keinen
+/// gibt es (anders als der defensive naive-Fallback im Original) hier keinen
 /// Pfad für tz-naive Werte. Ein unparsbarer Wert ist ein echter Datenfehler und
 /// wird als ungültige Session (401) behandelt, nicht stillschweigend als UTC
 /// angenommen.

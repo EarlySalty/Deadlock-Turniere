@@ -1,11 +1,11 @@
-//! `turnier-steam` — Rang-Resolver des Turnier-Backends.
+//! `turnier-steam`: Rang-Resolver des Turnier-Backends.
 //!
-//! Löst zu einer Discord-ID ein Deadlock-Rang-Profil auf — in einer dreistufigen
+//! Löst zu einer Discord-ID ein Deadlock-Rang-Profil auf, in einer dreistufigen
 //! Kaskade (portiert aus `rank_reader.py`):
-//! 1. **Cache** — L1 (prozesslokal) + L2 (Tabelle `rank_cache`), TTL 24 h.
-//! 2. **Steam-Bridge** — read-only Lookup in der externen Discord-Bot-SQLite
+//! 1. **Cache**: L1 (prozesslokal) + L2 (Tabelle `rank_cache`), TTL 24 h.
+//! 2. **Steam-Bridge**: read-only Lookup in der externen Discord-Bot-SQLite
 //!    (`steam_links`), bevorzugt der Primary-Account.
-//! 3. **Discord-Rollen** — REST-Fallback: höchste Rang-Rolle des Guild-Members,
+//! 3. **Discord-Rollen** als REST-Fallback: höchste Rang-Rolle des Guild-Members,
 //!    aufgelöst über das Subrank-Rollen-Mapping der Bridge-DB.
 //!
 //! Die Rang-Domäne ([`rank`]) ist die EINE Quelle der Wahrheit für die

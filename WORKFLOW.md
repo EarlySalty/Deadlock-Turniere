@@ -1,10 +1,10 @@
 > **Historical.** This is a dated plan, snapshot or design note. It does not describe the current state. The code on `origin/main` and the root `README.md` are authoritative. It is the German work log of the Python-to-Rust migration and later fixes.
 
-# Turnier-Bot Upgrade – WORKFLOW
+# Turnier-Bot Upgrade: WORKFLOW
 
 ---
 
-## Neue Aufgabe (2026-07-02): Rework T13-Kritiker — 4 Befunde
+## Neue Aufgabe (2026-07-02): Rework T13-Kritiker: 4 Befunde
 
 ### Ziel
 - Vier Abschluss-Kritiker-Befunde praezise fixen: atomare Status-/Gruppen-/Bracket-Transition, Single-Active-Advisory-Lock, Steam-Bridge-Fallback, Cutover-Runbook-Korrektur.
@@ -20,7 +20,7 @@
 - Workspace-Test gruen via zentralem Wegwerf-PG-Wrapper: `cargo test --workspace --features testing -- --include-ignored` (280 Tests, 0 fehlgeschlagen).
 
 ### Status (2026-07-02)
--> **Abgeschlossen fuer GPT-Worker** — Review durch Claude ausstehend
+-> **Abgeschlossen fuer GPT-Worker**: Review durch Claude ausstehend
 
 ---
 
@@ -84,7 +84,7 @@
 - Kein `cargo run -p turnier-bot -- --check` gegen Live-/Produktiv-DB ausgefuehrt; kein Commit/Push.
 
 ### Status (2026-07-02)
--> **Abgeschlossen fuer GPT-Worker** — Review durch Claude ausstehend
+-> **Abgeschlossen fuer GPT-Worker**: Review durch Claude ausstehend
 
 ---
 
@@ -106,7 +106,7 @@
 - Rework-Verifikation gruen: Build, Clippy, Fmt und volle `turnier-api`-Testsuite via zentralem Wegwerf-Postgres-Harness.
 
 ### Status (2026-07-02)
--> **Abgeschlossen fuer GPT-Worker** — Review durch Claude ausstehend
+-> **Abgeschlossen fuer GPT-Worker**: Review durch Claude ausstehend
 
 ### Fortschritt
 - `WORKFLOW.md`, Git-Status und SP4-Planabschnitte T10/T11 gelesen.
@@ -134,7 +134,7 @@
 - Keine Secrets ausgeben, kein Commit/Push.
 
 ### Status (2026-07-01)
--> **Abgeschlossen fuer GPT-Worker** — Review durch Claude ausstehend
+-> **Abgeschlossen fuer GPT-Worker**: Review durch Claude ausstehend
 
 ### Fortschritt
 - `WORKFLOW.md`, T9-Planabschnitt, Scheduler-Code, Scheduler-Tests und zentrales `0009_turnier.sql` gelesen.
@@ -159,7 +159,7 @@
 - Bestehende uncommitted T8-Aenderungen erhalten; kein Commit/Push.
 
 ### Status (2026-07-01)
--> **Abgeschlossen fuer GPT-Worker** — Review durch Claude ausstehend
+-> **Abgeschlossen fuer GPT-Worker**: Review durch Claude ausstehend
 
 ### Fortschritt
 - `WORKFLOW.md`, Git-Status und relevante Persistenz-/Testdateien gelesen.
@@ -185,7 +185,7 @@
 - Keine Codeaenderungen an Produktiv-/Testcode, kein Commit/Push.
 
 ### Status (2026-07-01)
-→ **Abgeschlossen** — Review-Befunde an Claude zurueckzugeben
+→ **Abgeschlossen**: Review-Befunde an Claude zurueckzugeben
 
 ### Fortschritt
 - `WORKFLOW.md`, Git-Status, Branch und Basis-Commit gelesen; bestehende uncommitted Aenderungen bleiben unangetastet.
@@ -206,7 +206,7 @@
 - Keine Secrets ausgeben, kein Commit/Push.
 
 ### Status (2026-07-01)
-→ **Abgeschlossen fuer GPT-Worker** — Review durch Claude ausstehend
+→ **Abgeschlossen fuer GPT-Worker**: Review durch Claude ausstehend
 
 ### Fortschritt
 - `WORKFLOW.md`, T8-Planabschnitt, zentrale `0009_turnier.sql`, bestehende Engine-Persistenz, T7-`turnier-match`-PG-Muster und Aufrufer per `rg` gelesen.
@@ -232,7 +232,7 @@
 - `advance_bracket_winner_pg`/`advance_in_tx_pg` kurz gegen alte Engine-Propagation pruefen.
 
 ### Status (2026-07-01)
-→ **Abgeschlossen fuer GPT-Worker** — Rework umgesetzt, Review durch Claude ausstehend
+→ **Abgeschlossen fuer GPT-Worker**: Rework umgesetzt, Review durch Claude ausstehend
 
 ### Fortschritt
 - `WORKFLOW.md`, Git-Status, `turnier_match::result`, `turnier_engine::mini_groups` und alte Engine-Persistenz fuer Mini-Groups/Advance gelesen.
@@ -256,7 +256,7 @@
 - Keine Codeaenderungen an Produktiv-/Testcode, kein Commit/Push.
 
 ### Status (2026-07-01)
-→ **Abgeschlossen** — Review-Befund an Claude zurückzugeben
+→ **Abgeschlossen**: Review-Befund an Claude zurückzugeben
 
 ### Fortschritt
 - `WORKFLOW.md`, `git status`, Basis-Commit und T7-Diffstat gelesen; bestehende uncommitted Aenderungen bleiben unangetastet.
@@ -275,7 +275,7 @@
 - Tests/Build/Clippy/Fmt fuer `turnier-match` ausfuehren; keine Secrets ausgeben, kein Commit/Push.
 
 ### Status (2026-07-01)
-→ **Abgeschlossen fuer GPT-Worker** — T7 umgesetzt, Review durch Claude ausstehend
+→ **Abgeschlossen fuer GPT-Worker**: T7 umgesetzt, Review durch Claude ausstehend
 
 ### Fortschritt
 - `WORKFLOW.md`, T7-Planabschnitt, Git-Status und `turnier-match`-SQLite-Stellen gelesen.
@@ -299,7 +299,7 @@
 - Tests/Build/Clippy/Fmt fuer die vier Crates ausfuehren; keine Secrets ausgeben, kein Commit/Push.
 
 ### Status (2026-07-01)
-→ **Abgeschlossen fuer GPT-Worker** — T3-T5 umgesetzt, Review durch Claude ausstehend
+→ **Abgeschlossen fuer GPT-Worker**: T3-T5 umgesetzt, Review durch Claude ausstehend
 
 ### Fortschritt
 - `WORKFLOW.md`, Git-Status und SP4-Plan gelesen.
@@ -324,7 +324,7 @@
 - Keine Codeänderungen, kein Commit/Push, keine Live-Daten anfassen.
 
 ### Status (2026-07-01)
-→ **Abgeschlossen** — Review-Befunde an Claude zurückzugeben
+→ **Abgeschlossen**: Review-Befunde an Claude zurückzugeben
 
 ### Fortschritt
 - `WORKFLOW.md`, `git status --short --branch` und `git diff --stat` gelesen.
@@ -344,7 +344,7 @@
 - Kein Commit/Push; Änderungen bleiben uncommitted fuer Claude-Review.
 
 ### Status (2026-07-01)
-→ **Abgeschlossen fuer GPT-Worker** — T2 umgesetzt, Review durch Claude ausstehend
+→ **Abgeschlossen fuer GPT-Worker**: T2 umgesetzt, Review durch Claude ausstehend
 
 ### Fortschritt
 - `WORKFLOW.md`, SP4-Plan, T1-Stand, zentrale `0009_turnier.sql` und Rust-Doku gelesen.
@@ -364,7 +364,7 @@
 - Kein Commit/Push; Änderungen bleiben uncommitted fuer Claude-Review.
 
 ### Status (2026-07-01)
-→ **Abgeschlossen fuer GPT-Worker** — T0/T1 umgesetzt, Review durch Claude ausstehend
+→ **Abgeschlossen fuer GPT-Worker**: T0/T1 umgesetzt, Review durch Claude ausstehend
 
 ### Fortschritt
 - `WORKFLOW.md` und SP4-Plan gelesen; vorhandene uncommitted `WORKFLOW.md`-Aenderung und untracked Audit-Datei nicht zurueckgesetzt.
@@ -386,7 +386,7 @@
 - Keine Live-Daten anfassen, keine Dienste neu starten, kein Push/Commit durch GPT-Worker.
 
 ### Status (2026-07-01)
-→ **Abgeschlossen fuer GPT-Worker** — Plan geschrieben, Review/Commit durch Claude ausstehend
+→ **Abgeschlossen fuer GPT-Worker**: Plan geschrieben, Review/Commit durch Claude ausstehend
 
 ### Fortschritt
 - `WORKFLOW.md` gelesen; vorhandener Arbeitsbaum hatte bereits eine untracked Audit-Datei, nicht angefasst.
@@ -405,7 +405,7 @@
 - Kein Commit/Push, kein Deploy.
 
 ### Status (2026-06-30)
-→ **Abgeschlossen** — beide HIGH-Fixes umgesetzt, Build/Clippy/Tests gruen
+→ **Abgeschlossen**: beide HIGH-Fixes umgesetzt, Build/Clippy/Tests gruen
 
 ### Fortschritt
 - Audit `rust/docs/audit/2026-06-30-enforcement-gap-audit.md` vollstaendig gelesen.
@@ -427,7 +427,7 @@
 - Kein Commit/Push, kein Service-Restart, kein Release-Build.
 
 ### Status (2026-06-29)
-→ **Abgeschlossen** — Rework umgesetzt, Debug-Build/Clippy/Tests gruen
+→ **Abgeschlossen**: Rework umgesetzt, Debug-Build/Clippy/Tests gruen
 
 ### Fortschritt
 - WORKFLOW gelesen; vorhandener Arbeitsbaum enthaelt bereits Phase0-Task4-Aenderungen.
@@ -447,7 +447,7 @@
 - Kein Commit/Push, kein Service-Restart, kein Release-Build.
 
 ### Status (2026-06-29)
-→ **Abgeschlossen** — Implementierung und Abschluss-Verifikation grün
+→ **Abgeschlossen**: Implementierung und Abschluss-Verifikation grün
 
 ### Fortschritt
 - Audit, Schema und betroffene Rust-Dateien gelesen.
@@ -466,7 +466,7 @@
 - Keine Funktionsänderung, kein Release-Build, kein Commit/Push.
 
 ### Status (2026-06-29)
-→ **Abgeschlossen** — Rename umgesetzt, Debug-Build/Clippy/Tests grün
+→ **Abgeschlossen**: Rename umgesetzt, Debug-Build/Clippy/Tests grün
 
 ### Fortschritt
 - Plan gelesen: `docs/plans/2026-06-29-turnier-automatik-phase0.md`, Task 1.
@@ -487,7 +487,7 @@
 - **Test-Modus**: `is_test`-Flag pro Turnier; Endpoints zum Erstellen von Test-Usern, Test-Turnieren, Match-Ergebnis-Simulation und Wipe. UI-Section, in der Test-Daten generiert/gelöscht werden.
 
 ### Status (2026-04-25)
-→ **In Arbeit** — Backend-Implementierung durch GPT-Worker läuft
+→ **In Arbeit**: Backend-Implementierung durch GPT-Worker läuft
 
 ### Scope (Backend, an GPT delegiert)
 1. **`backend/db.py`**:
@@ -495,15 +495,15 @@
    - Neue Spalte `tournaments.is_test INTEGER NOT NULL DEFAULT 0` + Migration.
 2. **Caster-Layer (`backend/tournament/admin_routes.py` + `backend/match/manager.py`)**:
    - Neue Endpoints: `GET/POST /admin/tournaments/{id}/casters`, `DELETE /admin/tournaments/{id}/casters/{discord_id}`.
-   - Per-Match-Endpoints (`/tournaments/{id}/matches/{match_id}/casters`) als Read-Only erhalten — sie geben zukünftig die Tournament-Caster zurück (Backwards-Compat fürs Frontend übergangsweise).
+   - Per-Match-Endpoints (`/tournaments/{id}/matches/{match_id}/casters`) als Read-Only erhalten: sie geben zukünftig die Tournament-Caster zurück (Backwards-Compat fürs Frontend übergangsweise).
    - `_load_match_casters(match_type, match_id)` in `manager.py`: Lookup tournament_id über match → liest aus `tournament_casters`. Falls Tournament-Liste leer, fallback auf alte `match_casters`-Einträge (Backwards-Compat).
    - Audit-Log-Einträge `tournament_caster_assign` / `tournament_caster_remove`.
 3. **Test-Modus (`backend/admin/test_mode.py` neu, eingebunden in `main.py`)**:
    - `is_test` in `TournamentCreate/Update/TournamentDetailPublic` Pydantic-Modellen.
-   - Neue Module-Routen `POST /admin/test/users` (body `{count}`), `GET /admin/test/users`, `DELETE /admin/test/users` — erzeugt/löscht User mit Discord-IDs `test_<6-stellig>` in `user_profiles` + simulierter `rank_cache`-Eintrag.
-   - `POST /admin/test/tournaments` (body `{name, team_size, num_teams, mode, game_mode}`) — erstellt komplettes Test-Turnier mit `is_test=1`, Teams + Members aus Test-User-Pool, Captain-Naming, optional auto-checkin → Status auf `bracket` setzen für sofortigen Test.
-   - `POST /admin/test/tournaments/{id}/simulate-round` — würfelt Ergebnisse für alle offenen Matches der aktuellen Runde, ruft `apply_bracket_match_result` / `apply_group_match_result`.
-   - `DELETE /admin/test/wipe` — löscht alle Test-User + alle `is_test=1` Turniere + abhängige Daten (signups, teams, matches, mini_groups …).
+   - Neue Module-Routen `POST /admin/test/users` (body `{count}`), `GET /admin/test/users`, `DELETE /admin/test/users`: erzeugt/löscht User mit Discord-IDs `test_<6-stellig>` in `user_profiles` + simulierter `rank_cache`-Eintrag.
+   - `POST /admin/test/tournaments` (body `{name, team_size, num_teams, mode, game_mode}`): erstellt komplettes Test-Turnier mit `is_test=1`, Teams + Members aus Test-User-Pool, Captain-Naming, optional auto-checkin → Status auf `bracket` setzen für sofortigen Test.
+   - `POST /admin/test/tournaments/{id}/simulate-round`: würfelt Ergebnisse für alle offenen Matches der aktuellen Runde, ruft `apply_bracket_match_result` / `apply_group_match_result`.
+   - `DELETE /admin/test/wipe`: löscht alle Test-User + alle `is_test=1` Turniere + abhängige Daten (signups, teams, matches, mini_groups …).
    - Endpoints alle `require_owner` (oder `require_mod` wenn keine Owner-Trennung existiert).
 4. **Tests**: Smoke-Test pro neuem Endpoint via `httpx.AsyncClient` (falls pytest-Setup vorhanden).
 
@@ -520,9 +520,9 @@
 2. **`frontend/src/api/client.ts` + `hooks/useTournament.ts`**: `useTournamentCasters`, `useAssignTournamentCaster`, `useRemoveTournamentCaster`, `useTestUsers`, `useCreateTestUsers`, `useWipeTestUsers`, `useCreateTestTournament`, `useSimulateRound`, `useWipeTestData`.
 3. **`pages/Admin.tsx`**: Top-Level-Mode-State `'live' | 'archive' | 'test'` als Tabs oben; Sidebar zeigt nur passende Liste; Archiv-Detail-View mit Banner "Read-Only" und reduzierten Phase-Tabs; Test-Tab mit Test-Mode-Tools-Panel.
 4. **Neue Komponenten**:
-   - `TournamentCasterPanel` — wird in der Voice/Caster-Phase angezeigt (Live + Archiv), Multi-Select aus Discord-Rollen-Pool.
-   - `ArchivedTournamentView` — gedimmter Read-Only-Container für archivierte Turniere.
-   - `TestModePanel` — Buttons: Seed N Users, Erstelle Test-Turnier, Simuliere Runde, Wipe.
+   - `TournamentCasterPanel`: wird in der Voice/Caster-Phase angezeigt (Live + Archiv), Multi-Select aus Discord-Rollen-Pool.
+   - `ArchivedTournamentView`: gedimmter Read-Only-Container für archivierte Turniere.
+   - `TestModePanel` mit Buttons: Seed N Users, Erstelle Test-Turnier, Simuliere Runde, Wipe.
 5. **`MatchAdminPanel.tsx`**: Per-Match-`CasterPanel` entfernen oder als Read-Only-Anzeige der Tournament-Caster lassen (Default: entfernen).
 
 ### Verifikation
@@ -542,7 +542,7 @@
 - Double-Elimination im Backend tatsächlich erzeugen und Loser-Routing persistieren
 
 ### Status (2026-05-09)
-→ **Abgeschlossen** — Engine/DB/Tests + Frontend-Bracket-Visualisierung umgesetzt
+→ **Abgeschlossen**: Engine/DB/Tests + Frontend-Bracket-Visualisierung umgesetzt
 
 ### Fortschritt
 - Relevante Stellen geprüft: `backend/tournament/engine.py`, `backend/db.py`, `backend/tournament/admin_routes.py`, `backend/tournament/models.py`, `backend/match/result_processor.py`, bestehende Tests in `backend/tests/`
@@ -563,7 +563,7 @@
 - API/Modelle/Tests für Mini-Groups und neue Match-Metadaten
 
 ### Status (2026-04-25)
-→ **In Arbeit** — Backend-Refactor läuft
+→ **In Arbeit**: Backend-Refactor läuft
 
 ### Fortschritt
 - Plan-Datei `/home/naniadm/.claude/plans/wir-m-ssen-den-turnier-sprightly-lemon.md` vollständig gelesen
@@ -576,7 +576,7 @@
 
 ---
 
-## Neue Aufgabe (2026-04-18): Feature-Erweiterungen — Voice, Bo3, Draft, Stats, Lobby
+## Neue Aufgabe (2026-04-18): Feature-Erweiterungen: Voice, Bo3, Draft, Stats, Lobby
 
 ### Ziel
 - **A** Voice-Kanal-Runden-Management: Start/Nächste Runde, Split Teams → VC1/VC2 → Sammelpunkt
@@ -586,7 +586,7 @@
 - **E** Lobby-Announcement: Lobby-Code immer in Kanal 1412411665713987635 mit User-Pings
 
 ### Status (2026-04-18)
-→ **Gestartet** — GPT-Worker werden dispatched
+→ **Gestartet**: GPT-Worker werden dispatched
 
 ### Fortschritt GPT-Worker A1 (2026-04-18)
 - `service/master_broker.py` in `Deadlock-Bots` um `move-voice` und `voice-channel/members` erweitert
@@ -670,12 +670,12 @@ Bot entscheidet automatisch, ob Gruppen-Phase oder nur Bracket basierend auf Tea
 Zusätzlich: Hilfe-Dokumentation für Turnier-Modi.
 
 ### Status (2026-04-15)
-→ **Implementierung fertig** — Syntaktisch korrekt, Review & Commit ausstehend
+→ **Implementierung fertig**: Syntaktisch korrekt, Review & Commit ausstehend
 
 ### Implementierungs-Schritte
 1. [x] `models.py`: `TournamentMode` Enum + `force_tournament_mode` Feld in Create/Update
 2. [x] `engine.py`: `determine_tournament_mode(team_count, force_mode)` Funktion
-3. [x] `scheduler.py`: Auto-Logik in `_get_due_next_status()` — wenn bracket_only → skip group_phase
+3. [x] `scheduler.py`: Auto-Logik in `_get_due_next_status()`, wenn bracket_only → skip group_phase
 4. [x] `db.py`: `tournament_mode` Spalte hinzugefügt via `_ensure_schema_upgrades()`
 5. [x] `admin_routes.py`: Override-Flag in Create/Update, Mode-Berechnung, Validierung
 6. [x] Hilfe-Datei `HELP_TOURNAMENT_MODES.md` erstellt (Erklärungen, Unterschiede, Ablauf, FAQ)
@@ -701,7 +701,7 @@ Zusätzlich: Hilfe-Dokumentation für Turnier-Modi.
 3. Doppeltes „Zeitplan anpassen"-Panel im TournamentManager entfernen
 
 ### Status (2026-04-15)
-→ **In Bearbeitung** — GPT-Worker laufen
+→ **In Bearbeitung**: GPT-Worker laufen
 
 ### Fortschritt GPT-Worker 2 (2026-04-15)
 - Frontend-Dateien für Profilbild/Anzeigename/`checkin_start` vollständig geprüft
@@ -765,12 +765,12 @@ Großes Feature-Upgrade mit 8 Phasen: DSGVO-Consent, Discord-ID-Schutz, Ranglist
 
 ## Relevante Dateien
 **Backend:**
-- `backend/db.py` – Schema + _ensure_schema_upgrades
-- `backend/tournament/models.py` – Neue Public-Varianten
-- `backend/tournament/routes.py` – Öffentliche Endpunkte
-- `backend/tournament/admin_routes.py` – Admin-Endpunkte
-- `backend/tournament/points.py` – NEU: Punkte-Berechnung
-- `backend/main.py` – Neue Router einbinden
+- `backend/db.py`: Schema + _ensure_schema_upgrades
+- `backend/tournament/models.py`: Neue Public-Varianten
+- `backend/tournament/routes.py`: Öffentliche Endpunkte
+- `backend/tournament/admin_routes.py`: Admin-Endpunkte
+- `backend/tournament/points.py`: NEU: Punkte-Berechnung
+- `backend/main.py`: Neue Router einbinden
 
 **Frontend:**
 - `frontend/src/types/tournament.ts`

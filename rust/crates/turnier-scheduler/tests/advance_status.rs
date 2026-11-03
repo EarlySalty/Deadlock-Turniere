@@ -2,7 +2,7 @@
 //! Wegwerf-PG-DB.
 //!
 //! Getestet wird der Übergang OHNE Generierungs-Seiteneffekte (registration →
-//! checkin), die Generierung selbst (group_phase/bracket) ist in turnier-engine
+//! checkin); die Generierung selbst (group_phase/bracket) ist in turnier-engine
 //! abgedeckt. Discord/Match sind No-op-Fakes.
 
 mod common;

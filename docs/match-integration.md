@@ -1,6 +1,6 @@
 > **Historical.** This is a dated plan, snapshot or design note. It does not describe the current state. The code on `origin/main` and the root `README.md` are authoritative. It also describes the Python backend (`backend/`), which is legacy and not run on v50671.
 
-# Match-Integration — Lobby, Ergebnisse & Bracket-Advancement
+# Match-Integration: Lobby, Ergebnisse & Bracket-Advancement
 
 ## 1. Übersicht
 
@@ -85,12 +85,12 @@ Jedes Bracket-Match durchläuft definierte Status-Übergänge:
 | Status | Bedeutung | Auslöser | DB-Felder gesetzt |
 |--------|-----------|----------|-------------------|
 | `pending` | Match wartet auf Lobby | Bracket-Generierung | team1_id, team2_id |
-| `checkin` | Check-in-Phase läuft | **NOCH NICHT IMPLEMENTIERT** | — |
+| `checkin` | Check-in-Phase läuft | **NOCH NICHT IMPLEMENTIERT** | - |
 | `lobby_created` | Custom Lobby erstellt, Party-Code verfügbar | Admin: "Lobby erstellen" | steam_party_id, party_code |
 | `in_progress` | Match läuft im Spiel | Admin: "Match starten" | deadlock_match_id |
 | `completed` | Match beendet, Gewinner steht fest | Auto-Fetch oder manuell | winner_id, match_duration_s, match_stats, played_at |
 | `forfeit` | Team hat aufgegeben/nicht erschienen | **NOCH NICHT IMPLEMENTIERT** | winner_id |
-| `cancelled` | Match abgesagt | **NOCH NICHT IMPLEMENTIERT** | — |
+| `cancelled` | Match abgesagt | **NOCH NICHT IMPLEMENTIERT** | - |
 
 ### Status-Übergänge im Code
 
@@ -161,7 +161,7 @@ CREATE TABLE checkins (
 
 ---
 
-## 4. Backend — Funktionen im Detail
+## 4. Backend: Funktionen im Detail
 
 ### 4.1 Match Manager (`backend/match/manager.py`)
 
@@ -169,8 +169,8 @@ Orchestriert den gesamten Match-Lifecycle. Delegiert GC-Kommunikation an `steam_
 
 #### `create_lobby(tournament_id, match_id, *, game_mode=1, region_mode=1)`
 
-1. Validiert Match: `_require_match_ready_for_lobby()` — blockiert wenn status ∈ {completed, cancelled, forfeit} oder wenn team1/team2 NULL
-2. Prüft auf Duplikate: `_ensure_no_duplicate_lobby_request()` — blockiert wenn `steam_party_id` schon gesetzt oder wenn bereits ein PENDING/RUNNING Task für dieses Match existiert
+1. Validiert Match: `_require_match_ready_for_lobby()`, blockiert wenn status ∈ {completed, cancelled, forfeit} oder wenn team1/team2 NULL
+2. Prüft auf Duplikate: `_ensure_no_duplicate_lobby_request()`, blockiert wenn `steam_party_id` schon gesetzt oder wenn bereits ein PENDING/RUNNING Task für dieses Match existiert
 3. Erstellt Steam-Task: `steam_bridge.create_task("GC_CREATE_CUSTOM_LOBBY", {...})`
 4. Pollt auf Ergebnis: `steam_bridge.poll_task_result(task_id, timeout_s=45)`
 5. Extrahiert `party_id` und `party_code_display` oder `join_code` aus Result
@@ -242,7 +242,7 @@ Abstrahiert die SQLite Task Queue unter `C:\Users\Nani-Admin\Documents\Deadlock\
 
 ### 4.3 Result Processor (`backend/match/result_processor.py`)
 
-Zentrale Funktion — wird von Auto-Fetch UND manuellem Ergebnis verwendet.
+Zentrale Funktion: wird von Auto-Fetch UND manuellem Ergebnis verwendet.
 
 #### `apply_bracket_match_result(tournament_id, match_id, *, winning_team, duration_s, players, source)`
 
@@ -338,7 +338,7 @@ Response 200: { status: "ok", winner_id }
 
 ---
 
-## 6. Frontend — Komponenten
+## 6. Frontend: Komponenten
 
 ### 6.1 MatchAdminPanel (`components/admin/MatchAdminPanel.tsx`)
 
@@ -446,7 +446,7 @@ Admin klickt "Lobby erstellen" für Match 42
 Admin teilt Party-Code (Discord/Website)
   → Spieler: Deadlock → Play → Custom Lobby → Join with Code
   → Alle 12 Spieler (6v6) müssen in der Lobby sein
-  → Kein automatischer Check — Admin bestätigt visuell
+  → Kein automatischer Check; Admin bestätigt visuell
 ```
 
 ### Schritt 4: Match starten
@@ -521,9 +521,9 @@ Zyklus wiederholt sich bis zum Finale.
 | BYE-Handling (Freilose) | ✅ generate + propagate | ✅ "Freilos" Anzeige |
 | Party-Code Anzeige + Copy | ✅ In DB gespeichert | ✅ Copy-to-Clipboard |
 | Match-Status State Machine (7 Werte) | ✅ Backend Enum | ✅ Farbige Badges |
-| Audit Logging (alle Endpoints) | ✅ audit_log Tabelle | — |
+| Audit Logging (alle Endpoints) | ✅ audit_log Tabelle | - |
 | Spieler-Stats Speicherung | ✅ match_stats JSON | ❌ Nicht angezeigt |
-| Stale-Task-Cleanup (hängende RUNNING Tasks) | ✅ 120s Timeout → FAILED | — |
+| Stale-Task-Cleanup (hängende RUNNING Tasks) | ✅ 120s Timeout → FAILED | - |
 
 ### NICHT implementiert ❌
 
@@ -531,7 +531,7 @@ Zyklus wiederholt sich bis zum Finale.
 |---------|----------------|-----------|-----------|
 | **Check-in System** | `checkin.py` = 2 Zeilen Stub, DB-Tabelle existiert | Logik, Routes, Frontend | Hoch |
 | **Match Scheduler** | `scheduler.py` = 2 Zeilen Stub | Background Tasks, Auto-Timeouts, APScheduler | Mittel |
-| **Echtzeit-Updates** | Fehlt komplett | Kein WebSocket/SSE/Polling — nur manueller Refresh | Mittel |
+| **Echtzeit-Updates** | Fehlt komplett | Kein WebSocket/SSE/Polling, nur manueller Refresh | Mittel |
 | **Discord Webhooks** | `DISCORD_WEBHOOK_URL` in config, wird nicht verwendet | Notification-Logik für Match-Events | Mittel |
 | **Forfeit/Cancelled** | Status-Werte existieren, kein Endpoint/UI | Admin-Endpoint + Button | Mittel |
 | **Gruppen-Matches via Steam** | Nur manuelle Ergebnisse | Steam-Felder in group_matches, Integration | Niedrig |
@@ -539,17 +539,17 @@ Zyklus wiederholt sich bis zum Finale.
 
 ---
 
-## 9. Was noch zu tun ist — Detail
+## 9. Was noch zu tun ist: Detail
 
 ### 9.1 Check-in System (`backend/tournament/checkin.py`)
 
 **Aktuell:** Nur Docstring, keine Funktionen.
 
 **Zu implementieren:**
-1. `open_checkin(match_id, deadline_minutes=15)` — Öffnet Check-in, setzt status='checkin'
-2. `checkin_player(match_id, discord_id)` — Spieler checkt ein, Eintrag in `checkins` Tabelle
-3. `get_checkin_status(match_id)` — Welche Spieler pro Team eingecheckt
-4. `close_checkin(match_id)` — Prüft ob alle da, sonst Forfeit für fehlendes Team
+1. `open_checkin(match_id, deadline_minutes=15)`: Öffnet Check-in, setzt status='checkin'
+2. `checkin_player(match_id, discord_id)`: Spieler checkt ein, Eintrag in `checkins` Tabelle
+3. `get_checkin_status(match_id)`: Welche Spieler pro Team eingecheckt
+4. `close_checkin(match_id)`: Prüft ob alle da, sonst Forfeit für fehlendes Team
 5. API Endpoints: Admin öffnet Check-in, Spieler checkt ein (public mit Auth)
 6. Frontend: Check-in-Button für Spieler, Status-Übersicht für Admin
 
@@ -582,7 +582,7 @@ Zyklus wiederholt sich bis zum Finale.
 **Zu implementieren:**
 1. `POST /api/admin/tournaments/{tid}/matches/{mid}/forfeit` mit `{forfeiting_team_id}`
 2. Setzt winner_id auf gegnerisches Team, ruft `advance_bracket_winner()` auf
-3. `POST .../cancel` — setzt status='cancelled'
+3. `POST .../cancel`: setzt status='cancelled'
 4. Frontend: Forfeit/Cancel Buttons im MatchAdminPanel
 
 ### 9.6 Gruppen-Matches via Steam (Zukunft)
@@ -599,7 +599,7 @@ Backend pollt `steam_tasks` statt Callback. Gründe:
 - **Einfach:** Kein WebSocket/HTTP-Callback zwischen Bot und Backend
 - **Robust:** Bei Backend-Restart einfach weiterpolten
 - **Entkoppelt:** Bot und Backend haben keine direkte Verbindung
-- **Nachteil:** ~0.5s Latenz (Poll-Intervall) — für Turniere akzeptabel
+- **Nachteil:** ~0.5s Latenz (Poll-Intervall), für Turniere akzeptabel
 
 ### Warum 3-Step Match-Start?
 

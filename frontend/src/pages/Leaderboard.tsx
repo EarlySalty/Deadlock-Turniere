@@ -6,7 +6,7 @@ import Card from '@/components/ui/Card'
 import LoadingSpinner from '@/components/ui/LoadingSpinner'
 
 function placementLabel(placement: number | null): string {
-  if (!placement) return '—'
+  if (!placement) return '-'
   if (placement === 1) return '1. Platz'
   if (placement === 2) return '2. Platz'
   if (placement <= 4) return 'Halbfinale'
@@ -112,7 +112,7 @@ export default function Leaderboard() {
                           {entry.rank}
                         </span>
                       ) : (
-                        <span className="text-muted text-[10px] uppercase tracking-widest">—</span>
+                        <span className="text-muted text-[10px] uppercase tracking-widest">-</span>
                       )}
                     </td>
                     <td className="px-6 py-4 text-right font-bold text-primary text-base">

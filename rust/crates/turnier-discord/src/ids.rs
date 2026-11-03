@@ -6,7 +6,7 @@
 //! sondern landen deterministisch in der `failed`-Bucket der jeweiligen
 //! Operation (siehe [`crate::notifier`]). Das Python-Original rief `int(id)`
 //! ohne `try/except` und ließ einen `ValueError` durchschlagen (Befund
-//! discord_notifier.py:208/225/456/499 — "behavior-change"); der Port erhält
+//! discord_notifier.py:208/225/456/499, "behavior-change"); der Port erhält
 //! das *beobachtbare* Verhalten (kein Versand bei ungültiger ID), ohne den
 //! Prozess mit einer Panic zu gefährden.
 
@@ -35,7 +35,7 @@ pub fn unique_preserve_order(values: &[String]) -> Vec<String> {
 /// Parst eine String-ID als Snowflake. `None`, wenn nicht rein numerisch.
 ///
 /// Bewusst strikt wie `int(...)` in Python: führende/folgende Whitespaces
-/// werden — wie schon in [`unique_preserve_order`] — getrimmt, ein nicht
+/// werden (wie schon in [`unique_preserve_order`]) getrimmt, ein nicht
 /// numerischer Rest ergibt `None` (statt Panic).
 pub fn parse_snowflake(value: &str) -> Option<u64> {
     value.trim().parse::<u64>().ok()

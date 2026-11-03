@@ -82,7 +82,7 @@ export default function Home() {
             Deadlock <span className="bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent">Turniere</span>
           </motion.h1>
           <motion.p variants={item} className="mx-auto mt-6 max-w-2xl text-lg leading-relaxed text-muted md:text-xl">
-            Anmeldung, Draft, Spielplan und Rangliste an einem Ort – für Community-Turniere ohne unnötigen Orga-Overhead.
+            Anmeldung, Draft, Spielplan und Rangliste an einem Ort, für Community-Turniere ohne unnötigen Orga-Overhead.
           </motion.p>
         </div>
       </section>

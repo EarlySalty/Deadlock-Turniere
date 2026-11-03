@@ -1,4 +1,4 @@
-//! `turnier-discord` — Broker-Client-Schicht zwischen Turnier-Backend und dem
+//! `turnier-discord`: Broker-Client-Schicht zwischen Turnier-Backend und dem
 //! zentralen "Discord-Master-Broker" (separater interner HTTP-Dienst).
 //!
 //! Kapselt alle Discord-seitigen Effekte (Match-Channel anlegen/löschen,

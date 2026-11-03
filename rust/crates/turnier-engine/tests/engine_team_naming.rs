@@ -3,7 +3,7 @@
 //!
 //! Der Python-Test patcht `random.shuffle` auf einen No-op, damit die
 //! Signup-Reihenfolge erhalten bleibt. Hier injizieren wir denselben Effekt über
-//! [`NoShuffle`] — die Reihenfolge bleibt wie geladen, sodass die geprüften Namen
+//! [`NoShuffle`][]: die Reihenfolge bleibt wie geladen, sodass die geprüften Namen
 //! WÖRTLICH reproduziert werden.
 
 #![cfg(feature = "testing")]

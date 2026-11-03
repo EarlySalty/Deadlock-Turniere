@@ -18,7 +18,7 @@ Gefunden wurden zwei belastbare Enforcement-Gaps:
 
 Nicht als Befund gemeldet: Auth-/RBAC-Extractor, Host-Guard, Auto-Lobby-Gates, Single-Active-Tournament-Gate, Caster-Zuweisung auf Turnier-Ebene, No-Show-Schonfrist-Anzeige. Diese Pfade wurden gegen Aufrufstellen geprüft; dort fand ich keinen überlebenden Enforcement-Gap im Sinne dieser Aufgabe.
 
-## HIGH — Proposal kann ohne echte Caster-Freigabe auf `approved`
+## HIGH: Proposal kann ohne echte Caster-Freigabe auf `approved`
 
 **Guard-Definition:** `rust/crates/turnier-automatik/src/proposals.rs:196` definiert `approvals_count()`, und die Datenmodell-/Spec-Definition verlangt mindestens einen Caster-Approve (`docs/specs/2026-06-29-turnier-automatisierung-design.md:17`, `:64`, `:87`, `:115`). Votes werden in `record_vote()` gespeichert (`rust/crates/turnier-automatik/src/proposals.rs:153`).
 
@@ -39,7 +39,7 @@ Variante: Ein Mod-User kann `POST /api/admin/proposals/{id}/votes` mit beliebige
 
 **Py-Referenz:** Keine Python-Feature-Referenz vorhanden; das Automatik-Feature ist laut Plan neu. Der Plan markiert 1a als DB/Logik-Fundament ohne Endpunkte, spätere Phasen sollen Callback/Freigabe verdrahten (`docs/plans/2026-06-29-turnier-automatik-phase1.md:9-12`, `:35-36`).
 
-## HIGH — `tournament_dm_optout` wird von Live-DM-Sendepfaden ignoriert
+## HIGH: `tournament_dm_optout` wird von Live-DM-Sendepfaden ignoriert
 
 **Guard-Definition:** Opt-out wird über `/api/me/dm-optout` geschrieben (`rust/crates/turnier-api/src/account.rs:56-63`) und gelöscht (`:66-73`). Die Guard-Logik existiert in `turnier_automatik::optout`: `set_optout()` (`rust/crates/turnier-automatik/src/optout.rs:45`), `is_opted_out()` (`:65`) und `compute_recipients()` (`:94`). Die Spec definiert `tournament_dm_optout` als DM-Unterdrückung und verlangt Rollenmitglieder minus Opt-out (`docs/specs/2026-06-29-turnier-automatisierung-design.md:89`, `:94`, `:104`, `:118`).
 

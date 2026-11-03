@@ -62,7 +62,7 @@ pub struct DraftSession {
     pub lobby_result: Option<Value>,
 }
 
-/// Vollständiger Draft-Zustand — Rückgabe von [`crate::get_draft_state`].
+/// Vollständiger Draft-Zustand, Rückgabe von [`crate::get_draft_state`].
 ///
 /// Entspricht dem zusammengesetzten Dict des Originals: alle Session-Felder
 /// (über `session`), die Aktionsliste und die abgeleiteten Sichten.
@@ -83,7 +83,7 @@ pub struct DraftState {
     pub picks_team2: Vec<String>,
 }
 
-/// Folgezustand nach einer Aktion — Rückgabe von [`crate::take_action`].
+/// Folgezustand nach einer Aktion, Rückgabe von [`crate::take_action`].
 ///
 /// Entspricht dem `{is_complete, next_action_type, next_team_slot}`-Dict, das
 /// `submit_action` über den Vollzustand merged.

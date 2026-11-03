@@ -2,7 +2,7 @@
 //!
 //! Deckt den Lebenszyklus ab: anlegen → auflösen (inkl. Flag-Berechnung) →
 //! löschen → abgelaufene wegräumen. Keine externen Dienste (kein Broker,
-//! kein Discord) — nur DB.
+//! kein Discord), nur DB.
 
 use std::collections::HashSet;
 

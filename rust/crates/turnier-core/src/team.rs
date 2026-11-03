@@ -26,7 +26,7 @@ pub struct TeamMember {
     pub joined_at: String,
 }
 
-/// Öffentliche Mitglieds-Sicht — ohne `discord_id`.
+/// Öffentliche Mitglieds-Sicht, ohne `discord_id`.
 #[derive(Debug, Clone, Serialize)]
 pub struct TeamMemberPublic {
     pub id: i64,

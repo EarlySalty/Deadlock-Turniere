@@ -3,7 +3,7 @@
 //! Im Python-Original wurden die Admin-/Mod-Rollen-Mengen bei JEDEM
 //! authentifizierten Request neu aus den Config-CSV-Strings geparst
 //! (`config.py` baute jedes Mal ein frisches `set`). Hier parsen wir sie EINMAL
-//! beim Start in [`RoleSets`] und halten sie im AppState — gleiches Ergebnis,
+//! beim Start in [`RoleSets`] und halten sie im AppState; gleiches Ergebnis,
 //! kein Hot-Path-Reparsen (Map-Befund „safe").
 //!
 //! Modell der Rollen-Ordnung (User < Mod < Admin): Admin impliziert Mod. Das

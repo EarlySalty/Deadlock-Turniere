@@ -1,6 +1,6 @@
 //! Reine, DB-freie Bracket-Algorithmen.
 //!
-//! Diese Untermodule kapseln die gesamte Verdrahtungs-Mathematik der Engine —
+//! Diese Untermodule kapseln die gesamte Verdrahtungs-Mathematik der Engine:
 //! Slot-Modell, Seed-Reihenfolge, Slot-Verteilung, Snake-Draft, Gruppen-Anzahl,
 //! Round-Robin und die Double-Elimination-Rundengrößen/Drop-Ziele. Keine Funktion
 //! hier berührt eine Datenbank; alle sind per Unit-Test gegen das Python-Original

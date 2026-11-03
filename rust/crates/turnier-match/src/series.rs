@@ -85,7 +85,7 @@ pub struct GameStats<'a> {
 ///
 /// Bug-preserved (Befund series_manager.py:108-132): `series_format` wird ohne
 /// Null-Guard als ganze Zahl gelesen. Die Spalte ist `NOT NULL DEFAULT 1`, daher
-/// in der Praxis nie NULL — ein dennoch NULL-er Wert führte im Original zu einem
+/// in der Praxis nie NULL; ein dennoch NULL-er Wert führte im Original zu einem
 /// `TypeError`; hier scheitert die Dekodierung analog (kein stiller Default).
 pub async fn record_game_result(
     pool: &Pool,

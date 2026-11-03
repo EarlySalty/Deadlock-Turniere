@@ -126,7 +126,7 @@ impl BrokerClient {
     }
 }
 
-/// Ermittelt die Fehler-`detail`-Meldung aus dem Non-200-Body — exakt nach der
+/// Ermittelt die Fehler-`detail`-Meldung aus dem Non-200-Body, exakt nach der
 /// Reihenfolge im Python-Original.
 fn error_detail(body_text: &str) -> String {
     const DEFAULT: &str = "Discord-Broker Fehler";

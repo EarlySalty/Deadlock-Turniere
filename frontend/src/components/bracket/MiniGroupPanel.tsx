@@ -64,7 +64,7 @@ export default function MiniGroupPanel({ miniGroups, matches, teams }: MiniGroup
           </h3>
           <p className="mt-1 text-xs text-muted">
             Wenn die Teamzahl nicht 1:1 aufteilbar ist, spielen die Teams in einem Slot jeder gegen
-            jeden — der Sieger rückt in die nächste Bracket-Runde auf. Kein Team bekommt ein Freilos.
+            jeden. Der Sieger rückt in die nächste Bracket-Runde auf. Kein Team bekommt ein Freilos.
           </p>
         </div>
       </header>

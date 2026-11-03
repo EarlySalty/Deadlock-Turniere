@@ -1,4 +1,4 @@
-//! Consent-Router — Datenschutz-Einwilligung und Nutzer-Profil inkl.
+//! Consent-Router: Datenschutz-Einwilligung und Nutzer-Profil inkl.
 //! Avatar-Upload/-Auslieferung (portiert `tournament/consent_routes.py`).
 //!
 //! - `/api/consent` (GET/POST/DELETE): Einwilligungsstatus lesen, setzen
@@ -201,7 +201,7 @@ async fn reload_profile(pool: &turnier_db::Pool, user: &UserSession) -> WebResul
 
 // --- Consent-Endpunkte ---
 
-/// `GET /api/consent` — Einwilligungsstatus des eingeloggten Nutzers.
+/// `GET /api/consent`: Einwilligungsstatus des eingeloggten Nutzers.
 async fn get_consent(
     State(state): State<AppState>,
     AuthUser(user): AuthUser,
@@ -228,7 +228,7 @@ async fn get_consent(
     }))
 }
 
-/// `POST /api/consent` (201) — Einwilligung setzen/aktualisieren.
+/// `POST /api/consent` (201): Einwilligung setzen/aktualisieren.
 async fn set_consent(
     State(state): State<AppState>,
     AuthUser(user): AuthUser,
@@ -258,7 +258,7 @@ async fn set_consent(
     ))
 }
 
-/// `DELETE /api/consent` (204) — Einwilligung widerrufen; 409 bei aktiver
+/// `DELETE /api/consent` (204): Einwilligung widerrufen; 409 bei aktiver
 /// Turnierteilnahme.
 async fn revoke_consent(
     State(state): State<AppState>,
@@ -278,7 +278,7 @@ async fn revoke_consent(
 
 // --- Profil-Endpunkte ---
 
-/// `GET /api/profile` — eigenes Profil (oder Default-Profil, wenn keine Zeile).
+/// `GET /api/profile`: eigenes Profil (oder Default-Profil, wenn keine Zeile).
 async fn get_my_profile(
     State(state): State<AppState>,
     AuthUser(user): AuthUser,
@@ -311,7 +311,7 @@ async fn get_my_profile(
     }
 }
 
-/// `PUT /api/profile` — eigenes Profil aktualisieren (partiell, UPSERT-Logik).
+/// `PUT /api/profile`: eigenes Profil aktualisieren (partiell, UPSERT-Logik).
 async fn update_my_profile(
     State(state): State<AppState>,
     AuthUser(user): AuthUser,
@@ -428,7 +428,7 @@ async fn update_my_profile(
     Ok(Json(reload_profile(pool, &user).await?))
 }
 
-/// `POST /api/profile/avatar` — Avatar als Multipart hochladen.
+/// `POST /api/profile/avatar`: Avatar als Multipart hochladen.
 async fn upload_profile_avatar(
     State(state): State<AppState>,
     AuthUser(user): AuthUser,
@@ -573,7 +573,7 @@ async fn latest_discord_avatar(
     Ok(row.and_then(|(avatar,)| avatar).filter(|a| !a.is_empty()))
 }
 
-/// `GET /api/avatars/{discord_id}` — gespeicherte Datei oder Redirect oder 404.
+/// `GET /api/avatars/{discord_id}`: gespeicherte Datei oder Redirect oder 404.
 async fn get_avatar(
     State(state): State<AppState>,
     Path(discord_id): Path<String>,
@@ -587,7 +587,7 @@ async fn get_avatar(
     Err(WebError::not_found("Avatar nicht gefunden"))
 }
 
-/// `GET /api/avatars/by-name/{discord_name}` — Avatar über den Discord-Namen.
+/// `GET /api/avatars/by-name/{discord_name}`: Avatar über den Discord-Namen.
 async fn get_avatar_by_name(
     State(state): State<AppState>,
     Path(discord_name): Path<String>,

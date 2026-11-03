@@ -9,7 +9,7 @@
 /// (`.round()` auf f64), was für alle nicht-.5-Fälle identisch ist.
 ///
 /// HINWEIS (bug-preserved): Das zweite Clamping auf `team_count/2` passiert
-/// bewusst weiterhin in `generate_groups` (`actual_groups`), nicht hier — exakt
+/// bewusst weiterhin in `generate_groups` (`actual_groups`), nicht hier, exakt
 /// wie im Original, wo `_auto_num_groups` und `_generate_groups_in_db` getrennt
 /// klemmen.
 pub fn auto_num_groups(team_count: usize) -> usize {

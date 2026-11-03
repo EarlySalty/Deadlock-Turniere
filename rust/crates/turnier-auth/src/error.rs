@@ -2,7 +2,7 @@
 //!
 //! Die Varianten bilden exakt die HTTP-Semantik des Python-Originals ab
 //! (FastAPI-`HTTPException`-Statuscodes), damit turnier-api sie 1:1 in Responses
-//! übersetzen kann — ohne dass diese Crate selbst von axum abhängt.
+//! übersetzen kann, ohne dass diese Crate selbst von axum abhängt.
 
 use thiserror::Error;
 

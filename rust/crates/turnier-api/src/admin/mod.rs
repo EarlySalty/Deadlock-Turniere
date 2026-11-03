@@ -3,17 +3,17 @@
 //!
 //! Aufgeteilt entlang der fachlichen Cluster in thematische Submodule:
 //!
-//! - [`tournaments`] — Turnier-CRUD + Status-Maschine (Statuswechsel über
+//! - [`tournaments`][]: Turnier-CRUD + Status-Maschine (Statuswechsel über
 //!   [`turnier_scheduler::advance_tournament_status`] mit `source="manual"`).
-//! - [`phases`] — Check-in finalisieren + Solo-Spieler zufällig verteilen.
-//! - [`teams`] — Team-/Mitglieder-/Bewerbungs-/Signup-Verwaltung.
-//! - [`brackets`] — Gruppen-/Bracket-Generierung.
-//! - [`matches`] — Bracket-Match-Leitstand (Ergebnis, Serien, Steam-Lobby,
+//! - [`phases`][]: Check-in finalisieren + Solo-Spieler zufällig verteilen.
+//! - [`teams`][]: Team-/Mitglieder-/Bewerbungs-/Signup-Verwaltung.
+//! - [`brackets`][]: Gruppen-/Bracket-Generierung.
+//! - [`matches`][]: Bracket-Match-Leitstand (Ergebnis, Serien, Steam-Lobby,
 //!   ConVars/Event-Presets).
-//! - [`group_matches`] — Group-Match-Leitstand (DRY mit [`matches`] über
+//! - [`group_matches`][]: Group-Match-Leitstand (DRY mit [`matches`] über
 //!   [`steam_ops`] und `MatchKind::Group`).
-//! - [`casters`] — Caster-Verwaltung (Turnier-Ebene; Match-Ebene deprecated).
-//! - [`voice`] — Discord-Voice-Steuerung.
+//! - [`casters`][]: Caster-Verwaltung (Turnier-Ebene; Match-Ebene deprecated).
+//! - [`voice`][]: Discord-Voice-Steuerung.
 //!
 //! Geteilte Bausteine: [`helpers`] (Audit/Loader/Invarianten/Tree-Lösch-SQL),
 //! [`loaders`] (Detail-Lese-Loader), [`tournament_row`] (Turnier-DTO-Mapping),

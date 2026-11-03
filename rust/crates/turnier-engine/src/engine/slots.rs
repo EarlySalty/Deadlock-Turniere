@@ -2,7 +2,7 @@
 //!
 //! Im Python-Original war ein Bracket-Slot ein `@dataclass _BracketEntryRef` mit
 //! DREI optionalen Feldern (`team_id` / `source_match_id` / `source_mini_group_id`),
-//! die nie gleichzeitig gesetzt sein durften — eine Einladung zu ungültigen
+//! die nie gleichzeitig gesetzt sein durften; eine Einladung zu ungültigen
 //! Kombinationen. Hier kollabiert das zu genau einem Enum, das immer exakt einen
 //! Zustand trägt. `Empty` entspricht `_BracketEntryRef()` ohne gesetzte Felder
 //! (ein noch unbestimmter Slot, z. B. ein wartendes Losers-Bracket-Match).
@@ -16,7 +16,7 @@ pub enum BracketSlot {
     FromMatch(i64),
     /// Sieger einer Quell-Mini-Group (über `source_mini_group*_id` verdrahtet).
     FromMiniGroup(i64),
-    /// Noch unbestimmt (kein Team, keine Quelle) — wird später per Advancement
+    /// Noch unbestimmt (kein Team, keine Quelle), wird später per Advancement
     /// befüllt. Entspricht `_BracketEntryRef()` im Original.
     Empty,
 }

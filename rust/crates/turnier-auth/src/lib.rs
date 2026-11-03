@@ -1,4 +1,4 @@
-//! `turnier-auth` — Auth-Logik unterhalb der HTTP-Schicht.
+//! `turnier-auth`: Auth-Logik unterhalb der HTTP-Schicht.
 //!
 //! Diese Crate bündelt drei Zuständigkeiten des delegierten Discord-Auth-Flows:
 //!

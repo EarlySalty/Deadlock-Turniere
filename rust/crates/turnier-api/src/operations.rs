@@ -1,4 +1,4 @@
-//! Operations-Router — Off-Stream-Ergebnis-Selbstmeldung, Admin-Bestätigung,
+//! Operations-Router: Off-Stream-Ergebnis-Selbstmeldung, Admin-Bestätigung,
 //! Leitstand und Stream-Marker (portiert `tournament/operations_routes.py`).
 //! Arbeitet ausschließlich auf Bracket-Matches.
 
@@ -156,7 +156,7 @@ impl ReportRow {
     }
 }
 
-/// `POST /api/tournaments/{tournament_id}/matches/{match_id}/report-result` —
+/// `POST /api/tournaments/{tournament_id}/matches/{match_id}/report-result`:
 /// ein Captain (oder Mod) meldet Sieger/No-Show; bleibt `pending` bis Bestätigung.
 async fn report_match_result(
     State(state): State<AppState>,
@@ -263,7 +263,7 @@ async fn report_match_result(
             .notify_users(
                 &missing_ids,
                 turnier_discord::NotificationEvent::MatchStart,
-                "Hey, dein Gegner wartet im Turnier auf dich — komm bitte in die Lobby, \
+                "Hey, dein Gegner wartet im Turnier auf dich. Komm bitte in die Lobby, \
                  sonst wird das Match als Walkover gewertet.",
             )
             .await
@@ -275,7 +275,7 @@ async fn report_match_result(
     Ok((axum::http::StatusCode::CREATED, Json(report_row.into_dto())))
 }
 
-/// `GET /api/admin/tournaments/{tournament_id}/action-items` — offene Meldungen
+/// `GET /api/admin/tournaments/{tournament_id}/action-items`: offene Meldungen
 /// für den Admin-Leitstand inkl. No-Show-Schonfrist-Status.
 async fn get_action_items(
     State(state): State<AppState>,
@@ -374,7 +374,7 @@ async fn load_report(pool: &turnier_db::Pool, report_id: i64) -> WebResult<Repor
         .ok_or_else(|| WebError::not_found("Meldung nicht gefunden"))
 }
 
-/// `POST /api/admin/result-reports/{report_id}/confirm` — Meldung bestätigen und
+/// `POST /api/admin/result-reports/{report_id}/confirm`: Meldung bestätigen und
 /// das Match werten.
 async fn confirm_result_report(
     State(state): State<AppState>,
@@ -480,7 +480,7 @@ async fn confirm_result_report(
     })))
 }
 
-/// `POST /api/admin/result-reports/{report_id}/reject` — Meldung verwerfen.
+/// `POST /api/admin/result-reports/{report_id}/reject`: Meldung verwerfen.
 async fn reject_result_report(
     State(state): State<AppState>,
     ModUser(user): ModUser,
@@ -519,7 +519,7 @@ struct StreamFlagBody {
     on_stream: bool,
 }
 
-/// `PATCH /api/admin/tournaments/{tournament_id}/matches/{match_id}/stream` —
+/// `PATCH /api/admin/tournaments/{tournament_id}/matches/{match_id}/stream`:
 /// Stream-Marker eines Matches umschalten.
 async fn set_match_stream_flag(
     State(state): State<AppState>,

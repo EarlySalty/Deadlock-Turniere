@@ -1,7 +1,7 @@
 //! Live-Event-ConVar-Presets und ConVar-Normalisierung.
 //!
 //! Portiert `MATCH_EVENT_PRESETS` und `_normalize_convar_payload` aus
-//! `match/manager.py`. Reine Logik, DB-frei — die Anwendung auf eine Lobby läuft
+//! `match/manager.py`. Reine Logik, DB-frei; die Anwendung auf eine Lobby läuft
 //! über [`crate::lobby`].
 
 use serde_json::{json, Value};
@@ -99,7 +99,7 @@ pub fn normalize_convar_payload(
 /// Wandelt einen einzelnen ConVar-Wert nach den Python-Regeln.
 ///
 /// Nur String-Werte werden umgeformt; andere JSON-Typen (Zahl, Bool, …) bleiben
-/// unverändert — exakt wie das Original, das nur `isinstance(value, str)` behandelt.
+/// unverändert, exakt wie das Original, das nur `isinstance(value, str)` behandelt.
 fn normalize_convar_value(name: &str, value: &Value) -> Result<Value, MatchError> {
     let Value::String(s) = value else {
         return Ok(value.clone());

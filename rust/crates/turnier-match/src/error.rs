@@ -2,8 +2,8 @@
 //!
 //! Das Python-Original führt zwei getrennte Familien:
 //! - [`MatchResultError`] (`RuntimeError`) mit den Unterfällen `MatchNotFoundError`
-//!   und `MatchStateError` — fachliche Ergebnis-/Statusfehler.
-//! - [`SteamTaskError`] (`RuntimeError`, separat) — ungültige/unvollständige
+//!   und `MatchStateError`: fachliche Ergebnis-/Statusfehler.
+//! - [`SteamTaskError`] (`RuntimeError`, separat): ungültige/unvollständige
 //!   GC-Ergebnisdaten oder fehlgeschlagene Steam-Tasks.
 //!
 //! Hier 1:1 als zwei thiserror-Enums abgebildet. Persistenz- und Discord-Fehler
@@ -100,7 +100,7 @@ pub enum SteamTaskError {
     #[error(transparent)]
     Bridge(#[from] crate::steam_bridge::BridgeError),
 
-    /// Ein bei der Ergebnis-Übernahme entstandener [`MatchError`] — im Original
+    /// Ein bei der Ergebnis-Übernahme entstandener [`MatchError`]; im Original
     /// fängt `_fetch_match_result_for_match` `MatchResultError` und verpackt ihn
     /// als `SteamTaskError(f"Ungueltige Steam-Ergebnisdaten: {exc}")`.
     #[error("Ungueltige Steam-Ergebnisdaten: {0}")]
@@ -132,15 +132,13 @@ impl From<sqlx::Error> for SteamTaskError {
 
 /// `MatchError` → `SteamTaskError`: bildet `_fetch_match_result_for_match`
 /// nach, das `MatchResultError` zu `SteamTaskError("Ungueltige Steam-Ergebnisdaten: …")`
-/// wandelt. NotFound/State/Invalid landen alle in [`SteamTaskError::InvalidResult`]
-/// — exakt wie das Original `except MatchResultError as exc` jede der drei
+/// wandelt. NotFound/State/Invalid landen alle in [`SteamTaskError::InvalidResult`],
+/// exakt wie das Original `except MatchResultError as exc` jede der drei
 /// Subklassen fängt. DB-/Tournament-Fehler werden hingegen durchgereicht
 /// (im Original schlugen diese ebenfalls nicht über den `except`-Zweig durch).
 impl From<MatchError> for SteamTaskError {
     fn from(err: MatchError) -> Self {
         match err {
-            // NotFound erhalten, damit ein fehlendes Match über die Steam-/Lobby-
-            // Pfade als 404 (statt 502) endet — wie Pythons _get_bracket_match.
             MatchError::NotFound(m) => SteamTaskError::NotFound(m),
             MatchError::State(m) | MatchError::Invalid(m) => SteamTaskError::InvalidResult(m),
             MatchError::Db(e) => SteamTaskError::Db(e),
