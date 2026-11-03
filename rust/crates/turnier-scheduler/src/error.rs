@@ -45,7 +45,7 @@ pub enum SchedulerError {
 }
 
 /// Direkte Konvertierung aus `sqlx::Error`, damit `?` an Query-Aufrufen ohne
-/// manuelles Mapping funktioniert — über [`turnier_db::DbError`], damit es genau eine
+/// manuelles Mapping funktioniert, über [`turnier_db::DbError`], damit es genau eine
 /// Persistenz-Fehler-Repräsentation gibt.
 impl From<sqlx::Error> for SchedulerError {
     fn from(err: sqlx::Error) -> Self {

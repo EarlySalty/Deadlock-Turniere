@@ -3,7 +3,7 @@
 //!
 //! Discord ist hier ein No-op-Fake: der [`DiscordNotifier`] hängt an einem
 //! unkonfigurierten Broker (leere Basis-URL). `notify_users` liefert dann
-//! deterministisch `Ok` (jede ID landet in `failed`/`Unconfigured`) — es geht KEIN
+//! deterministisch `Ok` (jede ID landet in `failed`/`Unconfigured`), es geht KEIN
 //! echter Netzwerk-Call raus, und der Dedupe-Pfad wird trotzdem ausgelöst.
 //! Steam-Bridge ist `None`.
 
@@ -34,7 +34,7 @@ pub fn fake_notifier(pool: Pool, config: &Config) -> DiscordNotifier {
     DiscordNotifier::new(broker, pool, config)
 }
 
-/// MatchManager ohne Discord/Bridge — `schedule_auto_lobbies_for_tournament` ist
+/// MatchManager ohne Discord/Bridge, `schedule_auto_lobbies_for_tournament` ist
 /// dann ein No-op (gated über `auto_lobby_enabled`, hier i. d. R. aus).
 pub fn fake_match_manager(pool: Pool, config: &Config) -> Arc<MatchManager> {
     Arc::new(MatchManager::new(pool, None, None, config))

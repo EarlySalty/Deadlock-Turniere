@@ -454,7 +454,7 @@ export default function Admin() {
               <Card className="p-8 text-center">
                 <Settings size={32} className="mx-auto mb-3 text-muted" />
                 <p className="text-muted">
-                  Kein Turnier ausgewählt — links auswählen oder ein neues anlegen.
+                  Kein Turnier ausgewählt. Wähle links eines aus oder lege ein neues an.
                 </p>
               </Card>
             )}
@@ -525,7 +525,7 @@ export default function Admin() {
                 <Archive size={32} className="mx-auto mb-3 text-muted" />
                 <p className="text-muted">
                   Wähle links ein archiviertes Turnier, um Bracket, Teams und Caster-Liste
-                  einzusehen. Read-Only — keine Bearbeitung möglich.
+                  einzusehen. Nur lesbar, keine Bearbeitung möglich.
                 </p>
               </Card>
             ) : loadingArchiveDetail ? (

@@ -1,4 +1,4 @@
-//! `turnier-scheduler` — Phasenübergänge + Reminder-Hintergrund-Loop des
+//! `turnier-scheduler`: Phasenübergänge + Reminder-Hintergrund-Loop des
 //! Turnier-Backends.
 //!
 //! Portiert `backend/tournament/scheduler.py` 1:1 im Verhalten. Zwei
@@ -10,7 +10,7 @@
 //!    Punkte neu und plant Auto-Lobbys. Wird vom Loop UND von turnier-api (Admin-Routen)
 //!    aufgerufen.
 //! 2. **Hintergrund-Loop** [`start_scheduler`]: führt im 60-s-Takt vier Checks aus
-//!    — Phasen-Kaskade + drei Reminder-Klassen. Jeder Check ist fehlertolerant;
+//!    Phasen-Kaskade + drei Reminder-Klassen. Jeder Check ist fehlertolerant;
 //!    der Loop stirbt nie (behebt den Tot-Loop des Originals).
 //!
 //! ## Bewusst erhaltene Befunde (`bugs_preserved`)

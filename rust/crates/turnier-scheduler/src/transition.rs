@@ -82,7 +82,7 @@ fn parse_status(value: &str) -> Option<TournamentStatus> {
 
 /// Wechselt den Turnierstatus und führt notwendige Seiteneffekte aus.
 ///
-/// Geteilte Orchestrierung — wird vom Scheduler-Loop UND von turnier-api (Admin-Routen)
+/// Geteilte Orchestrierung, wird vom Scheduler-Loop UND von turnier-api (Admin-Routen)
 /// aufgerufen. Portiert `advance_tournament_status` (Z.130-195) im Verhalten 1:1:
 ///
 /// 1. Übergang gegen die Status-Übergangstabelle validieren
@@ -252,7 +252,7 @@ async fn ensure_league_is_finished(
     Ok(())
 }
 
-/// Plant Auto-Lobbys nach `group_phase`/`bracket` — Fehler werden nur geloggt
+/// Plant Auto-Lobbys nach `group_phase`/`bracket`: Fehler werden nur geloggt
 /// (best-effort, wie im Original Z.185-193).
 async fn schedule_lobbies_best_effort(
     matchmgr: &MatchManager,

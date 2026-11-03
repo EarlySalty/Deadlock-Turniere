@@ -415,7 +415,7 @@ pub fn serialize_lobby_settings(
 // --- Tree-Lösch-Sequenzen (route-level Daten-SQL, 1:1 portiert) -------------
 
 /// Löscht alle Gruppen-Artefakte eines Turniers (gemeinsamer Helfer für die
-/// beiden Tree-Lösch-Funktionen — DRY-Fix gegenüber dem duplizierten Original).
+/// beiden Tree-Lösch-Funktionen, DRY-Fix gegenüber dem duplizierten Original).
 async fn delete_groups_for_tournament(
     tx: &mut sqlx::Transaction<'_, Postgres>,
     tournament_id: i64,
