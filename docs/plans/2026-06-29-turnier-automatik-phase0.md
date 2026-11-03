@@ -1,10 +1,10 @@
 > **Historical.** This is a dated plan, snapshot or design note. It does not describe the current state. The code on `origin/main` and the root `README.md` are authoritative.
 
-# Turnier-Automatik — Phase 0 Implementation Plan (Vorbedingung)
+# Turnier-Automatik: Phase 0 Implementation Plan (Vorbedingung)
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Saubere, bewiesen vollständige Rust-Turnier-Basis in `main` schaffen, bevor das Automatik-Feature drauf gebaut wird — durch Crate-Rename + Py→Rust-Vollständigkeits-Audit + Merge.
+**Goal:** Saubere, bewiesen vollständige Rust-Turnier-Basis in `main` schaffen, bevor das Automatik-Feature drauf gebaut wird, durch Crate-Rename + Py→Rust-Vollständigkeits-Audit + Merge.
 
 **Architecture:** Phase 0 ändert keine Funktionalität. Sie (1) benennt die Crates `tb-*` → `turnier-*` mechanisch um, (2) beweist per adversarialem Audit, dass kein Python-Feature fehlt, (3) schließt bestätigte Lücken, (4) mergt den seit Wochen live-aber-ungemergten `rust-rewrite`-Stand nach `main`.
 
@@ -13,13 +13,13 @@
 ## Global Constraints
 
 - Spec: `docs/specs/2026-06-29-turnier-automatisierung-design.md` (verbindlich).
-- Keine Funktionsänderung in Phase 0 — reines Umbenennen + Lücken schließen (Verhalten 1:1).
+- Keine Funktionsänderung in Phase 0: reines Umbenennen + Lücken schließen (Verhalten 1:1).
 - Crates deutsch-klar (`turnier-*`); DB-Tabellen/Enum-Werte englisch (Schema-konsistent).
 - Kein `.unwrap()` in Produktionspfaden; `cargo clippy --workspace --all-targets -- -D warnings` muss sauber bleiben.
 - Live-Dienst: `deadlock-turniere.service` (systemd --user) startet `scripts/run_turniere_backend_rust.sh` → Binary heute `rust/target/release/tb-app`.
-- Deploy-Beweis-Regel (CLAUDE.md): nach Build/Deploy beweisen, dass Artefakt UND Live-Zustand die Änderung tragen (Binary-mtime > Commit, Prozess-Pfad prüfen) — Erfolgs-Log allein zählt nicht.
+- Deploy-Beweis-Regel (CLAUDE.md): nach Build/Deploy beweisen, dass Artefakt UND Live-Zustand die Änderung tragen (Binary-mtime > Commit, Prozess-Pfad prüfen); Erfolgs-Log allein zählt nicht.
 - `main` empfängt nur fertige, verifizierte Arbeit. Merge nach `main` = expliziter Checkpoint (Task 5), vorher anhalten.
-- Stale-Migrator-Lektion: vor Release-Build `touch` auf die Migrator-`.rs`, falls nur `.sql` geändert wurde (hier nicht relevant, da keine Migration in Phase 0 — aber Regel notiert).
+- Stale-Migrator-Lektion: vor Release-Build `touch` auf die Migrator-`.rs`, falls nur `.sql` geändert wurde (hier nicht relevant, da keine Migration in Phase 0, aber Regel notiert).
 
 ---
 
@@ -50,7 +50,7 @@ Mechanischer, verhaltensneutraler Rename. Ein zusammenhängender Task (Rename oh
 | `tb-match` | `turnier-match` | `turnier_match` |
 | `tb-steam` | `turnier-steam` | `turnier_steam` |
 
-> Achtung `tb-tournament` → `turnier-engine` (nicht `turnier-tournament`): der Import wechselt von `tb_tournament` auf `turnier_engine` — beide Teile (Bindestrich-Paketname UND Unterstrich-Importname) müssen passen.
+> Achtung `tb-tournament` → `turnier-engine` (nicht `turnier-tournament`): der Import wechselt von `tb_tournament` auf `turnier_engine`; beide Teile (Bindestrich-Paketname UND Unterstrich-Importname) müssen passen.
 
 - [ ] **Step 1: Ausgangs-Build als Referenz grün stellen**
 
@@ -102,7 +102,7 @@ Der Dienst startet noch `tb-app`. Ohne diesen Task läuft der Dienst nach dem Re
 
 **Files:**
 - Modify: `scripts/run_turniere_backend_rust.sh` (Binary-Pfad `target/release/tb-app` → `target/release/turnier-bot`)
-- Modify: ggf. systemd-Unit (falls ExecStart direkt das Binary nennt; aktuell ruft sie das Skript — dann reicht das Skript)
+- Modify: ggf. systemd-Unit (falls ExecStart direkt das Binary nennt; aktuell ruft sie das Skript; dann reicht das Skript)
 
 - [ ] **Step 1: Binary-Referenz im Run-Script ersetzen**
 
@@ -138,7 +138,7 @@ git push
 
 ### Task 3: Vollständigkeits-Audit Py→Rust (Codex-Delegation, read-only)
 
-Discovery-Task — Ergebnis ist die Lücken-Liste, die Task 4 definiert. Kein Code, sondern ein verifizierter Report.
+Discovery-Task: Ergebnis ist die Lücken-Liste, die Task 4 definiert. Kein Code, sondern ein verifizierter Report.
 
 **Files:**
 - Create: `rust/docs/audit/2026-06-29/REPORT.md` (Inventar + Mapping + Lücken-Liste)
@@ -148,11 +148,11 @@ Discovery-Task — Ergebnis ist die Lücken-Liste, die Task 4 definiert. Kein Co
 2. Codex-Worker B (frischer Kontext, adversarial) prüft Worker As Liste: Over-Reporting (fälschlich „fehlt") und Under-Reporting (übersehene Lücken). Lektion Twitch/Steam: Triage über-feuert „genuine".
 3. Claude verifiziert Stichproben gegen echte Signale (Code/DB/Endpoint), nicht nur Modell-Annahmen.
 
-- [ ] **Step 1: Worker A — Inventar + Mapping**
+- [ ] **Step 1: Worker A: Inventar + Mapping**
 
 Codex (gpt-5.5/xhigh, Repo-Zugriff): „Erstelle vollständiges Endpunkt-/Funktions-Inventar aus `backend/` und mappe jede auf `rust/crates/turnier-*`. Schreibe `rust/docs/audit/2026-06-29/REPORT.md` mit Status-Tabelle. Kein Fix, nur Befund."
 
-- [ ] **Step 2: Worker B — adversariale Prüfung**
+- [ ] **Step 2: Worker B: adversariale Prüfung**
 
 Codex (frischer Kontext): „Prüfe REPORT.md gegen das echte Python + Rust. Liste Fehlklassifikationen (fälschlich fehlt / übersehene Lücke). Begründe je Befund mit Datei:Zeile."
 
@@ -178,7 +178,7 @@ git push
 
 ### Task 4: Lücken-Fix-Welle (abgeleitet aus Task 3)
 
-> **Datenabhängig — kein Platzhalter, sondern Discovery-Ergebnis.** Diese Tickets werden **nach Task 3** aus der finalen Lücken-Liste erzeugt: pro bestätigter Lücke ein Ticket (exakte Datei + erwartetes Verhalten + Test). Der Loop pro Ticket: Codex-Implement → frischer Codex-Kritiker → Claude verifiziert externes Signal → Commit. User-sichtbare Text-Stellen: Codex setzt `"Platzhalter"` + meldet Datei:Zeile, Claude schreibt den finalen deutschen Text.
+> **Datenabhängig: kein Platzhalter, sondern Discovery-Ergebnis.** Diese Tickets werden **nach Task 3** aus der finalen Lücken-Liste erzeugt: pro bestätigter Lücke ein Ticket (exakte Datei + erwartetes Verhalten + Test). Der Loop pro Ticket: Codex-Implement → frischer Codex-Kritiker → Claude verifiziert externes Signal → Commit. User-sichtbare Text-Stellen: Codex setzt `"Platzhalter"` + meldet Datei:Zeile, Claude schreibt den finalen deutschen Text.
 
 - [ ] **Step 1:** Aus finaler Lücken-Liste je Lücke ein Ticket (Scope + DoD) anlegen.
 - [ ] **Step 2:** Tickets per Codex-Loop abarbeiten (TDD: erst fehlschlagender Test, dann Fix).
@@ -187,12 +187,12 @@ git push
 
 ---
 
-### Task 5: Merge nach `main` (Checkpoint — irreversibel, hier anhalten)
+### Task 5: Merge nach `main` (Checkpoint, irreversibel, hier anhalten)
 
 > **Claude-Gate.** Vor dem Merge: `git log -1` + `git worktree list` (fremde HEAD-Bewegung?), `git branch --no-merged main`. Merge erst nach explizitem OK.
 
 - [ ] **Step 1:** Finalen Stand verifizieren: Build + Clippy + Tests grün, Dienst läuft live aus `turnier-bot`.
-- [ ] **Step 2:** CHANGELOG.md: Eintrag für den (user-sichtbaren) Anteil — hier v. a. „nichts kaputt, gleiche Funktion" → nur falls user-sichtbare Lücken geschlossen wurden; reiner Rename ist nicht CHANGELOG-würdig.
+- [ ] **Step 2:** CHANGELOG.md: Eintrag für den (user-sichtbaren) Anteil, hier v. a. „nichts kaputt, gleiche Funktion" → nur falls user-sichtbare Lücken geschlossen wurden; reiner Rename ist nicht CHANGELOG-würdig.
 - [ ] **Step 3:** `rust-rewrite`/Feature-Branch nach `main` mergen, Dienst aus `main` bauen + neu starten, Live-Zustand erneut beweisen.
 - [ ] **Step 4:** Branch-Hygiene: gemergte Branches löschen (`git branch -d`), `git worktree prune`.
 
@@ -202,6 +202,6 @@ git push
 
 **Spec-Abdeckung (Phase 0):** §4 Phase-0-Zeile → Tasks 1–5 ✓; §10 Rename + Deploy-Folge → Tasks 1–2 ✓; §11 Audit-Methodik → Task 3 ✓; §15 Reihenfolge + Merge-Checkpoint → Task 5 ✓. Phase 1/2 bewusst NICHT hier (eigene Pläne nach Phase 0).
 
-**Platzhalter-Scan:** Task 4 ist discovery-abhängig und als solcher deklariert (Tickets entstehen aus Task-3-Output) — kein verkappter „TODO", sondern der korrekte Umgang mit einem Audit-Ergebnis.
+**Platzhalter-Scan:** Task 4 ist discovery-abhängig und als solcher deklariert (Tickets entstehen aus Task-3-Output); kein verkappter „TODO", sondern der korrekte Umgang mit einem Audit-Ergebnis.
 
 **Typ-/Namens-Konsistenz:** Rename-Tabelle in Task 1 (Paketname ↔ underscore-Import) deckt die kritische `tb-tournament → turnier-engine`-Falle ab; Task 2 nutzt denselben Binary-Namen `turnier-bot`.

@@ -1,6 +1,6 @@
 > **Historical.** This is a dated plan, snapshot or design note. It does not describe the current state. The code on `origin/main` and the root `README.md` are authoritative.
 
-# Draft-Lobbys — öffentliches Pick/Ban-Tool
+# Draft-Lobbys: öffentliches Pick/Ban-Tool
 
 Stand: 2026-07-16. Vorbild: statlocker.gg Draft Tool.
 
@@ -8,7 +8,7 @@ Stand: 2026-07-16. Vorbild: statlocker.gg Draft Tool.
 
 Ein öffentliches Pick/Ban-Draft-Tool auf der Website. Jeder kann eine Lobby
 aufmachen, den Link teilen, live gegeneinander draften. Der fertige Draft bleibt
-unter demselben Link abrufbar — das ist gleichzeitig die Coaching-Nachbesprechung.
+unter demselben Link abrufbar; das ist gleichzeitig die Coaching-Nachbesprechung.
 Turniere binden denselben Draft nativ ein, dort mit Steam-Pflicht.
 
 Drei Einstiege, EIN Draft-Kern:
@@ -21,22 +21,22 @@ Drei Einstiege, EIN Draft-Kern:
 
 ## Was schon existiert (nicht neu bauen)
 
-- `turnier-draft` — Sequenz-Zustandsmaschine, Hero-Validierung, State, sqlx-Repo
+- `turnier-draft`: Sequenz-Zustandsmaschine, Hero-Validierung, State, sqlx-Repo
   mit Compare-and-Swap. 1122 Zeilen, DB-getestet.
-- `turnier-api` — läuft live auf :8900, Discord-OAuth, `AdminUser`/`AuthUser`.
-- `turnier-steam` — löst Discord-ID → Steam-Link + Rang über die Bridge auf.
+- `turnier-api`: läuft live auf :8900, Discord-OAuth, `AdminUser`/`AuthUser`.
+- `turnier-steam`: löst Discord-ID → Steam-Link + Rang über die Bridge auf.
   Damit ist die Steam-Pflicht ein Guard, kein neuer Login.
-- Frontend — React 19, Vite, Tailwind 4, TanStack Query, framer-motion.
-- `steam-flows/link.rs` — vollständiger Steam-OpenID-Flow (im Steam-Bot).
+- Frontend: React 19, Vite, Tailwind 4, TanStack Query, framer-motion.
+- `steam-flows/link.rs`: vollständiger Steam-OpenID-Flow (im Steam-Bot).
 
 ## Entscheidungen
 
 **Live-Sync = Polling (1s), kein WebSocket/SSE.**
 Der Zustand liegt vollständig in Postgres, der Server merkt sich nichts. Damit
 überlebt jeder laufende Draft einen Backend-Restart, Reconnects und
-Netzwechsel — bei WS/SSE lebt der Broadcast-Kanal im Prozessspeicher und jedes
+Netzwechsel. Bei WS/SSE lebt der Broadcast-Kanal im Prozessspeicher und jedes
 Deploy killt alle Drafts. Skaliert horizontal ohne Redis/Sticky-Sessions.
-Debuggen mit `curl`. Ein Draft ist ~1 Klick/30s — Push kauft nichts.
+Debuggen mit `curl`. Ein Draft ist ~1 Klick/30s; Push kauft nichts.
 
 **Timer wird faul ausgewertet, kein Scheduler.**
 Die Lobby speichert `deadline_at`. Jeder Lese-Request prüft, ob die Deadline
@@ -64,7 +64,7 @@ Turnier-Lobbys ignorieren Tokens und nutzen Discord-Session + Steam-Guard.
 ## Datenmodell (neue Migration in dl-central-db)
 
 Keine eigene `draft_lobbies`-Tabelle. Eine Lobby **ist** eine Draft-Session ohne
-Turnier-Bindung — zwei Tabellen hiessen: jede Abfrage joint, und der Status steht
+Turnier-Bindung. Zwei Tabellen hiessen: jede Abfrage joint, und der Status steht
 an zwei Orten ("Lobby fertig, Session laeuft"). Also `draft_sessions` erweitern:
 
 ```
@@ -92,29 +92,29 @@ vom `reserve_left` des Teams ab.
 
 `settle_expired()` wird von JEDEM Lese- und Schreibpfad in derselben Transaktion
 aufgerufen und loest abgelaufene Zuege auf (zufaelliger freier Held,
-`is_auto = TRUE`, Reserve auf 0) — in einer Schleife, falls lange niemand hinsah.
+`is_auto = TRUE`, Reserve auf 0), in einer Schleife, falls lange niemand hinsah.
 
 ## Slices
 
-### Slice 1 — freie Lobby, live, teilbar (der Kern)
+### Slice 1: freie Lobby, live, teilbar (der Kern)
 1. Migration in `dl-central-db`: `draft_lobbies`, `bracket_match_id` nullable.
 2. `turnier-draft`: Sequenz aus der Lobby statt `const DEFAULT_SEQUENCE`;
    `start_lobby_draft`, Timer-Auswertung in `take_action`/`get_draft_state`.
    Bestehende Turnier-Pfade bleiben grün.
 3. `turnier-draft`: Heroes-Provider (API + Cache + Fallback auf `heroes.rs`).
 4. `turnier-api`: `POST /api/draft/lobbies`, `GET /api/draft/lobbies/{code}`,
-   `POST /api/draft/lobbies/{code}/action` — öffentlich, Token-geprüft.
+   `POST /api/draft/lobbies/{code}/action`: öffentlich, Token-geprüft.
 5. Frontend: Route `/draft`, Lobby anlegen, Hero-Grid, Polling, Timer.
 6. Caddy: `/draft*` → :8900 bzw. SPA.
 
 **Fertig, wenn:** zwei Browser draften live gegeneinander durch, Timer läuft ab
 und schaltet weiter, Backend-Restart mittendrin verliert nichts.
 
-### Slice 2 — Nachbesprechung
+### Slice 2: Nachbesprechung
 Abgeschlossener Draft unter `/draft/{code}` read-only, Export JSON/CSV,
 Draft-Historie. Fällt zu großen Teilen aus Slice 1 ab.
 
-### Slice 3 — Turnier nativ
+### Slice 3: Turnier nativ
 `DraftPanel.tsx` auf die Lobby-API umstellen, Captains statt Admin,
 Steam-Guard über `turnier-steam`. Admin behält Override.
 
@@ -159,7 +159,7 @@ Ehrlicher Zwischenstand. `[x]` heisst: gebaut UND verifiziert. Alles andere ist 
 - [x] HTTP-Routen in `turnier-api`, einschließlich Token-, Validierungs- und
       Rate-Limit-Verträgen, gegen die zentrale Wegwerf-DB verifiziert.
 
-## TODO — bis Slice 1 wirklich fertig ist
+## TODO bis Slice 1 wirklich fertig ist
 
 - [x] **Routen-Ergebnis reviewt.** Die Änderungen am Draft-Repository gehören zum
       persistierten Lobby-, Timer- und Reconnect-Vertrag; ein frischer Kritiker fand
@@ -173,12 +173,12 @@ Ehrlicher Zwischenstand. `[x]` heisst: gebaut UND verifiziert. Alles andere ist 
       `journalctl` sauber. Öffentliche Health-, Seiten- und Lobby-Routen antworten erfolgreich;
       eine echte Aktion blieb über einen weiteren Backend-Neustart erhalten.
 - [ ] **Echter Durchlauf zu zweit**: zwei Browser, Draft bis `completed`, Timer ablaufen
-      lassen, Backend mittendrin neu starten (muss der Draft ueberleben — das ist der
+      lassen, Backend mittendrin neu starten (muss der Draft ueberleben; das ist der
       ganze Grund fuer Polling statt WebSocket).
 - [x] `CHANGELOG.md` ergänzt und auf die echte Route `/turnier/draft` korrigiert.
 - [x] Discord-Post nach erfolgreichem Live-Beweis in `#dev-updates` veröffentlicht.
 
-## TODO — Luecken, die ich kenne
+## TODO: Luecken, die ich kenne
 
 - [ ] **Der Captain weiss nicht, welches Team er ist.** Der Server verraet die Tokens nie
       (richtig so), also kann das Board die Zugehoerigkeit nicht ableiten. Aktuell darf
@@ -193,28 +193,28 @@ Ehrlicher Zwischenstand. `[x]` heisst: gebaut UND verifiziert. Alles andere ist 
 - [ ] **Rate-Limit ist prozesslokal** (`ponytail:` im Code vermerkt). Reicht bei einem
       Prozess; bei mehreren Instanzen neu denken.
 - [ ] Zwei ungetrackte SQLite-Dateien liegen noch in `backend/data/` herum, eine davon ist
-      der Rollback-Snapshot von vor dem PG-Cutover. Nicht in Git — Loeschen ist endgueltig,
+      der Rollback-Snapshot von vor dem PG-Cutover. Nicht in Git; Loeschen ist endgueltig,
       deshalb offen gelassen.
 
-## TODO — Slice 2: Nachbesprechung (Coaching)
+## TODO für Slice 2: Nachbesprechung (Coaching)
 
-- [ ] Abgeschlossener Draft unter `/turnier/draft/:code` read-only — greift heute schon,
+- [ ] Abgeschlossener Draft unter `/turnier/draft/:code` read-only; greift heute schon,
       aber ungetestet und ohne eigene Ansicht.
 - [ ] Export als JSON und CSV.
 - [ ] Draft-Historie (Liste eigener/letzter Drafts).
 
-## TODO — Slice 3: Turnier nativ
+## TODO für Slice 3: Turnier nativ
 
 - [ ] `DraftPanel.tsx` von der Admin-Route auf die Lobby-API umstellen.
 - [ ] Captains draften selbst statt des Admins; Admin behaelt Override.
 - [ ] **Steam-Pflicht**: Guard ueber `turnier-steam` (liest die vorhandene Steam-Bridge).
-      Kein neuer Login noetig — Discord-Session + verknuepfter Steam reicht als Nachweis.
+      Kein neuer Login noetig; Discord-Session + verknuepfter Steam reicht als Nachweis.
 
 ## Bewusst NICHT gebaut (kein Versehen)
 
-- Team-Logo-Upload — braucht Storage + Missbrauchsschutz, statlocker hat es, wir nicht.
-- Custom-Sequenz-Editor — erst die drei Presets, dann sehen wir, ob es jemand vermisst.
-- Shadow-Picks — erst verstehen, wozu.
+- Team-Logo-Upload: braucht Storage + Missbrauchsschutz, statlocker hat es, wir nicht.
+- Custom-Sequenz-Editor: erst die drei Presets, dann sehen wir, ob es jemand vermisst.
+- Shadow-Picks: erst verstehen, wozu.
 - Lobby-Verzeichnis / oeffentliche Lobby-Liste / Zuschauerzahl.
 - Kommentare an der Nachbesprechung.
 
@@ -227,4 +227,4 @@ Ehrlicher Zwischenstand. `[x]` heisst: gebaut UND verifiziert. Alles andere ist 
   ausgecheckten Branch ("Deploy-Baum"). Fuer eigene Arbeit einen Worktree aus `origin/main`.
 - **`npm run build` IST der Deploy** fuers Frontend: Caddy serviert `frontend/dist` direkt.
 - Die Marken-Wahrheit ist `Website/dl-brand/tokens.css`. Die `ddc-design-tokens.css` im
-  Twitch-Repo ist der aeltere Braun-Stand — nicht davon abschreiben.
+  Twitch-Repo ist der aeltere Braun-Stand; nicht davon abschreiben.

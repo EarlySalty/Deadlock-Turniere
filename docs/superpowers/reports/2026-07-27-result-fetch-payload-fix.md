@@ -45,16 +45,16 @@ wurde.
 - Rot vor dem Produktionsfix: Der fokussierte Routentest erhielt für den geänderten
   Ergebnis-Payload `200 OK` statt einer Ablehnung.
 - Grün nach dem Fix:
-  `match_block_and_action_operator_routes_persist_the_canonical_flow` — 1 bestanden,
+  `match_block_and_action_operator_routes_persist_the_canonical_flow`: 1 bestanden,
   0 fehlgeschlagen.
-- `cargo fmt --all -- --check` — bestanden.
-- `cargo build --release --workspace` — bestanden.
-- `cargo clippy --workspace --all-targets -- -D warnings` — bestanden.
+- `cargo fmt --all -- --check`: bestanden.
+- `cargo build --release --workspace`: bestanden.
+- `cargo clippy --workspace --all-targets -- -D warnings`: bestanden.
 - Vollständiger Workspace-Test mit zentraler Postgres-Testinstanz:
   Alle Result-Fetch- und übrigen Tests bestanden, außer dem ausdrücklich als
   vorbestehend benannten
   `invalid_proposal_transition_returns_conflict` (`400` statt `409`).
 - Unabhängiger Rust-Diff-Review: keine kritischen, wichtigen oder kleinen Findings.
-- `git diff --check` — bestanden.
+- `git diff --check`: bestanden.
 
 Es wurde weder committet noch gepusht. Die Änderungen liegen im Arbeitsbaum.
