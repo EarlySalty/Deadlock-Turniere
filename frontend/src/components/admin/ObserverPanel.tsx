@@ -281,7 +281,7 @@ export default function ObserverPanel() {
                   </div>
                   <div className="mt-2 flex items-center justify-between text-xs text-muted">
                     <span>{modeCopy[session.mode]}</span>
-                    <span>POV {session.recommended_account_id ?? '—'} · {session.recommended_score?.toFixed(0) ?? '—'}</span>
+                    <span>POV {session.recommended_account_id ?? '-'} · {session.recommended_score?.toFixed(0) ?? '-'}</span>
                   </div>
                 </button>
               ))
@@ -316,7 +316,7 @@ export default function ObserverPanel() {
                     {heroLabel(currentDecision?.hero_id, selected.current_account_id)}
                   </div>
                   <div className="text-xs text-muted">
-                    {selected.current_account_id ? `Account ${selected.current_account_id} · ` : ''}Score {selected.current_score?.toFixed(1) ?? '—'}
+                    {selected.current_account_id ? `Account ${selected.current_account_id} · ` : ''}Score {selected.current_score?.toFixed(1) ?? '-'}
                   </div>
                 </div>
                 <div className="rounded-lg border border-primary/30 bg-primary/5 p-3">
@@ -325,7 +325,7 @@ export default function ObserverPanel() {
                     {heroLabel(recommendedDecision?.hero_id, selected.recommended_account_id)}
                   </div>
                   <div className="text-xs text-muted">
-                    {selected.recommended_account_id ? `Account ${selected.recommended_account_id} · ` : ''}Score {selected.recommended_score?.toFixed(1) ?? '—'}
+                    {selected.recommended_account_id ? `Account ${selected.recommended_account_id} · ` : ''}Score {selected.recommended_score?.toFixed(1) ?? '-'}
                   </div>
                 </div>
                 <div className="rounded-lg border border-border bg-background/40 p-3">

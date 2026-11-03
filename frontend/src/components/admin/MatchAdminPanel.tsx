@@ -111,7 +111,7 @@ export default function MatchAdminPanel({
       <Card className="p-5">
         <div className="flex items-center gap-2 text-muted">
           <Swords size={18} />
-          <span>Keine Matches bereit — warte auf Gegner-Zuweisung.</span>
+          <span>Keine Matches bereit, warte auf Gegner-Zuweisung.</span>
         </div>
       </Card>
     )
@@ -443,7 +443,7 @@ export default function MatchAdminPanel({
                     >
                       Spiel {game.game_number}
                       {game.winner_team &&
-                        ` — ${
+                        `: ${
                           game.winner_team === 1
                             ? teamName(match.team1_id, teams)
                             : teamName(match.team2_id, teams)
@@ -484,10 +484,10 @@ export default function MatchAdminPanel({
                         <tbody>
                           {stats.players.map((player, index) => (
                             <tr key={index} className="border-t border-border/50 text-foreground">
-                              <td className="py-1 pr-3">{player.hero_id ?? '—'}</td>
-                              <td className="py-1 pr-3">{player.kills ?? '—'}</td>
-                              <td className="py-1 pr-3">{player.deaths ?? '—'}</td>
-                              <td className="py-1">{player.assists ?? '—'}</td>
+                              <td className="py-1 pr-3">{player.hero_id ?? '-'}</td>
+                              <td className="py-1 pr-3">{player.kills ?? '-'}</td>
+                              <td className="py-1 pr-3">{player.deaths ?? '-'}</td>
+                              <td className="py-1">{player.assists ?? '-'}</td>
                             </tr>
                           ))}
                         </tbody>

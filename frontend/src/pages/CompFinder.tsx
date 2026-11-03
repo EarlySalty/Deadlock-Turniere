@@ -28,7 +28,7 @@ function CopyButton({ text, label }: { text: string; label: string }) {
     <button type="button" className="comp-button comp-button-secondary" onClick={copy} aria-label={label}>
       {copied ? <Check size={16} /> : <Copy size={16} />}{copied ? 'Kopiert' : label}
     </button>
-    {failed && <label className="mt-2 block text-xs text-muted">Kopieren nicht erlaubt – Text markieren und kopieren:<textarea readOnly value={text} onFocus={e => e.currentTarget.select()} className="comp-input mt-1" rows={3} /></label>}
+    {failed && <label className="mt-2 block text-xs text-muted">Kopieren nicht erlaubt. Text markieren und kopieren:<textarea readOnly value={text} onFocus={e => e.currentTarget.select()} className="comp-input mt-1" rows={3} /></label>}
   </div>
 }
 
@@ -74,7 +74,7 @@ function Landing() {
       </section>
     </div>
     <div className="mx-auto mt-8 grid max-w-4xl gap-5 text-sm text-muted sm:grid-cols-3">
-      <p><strong className="mb-1 block text-foreground">01 · Helden markieren</strong>Spielbar, bevorzugt oder höchste Priorität – du entscheidest.</p>
+      <p><strong className="mb-1 block text-foreground">01 · Helden markieren</strong>Spielbar, bevorzugt oder höchste Priorität: du entscheidest.</p>
       <p><strong className="mb-1 block text-foreground">02 · Wünsche verteilen</strong>Ein Held pro Spieler, jeder Held nur einmal. Auch mit weniger als sechs Spielern.</p>
       <p><strong className="mb-1 block text-foreground">03 · Alternativen vergleichen</strong>Bis zu zehn unterschiedliche Helden-Teams, nach Wunschpunkten sortiert.</p>
     </div>
@@ -167,7 +167,7 @@ function Editor({ room, member, heroes }: { room: CompRoom; member: CompMember; 
           return <button key={hero.name} type="button" disabled={save.isPending} className={`comp-hero ${priority === undefined ? '' : `comp-hero-${priority}`}`} aria-pressed={priority !== undefined} aria-label={`${hero.name}: ${priorityLabel(priority)}${priority === undefined ? '' : `, ${priority} Punkte`}. Klicken für nächste Stufe.`} title={`${hero.name} · ${priorityLabel(priority)}`} onClick={() => cycle(hero.name)}>
             <Portrait hero={hero} name={hero.name} />
             <span className="comp-hero-name">{hero.name}</span>
-            <span className="comp-hero-value">{priority === undefined ? '—' : `${priority} P.`}</span>
+            <span className="comp-hero-value">{priority === undefined ? '-' : `${priority} P.`}</span>
           </button>
         })}
       </div>
@@ -175,7 +175,7 @@ function Editor({ room, member, heroes }: { room: CompRoom; member: CompMember; 
     </div>
     <div className="comp-savebar border-t border-border p-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <span role="status" className={`text-xs ${dirty ? 'text-amber-200' : 'text-muted'}`}>{save.isPending ? 'Wird gespeichert …' : dirty ? 'Ungespeichert – dein Team sieht noch den letzten Stand.' : 'Deine Auswahl ist gespeichert.'}</span>
+        <span role="status" className={`text-xs ${dirty ? 'text-amber-200' : 'text-muted'}`}>{save.isPending ? 'Wird gespeichert …' : dirty ? 'Ungespeichert: dein Team sieht noch den letzten Stand.' : 'Deine Auswahl ist gespeichert.'}</span>
         <button className="comp-button" type="button" disabled={!dirty || stale || save.isPending || unavailable.length > 0} onClick={() => save.mutate({ revision: draft.revision, preferences: list }, { onSuccess: updated => { const current = updated.members.find(m => m.id === member.id); if (current) adopt(current) } })}><Check size={16} />Auswahl speichern</button>
       </div>
       <ErrorNote error={save.error} />
@@ -209,7 +209,7 @@ function Results({ room, heroes }: { room: CompRoom; heroes: DraftHero[] }) {
   return <section aria-label="Passende Aufstellungen">
     <div className="mb-4 flex items-center gap-2"><Sparkles size={20} className="text-primary" /><h2 className="text-xl font-bold">Eure Aufstellungen</h2></div>
     <p className="mb-4 text-xs leading-relaxed text-muted">Summe der zugewiesenen Prioritäten. Bei Gleichstand zählen mehr höchste Prioritäten, danach eine stabile Heldenreihenfolge. Keine Meta- oder Synergie-Wertung.</p>
-    {room.members.length < 6 && <p className="mb-4 rounded-lg border border-border bg-card p-3 text-xs text-muted">Vorschau für {room.members.length} Spieler. Weitere Mitspieler können jederzeit beitreten – die Aufstellungen werden dann neu berechnet.</p>}
+    {room.members.length < 6 && <p className="mb-4 rounded-lg border border-border bg-card p-3 text-xs text-muted">Vorschau für {room.members.length} Spieler. Weitere Mitspieler können jederzeit beitreten. Die Aufstellungen werden dann neu berechnet.</p>}
     {results.waiting_for.length > 0 ? <div className="comp-panel p-6"><Users size={28} className="mb-3 text-primary" /><h3 className="font-bold">Es fehlen noch Heldenwünsche</h3><p className="mt-2 text-sm leading-relaxed text-muted">{names(results.waiting_for)}: Bitte mindestens einen verfügbaren Helden auswählen und speichern.</p></div> : results.conflict ? <div className="comp-panel border-amber-400/40 p-6"><AlertCircle size={28} className="mb-3 text-amber-200" /><h3 className="font-bold">Noch keine gültige Aufstellung</h3><p className="mt-2 text-sm leading-relaxed text-muted">{names(results.conflict.player_indices)} teilen sich nur {results.conflict.available_heroes.length} unterschiedliche Helden: {results.conflict.available_heroes.join(', ')}. Für diese {results.conflict.player_indices.length} Spieler reichen die freien Helden nicht.</p><p className="mt-3 text-sm text-amber-200">Mindestens einer von ihnen muss weitere spielbare Helden ergänzen. Ein weiterer Held ist ein Anfang; die neue Auswahl wird erneut geprüft.</p></div> : results.compositions.length > 0 ? <div className="space-y-3">
       {results.compositions.map((composition, i) => i === 0 ? <div key="best" className="comp-panel comp-best"><CompositionCard room={room} composition={composition} rank={1} heroes={heroes} /></div> : <details key={composition.assignments.map(a => a.hero_name).sort().join('|')} className="comp-panel"><summary className="cursor-pointer px-5 py-4 text-sm font-semibold">Alternative {i + 1}<span className="float-right text-primary">{composition.score}/{results.max_score} P.</span></summary><CompositionCard room={room} composition={composition} rank={i + 1} heroes={heroes} /></details>)}
       <p className="text-xs text-muted">{results.compositions.length} unterschiedliche Helden-Teams{results.compositions.length === 10 ? ' · die besten 10' : ''}. Identische Helden-Sets erscheinen nur einmal mit ihrer besten Spielerzuordnung.</p>
@@ -230,7 +230,7 @@ function RoomPage({ code }: { code: string }) {
   return <div className="comp-page">
     <TeamModeNav />
     <header className="mb-6 flex flex-wrap items-start justify-between gap-5">
-      <div><span className="comp-eyebrow">COMP-FINDER</span><h1 className="mt-2 font-display text-3xl font-black sm:text-4xl">Euer Team. Eure Helden.</h1><p className="mt-2 text-xs text-muted">Gültig bis {new Date(room.expires_at).toLocaleString('de-DE', { dateStyle: 'short', timeStyle: 'short' })} · {lobby.error ? 'Verbindung unterbrochen – letzter gespeicherter Stand' : 'Aktualisierung alle 2 Sekunden'}</p></div>
+      <div><span className="comp-eyebrow">COMP-FINDER</span><h1 className="mt-2 font-display text-3xl font-black sm:text-4xl">Euer Team. Eure Helden.</h1><p className="mt-2 text-xs text-muted">Gültig bis {new Date(room.expires_at).toLocaleString('de-DE', { dateStyle: 'short', timeStyle: 'short' })} · {lobby.error ? 'Verbindung unterbrochen, letzter gespeicherter Stand' : 'Aktualisierung alle 2 Sekunden'}</p></div>
       <div className="comp-panel flex flex-wrap items-center gap-4 p-4"><div><span className="block text-[10px] font-bold tracking-widest text-muted">LOBBY-CODE</span><span className="select-all font-mono text-2xl font-bold tracking-widest text-primary">{room.code}</span></div><CopyButton text={share} label="Einladungslink" /></div>
     </header>
     {lobby.error && <div className="mb-5"><ErrorNote error={lobby.error} /><button className="mt-2 text-sm text-primary underline" onClick={() => lobby.refetch()}>Verbindung erneut prüfen</button></div>}

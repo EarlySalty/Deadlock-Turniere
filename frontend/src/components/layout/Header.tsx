@@ -36,7 +36,7 @@ export default function Header() {
           <Link
             to="/"
             className="mr-auto flex min-w-0 items-center gap-2.5 select-none"
-            aria-label="Deutsche Deadlock Community – Turniere"
+            aria-label="Deutsche Deadlock Community: Turniere"
             onClick={() => setMenuOpen(false)}
           >
             <img

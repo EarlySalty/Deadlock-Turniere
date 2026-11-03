@@ -22,7 +22,7 @@ const GAME_MODE_OPTIONS: {
   {
     value: 'standard',
     label: 'Standard',
-    description: 'Normales Match — Spieler wählen ihren Helden frei.',
+    description: 'Normales Match: Spieler wählen ihren Helden frei.',
   },
   {
     value: 'mirror',
@@ -37,7 +37,7 @@ const GAME_MODE_OPTIONS: {
   {
     value: 'random_heroes',
     label: 'Random Heroes',
-    description: 'Jedem Spieler wird ein zufälliger Hero zugewiesen — unique solange Pool reicht.',
+    description: 'Jedem Spieler wird ein zufälliger Hero zugewiesen, unique solange Pool reicht.',
   },
   {
     value: 'single_lane',
@@ -90,7 +90,7 @@ const PRESET_LABELS: Record<LobbySettingsPreset, string> = {
   custom:      'Custom (manuelles JSON)',
 }
 
-// Basis-Convars je Preset — muss mit dem Backend übereinstimmen
+// Basis-Convars je Preset: muss mit dem Backend übereinstimmen
 const PRESET_BASE_CONVARS: Record<LobbySettingsPreset, Record<string, number>> = {
   standard:    {},
   fast_mode:   { citadel_enable_fast_cooldowns: 1 },
@@ -129,7 +129,7 @@ const CONVAR_SLIDERS: ConvarSliderConfig[] = [
     step: 10,
     defaultValue: 800,
     unit: '',
-    hint: 'Standard: 800 — niedriger = höhere Sprünge, mehr Luftzeit',
+    hint: 'Standard: 800. Niedriger = höhere Sprünge, mehr Luftzeit',
   },
   {
     key: 'host_timescale',
@@ -139,7 +139,7 @@ const CONVAR_SLIDERS: ConvarSliderConfig[] = [
     step: 0.1,
     defaultValue: 1.0,
     unit: '×',
-    hint: 'Standard: 1.0 — unter 1 = Zeitlupe, über 1 = Zeitraffer',
+    hint: 'Standard: 1.0. Unter 1 = Zeitlupe, über 1 = Zeitraffer',
   },
   {
     key: 'citadel_player_move_speed_scale',
@@ -149,7 +149,7 @@ const CONVAR_SLIDERS: ConvarSliderConfig[] = [
     step: 0.1,
     defaultValue: 1.0,
     unit: '×',
-    hint: 'Standard: 1.0 — gilt für alle Spieler',
+    hint: 'Standard: 1.0, gilt für alle Spieler',
   },
   {
     key: 'citadel_weapon_damage_multiplier',

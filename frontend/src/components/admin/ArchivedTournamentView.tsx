@@ -179,7 +179,7 @@ export default function ArchivedTournamentView({ tournament }: ArchivedTournamen
                         )}
                         {m.discord_name ?? m.discord_id}
                       </span>
-                      <span className="text-xs">{m.rank ?? '—'}</span>
+                      <span className="text-xs">{m.rank ?? '-'}</span>
                     </li>
                   ))}
                 </ul>

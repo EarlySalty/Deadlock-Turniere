@@ -5,7 +5,7 @@ import { useTriggerAutoLobby } from '@/hooks/useTournament'
 
 interface AutoLobbyButtonProps {
   tournamentId: number
-  /** Wenn false, ist Auto-Lobby für das Turnier deaktiviert — Button greift trotzdem als manueller Trigger. */
+  /** Wenn false, ist Auto-Lobby für das Turnier deaktiviert; Button greift trotzdem als manueller Trigger. */
   enabled: boolean
 }
 
@@ -40,7 +40,7 @@ export default function AutoLobbyButton({ tournamentId, enabled }: AutoLobbyButt
 
       {!enabled && (
         <span className="text-xs text-amber-300">
-          Auto-Lobby ist deaktiviert — Button startet nur manuell.
+          Auto-Lobby ist deaktiviert. Button startet nur manuell.
         </span>
       )}
 

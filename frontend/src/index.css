@@ -4,14 +4,14 @@
 @import "./draft.css";
 @plugin "@tailwindcss/typography";
 
-/* Turnierplattform — DDC-Marke: Patch-Schwarz + Gold
+/* Turnierplattform, DDC-Marke: Patch-Schwarz + Gold
  *
  * Vorher: "Ethereal & Industrial" (Neon-Gruen + Okkult-Lila auf Blau-Schwarz).
- * Jetzt: der Marken-Look der Website — neutrales Patch-Schwarz (#0b0b0b) mit
+ * Jetzt: der Marken-Look der Website, neutrales Patch-Schwarz (#0b0b0b) mit
  * Gold als einzigem Chrome-Akzent. Farben kommen aus brand-tokens.css.
  *
  * Der Look ist FLACH. Kein Holz, kein gebuerstetes Metall, keine Nieten, keine
- * Glow-Orbs — das ist die aeltere Braun-Materialschicht und ausdruecklich nicht
+ * Glow-Orbs; das ist die aeltere Braun-Materialschicht und ausdruecklich nicht
  * die Marke. Tiefe entsteht nur durch Flaechenhelligkeit, einen goldigen
  * Haarrahmen und einen Schlagschatten.
  *
@@ -65,7 +65,7 @@ body::before {
   -webkit-mask-image: radial-gradient(ellipse 100% 72% at 50% 0%, #000 30%, transparent 72%);
 }
 
-/* Ueberschriften: Sora statt Cinzel. Das globale Versal-Setzen faellt weg —
+/* Ueberschriften: Sora statt Cinzel. Das globale Versal-Setzen faellt weg;
    die Marke setzt Ueberschriften gemischt; wo Versalien gewollt sind, steht
    das uppercase weiterhin an der Komponente. */
 h1, h2, h3, h4, .font-display {
@@ -120,7 +120,7 @@ h1, h2, h3, h4, .font-display {
 
 /* ── Kachel ───────────────────────────────────────────────────────────────
    Flache Platte auf schwarzem Grund: etwas hellere Flaeche, goldiger
-   Haarrahmen, Schlagschatten. Mehr nicht — die Tiefe kommt aus dem Kontrast
+   Haarrahmen, Schlagschatten. Mehr nicht; die Tiefe kommt aus dem Kontrast
    zum Grund, nicht aus Textur.
    .glass/.glass-card sind die Klassen, die dieses Frontend schon benutzt
    (Tournament.tsx, CreateTournamentForm); sie tragen dasselbe Material, damit
@@ -145,7 +145,7 @@ h1, h2, h3, h4, .font-display {
   box-shadow: var(--shadow-card-soft);
 }
 
-/* Gold-Flaeche. Traegt IMMER dunkle Tinte — Kinder erben die Farbe, damit
+/* Gold-Flaeche. Traegt IMMER dunkle Tinte; Kinder erben die Farbe, damit
    niemand versehentlich weissen Text auf Gold setzt (~1.9:1, faellt keinem
    Build auf). #0b0b0b auf #c8a86b liegt bei 8.69:1. */
 .gradient-accent {
