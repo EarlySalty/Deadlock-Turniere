@@ -114,11 +114,13 @@ fn unknown_values_stay_unknown_and_winner_ends_match() {
     assert_eq!(player.net_worth_rank, None);
     assert_eq!(player.health_fraction, None);
 
-    acc.apply_boss_kill(&BossKill {
+    let kill = BossKill {
         tick: ticks[1].tick,
         team_num: Some(3),
         objective: "walker".into(),
-    });
+    };
+    acc.apply_boss_kill(&kill);
+    acc.apply_boss_kill(&kill);
     let mut ended = ticks[1].clone();
     ended.tick += 64;
     if let Some(rules) = ended.rules.as_mut() {
@@ -132,4 +134,10 @@ fn unknown_values_stay_unknown_and_winner_ends_match() {
         snapshot.feed_events.last(),
         Some(HudEvent::Objective { team: Some(1), .. })
     ));
+    let objectives = snapshot
+        .feed_events
+        .iter()
+        .filter(|event| matches!(event, HudEvent::Objective { .. }))
+        .count();
+    assert_eq!(objectives, 1);
 }

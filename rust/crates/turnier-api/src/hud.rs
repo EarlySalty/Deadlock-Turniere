@@ -10,7 +10,9 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::watch;
 use turnier_observer::broadcast::BroadcastClient;
 use turnier_observer::hud::HudSnapshot;
-use turnier_observer::hud_feed::{new_shared_feed, run_feed, FeedStatus, FeedTiming, SharedFeed};
+use turnier_observer::hud_feed::{
+    new_shared_feed, run_feed, FeedPhase, FeedStatus, FeedTiming, SharedFeed,
+};
 
 use crate::error::{WebError, WebResult};
 use crate::internal_scrims::require_internal_boundary;
@@ -62,7 +64,9 @@ impl HudRegistry {
             .and_then(|active| active.as_ref().map(|feed| feed.feed.clone()));
         let state = feed.and_then(|feed| feed.read().ok().map(|state| state.clone()));
         HudView {
-            active: state.is_some(),
+            active: state.as_ref().is_some_and(|state| {
+                matches!(state.status.phase, FeedPhase::Starting | FeedPhase::Live)
+            }),
             status: state.as_ref().map(|state| state.status.clone()),
             snapshot: state.and_then(|state| state.snapshot),
         }

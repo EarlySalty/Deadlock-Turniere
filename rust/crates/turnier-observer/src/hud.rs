@@ -158,6 +158,7 @@ pub struct HudAccumulator {
     item_events: VecDeque<HudEvent>,
     feed_events: VecDeque<HudEvent>,
     last_tick: Option<i64>,
+    seen_boss_kills: HashSet<(i64, Option<i64>, String)>,
 }
 
 pub fn team_index(team_num: Option<i64>) -> Option<u8> {
@@ -208,6 +209,10 @@ impl HudAccumulator {
     }
 
     pub fn apply_boss_kill(&mut self, kill: &BossKill) {
+        let key = (kill.tick, kill.team_num, kill.objective.clone());
+        if !self.seen_boss_kills.insert(key) {
+            return;
+        }
         let clock = match_clock(kill.tick, &self.rules);
         push_bounded(
             &mut self.feed_events,

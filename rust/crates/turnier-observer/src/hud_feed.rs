@@ -145,7 +145,7 @@ impl FeedRun {
         let mut last_progress = Instant::now();
         while !*self.stop.borrow() {
             if window.is_full() {
-                match self.fetch(next, FragmentKind::Full).await? {
+                match self.fetch_live(next, FragmentKind::Full).await? {
                     Some(full) => window.rebase(&full)?,
                     None => {
                         if self.wait_or_stop(&mut last_progress).await? {
@@ -155,7 +155,7 @@ impl FeedRun {
                     }
                 }
             }
-            let Some(delta) = self.fetch(next, FragmentKind::Delta).await? else {
+            let Some(delta) = self.fetch_live(next, FragmentKind::Delta).await? else {
                 if self.wait_or_stop(&mut last_progress).await? {
                     return Ok(FeedPhase::Stopped);
                 }
@@ -198,11 +198,24 @@ impl FeedRun {
         }))
     }
 
+    async fn fetch_live(
+        &mut self,
+        number: u64,
+        kind: FragmentKind,
+    ) -> Result<Option<Vec<u8>>, FeedError> {
+        match self.fetch(number, kind).await {
+            Err(FeedError::Broadcast(err)) if transient(&err) => {
+                tracing::warn!(error = %err, fragment = number, "HUD-Feed: Relay-Fehler, neuer Versuch");
+                let message = err.to_string();
+                self.update(|status| status.error = Some(message));
+                Ok(None)
+            }
+            other => other,
+        }
+    }
+
     async fn wait_or_stop(&mut self, last_progress: &mut Instant) -> Result<bool, FeedError> {
         if last_progress.elapsed() > self.timing.stall {
-            if self.accumulator.last_tick().is_some() {
-                return Ok(true);
-            }
             return Err(FeedError::Stalled);
         }
         let _ = tokio::time::timeout(self.timing.poll, self.stop.changed()).await;
@@ -241,6 +254,7 @@ impl FeedRun {
             status.hud_delay_seconds = sync.as_ref().and_then(|sync| hud_delay(sync, hud_tick));
             status.decode_millis = Some(decode_millis);
             status.window_bytes = window_bytes;
+            status.error = None;
         });
         if let Ok(mut state) = self.shared.write() {
             state.snapshot = Some(snapshot);
@@ -252,6 +266,16 @@ impl FeedRun {
         if let Ok(mut state) = self.shared.write() {
             apply(&mut state.status);
         }
+    }
+}
+
+fn transient(err: &BroadcastError) -> bool {
+    match err {
+        BroadcastError::Http(_) => true,
+        BroadcastError::Status(code) => {
+            code.is_server_error() || *code == reqwest::StatusCode::TOO_MANY_REQUESTS
+        }
+        _ => false,
     }
 }
 

@@ -103,7 +103,7 @@ impl BroadcastClient {
         if !response.status().is_success() {
             return Err(BroadcastError::Status(response.status()));
         }
-        let body = response.bytes().await?;
+        let body = read_limited(response).await?;
         serde_json::from_slice(&body).map_err(|err| BroadcastError::Sync(err.to_string()))
     }
 
@@ -124,16 +124,27 @@ impl BroadcastClient {
         if !status.is_success() {
             return Err(BroadcastError::Status(status));
         }
-        if response.content_length().unwrap_or(0) > MAX_FRAGMENT_BYTES {
-            return Err(BroadcastError::TooLarge);
-        }
-        let body = response.bytes().await?;
+        let body = read_limited(response).await?;
         let wire_bytes = body.len() as u64;
         Ok(Some(Fragment {
             bytes: inflate(&body)?,
             wire_bytes,
         }))
     }
+}
+
+async fn read_limited(mut response: reqwest::Response) -> Result<Vec<u8>, BroadcastError> {
+    if response.content_length().unwrap_or(0) > MAX_FRAGMENT_BYTES {
+        return Err(BroadcastError::TooLarge);
+    }
+    let mut body = Vec::new();
+    while let Some(chunk) = response.chunk().await? {
+        if (body.len() + chunk.len()) as u64 > MAX_FRAGMENT_BYTES {
+            return Err(BroadcastError::TooLarge);
+        }
+        body.extend_from_slice(&chunk);
+    }
+    Ok(body)
 }
 
 fn inflate(body: &[u8]) -> Result<Vec<u8>, BroadcastError> {
