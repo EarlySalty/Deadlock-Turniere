@@ -198,7 +198,11 @@ impl FeedRun {
                     }
                     wait = (wait * 2).min(longest);
                 }
-                other => return Ok(Some(other?)),
+                other => {
+                    let sync = other?;
+                    self.update(|status| status.error = None);
+                    return Ok(Some(sync));
+                }
             }
         }
     }
@@ -402,7 +406,9 @@ mod tests {
         let (mut run, _stop) = feed_run(&base, Duration::from_secs(5));
         let sync = run.ready_sync().await.unwrap().unwrap();
         assert_eq!(sync.fragment, 12);
-        assert_eq!(run.shared.read().unwrap().status.phase, FeedPhase::Starting);
+        let status = run.shared.read().unwrap().status.clone();
+        assert_eq!(status.phase, FeedPhase::Starting);
+        assert_eq!(status.error, None);
     }
 
     #[tokio::test]
