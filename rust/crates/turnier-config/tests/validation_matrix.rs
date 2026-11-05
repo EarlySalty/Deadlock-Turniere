@@ -49,7 +49,11 @@ fn every_required_leaf_rejects_omission_and_every_leaf_rejects_wrong_type() {
             .unwrap();
         if !matches!(
             label.as_str(),
-            "scrim_signup_role_id" | "scrim_reserve_role_id"
+            "scrim_signup_role_id"
+                | "scrim_reserve_role_id"
+                | "network.hud_poll_millis"
+                | "network.hud_stall_seconds"
+                | "network.hud_spectate_seconds"
         ) {
             assert!(
                 parse(&missing).is_err(),

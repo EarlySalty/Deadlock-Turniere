@@ -21,6 +21,7 @@ pub mod auth;
 pub mod comp;
 pub mod consent;
 pub mod draft;
+pub mod hud;
 pub mod internal_automatik;
 pub mod internal_scrims;
 pub mod leaderboard;

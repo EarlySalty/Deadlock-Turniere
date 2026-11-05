@@ -118,6 +118,7 @@ fn state_with_pool_broker_and_signup_role(
             "http://127.0.0.1:9",
             "",
         )),
+        hud: Default::default(),
     }
 }
 

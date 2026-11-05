@@ -4,7 +4,11 @@
 //! [`PlayerSnapshot`]s normalisiert, der [`Director`] entscheidet deterministisch,
 //! und der lokale Agent kennt nur drei erlaubte Kameraaktionen.
 
+pub mod broadcast;
 pub mod director;
+pub mod hud;
+pub mod hud_decode;
+pub mod hud_feed;
 pub mod live;
 pub mod protocol;
 pub mod vconsole;

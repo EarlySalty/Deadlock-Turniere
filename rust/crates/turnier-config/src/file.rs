@@ -85,6 +85,21 @@ pub struct NetworkConfig {
     pub observer_connect_seconds: u64,
     pub observer_keepalive_seconds: u64,
     pub heroes_request_seconds: u64,
+    #[serde(default = "default_hud_poll_millis")]
+    pub hud_poll_millis: u64,
+    #[serde(default = "default_hud_stall_seconds")]
+    pub hud_stall_seconds: u64,
+    #[serde(default = "default_hud_spectate_seconds")]
+    pub hud_spectate_seconds: u64,
+}
+fn default_hud_poll_millis() -> u64 {
+    750
+}
+fn default_hud_stall_seconds() -> u64 {
+    90
+}
+fn default_hud_spectate_seconds() -> u64 {
+    25
 }
 impl Default for NetworkConfig {
     fn default() -> Self {
@@ -103,6 +118,9 @@ impl Default for NetworkConfig {
             observer_connect_seconds: 5,
             observer_keepalive_seconds: 30,
             heroes_request_seconds: 5,
+            hud_poll_millis: default_hud_poll_millis(),
+            hud_stall_seconds: default_hud_stall_seconds(),
+            hud_spectate_seconds: default_hud_spectate_seconds(),
         }
     }
 }
@@ -604,6 +622,8 @@ impl Config {
             n.observer_connect_seconds,
             n.observer_keepalive_seconds,
             n.heroes_request_seconds,
+            n.hud_stall_seconds,
+            n.hud_spectate_seconds,
         ] {
             bounded(
                 value,
@@ -612,6 +632,12 @@ impl Config {
                 "network: Sekunden müssen zwischen 1 und 3600 liegen",
             )?;
         }
+        bounded(
+            n.hud_poll_millis,
+            100,
+            10_000,
+            "network: hud_poll_millis muss zwischen 100 und 10000 liegen",
+        )?;
         if n.broker_connect_seconds > n.broker_request_seconds
             || n.oauth_connect_seconds > n.oauth_request_seconds
             || n.lobby_connect_seconds > n.lobby_request_seconds

@@ -40,6 +40,7 @@ pub fn build_router(state: AppState) -> Router {
         .merge(observer::router())
         .merge(internal_automatik::router())
         .merge(internal_scrims::router())
+        .merge(crate::hud::router())
         .merge(test_mode::router(&state.config))
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),

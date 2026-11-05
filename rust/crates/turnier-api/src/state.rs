@@ -40,6 +40,7 @@ pub struct AppState {
     pub draft_viewers: Arc<Mutex<HashMap<String, HashMap<String, Instant>>>>,
     pub comp_rate_limit: Arc<Mutex<crate::comp::RateLimiter>>,
     pub scrim_lobby: Arc<ScrimLobbyClient>,
+    pub hud: Arc<crate::hud::HudRegistry>,
 }
 
 impl AppState {
@@ -102,6 +103,7 @@ impl AppState {
             draft_viewers: Arc::new(Mutex::new(HashMap::new())),
             comp_rate_limit,
             scrim_lobby,
+            hud: Arc::new(crate::hud::HudRegistry::default()),
         })
     }
 }

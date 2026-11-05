@@ -3294,7 +3294,7 @@ fn service(state: &AppState) -> ScrimService<PgScrimReadRepository> {
     ))
 }
 
-fn require_internal_boundary(
+pub(crate) fn require_internal_boundary(
     peer: SocketAddr,
     headers: &HeaderMap,
     state: &AppState,
