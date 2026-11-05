@@ -54,6 +54,7 @@ fn every_required_leaf_rejects_omission_and_every_leaf_rejects_wrong_type() {
                 | "network.hud_poll_millis"
                 | "network.hud_stall_seconds"
                 | "network.hud_spectate_seconds"
+                | "network.hud_ready_seconds"
         ) {
             assert!(
                 parse(&missing).is_err(),

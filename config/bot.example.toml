@@ -81,6 +81,7 @@ heroes_request_seconds = 5
 hud_poll_millis = 750
 hud_stall_seconds = 90
 hud_spectate_seconds = 25
+hud_ready_seconds = 120
 
 [scheduler]
 observer_agent_fresh_seconds = 8

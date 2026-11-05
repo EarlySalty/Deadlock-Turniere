@@ -91,6 +91,8 @@ pub struct NetworkConfig {
     pub hud_stall_seconds: u64,
     #[serde(default = "default_hud_spectate_seconds")]
     pub hud_spectate_seconds: u64,
+    #[serde(default = "default_hud_ready_seconds")]
+    pub hud_ready_seconds: u64,
 }
 fn default_hud_poll_millis() -> u64 {
     750
@@ -100,6 +102,9 @@ fn default_hud_stall_seconds() -> u64 {
 }
 fn default_hud_spectate_seconds() -> u64 {
     25
+}
+fn default_hud_ready_seconds() -> u64 {
+    120
 }
 impl Default for NetworkConfig {
     fn default() -> Self {
@@ -121,6 +126,7 @@ impl Default for NetworkConfig {
             hud_poll_millis: default_hud_poll_millis(),
             hud_stall_seconds: default_hud_stall_seconds(),
             hud_spectate_seconds: default_hud_spectate_seconds(),
+            hud_ready_seconds: default_hud_ready_seconds(),
         }
     }
 }
@@ -624,6 +630,7 @@ impl Config {
             n.heroes_request_seconds,
             n.hud_stall_seconds,
             n.hud_spectate_seconds,
+            n.hud_ready_seconds,
         ] {
             bounded(
                 value,

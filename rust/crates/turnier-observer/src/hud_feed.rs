@@ -12,11 +12,13 @@ use crate::hud_decode::{decode_window, DecodedWindow};
 const WINDOW_DELTAS: usize = 10;
 const SAMPLE_TICKS: i64 = 16;
 const NEWEST_PROBE_LIMIT: u64 = 30;
+const READY_BACKOFF_FACTOR: u32 = 8;
 
 #[derive(Debug, Clone, Copy)]
 pub struct FeedTiming {
     pub poll: Duration,
     pub stall: Duration,
+    pub ready: Duration,
 }
 
 impl FeedTiming {
@@ -24,6 +26,7 @@ impl FeedTiming {
         Self {
             poll: Duration::from_millis(network.hud_poll_millis),
             stall: Duration::from_secs(network.hud_stall_seconds),
+            ready: Duration::from_secs(network.hud_ready_seconds),
         }
     }
 }
@@ -135,7 +138,9 @@ pub async fn run_feed(
 
 impl FeedRun {
     async fn run(&mut self) -> Result<FeedPhase, FeedError> {
-        let sync = self.client.sync().await?;
+        let Some(sync) = self.ready_sync().await? else {
+            return Ok(FeedPhase::Stopped);
+        };
         let start = self
             .fetch(sync.signup_fragment, FragmentKind::Start)
             .await?
@@ -170,6 +175,32 @@ impl FeedRun {
             next += 1;
         }
         Ok(FeedPhase::Stopped)
+    }
+
+    async fn ready_sync(&mut self) -> Result<Option<BroadcastSync>, FeedError> {
+        let deadline = Instant::now() + self.timing.ready;
+        let longest = self.timing.poll * READY_BACKOFF_FACTOR;
+        let mut wait = self.timing.poll;
+        loop {
+            match self.client.sync().await {
+                Err(BroadcastError::Status(code)) if not_ready(code) => {
+                    let remaining = deadline.saturating_duration_since(Instant::now());
+                    if remaining.is_zero() {
+                        return Err(BroadcastError::Status(code).into());
+                    }
+                    tracing::info!(status = %code, "HUD-Feed: Broadcast noch nicht bereit");
+                    self.update(|status| {
+                        status.error = Some(format!("Broadcast noch nicht bereit ({code})"))
+                    });
+                    let _ = tokio::time::timeout(wait.min(remaining), self.stop.changed()).await;
+                    if *self.stop.borrow() {
+                        return Ok(None);
+                    }
+                    wait = (wait * 2).min(longest);
+                }
+                other => return Ok(Some(other?)),
+            }
+        }
     }
 
     async fn newest_full(
@@ -269,6 +300,10 @@ impl FeedRun {
     }
 }
 
+fn not_ready(code: reqwest::StatusCode) -> bool {
+    code == reqwest::StatusCode::METHOD_NOT_ALLOWED || code == reqwest::StatusCode::NOT_FOUND
+}
+
 fn transient(err: &BroadcastError) -> bool {
     match err {
         BroadcastError::Http(_) => true,
@@ -288,4 +323,107 @@ fn hud_delay(sync: &BroadcastSync, hud_tick: Option<i64>) -> Option<f64> {
     };
     let behind_relay = (relay_tick - hud_tick?) as f64 / tps;
     Some(sync.rtdelay.unwrap_or(0.0) + sync.rcvage.unwrap_or(0.0) + behind_relay.max(0.0))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::net::{TcpListener, TcpStream};
+
+    const NOT_READY: &str = "HTTP/1.1 405 Method Not Allowed\r\ncontent-type: application/json\r\ncontent-length: 50\r\nconnection: close\r\n\r\n{\"statusCode\":405,\"message\":\"Broadcast not ready\"}";
+    const FORBIDDEN: &str =
+        "HTTP/1.1 403 Forbidden\r\ncontent-length: 0\r\nconnection: close\r\n\r\n";
+    const READY: &str = "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: 46\r\nconnection: close\r\n\r\n{\"tick\":100,\"fragment\":12,\"signup_fragment\":3}";
+
+    async fn answer(stream: TcpStream, response: &'static str) {
+        let mut request = Vec::new();
+        let mut buf = [0u8; 1024];
+        while !request.windows(4).any(|w| w == b"\r\n\r\n") {
+            if stream.readable().await.is_err() {
+                return;
+            }
+            match stream.try_read(&mut buf) {
+                Ok(0) => return,
+                Ok(n) => request.extend_from_slice(&buf[..n]),
+                Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => continue,
+                Err(_) => return,
+            }
+        }
+        let mut sent = 0;
+        let bytes = response.as_bytes();
+        while sent < bytes.len() {
+            if stream.writable().await.is_err() {
+                return;
+            }
+            match stream.try_write(&bytes[sent..]) {
+                Ok(n) => sent += n,
+                Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => continue,
+                Err(_) => return,
+            }
+        }
+    }
+
+    async fn relay(responses: Vec<&'static str>) -> String {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        tokio::spawn(async move {
+            for response in responses {
+                let Ok((stream, _)) = listener.accept().await else {
+                    return;
+                };
+                answer(stream, response).await;
+            }
+        });
+        base
+    }
+
+    fn feed_run(base: &str, ready: Duration) -> (FeedRun, watch::Sender<bool>) {
+        let (stop_tx, stop) = watch::channel(false);
+        let client = BroadcastClient::new(base, &turnier_config::NetworkConfig::default()).unwrap();
+        let run = FeedRun {
+            client,
+            shared: new_shared_feed(1),
+            stop,
+            timing: FeedTiming {
+                poll: Duration::from_millis(10),
+                stall: Duration::from_secs(5),
+                ready,
+            },
+            accumulator: HudAccumulator::default(),
+            started: Instant::now(),
+            wire_bytes: 0,
+        };
+        (run, stop_tx)
+    }
+
+    #[tokio::test]
+    async fn sync_wartet_bis_broadcast_bereit_ist() {
+        let base = relay(vec![NOT_READY, NOT_READY, READY]).await;
+        let (mut run, _stop) = feed_run(&base, Duration::from_secs(5));
+        let sync = run.ready_sync().await.unwrap().unwrap();
+        assert_eq!(sync.fragment, 12);
+        assert_eq!(run.shared.read().unwrap().status.phase, FeedPhase::Starting);
+    }
+
+    #[tokio::test]
+    async fn sync_gibt_nach_frist_auf() {
+        let base = relay(vec![NOT_READY; 20]).await;
+        let (mut run, _stop) = feed_run(&base, Duration::from_millis(50));
+        let err = run.ready_sync().await.unwrap_err();
+        assert!(matches!(
+            err,
+            FeedError::Broadcast(BroadcastError::Status(code)) if code == reqwest::StatusCode::METHOD_NOT_ALLOWED
+        ));
+    }
+
+    #[tokio::test]
+    async fn anderer_sync_fehler_bleibt_fatal() {
+        let base = relay(vec![FORBIDDEN, READY]).await;
+        let (mut run, _stop) = feed_run(&base, Duration::from_secs(5));
+        let err = run.ready_sync().await.unwrap_err();
+        assert!(matches!(
+            err,
+            FeedError::Broadcast(BroadcastError::Status(code)) if code == reqwest::StatusCode::FORBIDDEN
+        ));
+    }
 }
