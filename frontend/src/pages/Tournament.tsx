@@ -1,4 +1,6 @@
 import { useState, useEffect } from 'react'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { loginGuest, fetchMe } from '@/api/client'
 import type { FormEvent } from 'react'
 import { useParams } from 'react-router-dom'
 import { motion } from 'framer-motion'
@@ -193,6 +195,19 @@ export default function Tournament() {
   const { data: tournament, isLoading } = useTournament(tournamentId)
   const { data: checkinStatus } = useCheckinStatus(tournamentId)
   const { isLoggedIn } = useAuth()
+  const queryClient = useQueryClient()
+  const [guestName, setGuestName] = useState('')
+  const guestLogin = useMutation({
+    mutationFn: loginGuest,
+    onSuccess: async () => {
+      queryClient.setQueryData(['auth', 'me'], await fetchMe())
+      await queryClient.invalidateQueries({ queryKey: ['consent'] })
+      setPendingAction(() => () => signupSoloMutation.mutate(tournamentId, {
+        onSuccess: () => setSuccessMsg('Du bist jetzt als Solo-Spieler eingetragen!'),
+      }))
+      setShowConsentModal(true)
+    },
+  })
   const [selectedTab, setActiveTab] = useState<Tab>('übersicht')
   const [showCreateTeam, setShowCreateTeam] = useState(false)
   const [teamName, setTeamName] = useState('')
@@ -413,6 +428,11 @@ export default function Tournament() {
 
       {/* Action Banner Group */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {signupSoloMutation.isError && (
+          <p role="alert" className="md:col-span-2 rounded-lg border border-red-500/20 bg-red-500/10 p-4 text-sm text-red-400">
+            {signupSoloMutation.error.message}
+          </p>
+        )}
         {/* Success message */}
         {successMsg && (
           <motion.div
@@ -576,8 +596,23 @@ export default function Tournament() {
 
                      {!isLoggedIn ? (
                         <div className="text-center py-6 space-y-4">
-                           <p className="text-muted italic">Melde dich an, um teilzunehmen.</p>
                            <LoginButton />
+                           <form className="mx-auto max-w-sm space-y-3 text-left" onSubmit={(event) => {
+                             event.preventDefault()
+                             if (guestName.trim()) guestLogin.mutate(guestName.trim())
+                           }}>
+                             <p className="text-sm text-muted">Kein Discord? Melde dich mit deinem Namen an.</p>
+                             <label htmlFor="guest-name" className="block text-sm text-foreground">Dein Spielername</label>
+                             <input id="guest-name" name="guest-name" type="text" required maxLength={32}
+                               autoComplete="nickname" value={guestName} disabled={guestLogin.isPending}
+                               onChange={(event) => setGuestName(event.target.value)}
+                               className="w-full rounded-lg border border-border bg-background p-3 text-foreground" />
+                             <p className="text-xs text-muted">Dein Gastzugang bleibt in diesem Browser gespeichert. Nach dem Abmelden oder Löschen der Cookies hilft dir die Turnierleitung weiter.</p>
+                             <Button type="submit" variant="secondary" disabled={guestLogin.isPending || !guestName.trim()}>
+                               {guestLogin.isPending ? 'Wird angemeldet…' : 'Mit Namen teilnehmen'}
+                             </Button>
+                             {guestLogin.isError && <p role="alert" className="text-sm text-red-400">{guestLogin.error.message}</p>}
+                           </form>
                         </div>
                      ) : !userTeam && !userHasSoloSignup ? (
                         <div className="space-y-4">

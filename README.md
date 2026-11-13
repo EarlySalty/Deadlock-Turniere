@@ -68,6 +68,10 @@ Expected: `active`, one `turnier-bot` process from the path above, and `200` for
 
 ## Discord notifications and DM opt-out
 
+Guests can join from a tournament's signup card by entering a player name and accepting the existing consent form. Their browser receives the same secure, HttpOnly session cookie used by Discord login. Guests can sign up, check in and join teams. The name alone cannot recover access after logout, cookie deletion or session expiry; tournament staff must manage the old entry in that case.
+
+Guest participant IDs are negative values allocated from the signup identity sequence. Discord snowflakes remain positive and retain their strict parser at Discord API boundaries. Guests receive no Discord roles and are skipped by tournament DM reminders. No schema migration is required.
+
 - Tournament DMs are sent by `DiscordNotifier` (`rust/crates/turnier-discord`). Before sending, it skips users who have a row in `turnier.tournament_dm_optout`, whatever the scope, and respects `user_profiles.notify_discord_dm` and the per-event flag.
 - Users manage the tournament opt-out through `GET /api/me/dm-optout`, `PUT /api/me/dm-optout` with `{"scope": "fun" | "comp" | "all"}`, and `DELETE /api/me/dm-optout/{scope}`.
 - The global table `core.dm_optout` in Deadlock-Bots is not read by this repo. A global opt-out does not stop tournament DMs today.

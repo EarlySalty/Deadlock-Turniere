@@ -96,6 +96,12 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 // Auth
 export const fetchMe = () => request<UserSession>('/me')
 
+export const loginGuest = (name: string) =>
+  request<Record<string, never>>('/auth/guest', {
+    method: 'POST',
+    body: JSON.stringify({ name }),
+  })
+
 // Tournaments (public)
 export const fetchTournaments = () => request<Tournament[]>('/tournaments')
 export const fetchTournament = (id: number) => request<TournamentDetailPublic>(`/tournaments/${id}`)

@@ -10,7 +10,7 @@ use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
 use chrono::{DateTime, Duration, Utc};
 use rand::RngCore;
-use turnier_core::{discord_id_to_string, parse_discord_id, UserSession};
+use turnier_core::{discord_id_to_string, parse_participant_id, UserSession};
 use turnier_db::{bearer, Pool};
 
 use crate::error::{AuthError, AuthResult};
@@ -96,7 +96,7 @@ pub async fn create_session_with_lifetime(
     let now = Utc::now();
     let expires_at = now + Duration::days(lifetime_days);
     let roles_csv = roles.join(",");
-    let discord_id = parse_discord_id(discord_id)
+    let discord_id = parse_participant_id(discord_id)
         .map_err(|_| AuthError::BadRequest("Discord-ID muss numerisch sein"))?;
 
     sqlx::query(

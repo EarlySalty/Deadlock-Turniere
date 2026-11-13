@@ -65,6 +65,22 @@ async fn notify_users_skips_tournament_dm_optout_before_send() {
 }
 
 #[tokio::test]
+async fn notify_users_skips_guests_without_creating_failed_tasks() {
+    let db = fresh_db().await;
+    let result = notifier(db.pool().clone())
+        .notify_users(&["-123".to_string()], NotificationEvent::MatchStart, "Test")
+        .await
+        .expect("guests have no Discord DM destination");
+    assert_eq!(result.skipped, vec!["-123"]);
+    assert!(result.failed.is_empty());
+    let count: i64 = sqlx::query_scalar("SELECT count(*) FROM turnier.discord_tasks")
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+    assert_eq!(count, 0);
+}
+
+#[tokio::test]
 async fn notify_casters_match_created_skips_tournament_dm_optout_before_send() {
     let db = fresh_db().await;
     let pool = db.pool();

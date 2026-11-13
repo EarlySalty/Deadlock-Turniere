@@ -21,7 +21,7 @@ pub mod user;
 pub use bracket::{BracketMatch, BracketMiniGroup, MatchGame};
 pub use enums::*;
 pub use group::{Group, GroupMatch, GroupTeam};
-pub use ids::{discord_id_to_string, parse_discord_id, DiscordIdParseError};
+pub use ids::{discord_id_to_string, parse_discord_id, parse_participant_id, DiscordIdParseError};
 pub use rank::RankProfile;
 pub use result::{CheckIn, MatchResult, MatchResultReport, MatchResultReportCreate};
 pub use team::{

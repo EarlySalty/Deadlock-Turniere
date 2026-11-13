@@ -381,6 +381,10 @@ impl DiscordNotifier {
 
         let mut summary = NotifyUsersResult::default();
         for discord_id in &unique_ids {
+            if turnier_core::parse_participant_id(discord_id).is_ok_and(|id| id < 0) {
+                summary.skipped.push(discord_id.clone());
+                continue;
+            }
             if optout_ids.contains(discord_id) {
                 summary.skipped.push(discord_id.clone());
                 continue;

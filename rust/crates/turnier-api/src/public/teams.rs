@@ -334,8 +334,8 @@ async fn kick_team_member(
     AuthUser(user): AuthUser,
     Path((tournament_id, team_id, discord_id)): Path<(i64, i64, String)>,
 ) -> WebResult<Json<Value>> {
-    if !is_strict_discord_id(&discord_id) {
-        return Err(WebError::bad_request("Ungültige Discord-ID"));
+    if !is_participant_id(&discord_id) {
+        return Err(WebError::bad_request("Ungültige Teilnehmer-ID"));
     }
     let target_discord_id = db::parse_discord_id(&discord_id)?;
 
@@ -497,8 +497,8 @@ async fn invite_to_team(
     AuthUser(user): AuthUser,
     Path((tournament_id, team_id, target_discord_id)): Path<(i64, i64, String)>,
 ) -> WebResult<Json<Team>> {
-    if !is_strict_discord_id(&target_discord_id) {
-        return Err(WebError::bad_request("Ungültige Discord-ID"));
+    if !is_participant_id(&target_discord_id) {
+        return Err(WebError::bad_request("Ungültige Teilnehmer-ID"));
     }
     let target_discord_id_i64 = db::parse_discord_id(&target_discord_id)?;
 
@@ -528,7 +528,7 @@ async fn invite_to_team(
 
     // Ziel-Spieler ist solo angemeldet (team_id IS NULL).
     let solo: Option<SoloSignupRow> = sqlx::query_as(
-        r#"SELECT steam_id, rank, rank_score FROM turnier."tournament_signups"
+        r#"SELECT discord_name, steam_id, rank, rank_score FROM turnier."tournament_signups"
          WHERE tournament_id = $1 AND discord_id = $2 AND team_id IS NULL"#,
     )
     .bind(tournament_id)
@@ -550,6 +550,7 @@ async fn invite_to_team(
     .await?;
     let discord_name = name_row
         .and_then(|(n,)| n)
+        .or(solo.discord_name)
         .unwrap_or_else(|| target_discord_id.clone());
 
     let mut tx = pool.begin().await?;
@@ -626,6 +627,7 @@ struct OldMemberRow {
 /// Rangfelder eines Solo-Signups.
 #[derive(sqlx::FromRow)]
 struct SoloSignupRow {
+    discord_name: Option<String>,
     steam_id: Option<String>,
     rank: Option<String>,
     rank_score: Option<i64>,
@@ -712,8 +714,11 @@ async fn load_team_member_by_id(
     })
 }
 
-/// Strenge Discord-ID-Prüfung `^\d{17,19}$` (kick/invite, 1:1 zum Original).
-fn is_strict_discord_id(value: &str) -> bool {
+/// Accepts guest participant IDs alongside existing Discord snowflakes.
+fn is_participant_id(value: &str) -> bool {
+    if value.starts_with('-') {
+        return turnier_core::parse_participant_id(value).is_ok_and(|id| id < 0);
+    }
     let len = value.len();
     (17..=19).contains(&len) && value.chars().all(|c| c.is_ascii_digit())
 }

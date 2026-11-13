@@ -23,6 +23,203 @@ const LEADER_ID: &str = "910000000000010005";
 const APPLICANT_ID: &str = "910000000000010006";
 const HELPER_ID: &str = "910000000000010007";
 
+#[tokio::test]
+async fn guest_signup_preserves_consent_and_identity_isolation() {
+    let ctx = setup().await;
+    for name in ["", "a\nb", &"ü".repeat(33)] {
+        assert_eq!(
+            send_json(
+                &ctx.app,
+                None,
+                Method::POST,
+                "/api/auth/guest",
+                Some(json!({"name": name}))
+            )
+            .await
+            .0,
+            StatusCode::BAD_REQUEST
+        );
+    }
+    let tournament_id = seed_tournament(&ctx.pool, "Guests", "registration", 2).await;
+    let mut tokens = Vec::new();
+    let mut identities = Vec::new();
+    for _ in 0..2 {
+        let response = ctx
+            .app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/api/auth/guest")
+                    .header(HOST, "localhost")
+                    .header(CONTENT_TYPE, "application/json")
+                    .body(Body::from(
+                        json!({"name": "  Jörg  ", "roles": ["admin-role"]}).to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::CREATED);
+        let cookie = response
+            .headers()
+            .get("set-cookie")
+            .unwrap()
+            .to_str()
+            .unwrap();
+        assert!(cookie.contains("HttpOnly; Secure; SameSite=Lax"));
+        let token = cookie
+            .split(';')
+            .next()
+            .unwrap()
+            .strip_prefix("session_token=")
+            .unwrap()
+            .to_string();
+        let (status, me) = send_json(&ctx.app, Some(&token), Method::GET, "/api/me", None).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(me["discord_name"], "Jörg");
+        assert_eq!(me["is_admin"], false);
+        assert_eq!(me["is_mod"], false);
+        assert!(me["discord_id"].as_str().unwrap().starts_with('-'));
+        identities.push(me["discord_id"].clone());
+        tokens.push(token);
+    }
+    assert_ne!(identities[0], identities[1]);
+    let token = &tokens[0];
+    assert_eq!(
+        send_json(
+            &ctx.app,
+            Some(token),
+            Method::POST,
+            "/api/auth/guest",
+            Some(json!({"name": "Other"}))
+        )
+        .await
+        .0,
+        StatusCode::CONFLICT
+    );
+    let signup = format!("/api/tournaments/{tournament_id}/signup");
+    assert_eq!(
+        send_json(&ctx.app, Some(token), Method::POST, &signup, None)
+            .await
+            .0,
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        send_json(
+            &ctx.app,
+            Some(token),
+            Method::POST,
+            "/api/consent",
+            Some(json!({"consent_version": 2}))
+        )
+        .await
+        .0,
+        StatusCode::CREATED
+    );
+    assert_eq!(
+        send_json(&ctx.app, Some(token), Method::POST, &signup, None)
+            .await
+            .0,
+        StatusCode::CREATED
+    );
+    assert_eq!(
+        send_json(&ctx.app, Some(token), Method::POST, &signup, None)
+            .await
+            .0,
+        StatusCode::CONFLICT
+    );
+    assert_eq!(
+        send_json(&ctx.app, Some(token), Method::DELETE, &signup, None)
+            .await
+            .0,
+        StatusCode::OK
+    );
+    assert_eq!(
+        send_json(&ctx.app, Some(token), Method::POST, &signup, None)
+            .await
+            .0,
+        StatusCode::CREATED
+    );
+    let captain_token = session(&ctx.pool, CAPTAIN_ID, "Captain", &[]).await;
+    let team_id = seed_team(&ctx.pool, tournament_id, "Guest team", CAPTAIN_ID).await;
+    let guest_id = identities[0].as_str().unwrap();
+    let (status, team) = send_json(
+        &ctx.app,
+        Some(&captain_token),
+        Method::POST,
+        &format!("/api/tournaments/{tournament_id}/teams/{team_id}/invite/{guest_id}"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(team["members"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|member| member["discord_name"] == "Jörg"));
+    assert_eq!(
+        send_json(
+            &ctx.app,
+            Some(&captain_token),
+            Method::DELETE,
+            &format!("/api/tournaments/{tournament_id}/teams/{team_id}/members/{guest_id}"),
+            None
+        )
+        .await
+        .0,
+        StatusCode::OK
+    );
+    sqlx::query("UPDATE turnier.tournaments SET status = 'checkin' WHERE id = $1")
+        .bind(tournament_id)
+        .execute(&ctx.pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        send_json(
+            &ctx.app,
+            Some(token),
+            Method::POST,
+            &format!("/api/tournaments/{tournament_id}/checkin"),
+            None
+        )
+        .await
+        .0,
+        StatusCode::OK
+    );
+    let (_, other) = send_json(
+        &ctx.app,
+        Some(&tokens[1]),
+        Method::GET,
+        &format!("/api/tournaments/{tournament_id}/me"),
+        None,
+    )
+    .await;
+    assert!(other["signup_id"].is_null());
+    let solo = seed_tournament(&ctx.pool, "Solo guest", "registration", 1).await;
+    assert_eq!(
+        send_json(
+            &ctx.app,
+            Some(token),
+            Method::POST,
+            &format!("/api/tournaments/{solo}/signup"),
+            None
+        )
+        .await
+        .0,
+        StatusCode::CREATED
+    );
+    let (_, me) = send_json(
+        &ctx.app,
+        Some(token),
+        Method::GET,
+        &format!("/api/tournaments/{solo}/me"),
+        None,
+    )
+    .await;
+    assert!(me["team_id"].is_number());
+}
+
 struct TestApp {
     app: Router,
     _db: TestDb,

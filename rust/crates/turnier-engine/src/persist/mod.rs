@@ -41,13 +41,13 @@ pub use start_gap::{
 
 use serde_json::Value;
 use sqlx::{Postgres, Transaction};
-use turnier_core::{now_utc, parse_discord_id};
+use turnier_core::{now_utc, parse_participant_id};
 
 use crate::engine::slots::BracketSlot;
 use crate::error::{TournamentError, TournamentResult};
 
 pub(crate) fn parse_db_discord_id(value: &str) -> TournamentResult<i64> {
-    parse_discord_id(value).map_err(|err| TournamentError::validation(err.to_string()))
+    parse_participant_id(value).map_err(|err| TournamentError::validation(err.to_string()))
 }
 
 /// Fügt ein Bracket-Match ein und verdrahtet bei Mini-Group-Quellen das
