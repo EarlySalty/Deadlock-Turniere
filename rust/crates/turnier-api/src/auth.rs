@@ -135,9 +135,6 @@ async fn guest_login(
         return Err(WebError::conflict("Du bist bereits angemeldet"));
     }
     let name = guest_name(&input.name)?;
-    // Reuse the signup identity sequence for concurrency safe allocation.
-    // Negative IDs cannot collide with Discord snowflakes. Sequence gaps
-    // are expected, including when the guest cancels before signing up.
     let guest_id: i64 = sqlx::query_scalar(
         "SELECT -nextval(pg_get_serial_sequence('turnier.tournament_signups', 'id'))",
     )
