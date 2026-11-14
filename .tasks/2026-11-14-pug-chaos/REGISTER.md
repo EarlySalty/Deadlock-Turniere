@@ -115,3 +115,4 @@ P3b solo-only built in 392872f (`auto_team_formation` off, player team actions a
 - `cargo fmt --check` per crate and `cargo-slot clippy --workspace --all-targets -- -D warnings`: clean.
 - `test-db-run dlcentral_test_turniere -- cargo-slot test --workspace --features testing --no-fail-fast` on ionos: 630 passed, 1 failed (`turnier-db --test migration`, stale count 39 since 2026-10-11, red on base too); after db74df4 the migration test passes 4/4. `pug_finalize_formation_withdraw_and_admin_signup_contract` ok.
 - Frontend: `npm run lint` 0, `npm test` 31/31, `npm run build` 0, `tsc` 0.
+- After 89504ec: full `--features testing` run on ionos 631 passed, 1 failed (`validation_matrix` treated the new defaulted key `limits.guest_logins_per_hour` as required; it is now listed with the other defaulted keys, `turnier-config` 9/9). `central_routes` 17/17 including the extended PUG contract test, clippy clean, frontend lint 0, test 31/31, build 0.

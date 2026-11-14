@@ -55,6 +55,7 @@ fn every_required_leaf_rejects_omission_and_every_leaf_rejects_wrong_type() {
                 | "network.hud_stall_seconds"
                 | "network.hud_spectate_seconds"
                 | "network.hud_ready_seconds"
+                | "limits.guest_logins_per_hour"
         ) {
             assert!(
                 parse(&missing).is_err(),
