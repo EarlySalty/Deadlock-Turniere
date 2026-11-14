@@ -463,7 +463,7 @@ async fn upload_profile_avatar(
 
     let (extension, _media_type) = detect_avatar_format(&data)?;
     if !ist_snowflake(&user.discord_id) {
-        return Err(WebError::bad_request("Ungueltige Discord-ID"));
+        return Err(WebError::bad_request("Ungültige Discord-ID"));
     }
     let avatar_dir = &state.config.avatar_dir;
     tokio::fs::create_dir_all(avatar_dir)

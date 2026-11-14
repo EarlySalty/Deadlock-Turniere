@@ -175,14 +175,13 @@ async fn cancel_solo_signup(
     let pool = &state.pool;
     let user_discord_id = db::parse_discord_id(&user.discord_id)?;
 
-    let t = helpers::load_tournament_or_404(pool, tournament_id).await?;
-    if t.status != "registration" && t.status != "checkin" {
+    let mut tx = pool.begin().await?;
+    let status = helpers::lock_tournament_status(&mut tx, tournament_id).await?;
+    if status != "registration" && status != "checkin" {
         return Err(WebError::bad_request(
             "Austragen ist nur bis zum Ende des Check-ins möglich",
         ));
     }
-
-    let mut tx = pool.begin().await?;
     let signup: Option<(Option<i64>,)> = sqlx::query_as(
         r#"SELECT team_id FROM turnier."tournament_signups"
          WHERE tournament_id = $1 AND discord_id = $2 FOR UPDATE"#,
@@ -205,7 +204,7 @@ async fn cancel_solo_signup(
         &mut *tx,
         "signup_withdraw",
         Some(&user.discord_id),
-        &json!({ "tournament_id": tournament_id, "discord_id": user.discord_id, "status": t.status }),
+        &json!({ "tournament_id": tournament_id, "discord_id": user.discord_id, "status": status }),
     )
     .await?;
     tx.commit().await?;

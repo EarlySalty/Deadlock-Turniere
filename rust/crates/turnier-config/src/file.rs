@@ -204,8 +204,13 @@ pub struct LimitsConfig {
     pub comp_writes_per_minute: u32,
     pub comp_creations_per_hour: usize,
     pub draft_creations_per_hour: usize,
+    #[serde(default = "default_guest_logins_per_hour")]
+    pub guest_logins_per_hour: usize,
     pub draft_viewer_ttl_seconds: u64,
     pub observer_live_queue_rows: usize,
+}
+fn default_guest_logins_per_hour() -> usize {
+    10
 }
 impl Default for LimitsConfig {
     fn default() -> Self {
@@ -219,6 +224,7 @@ impl Default for LimitsConfig {
             comp_writes_per_minute: 120,
             comp_creations_per_hour: 10,
             draft_creations_per_hour: 10,
+            guest_logins_per_hour: default_guest_logins_per_hour(),
             draft_viewer_ttl_seconds: 20,
             observer_live_queue_rows: 512,
         }
@@ -605,6 +611,7 @@ impl Config {
             || !(1..=100000).contains(&l.comp_writes_per_minute)
             || !(1..=1000).contains(&l.comp_creations_per_hour)
             || !(1..=1000).contains(&l.draft_creations_per_hour)
+            || !(1..=1000).contains(&l.guest_logins_per_hour)
             || !(1..=3600).contains(&l.draft_viewer_ttl_seconds)
             || !(1..=65536).contains(&l.observer_live_queue_rows)
         {

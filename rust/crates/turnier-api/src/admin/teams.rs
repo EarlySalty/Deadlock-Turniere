@@ -990,8 +990,8 @@ async fn delete_signup(
     Path((tournament_id, signup_id)): Path<(i64, i64)>,
 ) -> WebResult<Json<TournamentSignup>> {
     let mut tx = state.pool.begin().await?;
-    let tournament = load_tournament_or_404(&mut *tx, tournament_id).await?;
-    ensure_participant_management_allowed(tournament.get::<String, _>("status").as_str())?;
+    let status = crate::public::helpers::lock_tournament_status(&mut tx, tournament_id).await?;
+    ensure_participant_management_allowed(&status)?;
 
     let signup = sqlx::query(
         r#"SELECT id, tournament_id, discord_id, discord_name, steam_id, rank, rank_score, team_id, signed_up_at
@@ -1065,8 +1065,7 @@ async fn add_signup_by_name(
 ) -> WebResult<(StatusCode, Json<TournamentSignup>)> {
     let name = admin_signup_name(body.name.as_deref())?;
     let mut tx = state.pool.begin().await?;
-    let tournament = load_tournament_or_404(&mut *tx, tournament_id).await?;
-    let status: String = tournament.get("status");
+    let status = crate::public::helpers::lock_tournament_status(&mut tx, tournament_id).await?;
     if status != "registration" && status != "checkin" {
         return Err(WebError::bad_request(
             "Spieler können nur während Anmeldung und Check-in hinzugefügt werden",

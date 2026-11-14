@@ -1027,8 +1027,6 @@ pub async fn load_team_or_404(
     })
 }
 
-/// Prüft, ob die Anmeldung offen ist (status in registration|checkin), 400 sonst.
-/// Entspricht `_ensure_registration_open` (routes.py:441).
 pub const GUEST_NAME_TAKEN: &str = "Dieser Name ist in diesem Turnier schon angemeldet. Bitte wähle einen anderen Namen oder melde dich beim Orga-Team.";
 
 pub async fn ensure_guest_name_free(
@@ -1050,6 +1048,17 @@ pub async fn ensure_guest_name_free(
     .await
 }
 
+pub async fn lock_tournament_status(
+    tx: &mut sqlx::Transaction<'_, Postgres>,
+    tournament_id: i64,
+) -> WebResult<String> {
+    sqlx::query_scalar(r#"SELECT status FROM turnier."tournaments" WHERE id = $1 FOR UPDATE"#)
+        .bind(tournament_id)
+        .fetch_optional(&mut **tx)
+        .await?
+        .ok_or_else(|| WebError::not_found("Turnier nicht gefunden"))
+}
+
 pub async fn ensure_participant_name_free(
     tx: &mut sqlx::Transaction<'_, Postgres>,
     tournament_id: i64,
@@ -1057,10 +1066,7 @@ pub async fn ensure_participant_name_free(
     own_id: i64,
     taken_message: &str,
 ) -> WebResult<()> {
-    sqlx::query(r#"SELECT id FROM turnier."tournaments" WHERE id = $1 FOR UPDATE"#)
-        .bind(tournament_id)
-        .execute(&mut **tx)
-        .await?;
+    lock_tournament_status(tx, tournament_id).await?;
     let taken: Option<i64> = sqlx::query_scalar(
         r#"SELECT 1::BIGINT FROM turnier."tournament_signups"
          WHERE tournament_id = $1 AND discord_id <> $3
@@ -1104,6 +1110,8 @@ pub async fn remove_signup_and_checkin(
     Ok(())
 }
 
+/// Prüft, ob die Anmeldung offen ist (status in registration|checkin), 400 sonst.
+/// Entspricht `_ensure_registration_open` (routes.py:441).
 pub fn ensure_registration_open(status: &str) -> WebResult<()> {
     if status != "registration" && status != "checkin" {
         return Err(WebError::bad_request("Anmeldung ist nicht geöffnet"));
@@ -1137,9 +1145,6 @@ pub fn ensure_captain_or_mod(user: &UserSession, captain_discord_id: &str) -> We
     ))
 }
 
-/// Prüft, ob Einladungen erlaubt sind, und liefert ggf. das Ablaufdatum
-/// (Window-Ende). 403 bei `never` oder außerhalb des Fensters.
-/// Entspricht `_ensure_invites_enabled` (routes.py:470).
 pub const SOLO_ONLY_MODE: &str = "solo_only";
 
 pub fn ensure_player_teams_allowed(t: &TournamentGuard) -> WebResult<()> {
@@ -1151,6 +1156,9 @@ pub fn ensure_player_teams_allowed(t: &TournamentGuard) -> WebResult<()> {
     Ok(())
 }
 
+/// Prüft, ob Einladungen erlaubt sind, und liefert ggf. das Ablaufdatum
+/// (Window-Ende). 403 bei `never` oder außerhalb des Fensters.
+/// Entspricht `_ensure_invites_enabled` (routes.py:470).
 pub fn ensure_invites_enabled(t: &TournamentGuard) -> WebResult<Option<String>> {
     // Vergleich auf den rohen DB-String wie im Original (`mode == InviteMode.x.value`);
     // leerer/NULL-Wert defaultet auf "always".

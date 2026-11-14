@@ -1,14 +1,14 @@
 import { useMemo, useState } from 'react'
 import Card from '@/components/ui/Card'
 import Button from '@/components/ui/Button'
-import { useAdminCheckins, useCheckinStatus, useDeleteAdminSignup, useFinalizeCheckin, useRevertCheckin } from '@/hooks/useTournament'
+import { useAdminCheckin, useAdminCheckins, useCheckinStatus, useDeleteAdminSignup, useFinalizeCheckin, useRevertCheckin } from '@/hooks/useTournament'
 import { pendingDraftChanges } from '@/components/admin/teamBuilderDrafts'
 import type {
   FinalizeCheckinResult,
   Team,
   TournamentSignup,
 } from '@/types/tournament'
-import { AlertCircle, CheckCircle2, ClipboardCheck, TriangleAlert, X } from 'lucide-react'
+import { AlertCircle, CheckCircle2, ClipboardCheck, TriangleAlert, UserCheck, X } from 'lucide-react'
 
 interface CheckinManagerProps {
   tournamentId: number
@@ -48,6 +48,7 @@ export default function CheckinManager({
   const { data: checkinStatus } = useCheckinStatus(tournamentId)
   const { data: adminCheckins } = useAdminCheckins(tournamentId)
   const deleteSignup = useDeleteAdminSignup()
+  const adminCheckin = useAdminCheckin(tournamentId)
   const finalizeMutation = useFinalizeCheckin(tournamentId)
   const revertMutation = useRevertCheckin(tournamentId)
 
@@ -58,6 +59,11 @@ export default function CheckinManager({
   const checkedInIds = useMemo(
     () => new Set((adminCheckins ?? []).map((entry) => entry.discord_id)),
     [adminCheckins],
+  )
+
+  const signupIds = useMemo(
+    () => new Set(signups.map((signup) => signup.discord_id)),
+    [signups],
   )
 
   const participants = useMemo(() => {
@@ -95,8 +101,8 @@ export default function CheckinManager({
     })
   }, [checkedInIds, signups, teams])
 
-  const error = finalizeMutation.error ?? revertMutation.error ?? deleteSignup.error
-  const isBusy = finalizeMutation.isPending || revertMutation.isPending || deleteSignup.isPending
+  const error = finalizeMutation.error ?? revertMutation.error ?? deleteSignup.error ?? adminCheckin.error
+  const isBusy = finalizeMutation.isPending || revertMutation.isPending || deleteSignup.isPending || adminCheckin.isPending
   const pendingBuilderChanges = preview ? pendingDraftChanges(tournamentId) : 0
   const bracketFallback = preview !== null && preview.effective_bracket_format !== preview.bracket_format
 
@@ -108,6 +114,13 @@ export default function CheckinManager({
       { tournamentId, signupId: row.signup_id },
       { onSuccess: () => setFeedback(`${participantName(row)} wurde aus dem Turnier entfernt.`) },
     )
+  }
+
+  const checkinParticipant = (row: ParticipantRow) => {
+    setFeedback('')
+    adminCheckin.mutate(row.discord_id, {
+      onSuccess: () => setFeedback(`${participantName(row)} ist eingecheckt.`),
+    })
   }
 
   const runPreview = () => {
@@ -253,7 +266,19 @@ export default function CheckinManager({
                           {checkedIn ? 'eingecheckt' : 'fehlt'}
                         </span>
                       </td>
-                      <td className="px-3 py-2 text-right">
+                      <td className="px-3 py-2 text-right whitespace-nowrap">
+                        {!checkedIn && signupIds.has(row.discord_id) && (
+                          <button
+                            type="button"
+                            disabled={isBusy}
+                            onClick={() => checkinParticipant(row)}
+                            aria-label={`${participantName(row)} einchecken`}
+                            title="Einchecken"
+                            className="rounded p-1.5 text-muted hover:bg-green-500/10 hover:text-green-400 disabled:opacity-50"
+                          >
+                            <UserCheck size={15} />
+                          </button>
+                        )}
                         {row.signup_id !== null && (
                           <button
                             type="button"

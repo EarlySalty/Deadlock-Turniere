@@ -42,8 +42,6 @@ pub fn parse_discord_id(value: &str) -> Result<i64, DiscordIdParseError> {
     i64::try_from(parsed).map_err(|_| DiscordIdParseError::OutOfRange)
 }
 
-/// Parses an internal participant ID. Negative IDs belong to browser guests;
-/// Discord API boundaries must continue to use `parse_discord_id`.
 pub fn parse_participant_id(value: &str) -> Result<i64, DiscordIdParseError> {
     if let Some(digits) = value.trim().strip_prefix('-') {
         let magnitude = parse_discord_id(digits)?;

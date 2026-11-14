@@ -31,6 +31,10 @@ pub fn router() -> Router<AppState> {
             get(list_checkins),
         )
         .route(
+            "/api/admin/tournaments/{tournament_id}/checkins/{discord_id}",
+            post(checkin_participant),
+        )
+        .route(
             "/api/admin/tournaments/{tournament_id}/assign-random",
             post(assign_random),
         )
@@ -59,6 +63,58 @@ async fn list_checkins(
             })
             .collect(),
     )))
+}
+
+async fn checkin_participant(
+    State(state): State<AppState>,
+    ModUser(user): ModUser,
+    Path((tournament_id, discord_id)): Path<(i64, String)>,
+) -> WebResult<Json<Value>> {
+    let participant_id = crate::db::parse_discord_id(&discord_id)?;
+    let mut tx = state.pool.begin().await?;
+    let status = crate::public::helpers::lock_tournament_status(&mut tx, tournament_id).await?;
+    if status != "checkin" {
+        return Err(WebError::bad_request("Check-in ist aktuell nicht geöffnet"));
+    }
+    let signup: Option<i64> = sqlx::query_scalar(
+        r#"SELECT id FROM turnier."tournament_signups" WHERE tournament_id = $1 AND discord_id = $2"#,
+    )
+    .bind(tournament_id)
+    .bind(participant_id)
+    .fetch_optional(&mut *tx)
+    .await?;
+    if signup.is_none() {
+        return Err(WebError::not_found(
+            "Spieler ist in diesem Turnier nicht angemeldet",
+        ));
+    }
+    let inserted = sqlx::query(
+        r#"INSERT INTO turnier."tournament_checkins" (tournament_id, discord_id, checked_in_at)
+         SELECT $1, $2, now()
+         WHERE NOT EXISTS (
+             SELECT 1 FROM turnier."tournament_checkins" WHERE tournament_id = $1 AND discord_id = $2
+         )"#,
+    )
+    .bind(tournament_id)
+    .bind(participant_id)
+    .execute(&mut *tx)
+    .await?
+    .rows_affected();
+    crate::public::helpers::audit(
+        &mut *tx,
+        "checkin_admin",
+        Some(&user.discord_id),
+        &json!({
+            "tournament_id": tournament_id,
+            "discord_id": crate::db::discord_id_to_string(participant_id),
+            "already_checked_in": inserted == 0,
+        }),
+    )
+    .await?;
+    tx.commit().await?;
+    Ok(Json(
+        json!({ "checked_in": true, "already_checked_in": inserted == 0 }),
+    ))
 }
 
 /// Query-Parameter `?confirm=bool` für die Check-in-Finalisierung.

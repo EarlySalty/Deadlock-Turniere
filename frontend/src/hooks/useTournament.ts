@@ -19,7 +19,7 @@ import {
   fetchMatchEventPresets, applyMatchConvars, applyMatchEventPreset,
   createAdminTeam, renameAdminTeam, deleteAdminTeam,
   changeAdminCaptain, removeAdminTeamMember, moveAdminTeamMember,
-  assignSignupToAdminTeam, deleteAdminSignup, addAdminSignupByName, fetchAdminCheckins, addTeamMember,
+  assignSignupToAdminTeam, deleteAdminSignup, addAdminSignupByName, checkinAdminParticipant, fetchAdminCheckins, addTeamMember,
   setRecruitingStatus,
   fetchMyInvitations, acceptInvitation, rejectInvitation,
   applyToTeam, fetchTeamApplications, acceptApplication, rejectApplication,
@@ -729,6 +729,16 @@ export function useAddAdminSignupByName(tournamentId: number) {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (name: string) => addAdminSignupByName(tournamentId, name),
+    onSuccess: () => {
+      invalidateTournamentCaches(qc, tournamentId)
+    },
+  })
+}
+
+export function useAdminCheckin(tournamentId: number) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (discordId: string) => checkinAdminParticipant(tournamentId, discordId),
     onSuccess: () => {
       invalidateTournamentCaches(qc, tournamentId)
     },

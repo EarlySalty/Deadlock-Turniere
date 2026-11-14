@@ -137,6 +137,7 @@ fn pool_cache_limits_and_intervals_reject_out_of_range_values() {
         ("limits.comp_writes_per_minute", [0, 100001]),
         ("limits.comp_creations_per_hour", [0, 1001]),
         ("limits.draft_creations_per_hour", [0, 1001]),
+        ("limits.guest_logins_per_hour", [0, 1001]),
         ("limits.draft_viewer_ttl_seconds", [0, 3601]),
         ("scheduler.reminder_window_minutes", [0, 61]),
         ("scheduler.observer_agent_fresh_seconds", [0, 61]),

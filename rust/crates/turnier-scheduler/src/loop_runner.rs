@@ -214,7 +214,7 @@ impl Scheduler {
     /// [`get_due_next_status`] und die Benachrichtigung benötigten Spalten.
     async fn load_advanceable_tournaments(&self) -> sqlx::Result<Vec<AdvanceRow>> {
         sqlx::query_as::<_, AdvanceRow>(
-            "SELECT id, status, tournament_mode, registration_start, registration_end, \
+            "SELECT id, status, tournament_mode, invite_mode, registration_start, registration_end, \
                     checkin_start, group_phase_start, bracket_start, is_test \
              FROM turnier.tournaments \
              WHERE status IN ('registration', 'checkin', 'group_phase') \
@@ -232,6 +232,7 @@ impl Scheduler {
         let due_row = DueStatusRow {
             status: row.status.clone(),
             tournament_mode: row.tournament_mode.clone(),
+            invite_mode: row.invite_mode.clone(),
             registration_start: row.registration_start,
             registration_end: row.registration_end,
             checkin_start: row.checkin_start,
@@ -351,6 +352,7 @@ struct AdvanceRow {
     id: i64,
     status: String,
     tournament_mode: Option<String>,
+    invite_mode: Option<String>,
     registration_start: Option<DateTime<Utc>>,
     registration_end: Option<DateTime<Utc>>,
     checkin_start: Option<DateTime<Utc>>,

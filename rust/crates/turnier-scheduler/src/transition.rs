@@ -34,6 +34,7 @@ use crate::time::is_due;
 pub struct DueStatusRow {
     pub status: String,
     pub tournament_mode: Option<String>,
+    pub invite_mode: Option<String>,
     pub registration_start: Option<DateTime<Utc>>,
     pub registration_end: Option<DateTime<Utc>>,
     pub checkin_start: Option<DateTime<Utc>>,
@@ -56,6 +57,10 @@ pub fn get_due_next_status(row: &DueStatusRow, now: DateTime<Utc>) -> Option<&'s
     let checkin_trigger = row.checkin_start.as_ref().or(row.registration_end.as_ref());
     if s == "registration" && is_due(checkin_trigger, now) {
         return Some("checkin");
+    }
+
+    if s == "checkin" && row.invite_mode.as_deref() == Some("solo_only") {
+        return None;
     }
 
     let bracket_only = row.tournament_mode.as_deref() == Some("bracket_only");
@@ -309,6 +314,22 @@ mod tests {
             status: status.to_string(),
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn solo_only_checkin_waits_for_the_organisers() {
+        let mut r = row("checkin");
+        r.invite_mode = Some("solo_only".to_string());
+        r.tournament_mode = Some("bracket_only".to_string());
+        r.bracket_start = Some(utc("2026-06-14T11:00:00"));
+        r.group_phase_start = Some(utc("2026-06-14T11:00:00"));
+        assert_eq!(get_due_next_status(&r, now()), None);
+        r.tournament_mode = Some("group_stage".to_string());
+        assert_eq!(get_due_next_status(&r, now()), None);
+        r.invite_mode = Some("always".to_string());
+        assert_eq!(get_due_next_status(&r, now()), Some("group_phase"));
+        r.tournament_mode = Some("bracket_only".to_string());
+        assert_eq!(get_due_next_status(&r, now()), Some("bracket"));
     }
 
     #[test]

@@ -5,11 +5,11 @@ use crate::error::{WebError, WebResult};
 
 pub fn parse_discord_id(value: &str) -> WebResult<i64> {
     turnier_core::parse_participant_id(value)
-        .map_err(|_| WebError::bad_request("Ungueltige Discord-ID"))
+        .map_err(|_| WebError::bad_request("Ungültige Discord-ID"))
 }
 
 pub fn parse_actor_id(value: &str) -> WebResult<i64> {
-    turnier_core::parse_participant_id(value).map_err(|_| WebError::internal("Ungueltige Actor-ID"))
+    turnier_core::parse_participant_id(value).map_err(|_| WebError::internal("Ungültige Actor-ID"))
 }
 
 /// Zentrale PG-Spalten sind BIGINT. Fuer die historische Admin-Funktion

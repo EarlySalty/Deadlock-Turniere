@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { registrationSummary } from '@/lib/countLabel'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { loginGuest, fetchMe } from '@/api/client'
 import type { FormEvent } from 'react'
@@ -238,8 +239,14 @@ export default function Tournament() {
   }, [successMsg])
 
   const league = isLeague(tournament?.tournament_mode)
+  const showResultsTab = tournament
+    ? ['group_phase', 'bracket', 'completed', 'archived'].includes(tournament.status)
+    : false
   const bracketOnly = tournament?.tournament_mode === 'bracket_only'
-  const availableTabs = ALL_TABS.filter((tab) => !league || tab.key !== 'bracket')
+  const availableTabs = ALL_TABS.filter(
+    (tab) => showResultsTab || (tab.key !== 'ergebnisse' && tab.key !== 'rangliste')
+  )
+    .filter((tab) => !league || tab.key !== 'bracket')
     .filter((tab) => !bracketOnly || tab.key !== 'gruppen')
     .map((tab) => (league && tab.key === 'gruppen' ? { ...tab, label: 'Tabelle' } : tab))
   const activeTab = availableTabs.some((tab) => tab.key === selectedTab)
@@ -261,9 +268,10 @@ export default function Tournament() {
   const isCheckinPhase = tournament.status === 'checkin'
   const soloOnly = tournament.invite_mode === 'solo_only'
   const formatLabel = bracketFormatLabel(effectiveBracketFormat(tournament.bracket_format, tournament.bracket_matches))
-  const registrationLabel = tournament.teams.length > 0
-    ? `${tournament.teams.length} Teams gemeldet`
-    : `${tournament.signups.length} Spieler angemeldet`
+  const registrationLabel = registrationSummary(
+    tournament.teams.length,
+    tournament.signups.filter((signup) => signup.team_id === null).length,
+  )
 
   // User state from status endpoint (no discord_id scanning needed)
   const userTeam = myStatus?.team_id != null

@@ -1539,12 +1539,29 @@ async fn pug_finalize_formation_withdraw_and_admin_signup_contract() {
         .iter()
         .all(|team| team.members.len() == 6));
 
+    let fill = seed_tournament(&ctx.pool, "PUG Auffüllen", "checkin", 6).await;
+    seed_team(&ctx.pool, fill, "Orga Team", CAPTAIN_ID).await;
+    seed_balance_signups(&ctx.pool, fill).await;
+    checkin_all(&ctx.pool, fill).await;
+    let fill_preview = turnier_engine::finalize_checkin(
+        &ctx.pool,
+        fill,
+        turnier_engine::FinalizeCheckinParams::default(),
+    )
+    .await
+    .expect("fill preview");
+    assert!(fill_preview
+        .added_players
+        .iter()
+        .any(|player| player.source == "solo_pool"));
+
     let solo = seed_tournament(&ctx.pool, "PUG Solo", "checkin", 6).await;
     sqlx::query("UPDATE turnier.tournaments SET invite_mode = 'solo_only' WHERE id = $1")
         .bind(solo)
         .execute(&ctx.pool)
         .await
         .expect("solo only");
+    seed_team(&ctx.pool, solo, "Orga Team", CAPTAIN_ID).await;
     seed_balance_signups(&ctx.pool, solo).await;
     checkin_all(&ctx.pool, solo).await;
     let solo_preview = turnier_engine::finalize_checkin(
@@ -1556,6 +1573,7 @@ async fn pug_finalize_formation_withdraw_and_admin_signup_contract() {
     .expect("solo preview");
     assert!(!solo_preview.auto_team_formation);
     assert!(solo_preview.created_teams.is_empty());
+    assert!(solo_preview.added_players.is_empty());
 
     seed_consent(&ctx.pool, PLAYER_ID).await;
     let player = session(&ctx.pool, PLAYER_ID, "Player", &[]).await;
@@ -1596,6 +1614,55 @@ async fn pug_finalize_formation_withdraw_and_admin_signup_contract() {
     .await;
     assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
     assert!(body.to_string().contains("Orga-Team"), "{body}");
+
+    let (status, early) = send_json(
+        &ctx.app,
+        Some(&admin),
+        Method::POST,
+        &format!("/api/admin/tournaments/{open}/signups"),
+        Some(json!({"name": "Voice Captain"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{early}");
+    let early_id: i64 = early["discord_id"]
+        .as_str()
+        .map(|value| value.parse().expect("early id"))
+        .or_else(|| early["discord_id"].as_i64())
+        .expect("early discord id");
+    assert_eq!(signup_rows(&ctx.pool, open, early_id).await, (1, 0));
+    let checkin_path = format!("/api/admin/tournaments/{open}/checkins/{early_id}");
+    let (status, body) = send_json(&ctx.app, Some(&admin), Method::POST, &checkin_path, None).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    sqlx::query("UPDATE turnier.tournaments SET status = 'checkin' WHERE id = $1")
+        .bind(open)
+        .execute(&ctx.pool)
+        .await
+        .expect("open checkin");
+    let (status, body) =
+        send_json(&ctx.app, Some(&player), Method::POST, &checkin_path, None).await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+    let (status, body) = send_json(&ctx.app, Some(&admin), Method::POST, &checkin_path, None).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["already_checked_in"], json!(false));
+    let (status, body) = send_json(&ctx.app, Some(&admin), Method::POST, &checkin_path, None).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["already_checked_in"], json!(true));
+    assert_eq!(signup_rows(&ctx.pool, open, early_id).await, (1, 1));
+    let (status, body) = send_json(
+        &ctx.app,
+        Some(&admin),
+        Method::POST,
+        &format!("/api/admin/tournaments/{open}/checkins/{}", PLAYER_ID),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
+    let checkin_audits: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM turnier.audit_log WHERE action = 'checkin_admin'")
+            .fetch_one(&ctx.pool)
+            .await
+            .expect("checkin audits");
+    assert_eq!(checkin_audits, 2);
 
     let (status, added) = send_json(
         &ctx.app,
@@ -1639,6 +1706,10 @@ async fn pug_finalize_formation_withdraw_and_admin_signup_contract() {
         .expect("admin audits");
     assert_eq!(
         admin_audits,
-        vec!["signup_add_admin", "signup_delete_admin"]
+        vec![
+            "signup_add_admin",
+            "signup_add_admin",
+            "signup_delete_admin"
+        ]
     );
 }

@@ -766,11 +766,12 @@ pub async fn finalize_checkin(
     let mut added_players: Vec<AddedPlayer> = Vec::new();
     let mut created_teams: Vec<CreatedTeamPlan> = Vec::new();
     let mut affected_team_ids: HashSet<i64> = HashSet::new();
+    let auto_team_formation = tournament.invite_mode != "solo_only";
 
     // Unvollständige bestehende Teams aus dem Pool auffüllen.
     for team_id in &team_order {
         let mut members = team_states.get(team_id).cloned().unwrap_or_default();
-        while (members.len() as i64) < team_size {
+        while auto_team_formation && (members.len() as i64) < team_size {
             let Some(signup) = pool.pop_front() else {
                 break;
             };
@@ -797,7 +798,6 @@ pub async fn finalize_checkin(
             .fetch_all(&mut *tx)
             .await?;
     let mut name_pool = TeamNamePool::new(existing_keys.into_iter().map(|(k,)| k));
-    let auto_team_formation = tournament.invite_mode != "solo_only";
     while auto_team_formation && team_size > 0 && pool.len() >= team_size as usize {
         let chunk: Vec<SignupData> = (0..team_size).map(|_| pool.pop_front().unwrap()).collect();
         let captain_name = captain_team_name(&mut tx, tournament_id, chunk[0].discord_id).await?;

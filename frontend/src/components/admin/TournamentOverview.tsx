@@ -1,4 +1,5 @@
 import { CalendarDays, ChevronDown, Plus, Trophy, Users } from 'lucide-react'
+import { pluralize } from '@/lib/countLabel'
 import Card from '@/components/ui/Card'
 import Badge from '@/components/ui/Badge'
 import Button from '@/components/ui/Button'
@@ -18,7 +19,7 @@ function formatDate(value: string | null): string {
 
 function signupLine(t: AdminTournamentSummary): string {
   if (t.team_size <= 1) return `${t.signup_count} Anmeldungen`
-  return `${t.team_count} Teams · ${t.open_signup_count} Solo offen`
+  return `${pluralize(t.team_count, 'Team', 'Teams')} · ${t.open_signup_count} Solo offen`
 }
 
 interface CreateEntryProps {

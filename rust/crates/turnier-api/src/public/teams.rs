@@ -732,7 +732,6 @@ async fn load_team_member_by_id(
     })
 }
 
-/// Accepts guest participant IDs alongside existing Discord snowflakes.
 fn is_participant_id(value: &str) -> bool {
     if value.starts_with('-') {
         return turnier_core::parse_participant_id(value).is_ok_and(|id| id < 0);

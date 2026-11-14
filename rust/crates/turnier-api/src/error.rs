@@ -163,7 +163,7 @@ impl From<turnier_draft::DraftError> for WebError {
             SessionNotActive => Self::bad_request("Draft ist nicht aktiv"),
             HeroAlreadyTaken(msg) => Self::bad_request(msg),
             ActionConflict => Self::conflict("Draft-Aktion kollidiert"),
-            InvalidDiscordId(_) => Self::bad_request("Ungueltige Discord-ID"),
+            InvalidDiscordId(_) => Self::bad_request("Ungültige Discord-ID"),
             Db(e) => e.into(),
         }
     }

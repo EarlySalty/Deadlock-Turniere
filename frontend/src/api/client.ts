@@ -455,6 +455,12 @@ export const addAdminSignupByName = (tournamentId: number, name: string) =>
     body: JSON.stringify({ name }),
   })
 
+export const checkinAdminParticipant = (tournamentId: number, discordId: string) =>
+  request<{ checked_in: boolean; already_checked_in: boolean }>(
+    `/admin/tournaments/${tournamentId}/checkins/${encodeURIComponent(discordId)}`,
+    { method: 'POST' }
+  )
+
 export const fetchAdminCheckins = (tournamentId: number) =>
   request<{ discord_id: string; checked_in_at: string }[]>(`/admin/tournaments/${tournamentId}/checkins`)
 

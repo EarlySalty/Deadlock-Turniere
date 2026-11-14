@@ -122,6 +122,7 @@ comp_reads_per_minute = 600
 comp_writes_per_minute = 120
 comp_creations_per_hour = 10
 draft_creations_per_hour = 10
+guest_logins_per_hour = 10
 draft_viewer_ttl_seconds = 20
 observer_live_queue_rows = 512
 
