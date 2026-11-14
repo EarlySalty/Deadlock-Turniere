@@ -92,38 +92,71 @@ impl BrokerClient {
     {
         let url = format!("{}{}", self.base_url()?, path);
         let token = self.token()?.to_string();
-
-        let response = self
+        let request = self
             .http
             .post(&url)
             .header(INTERNAL_TOKEN_HEADER, token)
-            .json(payload)
-            .send()
-            .await
-            .map_err(BrokerError::Unreachable)?;
-
-        let status = response.status();
-        // Body wird in jedem Fall als Text gelesen (für die Non-200-Detailfindung).
-        let body_text = response.text().await.map_err(BrokerError::Unreachable)?;
-
-        if status.as_u16() != 200 {
-            return Err(BrokerError::Http {
-                status: status.as_u16(),
-                detail: error_detail(&body_text),
-            });
-        }
-
-        // 200: erst als JSON-Objekt validieren, dann nach T deserialisieren.
-        let value: serde_json::Value = serde_json::from_str(&body_text)
-            .map_err(|_| BrokerError::BadJson("Discord-Broker lieferte kein JSON"))?;
-        if !value.is_object() {
-            return Err(BrokerError::BadJson(
-                "Discord-Broker lieferte ein ungültiges Payload",
-            ));
-        }
-        serde_json::from_value(value)
-            .map_err(|_| BrokerError::BadJson("Discord-Broker lieferte ein ungültiges Payload"))
+            .json(payload);
+        send_and_decode(request, "POST", path).await
     }
+
+    pub async fn get_internal<T>(&self, path: &str, query: &[(&str, String)]) -> BrokerResult<T>
+    where
+        T: DeserializeOwned,
+    {
+        let url = format!("{}{}", self.base_url()?, path);
+        let token = self.token()?.to_string();
+        let request = self
+            .http
+            .get(&url)
+            .header(INTERNAL_TOKEN_HEADER, token)
+            .query(query);
+        send_and_decode(request, "GET", path).await
+    }
+}
+
+async fn send_and_decode<T>(
+    request: reqwest::RequestBuilder,
+    method: &'static str,
+    path: &str,
+) -> BrokerResult<T>
+where
+    T: DeserializeOwned,
+{
+    let response = request.send().await.map_err(|err| {
+        tracing::warn!(method, path, error = %err, "Discord-Broker nicht erreichbar");
+        BrokerError::Unreachable(err)
+    })?;
+
+    let status = response.status();
+    let body_text = response.text().await.map_err(BrokerError::Unreachable)?;
+
+    if status.as_u16() != 200 {
+        let detail = error_detail(&body_text);
+        tracing::warn!(
+            method,
+            path,
+            status = status.as_u16(),
+            detail = %detail,
+            "Discord-Broker antwortete mit Fehler"
+        );
+        return Err(BrokerError::Http {
+            status: status.as_u16(),
+            detail,
+        });
+    }
+
+    let value: serde_json::Value = serde_json::from_str(&body_text).map_err(|_| {
+        tracing::warn!(method, path, "Discord-Broker lieferte kein JSON");
+        BrokerError::BadJson("Discord-Broker lieferte kein JSON")
+    })?;
+    if !value.is_object() {
+        return Err(BrokerError::BadJson(
+            "Discord-Broker lieferte ein ungültiges Payload",
+        ));
+    }
+    serde_json::from_value(value)
+        .map_err(|_| BrokerError::BadJson("Discord-Broker lieferte ein ungültiges Payload"))
 }
 
 /// Ermittelt die Fehler-`detail`-Meldung aus dem Non-200-Body, exakt nach der

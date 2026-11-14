@@ -29,7 +29,7 @@ mod path {
     pub const DELETE_CHANNEL: &str = "/internal/master/v1/discord/delete-channel";
     pub const MOVE_VOICE: &str = "/internal/master/v1/discord/member/move-voice";
     pub const VOICE_MEMBERS: &str = "/internal/master/v1/discord/voice-channel/members";
-    pub const ROLE_MEMBERS: &str = "/internal/master/v1/discord/role/members";
+    pub const ROLE_MEMBERS: &str = "/internal/master/v1/discord/role-members";
     pub const PUBLISH_TOURNAMENT_PROPOSAL: &str = "/internal/master/v1/turnier/proposals/publish";
 }
 
@@ -829,9 +829,13 @@ impl DiscordNotifier {
     pub async fn get_role_members(&self, guild_id: i64, role_id: i64) -> BrokerResult<Vec<Value>> {
         let result: Value = self
             .broker
-            .post_internal(
+            .get_internal(
                 path::ROLE_MEMBERS,
-                &json!({ "guild_id": guild_id, "role_id": role_id }),
+                &[
+                    ("guild_id", guild_id.to_string()),
+                    ("role_id", role_id.to_string()),
+                    ("live", "true".to_string()),
+                ],
             )
             .await?;
         Ok(members_list(&result))
