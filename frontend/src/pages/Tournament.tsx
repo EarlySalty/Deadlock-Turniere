@@ -237,14 +237,10 @@ export default function Tournament() {
     return () => clearTimeout(timer)
   }, [successMsg])
 
-  const showResultsTab = tournament
-    ? ['group_phase', 'bracket', 'completed', 'archived'].includes(tournament.status)
-    : false
   const league = isLeague(tournament?.tournament_mode)
-  const availableTabs = ALL_TABS.filter(
-    (tab) => showResultsTab || (tab.key !== 'ergebnisse' && tab.key !== 'rangliste')
-  )
-    .filter((tab) => !league || tab.key !== 'bracket')
+  const bracketOnly = tournament?.tournament_mode === 'bracket_only'
+  const availableTabs = ALL_TABS.filter((tab) => !league || tab.key !== 'bracket')
+    .filter((tab) => !bracketOnly || tab.key !== 'gruppen')
     .map((tab) => (league && tab.key === 'gruppen' ? { ...tab, label: 'Tabelle' } : tab))
   const activeTab = availableTabs.some((tab) => tab.key === selectedTab)
     ? selectedTab

@@ -353,7 +353,7 @@ function AddPlayerForm({ onAdd }: { onAdd: (name: string) => Promise<boolean> })
 
   return (
     <div className="space-y-1">
-      <div className="flex gap-2">
+      <div className="flex flex-wrap gap-2">
         <input
           value={name}
           maxLength={32}
@@ -361,7 +361,7 @@ function AddPlayerForm({ onAdd }: { onAdd: (name: string) => Promise<boolean> })
           onKeyDown={(event) => event.key === 'Enter' && void submit()}
           placeholder="Spieler ohne Anmeldung"
           aria-label="Name eines Spielers ohne Anmeldung"
-          className="min-w-0 flex-1 rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
+          className="min-w-0 flex-[1_1_10rem] rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
         />
         <Button variant="secondary" size="sm" disabled={!name.trim() || busy} onClick={() => void submit()}>
           <UserPlus size={14} />
@@ -578,15 +578,22 @@ export default function TeamBuilderPanel({ tournamentId, teamSize, teams, signup
     setNotice(null)
     setSelectedId(null)
     setProgress({ done: 0, total: steps.length })
+    let finished = 0
     try {
-      await saveTeamBuilder(ctx, steps, displayedCaptains(view), (done, total) => setProgress({ done, total }))
+      await saveTeamBuilder(ctx, steps, displayedCaptains(view), (done, total) => {
+        finished = done
+        setProgress({ done, total })
+      })
+      writeDraft(tournamentId, { edits: EMPTY_EDITS, renames: [] }, 0)
       await refresh()
       setEdits(EMPTY_EDITS)
       setRenames([])
       setNotice({ tone: 'ok', text: 'Teams gespeichert.' })
     } catch (error) {
+      const rebased = rebaseEdits(pinned, ctx.teamIds)
+      writeDraft(tournamentId, { edits: rebased, renames: pendingRenames }, Math.max(1, changeCount - finished))
       await refresh().catch(() => undefined)
-      setEdits(rebaseEdits(pinned, ctx.teamIds))
+      setEdits(rebased)
       setRenames(pendingRenames)
       const text = error instanceof Error ? error.message : 'Speichern fehlgeschlagen.'
       setNotice({ tone: 'error', text: `${text} Die übrigen Änderungen sind noch offen.` })
@@ -634,7 +641,7 @@ export default function TeamBuilderPanel({ tournamentId, teamSize, teams, signup
       <fieldset disabled={saving} className="min-w-0 space-y-4">
         <NewTeamForm teams={view.teams} onCreate={createTeam} />
 
-        <div className="grid gap-4 md:grid-cols-[minmax(0,17rem)_minmax(0,1fr)]">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-[minmax(0,17rem)_minmax(0,1fr)]">
           <PoolColumn
             pool={view.pool}
             selectedId={selectedId}

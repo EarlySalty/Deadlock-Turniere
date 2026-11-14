@@ -43,6 +43,7 @@ import { LEAGUE_LABEL, isLeague } from '@/lib/league'
 import BracketView from '@/components/bracket/BracketView'
 import MiniGroupPanel from '@/components/bracket/MiniGroupPanel'
 import AutoLobbyButton from '@/components/admin/AutoLobbyButton'
+import { effectiveBracketFormat } from '@/lib/bracketFormat'
 import {
   Archive,
   CalendarClock,
@@ -375,8 +376,9 @@ export default function Admin() {
                         <header>
                           <h2 className="text-lg font-semibold text-foreground">Matches</h2>
                           <p className="mt-1 text-sm text-muted">
-                            Bracket-Übersicht und Match-Steuerung. Winner-Bracket läuft auf
-                            Stream, Loser-Bracket parallel.
+                            {effectiveBracketFormat(liveDetail.bracket_format, liveDetail.bracket_matches) === 'double_elimination'
+                              ? 'Bracket-Übersicht und Match-Steuerung. Winner-Bracket läuft auf Stream, Loser-Bracket parallel.'
+                              : 'Bracket-Übersicht und Match-Steuerung im K.-o.-System.'}
                           </p>
                         </header>
                         <AutoLobbyButton

@@ -87,8 +87,8 @@ export default function CheckinManager({
     }
 
     return Array.from(rows.values()).sort((left, right) => {
-      const leftMissing = checkedInIds.has(left.discord_id) ? 1 : 0
-      const rightMissing = checkedInIds.has(right.discord_id) ? 1 : 0
+      const leftMissing = checkedInIds.has(left.discord_id) ? 0 : 1
+      const rightMissing = checkedInIds.has(right.discord_id) ? 0 : 1
       if (leftMissing !== rightMissing) return rightMissing - leftMissing
       if (left.team_name !== right.team_name) return left.team_name.localeCompare(right.team_name)
       return participantName(left).localeCompare(participantName(right))
