@@ -288,12 +288,13 @@ async fn update_tournament(
 
     let mut tx = state.pool.begin().await?;
     turnier_scheduler::acquire_tournament_schedule_lock(&mut tx).await?;
-    let existing =
-        sqlx::query(r#"SELECT status, tournament_mode FROM turnier."tournaments" WHERE id = $1"#)
-            .bind(tournament_id)
-            .fetch_optional(&mut *tx)
-            .await?
-            .ok_or_else(|| WebError::not_found("Turnier nicht gefunden"))?;
+    let existing = sqlx::query(
+        r#"SELECT status, tournament_mode FROM turnier."tournaments" WHERE id = $1 FOR UPDATE"#,
+    )
+    .bind(tournament_id)
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or_else(|| WebError::not_found("Turnier nicht gefunden"))?;
     let current_status: String = existing.get("status");
     let existing_mode: String = existing.get("tournament_mode");
 

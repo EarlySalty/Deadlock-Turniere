@@ -72,7 +72,7 @@ Guests can join from a tournament's signup card by entering a player name and ac
 
 - IDs: guests and players added by name get negative participant IDs from the signup identity sequence (`allocate_guest_participant_id`). Discord snowflakes stay positive. API binds use `db::parse_participant_id`, which accepts both; Discord OAuth sessions and caster entries use the strict `parse_discord_id`.
 - Names: one rule for guest login and admin add-by-name (`participant_name`): 1 to 32 characters, no control or invisible format characters. A guest name that matches an existing participant of the tournament is refused. A Discord signup with the same name is allowed, because Discord display names are not unique; the admin builder and check-in table mark such pairs as "Name doppelt".
-- Discord paths: DM reminders, notifications and voice moves skip guests and count them; lobby and match posts list guests as a count instead of a mention; rank lookup and Discord roles are skipped for guests; avatar upload and DM opt-out changes need a Discord login.
+- Discord paths: DM reminders, notifications and voice moves skip guests and count them; lobby and match posts list guests as a count instead of a mention; rank lookup is skipped for guests, and tournaments assign no Discord roles; avatar upload and DM opt-out changes need a Discord login.
 - Limit: `limits.guest_logins_per_hour` per connection (IPv4 address or IPv6 /64), shared limiter with draft lobby creation.
 
 No schema migration is required.

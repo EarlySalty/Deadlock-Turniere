@@ -1547,6 +1547,73 @@ async fn pug_finalize_formation_withdraw_and_admin_signup_contract() {
         .iter()
         .all(|team| team.members.len() == 6));
 
+    sqlx::query(
+        "UPDATE turnier.tournaments SET bracket_format = 'double_elimination', is_test = false WHERE id = $1",
+    )
+    .bind(always)
+    .execute(&ctx.pool)
+    .await
+    .expect("double elimination with two teams");
+    let stale = turnier_engine::finalize_checkin(
+        &ctx.pool,
+        always,
+        turnier_engine::FinalizeCheckinParams {
+            confirm: true,
+            expected_snapshot_token: Some(&preview.snapshot_token),
+            ..Default::default()
+        },
+    )
+    .await;
+    assert!(
+        stale.is_err(),
+        "token from before the format change must be refused"
+    );
+    let fresh = turnier_engine::finalize_checkin(
+        &ctx.pool,
+        always,
+        turnier_engine::FinalizeCheckinParams::default(),
+    )
+    .await
+    .expect("fresh preview");
+    turnier_engine::finalize_checkin(
+        &ctx.pool,
+        always,
+        turnier_engine::FinalizeCheckinParams {
+            confirm: true,
+            expected_snapshot_token: Some(&fresh.snapshot_token),
+            advance_to_group_phase: true,
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("confirm with fresh token");
+    let stored: String =
+        sqlx::query_scalar("SELECT bracket_format FROM turnier.tournaments WHERE id = $1")
+            .bind(always)
+            .fetch_one(&ctx.pool)
+            .await
+            .expect("stored format");
+    assert_eq!(stored, "double_elimination");
+    let (status, body) = send_json(
+        &ctx.app,
+        None,
+        Method::GET,
+        &format!("/api/tournaments/{always}"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(
+        body["bracket_format"],
+        json!("double_elimination"),
+        "{body}"
+    );
+    assert_eq!(
+        body["played_bracket_format"],
+        json!("single_elimination"),
+        "{body}"
+    );
+
     let fill = seed_tournament(&ctx.pool, "PUG Auffüllen", "checkin", 6).await;
     seed_team(&ctx.pool, fill, "Orga Team", CAPTAIN_ID).await;
     seed_balance_signups(&ctx.pool, fill).await;

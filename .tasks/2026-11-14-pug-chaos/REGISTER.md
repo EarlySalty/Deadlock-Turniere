@@ -32,7 +32,7 @@ Evidence sources: `turnier.audit_log` (tournament 16), Caddy access logs `ddc.ac
 - Mechanism: `admin/teams.rs::delete_signup` existed with audit `signup_delete_admin`, but only for unassigned signups, its button lived in "Offene Solo-Anmeldungen" below the balance panel, not reachable from the builder pool or the check-in phase, and it left the check-in row behind.
 - Why possible / unnoticed: P4 moved the participant UI into the builder and kept the old card only in the participants phase.
 - Twins: the check-in table had no remove or check-in action; admin check-in and self check-in used different eligibility rules (K13).
-- Fix: X per pool player in the builder (disabled while a removal runs), admin check-in route plus button, one `ensure_checkin_signup` eligibility rule for admin and self check-in, add-by-name only while registration or check-in is open.
+- Fix: X per pool player in the builder (disabled while a removal runs), admin check-in route plus button, one `ensure_checkin_signup` eligibility rule for admin and self check-in, add-by-name only while registration or check-in is open (the form is hidden otherwise).
 
 ## E. Numbers, labels and the double-elimination fallback
 
@@ -58,6 +58,7 @@ Evidence sources: `turnier.audit_log` (tournament 16), Caddy access logs `ddc.ac
 - Why unnoticed: no browser pass with a solo pool existed; the frontend tests cover helpers, not layouts.
 - Twins: the same draft, label and umlaut patterns in the other admin panels; fixed together (K8, K9, K12).
 - Proven in the browser: solo_only finalize forms no teams; preview shows the unsaved-draft alert with disabled start, the fallback alert and the remaining solos; after save the start works; builder X removes a signup; admin "Einchecken" works; guest login 10 times 201, then 429; scrollWidth equals the viewport on every page at 390 px. Screenshots in `/home/nathanael/.claude/sichtpruefung/pug-chaos/`.
+- Proven after gate round 1 (Moli, fixture with a guest "kaltfront " next to the Discord signup "Kaltfront", 1440 and 390 px, no console or API errors): check-in table and builder show "Gast" and "Name doppelt" on both entries (chips made non-wrapping after the 390 px look); "Test" badge on the test tournament in the list and the overview rows; add-by-name form shown in check-in; a team created in tab A (stored draft count 1) makes the preview in tab B say "Im Team-Builder ist 1 Änderung noch nicht gespeichert, davon 1 in einem anderen Tab dieses Browsers."; scrollWidth equals the viewport (`r2-*` screenshots). The PresetForm save error and the hidden add form outside registration and check-in are covered by code review only.
 - Taste, not changed: header brand truncates at 390 px; legacy "Teams & Teilnehmer" and "Offene Solo-Anmeldungen" below the builder (P4b, TODO.md); overall admin density.
 
 ## H. Wave 2

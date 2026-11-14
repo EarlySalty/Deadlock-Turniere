@@ -1058,7 +1058,7 @@ async fn add_signup_by_name(
         crate::public::helpers::participant_name(body.name.as_deref().unwrap_or(""))?.to_string();
     let mut tx = state.pool.begin().await?;
     let status = crate::public::helpers::lock_tournament_status(&mut tx, tournament_id).await?;
-    if status != "registration" && status != "checkin" {
+    if !crate::public::helpers::registration_window_open(&status) {
         return Err(WebError::bad_request(
             "Spieler können nur während Anmeldung und Check-in hinzugefügt werden",
         ));

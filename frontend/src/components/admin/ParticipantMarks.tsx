@@ -15,11 +15,11 @@ export default function ParticipantMarks({ discordId, name }: ParticipantMarksPr
   return (
     <span className="ml-1.5 inline-flex flex-wrap gap-1 align-middle">
       {guest && (
-        <span className="rounded-full border border-border px-1.5 py-px text-[10px] font-medium text-muted">Gast</span>
+        <span className="whitespace-nowrap rounded-full border border-border px-1.5 py-px text-[10px] font-medium text-muted">Gast</span>
       )}
       {duplicate && (
         <span
-          className="rounded-full bg-amber-500/15 px-1.5 py-px text-[10px] font-medium text-amber-300"
+          className="whitespace-nowrap rounded-full bg-amber-500/15 px-1.5 py-px text-[10px] font-medium text-amber-300"
           title="Mehrere Teilnehmer haben diesen Namen. Prüfe, ob dieselbe Person doppelt angemeldet ist."
         >
           Name doppelt
