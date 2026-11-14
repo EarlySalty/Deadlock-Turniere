@@ -1499,3 +1499,146 @@ async fn test_mode_seed_simulate_and_wipe_only_touch_test_data() {
             .expect("real tournament");
     assert_eq!(real_remaining, 1);
 }
+
+async fn checkin_all(pool: &Pool, tournament_id: i64) {
+    sqlx::query("INSERT INTO turnier.tournament_checkins (tournament_id, discord_id, checked_in_at) SELECT tournament_id, discord_id, now() FROM turnier.tournament_signups WHERE tournament_id = $1 ON CONFLICT DO NOTHING")
+        .bind(tournament_id)
+        .execute(pool)
+        .await
+        .expect("checkins");
+}
+
+async fn signup_rows(pool: &Pool, tournament_id: i64, discord_id: i64) -> (i64, i64) {
+    sqlx::query_as("SELECT (SELECT count(*) FROM turnier.tournament_signups WHERE tournament_id = $1 AND discord_id = $2), (SELECT count(*) FROM turnier.tournament_checkins WHERE tournament_id = $1 AND discord_id = $2)")
+        .bind(tournament_id)
+        .bind(discord_id)
+        .fetch_one(pool)
+        .await
+        .expect("signup rows")
+}
+
+#[tokio::test]
+async fn pug_finalize_formation_withdraw_and_admin_signup_contract() {
+    let ctx = setup().await;
+    let admin = session(&ctx.pool, ADMIN_ID, "Admin", &["admin-role", "mod-role"]).await;
+
+    let always = seed_tournament(&ctx.pool, "PUG Immer", "checkin", 6).await;
+    seed_balance_signups(&ctx.pool, always).await;
+    checkin_all(&ctx.pool, always).await;
+    let preview = turnier_engine::finalize_checkin(
+        &ctx.pool,
+        always,
+        turnier_engine::FinalizeCheckinParams::default(),
+    )
+    .await
+    .expect("always preview");
+    assert!(preview.auto_team_formation);
+    assert_eq!(preview.created_teams.len(), 2);
+    assert!(preview
+        .created_teams
+        .iter()
+        .all(|team| team.members.len() == 6));
+
+    let solo = seed_tournament(&ctx.pool, "PUG Solo", "checkin", 6).await;
+    sqlx::query("UPDATE turnier.tournaments SET invite_mode = 'solo_only' WHERE id = $1")
+        .bind(solo)
+        .execute(&ctx.pool)
+        .await
+        .expect("solo only");
+    seed_balance_signups(&ctx.pool, solo).await;
+    checkin_all(&ctx.pool, solo).await;
+    let solo_preview = turnier_engine::finalize_checkin(
+        &ctx.pool,
+        solo,
+        turnier_engine::FinalizeCheckinParams::default(),
+    )
+    .await
+    .expect("solo preview");
+    assert!(!solo_preview.auto_team_formation);
+    assert!(solo_preview.created_teams.is_empty());
+
+    seed_consent(&ctx.pool, PLAYER_ID).await;
+    let player = session(&ctx.pool, PLAYER_ID, "Player", &[]).await;
+    seed_signup(&ctx.pool, solo, PLAYER_ID, "Player").await;
+    checkin_all(&ctx.pool, solo).await;
+    assert_eq!(signup_rows(&ctx.pool, solo, id(PLAYER_ID)).await, (1, 1));
+    let (status, body) = send_json(
+        &ctx.app,
+        Some(&player),
+        Method::DELETE,
+        &format!("/api/tournaments/{solo}/signup"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(signup_rows(&ctx.pool, solo, id(PLAYER_ID)).await, (0, 0));
+    let withdraw_audits: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM turnier.audit_log WHERE action = 'signup_withdraw'",
+    )
+    .fetch_one(&ctx.pool)
+    .await
+    .expect("withdraw audit");
+    assert_eq!(withdraw_audits, 1);
+
+    let open = seed_tournament(&ctx.pool, "PUG Anmeldung", "registration", 6).await;
+    sqlx::query("UPDATE turnier.tournaments SET invite_mode = 'solo_only' WHERE id = $1")
+        .bind(open)
+        .execute(&ctx.pool)
+        .await
+        .expect("solo only open");
+    let (status, body) = send_json(
+        &ctx.app,
+        Some(&player),
+        Method::POST,
+        &format!("/api/tournaments/{open}/teams"),
+        Some(json!({"name": "Eigenes Team"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+    assert!(body.to_string().contains("Orga-Team"), "{body}");
+
+    let (status, added) = send_json(
+        &ctx.app,
+        Some(&admin),
+        Method::POST,
+        &format!("/api/admin/tournaments/{solo}/signups"),
+        Some(json!({"name": "Captain Ohne Konto"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{added}");
+    let guest_id: i64 = added["discord_id"]
+        .as_str()
+        .map(|value| value.parse().expect("guest id"))
+        .or_else(|| added["discord_id"].as_i64())
+        .expect("guest discord id");
+    assert!(guest_id < 0);
+    assert_eq!(signup_rows(&ctx.pool, solo, guest_id).await, (1, 1));
+    let (status, body) = send_json(
+        &ctx.app,
+        Some(&admin),
+        Method::POST,
+        &format!("/api/admin/tournaments/{solo}/signups"),
+        Some(json!({"name": " captain ohne konto "})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    let signup_id = added["id"].as_i64().expect("signup id");
+    let (status, body) = send_json(
+        &ctx.app,
+        Some(&admin),
+        Method::DELETE,
+        &format!("/api/admin/tournaments/{solo}/signups/{signup_id}"),
+        None,
+    )
+    .await;
+    assert!(status.is_success(), "{status} {body}");
+    assert_eq!(signup_rows(&ctx.pool, solo, guest_id).await, (0, 0));
+    let admin_audits: Vec<String> = sqlx::query_scalar("SELECT action FROM turnier.audit_log WHERE action IN ('signup_add_admin', 'signup_delete_admin') ORDER BY id")
+        .fetch_all(&ctx.pool)
+        .await
+        .expect("admin audits");
+    assert_eq!(
+        admin_audits,
+        vec!["signup_add_admin", "signup_delete_admin"]
+    );
+}
