@@ -51,13 +51,43 @@ Evidence sources: `turnier.audit_log` (tournament 16), Caddy access logs `ddc.ac
 
 ## G. UI pass
 
-See section after the Moli run.
+Moli pass on a throwaway stack (test-db-run `dlcentral_test_turniere`, turnier-bot on 127.0.0.1:18916, Vite on 5191) at 390 and 1440 px: public registration, check-in and bracket of a PUG test tournament, admin list, builder, check-in, preview, start and bracket. Screenshots in `/home/nathanael/.claude/sichtpruefung/pug-chaos/`.
+
+Fixed (d78a7e3):
+- Check-in table sorted checked-in players above missing ones (inverted flag).
+- Builder kept the module draft after a successful save, so a remount restored stale edits and blocked the preview; a failed save now keeps only the unsaved rest.
+- Builder grid forced horizontal scroll at 390 px (fixed 17rem column); add-player field shrank to about 85 px at 1440 px (flex basis 0).
+- Matches header always promised a loser bracket; now follows `effectiveBracketFormat`.
+- Public page showed an empty "Gruppen" tab for bracket-only tournaments and hid results and standings until the group phase.
+
+Proven in the browser: solo_only finalize forms no teams; preview shows the unsaved-draft alert with disabled start, the single-elimination fallback alert and the remaining solos; after save the start works (stored `single_elimination`, 1 match); public shows "SINGLE ELIM." and "2 TEAMS GEMELDET"; builder X removes a signup (DELETE 200, notice "Brummbär wurde aus dem Turnier entfernt.", 8 to 6 signups over two removals); scrollWidth equals the viewport on every page at 390 px.
+
+Taste, not changed:
+- Header brand "Deutsche Deadlock Community" truncates at 390 px.
+- Legacy duplicates "Teams & Teilnehmer" and "Offene Solo-Anmeldungen" below the builder (P4b, see TODO.md).
+- ASCII umlauts in Match-Events and Presets ("ausloesen", "fuer", "ZURUECKSETZEN").
+- Overall admin density in the participants phase.
 
 ## H. Wave 2
 
-P3b solo-only built; rest in TODO.md.
+P3b solo-only built in 392872f (`auto_team_formation` off, player team actions answer 403 with a German hint, public page hides "Team gründen"). Rest of wave 2 in TODO.md.
+
+## Tournament 16 and 17
+
+- 16 (not modified): stored `bracket_format` should be `single_elimination`, and the five teams should match the Discord picks in message 1571211196634243204. Correction left to the organisers.
+- 17: with 3 groups (6 qualifiers) it hits the fallback; the preview now warns and the stored format follows the real bracket.
 
 ## Commits
 
 | Finding | SHA | Summary |
 |---|---|---|
+| F | 4c87a61 | Caster pool via broker GET `role-members`, broker errors log method, path and status |
+| A, B, C, D, E, H | 392872f | solo_only mode, team preview with members, unsaved-draft guard, name guard, admin add and remove, withdraw in check-in, error rendering, stored fallback format and labels |
+| A, B, C, D, H tests | db74df4 | PUG contract test, migration count 39 to 41 |
+| G | d78a7e3 | UI pass fixes |
+
+## Test evidence
+
+- `cargo fmt --check` per crate and `cargo-slot clippy --workspace --all-targets -- -D warnings`: clean.
+- `test-db-run dlcentral_test_turniere -- cargo-slot test --workspace --features testing --no-fail-fast` on ionos: 630 passed, 1 failed (`turnier-db --test migration`, stale count 39 since 2026-10-11, red on base too); after db74df4 the migration test passes 4/4. `pug_finalize_formation_withdraw_and_admin_signup_contract` ok.
+- Frontend: `npm run lint` 0, `npm test` 31/31, `npm run build` 0, `tsc` 0.
