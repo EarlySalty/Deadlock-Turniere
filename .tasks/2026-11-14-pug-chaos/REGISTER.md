@@ -78,16 +78,17 @@ P3b solo-only built (`auto_team_formation` off, player team actions answer 403 w
 
 | Finding | SHA | Summary |
 |---|---|---|
-| F | 4c87a61 | Caster pool via broker GET `role-members`, broker errors log method, path and status |
-| A, B, C, D, E, H | 392872f | solo_only mode, team preview with members, unsaved-draft guard, name guard, admin add and remove, withdraw in check-in, error rendering, labels |
-| A, B, C, D, H tests | db74df4 | PUG contract test, migration count 39 to 41 |
-| G | d78a7e3 | UI pass fixes |
-| A, B, C, D, E (review) | 89504ec | admin check-in, solo_only fill loop, guest login limit, lock before status check, count labels |
-| Config test | f8d20d6 | `guest_logins_per_hour` as defaulted key |
-| K1 to K13 | see `git log` | gate round 1 classes |
+| F | 1dcf35d | Caster pool via broker GET `role-members`, broker errors log method, path and status |
+| A, B, C, D, E, H | f7e7899 | solo_only mode, team preview with members, unsaved-draft guard, name guard, admin add and remove, withdraw in check-in, error rendering, labels |
+| A, B, C, D, H tests | 3ac4461 | PUG contract test, migration count 39 to 41 |
+| G | 5a84931 | UI pass fixes |
+| A, B, C, D, E (review) | 43e71e8 | admin check-in, solo_only fill loop, guest login limit, lock before status check, count labels |
+| Config test | 987525d | `guest_logins_per_hour` as defaulted key |
+| K1 to K13 | 53f2bf3 | gate round 1 classes |
 
 ## Test evidence
 
 - rustfmt `--check` on every changed file and `cargo-slot clippy --workspace --all-targets --features turnier-api/testing,turnier-db/testing -- -D warnings`: clean.
 - `test-db-run dlcentral_test_turniere -- cargo-slot test --workspace --features testing --no-fail-fast` on ionos after the K1 to K13 fixes: 633 passed, 0 failed.
 - Frontend: `npm run lint` 0, `npm test` 31/31, `npx tsc -b` 0, `npm run build` 0.
+Commit messages of 1dcf35d, f7e7899, 5a84931 and 43e71e8 were reworded (layer 4 named Twins, claims matched to HEAD); every rewritten commit has the tree of its original.

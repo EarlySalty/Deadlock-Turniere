@@ -1,4 +1,4 @@
-# Gate round 1 triage (f8d20d6, BLOCK, 333 blocking, 54 nits)
+# Gate round 1 triage (f8d20d6, now 987525d after message-only rewording; BLOCK, 333 blocking, 54 nits)
 
 Log: scratchpad gate-r1.log. Hook "unit ... mishandles" items mirror the reviewer findings below and clear with them. Every class is fixed in this branch; nothing is parked.
 
