@@ -21,6 +21,7 @@ Evidence sources: `turnier.audit_log` (tournament 16), Caddy access logs `ddc.ac
   - No solo-only mode, so the public page offered "Team gründen" during a PUG.
 - Why unnoticed: the PUG flow (solo pool, builder, finalize) was never rehearsed end to end; the test tooling did not support it.
 - Where else: same duplicate risk for every guest signup in tournament 17.
+- Fixed: a guest name that matches an existing signup in the tournament is refused (`ensure_participant_name_free`, under the tournament row lock), guest logins are limited per IP and hour (`limits.guest_logins_per_hour`, default 10, 89504ec). Still open: a Discord signup after a guest with the same name is not refused, because the Discord display name is not a reliable identity; the organiser sees both in the builder and can remove one.
 
 ## C. "Austragen" silently fails during check-in
 
@@ -58,7 +59,7 @@ Fixed (d78a7e3):
 - Builder kept the module draft after a successful save, so a remount restored stale edits and blocked the preview; a failed save now keeps only the unsaved rest.
 - Builder grid forced horizontal scroll at 390 px (fixed 17rem column); add-player field shrank to about 85 px at 1440 px (flex basis 0).
 - Matches header always promised a loser bracket; now follows `effectiveBracketFormat`.
-- Public page showed an empty "Gruppen" tab for bracket-only tournaments and hid results and standings until the group phase.
+- Public page showed an empty "Gruppen" tab for bracket-only tournaments. The results and standings tabs keep their status gate (a d78a7e3 change to them was reverted in 89504ec).
 
 Proven in the browser: solo_only finalize forms no teams; preview shows the unsaved-draft alert with disabled start, the single-elimination fallback alert and the remaining solos; after save the start works (stored `single_elimination`, 1 match); public shows "SINGLE ELIM." and "2 TEAMS GEMELDET"; builder X removes a signup (DELETE 200, notice "Brummbär wurde aus dem Turnier entfernt.", 8 to 6 signups over two removals); scrollWidth equals the viewport on every page at 390 px.
 
@@ -67,6 +68,28 @@ Taste, not changed:
 - Legacy duplicates "Teams & Teilnehmer" and "Offene Solo-Anmeldungen" below the builder (P4b, see TODO.md).
 - ASCII umlauts in Match-Events and Presets ("ausloesen", "fuer", "ZURUECKSETZEN").
 - Overall admin density in the participants phase.
+
+## Independent review (one critic, Opus) and fixes in 89504ec
+
+- Players added by name during registration could never be checked in (no admin check-in route), so finalize removed them. New `POST /api/admin/tournaments/{id}/checkins/{discord_id}` (audit `checkin_admin`) and a "Einchecken" button per missing row in the check-in table.
+- solo_only still filled incomplete saved teams from the solo pool; the fill loop now shares the `auto_team_formation` flag with team creation.
+- Twin: the scheduler moved a solo_only tournament from check-in to the bracket at the planned time without finalize or preview; `get_due_next_status` now leaves solo_only check-in to the organisers.
+- Guest login had no rate limit (see B).
+- Withdraw, admin add and admin delete checked the status before taking the tournament row lock; one `lock_tournament_status` helper now orders lock before check everywhere.
+- Public label showed "1 Teams" and hid the open solo players; `registrationSummary` and `pluralize` now give "1 Team, 6 Spieler solo".
+- Removed added doc comments and a `.expect`, restored detached doc comments, real umlauts in "Ungültige Discord-ID" and "Ungültige Actor-ID".
+
+Browser proof on the fixture (Moli, fresh load per width): public label "1 Team, 6 Spieler solo" at 1440 and 390 (`public-pug-checkin-label-*`); admin "Einchecken" sends `POST .../checkins/910000000000050304`, notice "Feuerqualle ist eingecheckt.", missing buttons 5 to 4, eingecheckt 3 to 4 (`admin-pug-checkin-buttons-1440`, `admin-pug-checkin-done-{1440,390}`, scrollWidth 390 at 390); guest login: 10 times 201, then 429 with the German message, another IP 201.
+
+## Open points
+
+- A Discord signup after a same-named guest still creates a duplicate (see B).
+- The stored fallback format stays when the bracket is reset and rebuilt with more teams; the preview snapshot token ignores `invite_mode` and `bracket_format`.
+- Before generation the public label shows the configured "Double Elim." even when the fallback will apply.
+- Manual "Gruppen neu generieren" uses 4 groups, the preview and finalize use the automatic group count, so only that manual path can differ from the warning.
+- Stale action errors stay visible until the next action; negative participant ids are accepted on all admin routes (guests); the leave-team message in check-in is generic.
+- ASCII umlauts in other crates and older UI texts (see G taste list).
+- Live admin browser pass on the production host after deploy.
 
 ## H. Wave 2
 
@@ -85,6 +108,7 @@ P3b solo-only built in 392872f (`auto_team_formation` off, player team actions a
 | A, B, C, D, E, H | 392872f | solo_only mode, team preview with members, unsaved-draft guard, name guard, admin add and remove, withdraw in check-in, error rendering, stored fallback format and labels |
 | A, B, C, D, H tests | db74df4 | PUG contract test, migration count 39 to 41 |
 | G | d78a7e3 | UI pass fixes |
+| A, B, C, D, E (review) | 89504ec | admin check-in, solo_only fill loop and scheduler twin, guest login limit, lock before status check, count labels |
 
 ## Test evidence
 
