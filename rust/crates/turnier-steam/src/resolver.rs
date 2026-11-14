@@ -133,6 +133,9 @@ impl SteamRankResolver {
 #[async_trait]
 impl RankResolver for SteamRankResolver {
     async fn rank_profile(&self, discord_id: &str) -> SteamResult<Option<RankProfile>> {
+        if turnier_core::is_guest_participant_id(discord_id) {
+            return Ok(None);
+        }
         // Stufe 1: Cache.
         if let Some(cached) = self.cache.get(discord_id).await? {
             return Ok(Some(cached));

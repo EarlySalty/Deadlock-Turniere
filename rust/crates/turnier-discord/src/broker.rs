@@ -1,5 +1,6 @@
-//! Broker-Transport: HTTP-POST an die internen Master-Broker-Endpunkte mit
-//! `X-Internal-Token`, plus die exakt nachgebildete Fehlerübersetzung.
+//! Broker-Transport: HTTP-POST und -GET an die internen Master-Broker-Endpunkte
+//! mit `X-Internal-Token`, plus die Fehlerübersetzung; jeder Fehlerzweig wird
+//! mit Methode und Pfad geloggt.
 
 use serde::de::DeserializeOwned;
 use serde::Serialize;
@@ -129,10 +130,13 @@ where
     })?;
 
     let status = response.status();
-    let body_text = response.text().await.map_err(BrokerError::Unreachable)?;
+    let body_text = response.text().await.map_err(|err| {
+        tracing::warn!(method, path, status = status.as_u16(), error = %err, "Discord-Broker-Antwort nicht lesbar");
+        BrokerError::Unreachable(err)
+    })?;
 
     if status.as_u16() != 200 {
-        let detail = error_detail(&body_text);
+        let detail = with_status(error_detail(&body_text), status.as_u16());
         tracing::warn!(
             method,
             path,
@@ -151,18 +155,31 @@ where
         BrokerError::BadJson("Discord-Broker lieferte kein JSON")
     })?;
     if !value.is_object() {
+        tracing::warn!(method, path, "Discord-Broker lieferte kein JSON-Objekt");
         return Err(BrokerError::BadJson(
             "Discord-Broker lieferte ein ungültiges Payload",
         ));
     }
-    serde_json::from_value(value)
-        .map_err(|_| BrokerError::BadJson("Discord-Broker lieferte ein ungültiges Payload"))
+    serde_json::from_value(value).map_err(|err| {
+        tracing::warn!(method, path, error = %err, "Discord-Broker-Payload passt nicht zum erwarteten Format");
+        BrokerError::BadJson("Discord-Broker lieferte ein ungültiges Payload")
+    })
+}
+
+const DEFAULT_DETAIL: &str = "Discord-Broker Fehler";
+
+fn with_status(detail: String, status: u16) -> String {
+    if detail == DEFAULT_DETAIL {
+        format!("{DEFAULT_DETAIL} (HTTP {status})")
+    } else {
+        detail
+    }
 }
 
 /// Ermittelt die Fehler-`detail`-Meldung aus dem Non-200-Body, exakt nach der
 /// Reihenfolge im Python-Original.
 fn error_detail(body_text: &str) -> String {
-    const DEFAULT: &str = "Discord-Broker Fehler";
+    const DEFAULT: &str = DEFAULT_DETAIL;
 
     if let Ok(serde_json::Value::Object(map)) = serde_json::from_str::<serde_json::Value>(body_text)
     {

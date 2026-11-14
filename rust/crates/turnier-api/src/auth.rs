@@ -7,9 +7,10 @@
 //!   Frontend (302).
 //! - `GET /auth/discord/logout` → löscht die Session und das Cookie, leitet aufs
 //!   Frontend (302).
+//! - `POST /api/auth/guest` → legt für einen Namen eine Gast-Session mit
+//!   negativer Teilnehmer-ID an (201), begrenzt je Anschluss und Stunde.
 
-use std::net::{IpAddr, Ipv4Addr, SocketAddr};
-use std::time::{Duration, Instant};
+use std::net::SocketAddr;
 
 use axum::body::Body;
 use axum::extract::{ConnectInfo, Query, State};
@@ -18,7 +19,7 @@ use axum::http::HeaderMap;
 use axum::http::StatusCode;
 use axum::response::Response;
 use axum::routing::{get, post};
-use axum::{Extension, Json, Router};
+use axum::{Json, Router};
 use axum_extra::extract::cookie::CookieJar;
 use serde::Deserialize;
 
@@ -118,41 +119,9 @@ struct GuestLogin {
     name: String,
 }
 
-fn guest_name(raw: &str) -> WebResult<&str> {
-    let name = raw.trim();
-    if name.is_empty() || name.chars().count() > 32 || name.chars().any(char::is_control) {
-        return Err(WebError::bad_request(
-            "Bitte gib einen Namen mit 1 bis 32 Zeichen ohne Steuerzeichen ein",
-        ));
-    }
-    Ok(name)
-}
-
-fn enforce_guest_login_limit(state: &AppState, ip: IpAddr) -> WebResult<()> {
-    let now = Instant::now();
-    let limit = state.config.limits.guest_logins_per_hour;
-    let mut logins = state
-        .guest_logins
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    logins.retain(|_, times| {
-        times.retain(|at| now.duration_since(*at) < Duration::from_secs(60 * 60));
-        !times.is_empty()
-    });
-    let per_ip = logins.entry(ip).or_default();
-    if per_ip.len() >= limit {
-        return Err(WebError::new(
-            StatusCode::TOO_MANY_REQUESTS,
-            "Zu viele Gastanmeldungen von diesem Anschluss. Bitte versuche es in einer Stunde erneut.",
-        ));
-    }
-    per_ip.extend([now]);
-    Ok(())
-}
-
 async fn guest_login(
     State(state): State<AppState>,
-    connect: Option<Extension<ConnectInfo<SocketAddr>>>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
     OptionalUser(user): OptionalUser,
     Json(input): Json<GuestLogin>,
@@ -160,22 +129,21 @@ async fn guest_login(
     if user.is_some() {
         return Err(WebError::conflict("Du bist bereits angemeldet"));
     }
-    let name = guest_name(&input.name)?;
-    let peer_ip = connect
-        .map(|Extension(ConnectInfo(peer))| peer.ip())
-        .unwrap_or(IpAddr::V4(Ipv4Addr::LOCALHOST));
-    enforce_guest_login_limit(&state, crate::draft::client_ip(&headers, peer_ip))?;
-    let guest_id: i64 = sqlx::query_scalar(
-        "SELECT -nextval(pg_get_serial_sequence('turnier.tournament_signups', 'id'))",
-    )
-    .fetch_one(&state.pool)
-    .await?;
-    let token = turnier_auth::create_session_with_lifetime(
+    let name = crate::public::helpers::participant_name(&input.name)?;
+    crate::rate_limit::enforce_hourly_limit(
+        &state.guest_logins,
+        crate::draft::client_ip(&headers, peer.ip()),
+        state.config.limits.guest_logins_per_hour,
+        || {
+            "Zu viele Gastanmeldungen von diesem Anschluss. Bitte versuche es in einer Stunde erneut."
+                .to_string()
+        },
+    )?;
+    let guest_id = crate::public::helpers::allocate_guest_participant_id(&state.pool).await?;
+    let token = turnier_auth::create_guest_session(
         &state.pool,
-        &guest_id.to_string(),
+        guest_id,
         name,
-        "",
-        &[],
         state.config.limits.session_lifetime_days,
     )
     .await?;
@@ -186,18 +154,4 @@ async fn guest_login(
         .header(axum::http::header::CONTENT_TYPE, "application/json")
         .body(Body::from("{}"))
         .map_err(|_| WebError::internal("Gastanmeldung konnte nicht abgeschlossen werden"))
-}
-
-#[cfg(test)]
-mod guest_tests {
-    use super::guest_name;
-
-    #[test]
-    fn validates_guest_names() {
-        assert_eq!(guest_name("  Jörg  ").unwrap(), "Jörg");
-        for name in ["", "  ", "a\nb", "a\u{7f}b", &"ü".repeat(33)] {
-            assert!(guest_name(name).is_err());
-        }
-        assert!(guest_name(&"ü".repeat(32)).is_ok());
-    }
 }

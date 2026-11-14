@@ -77,6 +77,7 @@ export default function PresetForm({ preset, onDone }: PresetFormProps) {
   const createPreset = useCreatePreset()
   const updatePreset = useUpdatePreset()
   const isPending = createPreset.isPending || updatePreset.isPending
+  const saveError = preset ? updatePreset.error : createPreset.error
 
   const buildConfig = (): PresetConfig => ({
     team_size: teamSize,
@@ -305,6 +306,12 @@ export default function PresetForm({ preset, onDone }: PresetFormProps) {
             />
             <span>{AUTOMATIK_COPY.activeCheckboxLabel}</span>
           </label>
+        )}
+
+        {saveError instanceof Error && (
+          <p role="alert" className="rounded-lg border border-red-500/20 bg-red-500/10 p-3 text-sm text-red-400">
+            {saveError.message}
+          </p>
         )}
 
         <Button type="submit" disabled={isPending}>

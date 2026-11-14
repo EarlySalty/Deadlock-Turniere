@@ -10,7 +10,7 @@ use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
 use chrono::{DateTime, Duration, Utc};
 use rand::RngCore;
-use turnier_core::{discord_id_to_string, parse_participant_id, UserSession};
+use turnier_core::{discord_id_to_string, is_guest_participant, parse_discord_id, UserSession};
 use turnier_db::{bearer, Pool};
 
 use crate::error::{AuthError, AuthResult};
@@ -87,6 +87,39 @@ pub async fn create_session_with_lifetime(
     roles: &[String],
     lifetime_days: i64,
 ) -> AuthResult<String> {
+    let discord_id = parse_discord_id(discord_id)
+        .map_err(|_| AuthError::BadRequest("Discord-ID muss numerisch sein"))?;
+    insert_session(
+        pool,
+        discord_id,
+        discord_name,
+        discord_avatar,
+        roles,
+        lifetime_days,
+    )
+    .await
+}
+
+pub async fn create_guest_session(
+    pool: &Pool,
+    guest_id: i64,
+    guest_name: &str,
+    lifetime_days: i64,
+) -> AuthResult<String> {
+    if !is_guest_participant(guest_id) {
+        return Err(AuthError::BadRequest("Gast-ID muss negativ sein"));
+    }
+    insert_session(pool, guest_id, guest_name, "", &[], lifetime_days).await
+}
+
+async fn insert_session(
+    pool: &Pool,
+    discord_id: i64,
+    discord_name: &str,
+    discord_avatar: &str,
+    roles: &[String],
+    lifetime_days: i64,
+) -> AuthResult<String> {
     if !(1..=30).contains(&lifetime_days) {
         return Err(AuthError::BadRequest(
             "Session-Lebensdauer außerhalb der Sicherheitsgrenze",
@@ -96,8 +129,6 @@ pub async fn create_session_with_lifetime(
     let now = Utc::now();
     let expires_at = now + Duration::days(lifetime_days);
     let roles_csv = roles.join(",");
-    let discord_id = parse_participant_id(discord_id)
-        .map_err(|_| AuthError::BadRequest("Discord-ID muss numerisch sein"))?;
 
     sqlx::query(
         "INSERT INTO turnier.sessions \

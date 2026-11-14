@@ -103,7 +103,7 @@ pub enum SteamTaskError {
     /// Ein bei der Ergebnis-Übernahme entstandener [`MatchError`]; im Original
     /// fängt `_fetch_match_result_for_match` `MatchResultError` und verpackt ihn
     /// als `SteamTaskError(f"Ungueltige Steam-Ergebnisdaten: {exc}")`.
-    #[error("Ungueltige Steam-Ergebnisdaten: {0}")]
+    #[error("Ungültige Steam-Ergebnisdaten: {0}")]
     InvalidResult(String),
 }
 

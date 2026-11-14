@@ -79,7 +79,11 @@ pub async fn generate_bracket_in_tx(
         .fetch_all(&mut **tx)
         .await?;
         let mut group_qs: Vec<Qualifier> = Vec::new();
-        for (rank_pos, (team_id, wins, _losses, points)) in standings.iter().take(2).enumerate() {
+        for (rank_pos, (team_id, wins, _losses, points)) in standings
+            .iter()
+            .take(crate::engine::groups::QUALIFIERS_PER_GROUP)
+            .enumerate()
+        {
             qualified.push(Qualifier {
                 team_id: *team_id,
                 points: *points,

@@ -9,7 +9,6 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use serde::Deserialize;
 use serde_json::{json, Value};
-use sqlx::Row;
 
 use turnier_engine::{assign_random_teams, finalize_checkin, FinalizeCheckinParams, SoloShuffler};
 
@@ -70,36 +69,21 @@ async fn checkin_participant(
     ModUser(user): ModUser,
     Path((tournament_id, discord_id)): Path<(i64, String)>,
 ) -> WebResult<Json<Value>> {
-    let participant_id = crate::db::parse_discord_id(&discord_id)?;
+    let participant_id = crate::db::parse_participant_id(&discord_id)?;
     let mut tx = state.pool.begin().await?;
     let status = crate::public::helpers::lock_tournament_status(&mut tx, tournament_id).await?;
     if status != "checkin" {
         return Err(WebError::bad_request("Check-in ist aktuell nicht geöffnet"));
     }
-    let signup: Option<i64> = sqlx::query_scalar(
-        r#"SELECT id FROM turnier."tournament_signups" WHERE tournament_id = $1 AND discord_id = $2"#,
-    )
-    .bind(tournament_id)
-    .bind(participant_id)
-    .fetch_optional(&mut *tx)
-    .await?;
-    if signup.is_none() {
+    if !crate::public::helpers::ensure_checkin_signup(&mut tx, tournament_id, participant_id, None)
+        .await?
+    {
         return Err(WebError::not_found(
             "Spieler ist in diesem Turnier nicht angemeldet",
         ));
     }
-    let inserted = sqlx::query(
-        r#"INSERT INTO turnier."tournament_checkins" (tournament_id, discord_id, checked_in_at)
-         SELECT $1, $2, now()
-         WHERE NOT EXISTS (
-             SELECT 1 FROM turnier."tournament_checkins" WHERE tournament_id = $1 AND discord_id = $2
-         )"#,
-    )
-    .bind(tournament_id)
-    .bind(participant_id)
-    .execute(&mut *tx)
-    .await?
-    .rows_affected();
+    let already_checked_in =
+        !crate::public::helpers::insert_checkin(&mut tx, tournament_id, participant_id).await?;
     crate::public::helpers::audit(
         &mut *tx,
         "checkin_admin",
@@ -107,13 +91,13 @@ async fn checkin_participant(
         &json!({
             "tournament_id": tournament_id,
             "discord_id": crate::db::discord_id_to_string(participant_id),
-            "already_checked_in": inserted == 0,
+            "already_checked_in": already_checked_in,
         }),
     )
     .await?;
     tx.commit().await?;
     Ok(Json(
-        json!({ "checked_in": true, "already_checked_in": inserted == 0 }),
+        json!({ "checked_in": true, "already_checked_in": already_checked_in }),
     ))
 }
 
@@ -283,22 +267,13 @@ async fn assign_random(
     _mod: ModUser,
     Path(tournament_id): Path<i64>,
 ) -> WebResult<Json<Value>> {
-    let (status, team_size): (String, i64) = {
-        let tournament = load_tournament_or_404(&state.pool, tournament_id).await?;
-        (tournament.get("status"), tournament.get("team_size"))
-    };
-    if status != "registration" {
-        return Err(WebError::bad_request(
-            "Team-Zuweisung nur während der Registration möglich",
-        ));
-    }
+    load_tournament_or_404(&state.pool, tournament_id).await?;
 
     let mut shuffler = TimeSeededShuffler::new();
     let teams_created = assign_random_teams(
         &state.pool,
         state.rank_resolver.as_ref(),
         tournament_id,
-        team_size,
         &mut shuffler,
     )
     .await?;

@@ -63,7 +63,7 @@ pub enum DraftError {
     ActionConflict,
 
     /// Ungueltige Discord-ID fuer eine BIGINT-Spalte.
-    #[error("ungueltige Discord-ID: {0}")]
+    #[error("ungültige Discord-ID: {0}")]
     InvalidDiscordId(String),
 
     /// Persistenz-Fehler (Pool/Query).

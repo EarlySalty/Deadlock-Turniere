@@ -28,7 +28,8 @@ use crate::state::AppState;
 
 use super::helpers::{
     audit, delete_group_phase_tree, delete_tournament_tree, group_phase_has_played_matches,
-    load_tournament_or_404, serialize_lobby_settings, serialize_reminder_offsets,
+    load_tournament_or_404, lock_tournament_or_404, serialize_lobby_settings,
+    serialize_reminder_offsets,
 };
 use super::loaders::{
     load_bracket_matches, load_groups_for_tournament, load_mini_groups_for_tournament,
@@ -665,7 +666,7 @@ async fn delete_tournament(
     Path(tournament_id): Path<i64>,
 ) -> WebResult<Json<Value>> {
     let mut tx = state.pool.begin().await?;
-    let existing = load_tournament_or_404(&mut *tx, tournament_id).await?;
+    let existing = lock_tournament_or_404(&mut tx, tournament_id).await?;
     let name: String = existing.get("name");
 
     delete_tournament_tree(&mut tx, tournament_id).await?;
@@ -725,7 +726,7 @@ async fn revert_checkin(
     Path(tournament_id): Path<i64>,
 ) -> WebResult<Json<Tournament>> {
     let mut tx = state.pool.begin().await?;
-    let existing = load_tournament_or_404(&mut *tx, tournament_id).await?;
+    let existing = lock_tournament_or_404(&mut tx, tournament_id).await?;
     let status: String = existing.get("status");
     if status != "checkin" {
         return Err(WebError::bad_request(

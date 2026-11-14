@@ -4,6 +4,7 @@ import Button from '@/components/ui/Button'
 import { useSoloBalance } from '@/hooks/useTournament'
 import type { Team, TournamentStatus } from '@/types/tournament'
 import type { BalancePlayer } from '@/types/soloBalance'
+import { pluralize } from '@/lib/countLabel'
 
 interface SoloBalancePanelProps {
   tournamentId: number
@@ -78,7 +79,7 @@ export default function SoloBalancePanel({ tournamentId, tournamentStatus, teamS
       {proposal && !apply.isSuccess && (
         <section aria-label="Vorschlag für ausgeglichene Teams" className="space-y-4 border-t border-border pt-4">
           <div>
-            <h3 className="font-semibold text-foreground">Vorschlag: {proposal.team_count} Teams mit je {proposal.team_size} Spielern</h3>
+            <h3 className="font-semibold text-foreground">Vorschlag: {pluralize(proposal.team_count, 'Team', 'Teams')} mit je {pluralize(proposal.team_size, 'Spieler', 'Spielern')}</h3>
             <p className="mt-1 text-sm text-muted">
               Stärkeabstand: <span className="tabular-nums text-foreground">{formatScore(proposal.gap)}</span>. Ohne Rang zählt der Median {formatScore(proposal.median_score)}.
             </p>

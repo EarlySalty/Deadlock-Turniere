@@ -38,7 +38,7 @@ async fn verify_central_draft_schema(pool: &turnier_db::Pool) -> anyhow::Result<
     let missing = missing_required_draft_migrations(&applied);
     if !missing.is_empty() {
         anyhow::bail!(
-            "zentrales Draft-Schema ist veraltet; fehlende Deadlock-Bots-Migrationen: {missing:?}. Zuerst Deadlock-Bots/rust/target/release/dl-central-migrate ausfuehren"
+            "zentrales Draft-Schema ist veraltet; fehlende Deadlock-Bots-Migrationen: {missing:?}. Zuerst Deadlock-Bots/rust/target/release/dl-central-migrate ausführen"
         );
     }
     Ok(())
@@ -166,7 +166,7 @@ async fn shutdown_signal(shutdown_tx: tokio::sync::watch::Sender<bool>) {
 async fn check_broker_readonly(config: &Config) -> anyhow::Result<()> {
     let body: serde_json::Value = BrokerClient::from_config(config)
         .post_internal(
-            "/internal/master/v1/discord/voice-channel/members",
+            turnier_discord::paths::VOICE_MEMBERS,
             &serde_json::json!({"channel_id": config.discord_sammelpunkt_channel_id}),
         )
         .await

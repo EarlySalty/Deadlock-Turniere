@@ -72,9 +72,11 @@ async fn create_team(
 
     let pool = &state.pool;
     helpers::ensure_consent(pool, &user.discord_id).await?;
-    let user_discord_id = db::parse_discord_id(&user.discord_id)?;
+    let user_discord_id = db::parse_participant_id(&user.discord_id)?;
+    let rank = helpers::load_rank_input(&state, &user.discord_id).await;
 
-    let t = helpers::load_tournament_or_404(pool, tournament_id).await?;
+    let mut tx = pool.begin().await?;
+    let t = helpers::lock_tournament_or_404(&mut tx, tournament_id).await?;
     helpers::ensure_player_teams_allowed(&t)?;
     helpers::ensure_registration_open(&t.status)?;
 
@@ -84,7 +86,7 @@ async fn create_team(
     )
     .bind(tournament_id)
     .bind(&name_key)
-    .fetch_optional(pool)
+    .fetch_optional(&mut *tx)
     .await?;
     if name_taken.is_some() {
         return Err(WebError::conflict(
@@ -99,7 +101,7 @@ async fn create_team(
     )
     .bind(tournament_id)
     .bind(user_discord_id)
-    .fetch_optional(pool)
+    .fetch_optional(&mut *tx)
     .await?;
     if already_in_team.is_some() {
         return Err(WebError::conflict(
@@ -107,9 +109,6 @@ async fn create_team(
         ));
     }
 
-    let rank = helpers::load_rank_input(&state, &user.discord_id).await;
-
-    let mut tx = pool.begin().await?;
     helpers::ensure_guest_name_free(
         &mut tx,
         tournament_id,
@@ -169,16 +168,15 @@ async fn join_team(
 ) -> WebResult<Json<TeamMember>> {
     let pool = &state.pool;
     helpers::ensure_consent(pool, &user.discord_id).await?;
-    let user_discord_id = db::parse_discord_id(&user.discord_id)?;
-
-    let t = helpers::load_tournament_or_404(pool, tournament_id).await?;
-    helpers::ensure_player_teams_allowed(&t)?;
-    helpers::ensure_registration_open(&t.status)?;
-    helpers::load_team_or_404(pool, tournament_id, team_id).await?;
+    let user_discord_id = db::parse_participant_id(&user.discord_id)?;
 
     let rank = helpers::load_rank_input(&state, &user.discord_id).await;
 
     let mut tx = pool.begin().await?;
+    let t = helpers::lock_tournament_or_404(&mut tx, tournament_id).await?;
+    helpers::ensure_player_teams_allowed(&t)?;
+    helpers::ensure_registration_open(&t.status)?;
+    helpers::load_team_or_404(&mut *tx, tournament_id, team_id).await?;
     helpers::ensure_guest_name_free(
         &mut tx,
         tournament_id,
@@ -328,17 +326,19 @@ async fn update_team_recruiting(
     }
 
     let pool = &state.pool;
-    let t = helpers::load_tournament_or_404(pool, tournament_id).await?;
+    let mut tx = pool.begin().await?;
+    let t = helpers::lock_tournament_or_404(&mut tx, tournament_id).await?;
+    let team = helpers::load_team_or_404(&mut *tx, tournament_id, team_id).await?;
+    helpers::ensure_captain_or_mod(&user, &team.captain_discord_id)?;
     helpers::ensure_player_teams_allowed(&t)?;
     helpers::ensure_registration_open(&t.status)?;
-    let team = helpers::load_team_or_404(pool, tournament_id, team_id).await?;
-    helpers::ensure_captain_or_mod(&user, &team.captain_discord_id)?;
 
     sqlx::query(r#"UPDATE turnier."teams" SET recruitment_status = $1 WHERE id = $2"#)
         .bind(&raw)
         .bind(team_id)
-        .execute(pool)
+        .execute(&mut *tx)
         .await?;
+    tx.commit().await?;
 
     Ok(Json(helpers::load_team_response(&state, team_id).await?))
 }
@@ -353,20 +353,21 @@ async fn kick_team_member(
     if !is_participant_id(&discord_id) {
         return Err(WebError::bad_request("Ungültige Teilnehmer-ID"));
     }
-    let target_discord_id = db::parse_discord_id(&discord_id)?;
+    let target_discord_id = db::parse_participant_id(&discord_id)?;
 
     let pool = &state.pool;
-    let t = helpers::load_tournament_or_404(pool, tournament_id).await?;
-    helpers::ensure_player_teams_allowed(&t)?;
-    if t.status != "registration" {
-        return Err(WebError::bad_request("Anmeldung ist nicht geöffnet"));
-    }
-    let team = helpers::load_team_or_404(pool, tournament_id, team_id).await?;
+    let mut tx = pool.begin().await?;
+    let t = helpers::lock_tournament_or_404(&mut tx, tournament_id).await?;
+    let team = helpers::load_team_or_404(&mut *tx, tournament_id, team_id).await?;
 
     if user.discord_id != team.captain_discord_id {
         return Err(WebError::forbidden(
             "Nur der Captain darf Mitglieder entfernen",
         ));
+    }
+    helpers::ensure_player_teams_allowed(&t)?;
+    if t.status != "registration" {
+        return Err(WebError::bad_request("Anmeldung ist nicht geöffnet"));
     }
     if discord_id == user.discord_id {
         return Err(WebError::bad_request("Du kannst dich nicht selbst kicken"));
@@ -378,13 +379,12 @@ async fn kick_team_member(
     )
     .bind(team_id)
     .bind(target_discord_id)
-    .fetch_optional(pool)
+    .fetch_optional(&mut *tx)
     .await?;
     let Some(member) = member else {
         return Err(WebError::not_found("Mitglied nicht gefunden"));
     };
 
-    let mut tx = pool.begin().await?;
     sqlx::query(r#"DELETE FROM turnier."team_members" WHERE team_id = $1 AND discord_id = $2"#)
         .bind(team_id)
         .bind(target_discord_id)
@@ -408,12 +408,13 @@ async fn leave_team(
     Path((tournament_id, team_id)): Path<(i64, i64)>,
 ) -> WebResult<Json<Value>> {
     let pool = &state.pool;
-    let user_discord_id = db::parse_discord_id(&user.discord_id)?;
-    let t = helpers::load_tournament_or_404(pool, tournament_id).await?;
-    if t.status != "registration" {
+    let user_discord_id = db::parse_participant_id(&user.discord_id)?;
+    let mut tx = pool.begin().await?;
+    let status = helpers::lock_tournament_status(&mut tx, tournament_id).await?;
+    if status != "registration" {
         return Err(WebError::bad_request("Anmeldung ist nicht geöffnet"));
     }
-    let team = helpers::load_team_or_404(pool, tournament_id, team_id).await?;
+    let team = helpers::load_team_or_404(&mut *tx, tournament_id, team_id).await?;
 
     let member: Option<OldMemberRow> = sqlx::query_as(
         r#"SELECT discord_name, steam_id, rank, rank_score
@@ -421,13 +422,12 @@ async fn leave_team(
     )
     .bind(team_id)
     .bind(user_discord_id)
-    .fetch_optional(pool)
+    .fetch_optional(&mut *tx)
     .await?;
     let Some(member) = member else {
         return Err(WebError::not_found("Du bist kein Mitglied dieses Teams"));
     };
 
-    let mut tx = pool.begin().await?;
     let member_count = helpers::count_team_members(&mut *tx, team_id).await?;
     let is_captain = user.discord_id == team.captain_discord_id;
 
@@ -517,18 +517,19 @@ async fn invite_to_team(
     if !is_participant_id(&target_discord_id) {
         return Err(WebError::bad_request("Ungültige Teilnehmer-ID"));
     }
-    let target_discord_id_i64 = db::parse_discord_id(&target_discord_id)?;
+    let target_discord_id_i64 = db::parse_participant_id(&target_discord_id)?;
 
     let pool = &state.pool;
-    let t = helpers::load_tournament_or_404(pool, tournament_id).await?;
-    helpers::ensure_player_teams_allowed(&t)?;
-    if t.status != "registration" {
-        return Err(WebError::bad_request("Anmeldung ist nicht geöffnet"));
-    }
-    let team = helpers::load_team_or_404(pool, tournament_id, team_id).await?;
+    let mut tx = pool.begin().await?;
+    let t = helpers::lock_tournament_or_404(&mut tx, tournament_id).await?;
+    let team = helpers::load_team_or_404(&mut *tx, tournament_id, team_id).await?;
 
     if user.discord_id != team.captain_discord_id {
         return Err(WebError::forbidden("Nur der Captain darf Spieler einladen"));
+    }
+    helpers::ensure_player_teams_allowed(&t)?;
+    if t.status != "registration" {
+        return Err(WebError::bad_request("Anmeldung ist nicht geöffnet"));
     }
 
     // Spieler nicht bereits in einem Team.
@@ -538,7 +539,7 @@ async fn invite_to_team(
     )
     .bind(tournament_id)
     .bind(target_discord_id_i64)
-    .fetch_optional(pool)
+    .fetch_optional(&mut *tx)
     .await?;
     if in_team.is_some() {
         return Err(WebError::conflict("Spieler ist bereits in einem Team"));
@@ -551,7 +552,7 @@ async fn invite_to_team(
     )
     .bind(tournament_id)
     .bind(target_discord_id_i64)
-    .fetch_optional(pool)
+    .fetch_optional(&mut *tx)
     .await?;
     let Some(solo) = solo else {
         return Err(WebError::bad_request(
@@ -564,14 +565,12 @@ async fn invite_to_team(
          WHERE discord_id = $1 AND discord_name != '' LIMIT 1"#,
     )
     .bind(target_discord_id_i64)
-    .fetch_optional(pool)
+    .fetch_optional(&mut *tx)
     .await?;
     let discord_name = name_row
         .and_then(|(n,)| n)
         .or(solo.discord_name)
         .unwrap_or_else(|| target_discord_id.clone());
-
-    let mut tx = pool.begin().await?;
 
     // Team-Größe prüfen (innerhalb der Tx).
     helpers::ensure_team_has_capacity(&mut *tx, team_id, t.team_size).await?;
@@ -660,7 +659,7 @@ async fn reset_or_create_solo_signup(
     discord_id: &str,
     member: Option<&OldMemberRow>,
 ) -> WebResult<()> {
-    let discord_id_i64 = db::parse_discord_id(discord_id)?;
+    let discord_id_i64 = db::parse_participant_id(discord_id)?;
     let existing: Option<(i64,)> = sqlx::query_as(
         r#"SELECT id FROM turnier."tournament_signups" WHERE tournament_id = $1 AND discord_id = $2"#,
     )

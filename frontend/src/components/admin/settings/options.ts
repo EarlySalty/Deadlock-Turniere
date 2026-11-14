@@ -91,7 +91,7 @@ export const INVITE_MODE_OPTIONS: Choice<InviteMode>[] = [
   {
     value: 'solo_only',
     label: 'Nur Solo-Anmeldung (PUG)',
-    description: 'Spieler melden sich nur einzeln an. Teams gründen, beitreten, bewerben und einladen ist aus. Das Orga-Team baut die Teams im Team-Builder, und beim Check-in-Abschluss entstehen keine automatischen Teams.',
+    description: 'Spieler melden sich nur einzeln an. Teams gründen, beitreten, bewerben und einladen ist aus. Das Orga-Team baut die Teams im Team-Builder, und beim Check-in-Abschluss entstehen keine automatischen Teams. Das Turnier startet erst, wenn ihr den Check-in abschließt.',
   },
 ]
 
@@ -156,4 +156,5 @@ export function optionDescription<T extends string>(options: Choice<T>[], value:
 export const DATE_HINTS = {
   registrationEnd: 'Gleichzeitig Anmeldeschluss. Die Erinnerungen richten sich danach.',
   checkinStart: 'Leer: Check-in startet mit dem Turnier-Start.',
+  phaseStart: 'Nur zur Planung. Die Phase beginnt erst, wenn ihr den Check-in abschließt.',
 }

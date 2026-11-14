@@ -1,9 +1,11 @@
 #![cfg(feature = "testing")]
 
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::Arc;
 use std::time::Duration;
 
 use axum::body::{to_bytes, Body};
+use axum::extract::ConnectInfo;
 use axum::http::header::{AUTHORIZATION, CONTENT_TYPE, HOST};
 use axum::http::{Method, Request, StatusCode};
 use axum::Router;
@@ -26,7 +28,7 @@ const HELPER_ID: &str = "910000000000010007";
 #[tokio::test]
 async fn guest_signup_preserves_consent_and_identity_isolation() {
     let ctx = setup().await;
-    for name in ["", "a\nb", &"ü".repeat(33)] {
+    for name in ["", "a\nb", "a\u{200B}b", "\u{202E}gnuj", &"ü".repeat(33)] {
         assert_eq!(
             send_json(
                 &ctx.app,
@@ -51,6 +53,7 @@ async fn guest_signup_preserves_consent_and_identity_isolation() {
                 Request::builder()
                     .method(Method::POST)
                     .uri("/api/auth/guest")
+                    .extension(peer())
                     .header(HOST, "localhost")
                     .header(CONTENT_TYPE, "application/json")
                     .body(Body::from(
@@ -268,6 +271,10 @@ async fn session(pool: &Pool, discord_id: &str, name: &str, roles: &[&str]) -> S
     .expect("session")
 }
 
+fn peer() -> ConnectInfo<SocketAddr> {
+    ConnectInfo(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 40_000))
+}
+
 async fn send_json(
     app: &Router,
     token: Option<&str>,
@@ -281,6 +288,7 @@ async fn send_json(
     let mut builder = Request::builder()
         .method(method)
         .uri(uri)
+        .extension(peer())
         .header(HOST, "localhost")
         .header(CONTENT_TYPE, "application/json");
     if let Some(token) = token {

@@ -82,7 +82,7 @@ export default function MatchEventPanel({
       <Card className="p-5">
         <div className="flex items-center gap-2 text-muted">
           <PartyPopper size={18} />
-          <span>Keine Bracket-Matches fuer Live-Events verfuegbar.</span>
+          <span>Keine Bracket-Matches für Live-Events verfügbar.</span>
         </div>
       </Card>
     )
@@ -105,7 +105,7 @@ export default function MatchEventPanel({
         kind: 'success',
         text: enabled
           ? `${result.label} wurde auf das Match angewendet.`
-          : `${result.label} wurde wieder zurueckgesetzt.`,
+          : `${result.label} wurde wieder zurückgesetzt.`,
       })
       onRefresh?.()
     } catch (error) {
@@ -129,7 +129,7 @@ export default function MatchEventPanel({
     }, {})
 
     if (Object.keys(convars).length === 0) {
-      setMessage({ kind: 'error', text: 'Mindestens eine gueltige ConVar-Zeile ist erforderlich.' })
+      setMessage({ kind: 'error', text: 'Mindestens eine gültige ConVar-Zeile ist erforderlich.' })
       return
     }
 
@@ -163,7 +163,7 @@ export default function MatchEventPanel({
               <span>Live-Event-Steuerung</span>
             </div>
             <h3 className="mt-1 text-lg font-semibold text-foreground">
-              Match auswaehlen und Event direkt aus dem Admin-Panel ausloesen
+              Match auswählen und Event direkt aus dem Admin-Panel auslösen
             </h3>
           </div>
 
@@ -210,7 +210,7 @@ export default function MatchEventPanel({
         {!selectedMatchLive && (
           <div className="flex items-center gap-2 rounded-lg border border-amber-500/20 bg-amber-500/10 p-3 text-sm text-amber-300">
             <ShieldAlert size={16} />
-            <span>Events greifen erst, wenn fuer das Match eine Lobby erstellt wurde.</span>
+            <span>Events greifen erst, wenn für das Match eine Lobby erstellt wurde.</span>
           </div>
         )}
       </Card>
@@ -222,7 +222,7 @@ export default function MatchEventPanel({
             Presets
           </h3>
           <p className="mt-1 text-sm text-muted">
-            Ein Klick fuer lustige Showmatch-Modi. Presets mit Cheat-Hinweis funktionieren nur, wenn die Lobby sie zulaesst.
+            Ein Klick für lustige Showmatch-Modi. Presets mit Cheat-Hinweis funktionieren nur, wenn die Lobby sie zulässt.
           </p>
         </div>
 
@@ -258,7 +258,7 @@ export default function MatchEventPanel({
                   disabled={!selectedMatchLive || isBusy}
                   onClick={() => void handlePreset(preset.key, false)}
                 >
-                  Zuruecksetzen
+                  Zurücksetzen
                 </Button>
               </div>
             </div>
@@ -270,7 +270,7 @@ export default function MatchEventPanel({
         <div>
           <h3 className="text-lg font-semibold text-foreground">Eigene ConVars</h3>
           <p className="mt-1 text-sm text-muted">
-            Fuer Sonderfaelle oder schnelle Tests. Einfach Name und Wert eintragen, ohne extra Steam-Kommandos.
+            Für Sonderfälle oder schnelle Tests. Einfach Name und Wert eintragen, ohne extra Steam-Kommandos.
           </p>
         </div>
 
@@ -323,7 +323,7 @@ export default function MatchEventPanel({
             size="sm"
             onClick={() => setCustomRows((current) => [...current, { name: '', value: '' }])}
           >
-            Zeile hinzufuegen
+            Zeile hinzufügen
           </Button>
           <Button
             type="button"

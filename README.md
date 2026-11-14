@@ -66,11 +66,18 @@ curl -s -o /dev/null -w '%{http_code}\n' https://deutsche-deadlock-community.de/
 
 Expected: `active`, one `turnier-bot` process from the path above, and `200` for all three URLs.
 
+## Guest access
+
+Guests can join from a tournament's signup card by entering a player name and accepting the existing consent form (`POST /api/auth/guest`). Their browser receives the same secure, HttpOnly session cookie used by Discord login. Guests can sign up, check in and join teams. The name alone cannot recover access after logout, cookie deletion or session expiry; tournament staff must manage the old entry in that case.
+
+- IDs: guests and players added by name get negative participant IDs from the signup identity sequence (`allocate_guest_participant_id`). Discord snowflakes stay positive. API binds use `db::parse_participant_id`, which accepts both; Discord OAuth sessions and caster entries use the strict `parse_discord_id`.
+- Names: one rule for guest login and admin add-by-name (`participant_name`): 1 to 32 characters, no control or invisible format characters. A guest name that matches an existing participant of the tournament is refused. A Discord signup with the same name is allowed, because Discord display names are not unique; the admin builder and check-in table mark such pairs as "Name doppelt".
+- Discord paths: DM reminders, notifications and voice moves skip guests and count them; lobby and match posts list guests as a count instead of a mention; rank lookup and Discord roles are skipped for guests; avatar upload and DM opt-out changes need a Discord login.
+- Limit: `limits.guest_logins_per_hour` per connection (IPv4 address or IPv6 /64), shared limiter with draft lobby creation.
+
+No schema migration is required.
+
 ## Discord notifications and DM opt-out
-
-Guests can join from a tournament's signup card by entering a player name and accepting the existing consent form. Their browser receives the same secure, HttpOnly session cookie used by Discord login. Guests can sign up, check in and join teams. The name alone cannot recover access after logout, cookie deletion or session expiry; tournament staff must manage the old entry in that case.
-
-Guest participant IDs are negative values allocated from the signup identity sequence. Discord snowflakes remain positive and retain their strict parser at Discord API boundaries. Guests receive no Discord roles and are skipped by tournament DM reminders. No schema migration is required.
 
 - Tournament DMs are sent by `DiscordNotifier` (`rust/crates/turnier-discord`). Before sending, it skips users who have a row in `turnier.tournament_dm_optout`, whatever the scope, and respects `user_profiles.notify_discord_dm` and the per-event flag.
 - Users manage the tournament opt-out through `GET /api/me/dm-optout`, `PUT /api/me/dm-optout` with `{"scope": "fun" | "comp" | "all"}`, and `DELETE /api/me/dm-optout/{scope}`.

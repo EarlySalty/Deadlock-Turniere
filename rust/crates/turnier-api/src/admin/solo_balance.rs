@@ -326,7 +326,7 @@ async fn apply(
         sqlx::query("UPDATE turnier.tournament_signups SET steam_id = $1, rank = $2, rank_score = $3 WHERE id = $4")
             .bind(&player.steam_id).bind(&player.rank).bind(player.rank_score).bind(player.signup_id).execute(&mut *tx).await?;
         sqlx::query("INSERT INTO turnier.solo_balance_waitlist (tournament_id, signup_id, discord_id, position) VALUES ($1, $2, $3, $4)")
-            .bind(tournament_id).bind(player.signup_id).bind(db::parse_discord_id(&player.discord_id)?).bind(index as i64 + 1).execute(&mut *tx).await?;
+            .bind(tournament_id).bind(player.signup_id).bind(db::parse_participant_id(&player.discord_id)?).bind(index as i64 + 1).execute(&mut *tx).await?;
     }
     audit(&mut *tx, "solo_balance_apply", &user.discord_id,
         json!({ "tournament_id": tournament_id, "team_count": dto.team_count, "waitlist_count": dto.waitlist.len(), "gap": dto.gap, "median_score": dto.median_score })).await?;

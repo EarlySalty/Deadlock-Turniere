@@ -229,7 +229,7 @@ pub fn spawn_substitute_sweep_worker(state: AppState) {
             let plans = match repository.sweep_expired_substitutes().await {
                 Ok(plans) => plans,
                 Err(error) => {
-                    tracing::warn!(%error, "Scrim-Aushilfe-Ablauf konnte nicht geprueft werden");
+                    tracing::warn!(%error, "Scrim-Aushilfe-Ablauf konnte nicht geprüft werden");
                     Vec::new()
                 }
             };
@@ -278,7 +278,7 @@ pub fn spawn_substitute_sweep_worker(state: AppState) {
                         subject,
                         user_id = ?user_id,
                         detail = %status.detail,
-                        "Scrim-Aushilfe-Rollen-Sync bleibt fuer Retry offen"
+                        "Scrim-Aushilfe-Rollen-Sync bleibt für Retry offen"
                     );
                 }
                 if let Err(error) = delivery.finish(status.ok).await {
@@ -292,7 +292,7 @@ pub fn spawn_substitute_sweep_worker(state: AppState) {
                     );
                 }
             }
-            tracing::info!(count, "Scrim-Aushilfe-Ablauf geprueft");
+            tracing::info!(count, "Scrim-Aushilfe-Ablauf geprüft");
             tokio::time::sleep(interval).await;
         }
     });
@@ -967,10 +967,7 @@ async fn process_reminder(state: &AppState, claim: ReminderClaim) -> Result<(), 
     let result = state
         .notifier
         .broker()
-        .post_internal::<serde_json::Value, _>(
-            "/internal/master/v1/discord/send-message",
-            &claim.payload,
-        )
+        .post_internal::<serde_json::Value, _>(turnier_discord::paths::SEND_MESSAGE, &claim.payload)
         .await;
     match result {
         Ok(response) => {
@@ -1789,7 +1786,7 @@ async fn deliver_selected_result_to_channel(
     let response = state
         .notifier
         .broker()
-        .post_internal::<serde_json::Value, _>("/internal/master/v1/discord/send-message", &payload)
+        .post_internal::<serde_json::Value, _>(turnier_discord::paths::SEND_MESSAGE, &payload)
         .await;
     let response = match response {
         Ok(response) => response,
@@ -2027,7 +2024,7 @@ async fn distribute_lobby_code_to_channel(
             .notifier
             .broker()
             .post_internal::<serde_json::Value, _>(
-                "/internal/master/v1/discord/send-message",
+                turnier_discord::paths::SEND_MESSAGE,
                 &serde_json::json!({
                     "channel_id": channel_id,
                     "content": format!("Lobby Code: {code}"),
@@ -2124,7 +2121,7 @@ async fn publish_announcement(
         .notifier
         .broker()
         .post_internal::<serde_json::Value, _>(
-            "/internal/master/v1/discord/send-message",
+            turnier_discord::paths::SEND_MESSAGE,
             &serde_json::json!({
                 "channel_id": channel_id,
                 "content": publication.message,
@@ -2624,7 +2621,7 @@ async fn create_team_discord_role(
         .notifier
         .broker()
         .post_internal::<serde_json::Value, _>(
-            "/internal/master/v1/discord/role/create",
+            turnier_discord::paths::CREATE_ROLE,
             &serde_json::json!({
                 "guild_id": guild_id,
                 "name": team.name,
@@ -2677,7 +2674,7 @@ async fn sync_discord_roles(
     operation_key: &str,
 ) -> DiscordSyncStatus {
     let Some(guild_id) = positive_config_id(Some(state.config.scrim_guild_id)) else {
-        tracing::warn!("Scrim-Rollen-Sync ohne gueltige Guild-ID");
+        tracing::warn!("Scrim-Rollen-Sync ohne gültige Guild-ID");
         return DiscordSyncStatus {
             ok: false,
             detail: DISCORD_SYNC_NOT_CONFIGURED.to_string(),
@@ -2693,10 +2690,8 @@ async fn sync_discord_roles(
         for action in plan.actions {
             changed = true;
             let (path, operation) = match action.operation {
-                RoleOperation::Add => ("/internal/master/v1/discord/member/add-role", "add"),
-                RoleOperation::Remove => {
-                    ("/internal/master/v1/discord/member/remove-role", "remove")
-                }
+                RoleOperation::Add => (turnier_discord::paths::ADD_ROLE, "add"),
+                RoleOperation::Remove => (turnier_discord::paths::REMOVE_ROLE, "remove"),
             };
             let broker = state.notifier.broker().clone();
             let subject = plan.subject.clone();
@@ -2791,7 +2786,7 @@ async fn post_team_announcement(
         .notifier
         .broker()
         .post_internal::<serde_json::Value, _>(
-            "/internal/master/v1/discord/send-rich-message",
+            turnier_discord::paths::SEND_RICH_MESSAGE,
             &serde_json::json!({
                 "channel_id": channel_id,
                 "content": content,
@@ -2853,7 +2848,7 @@ async fn post_team_announcement(
         .notifier
         .broker()
         .post_internal::<serde_json::Value, _>(
-            "/internal/master/v1/discord/add-reaction",
+            turnier_discord::paths::ADD_REACTION,
             &serde_json::json!({
                 "channel_id": channel_id,
                 "message_id": message_id,
@@ -2942,7 +2937,7 @@ async fn send_substitute_dm(
         .notifier
         .broker()
         .post_internal::<serde_json::Value, _>(
-            "/internal/master/v1/discord/send-dm",
+            turnier_discord::paths::SEND_DM,
             &serde_json::json!({
                 "user_id": user_id,
                 "content": substitute_dm_content(team_name, &window),
@@ -3007,7 +3002,7 @@ async fn sync_signup_roles(
             .notifier
             .broker()
             .post_internal::<serde_json::Value, _>(
-                "/internal/master/v1/discord/member/add-role",
+                turnier_discord::paths::ADD_ROLE,
                 &serde_json::json!({
                     "guild_id": guild_id,
                     "user_id": discord_user_id,
@@ -3046,7 +3041,7 @@ async fn dispatch_discord(
                 .notifier
                 .broker()
                 .post_internal::<serde_json::Value, _>(
-                    "/internal/master/v1/discord/send-dm",
+                    turnier_discord::paths::SEND_DM,
                     &serde_json::json!({
                         "user_id": user_id,
                         "content": target.content,
@@ -3059,7 +3054,7 @@ async fn dispatch_discord(
                 .notifier
                 .broker()
                 .post_internal::<serde_json::Value, _>(
-                    "/internal/master/v1/discord/send-message",
+                    turnier_discord::paths::SEND_MESSAGE,
                     &serde_json::json!({
                         "channel_id": channel_id,
                         "content": target.content,

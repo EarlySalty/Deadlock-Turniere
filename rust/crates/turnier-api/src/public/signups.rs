@@ -10,7 +10,7 @@ use crate::error::{map_unique_conflict, WebError, WebResult};
 use crate::extract::AuthUser;
 use crate::state::AppState;
 
-use super::helpers::{self, RankInput};
+use super::helpers;
 
 /// Router der Solo-Signup-/Check-in-Routen.
 pub fn router() -> Router<AppState> {
@@ -26,7 +26,8 @@ pub fn router() -> Router<AppState> {
 }
 
 /// `POST /api/tournaments/{tournament_id}/signup`: Solo-Anmeldung (201).
-/// Bei `team_size == 1` wird automatisch ein 1-Mann-Team angelegt.
+/// Bei `team_size == 1` wird automatisch ein 1-Mann-Team angelegt, außer im
+/// Modus `solo_only`, in dem das Orga-Team die Teams bildet.
 async fn solo_signup(
     State(state): State<AppState>,
     AuthUser(user): AuthUser,
@@ -34,9 +35,11 @@ async fn solo_signup(
 ) -> WebResult<(axum::http::StatusCode, Json<Value>)> {
     let pool = &state.pool;
     helpers::ensure_consent(pool, &user.discord_id).await?;
-    let user_discord_id = db::parse_discord_id(&user.discord_id)?;
+    let user_discord_id = db::parse_participant_id(&user.discord_id)?;
+    let rank = helpers::load_rank_input(&state, &user.discord_id).await;
 
-    let t = helpers::load_tournament_or_404(pool, tournament_id).await?;
+    let mut tx = pool.begin().await?;
+    let t = helpers::lock_tournament_or_404(&mut tx, tournament_id).await?;
     helpers::ensure_registration_open(&t.status)?;
 
     // Bereits angemeldet?
@@ -45,7 +48,7 @@ async fn solo_signup(
     )
     .bind(tournament_id)
     .bind(user_discord_id)
-    .fetch_optional(pool)
+    .fetch_optional(&mut *tx)
     .await?;
     if signup_exists.is_some() {
         return Err(WebError::conflict(
@@ -60,7 +63,7 @@ async fn solo_signup(
     )
     .bind(tournament_id)
     .bind(user_discord_id)
-    .fetch_optional(pool)
+    .fetch_optional(&mut *tx)
     .await?;
     if in_team.is_some() {
         return Err(WebError::conflict(
@@ -68,10 +71,11 @@ async fn solo_signup(
         ));
     }
 
-    let rank = helpers::load_rank_input(&state, &user.discord_id).await;
-    let team_size = t.team_size;
-
-    let mut tx = pool.begin().await?;
+    let creates_solo_team = t.team_size == 1
+        && !t
+            .invite_mode
+            .as_deref()
+            .is_some_and(turnier_core::InviteMode::is_solo_only);
 
     helpers::ensure_guest_name_free(
         &mut tx,
@@ -96,7 +100,7 @@ async fn solo_signup(
     .await
     .map_err(|err| map_unique_conflict(err, "Du bist bereits für dieses Turnier angemeldet"))?;
 
-    if team_size == 1 {
+    if creates_solo_team {
         let resolved_name =
             helpers::sanitize_discord_name(user.discord_name.as_deref(), Some(&user.discord_id))
                 .unwrap_or_else(|| user.discord_id.clone());
@@ -173,11 +177,11 @@ async fn cancel_solo_signup(
     Path(tournament_id): Path<i64>,
 ) -> WebResult<Json<Value>> {
     let pool = &state.pool;
-    let user_discord_id = db::parse_discord_id(&user.discord_id)?;
+    let user_discord_id = db::parse_participant_id(&user.discord_id)?;
 
     let mut tx = pool.begin().await?;
     let status = helpers::lock_tournament_status(&mut tx, tournament_id).await?;
-    if status != "registration" && status != "checkin" {
+    if !helpers::registration_window_open(&status) {
         return Err(WebError::bad_request(
             "Austragen ist nur bis zum Ende des Check-ins möglich",
         ));
@@ -222,78 +226,28 @@ async fn checkin_player(
     Path(tournament_id): Path<i64>,
 ) -> WebResult<Json<Value>> {
     let pool = &state.pool;
-    let user_discord_id = db::parse_discord_id(&user.discord_id)?;
+    let user_discord_id = db::parse_participant_id(&user.discord_id)?;
 
-    let t = helpers::load_tournament_or_404(pool, tournament_id).await?;
-    if t.status != "checkin" {
+    let mut tx = pool.begin().await?;
+    let status = helpers::lock_tournament_status(&mut tx, tournament_id).await?;
+    if status != "checkin" {
         return Err(WebError::bad_request("Check-in ist aktuell nicht geöffnet"));
     }
 
-    let mut tx = pool.begin().await?;
-
-    let signup_exists: Option<(i64,)> = sqlx::query_as(
-        r#"SELECT id FROM turnier."tournament_signups" WHERE tournament_id = $1 AND discord_id = $2"#,
+    if !helpers::ensure_checkin_signup(
+        &mut tx,
+        tournament_id,
+        user_discord_id,
+        user.discord_name.as_deref(),
     )
-    .bind(tournament_id)
-    .bind(user_discord_id)
-    .fetch_optional(&mut *tx)
-    .await?;
-
-    if signup_exists.is_none() {
-        // Lazy-Signup für Team-Mitglieder, die noch keinen Signup-Eintrag haben.
-        let membership: Option<MembershipRow> = sqlx::query_as(
-            r#"SELECT tm.discord_name, tm.steam_id, tm.rank, tm.rank_score, tm.team_id
-             FROM turnier."team_members" tm JOIN turnier."teams" t ON t.id = tm.team_id
-             WHERE t.tournament_id = $1 AND tm.discord_id = $2"#,
-        )
-        .bind(tournament_id)
-        .bind(user_discord_id)
-        .fetch_optional(&mut *tx)
-        .await?;
-        let Some(m) = membership else {
-            return Err(WebError::forbidden(
-                "Du bist für dieses Turnier nicht angemeldet",
-            ));
-        };
-        let discord_name = user
-            .discord_name
-            .clone()
-            .filter(|n| !n.is_empty())
-            .or(m.discord_name);
-        let rank = RankInput {
-            steam_id: m.steam_id,
-            rank: m.rank,
-            rank_score: m.rank_score.unwrap_or(0),
-        };
-        helpers::upsert_signup(
-            &mut tx,
-            tournament_id,
-            &user.discord_id,
-            discord_name.as_deref(),
-            &rank,
-            Some(m.team_id),
-        )
-        .await?;
+    .await?
+    {
+        return Err(WebError::forbidden(
+            "Du bist für dieses Turnier nicht angemeldet",
+        ));
     }
-
-    let existing_checkin: Option<(i64,)> = sqlx::query_as(
-        r#"SELECT id FROM turnier."tournament_checkins" WHERE tournament_id = $1 AND discord_id = $2"#,
-    )
-    .bind(tournament_id)
-    .bind(user_discord_id)
-    .fetch_optional(&mut *tx)
-    .await?;
-    let already_checked_in = existing_checkin.is_some();
-    if !already_checked_in {
-        sqlx::query(
-            r#"INSERT INTO turnier."tournament_checkins" (tournament_id, discord_id, checked_in_at)
-             VALUES ($1, $2, now())"#,
-        )
-        .bind(tournament_id)
-        .bind(user_discord_id)
-        .execute(&mut *tx)
-        .await?;
-    }
+    let already_checked_in =
+        !helpers::insert_checkin(&mut tx, tournament_id, user_discord_id).await?;
 
     helpers::audit(
         &mut *tx,
@@ -312,16 +266,6 @@ async fn checkin_player(
     Ok(Json(
         json!({ "checked_in": true, "already_checked_in": already_checked_in }),
     ))
-}
-
-/// Mitgliedszeile für den Lazy-Signup beim Check-in.
-#[derive(sqlx::FromRow)]
-struct MembershipRow {
-    discord_name: Option<String>,
-    steam_id: Option<String>,
-    rank: Option<String>,
-    rank_score: Option<i64>,
-    team_id: i64,
 }
 
 /// Kürzt einen String auf höchstens `max` Zeichen (Codepoints), wie das

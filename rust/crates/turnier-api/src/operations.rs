@@ -165,7 +165,7 @@ async fn report_match_result(
     Json(body): Json<MatchResultReportCreate>,
 ) -> WebResult<(axum::http::StatusCode, Json<MatchResultReport>)> {
     let pool = &state.pool;
-    let user_discord_id = db::parse_discord_id(&user.discord_id)?;
+    let user_discord_id = db::parse_participant_id(&user.discord_id)?;
     let m = load_bracket_match(pool, tournament_id, match_id).await?;
 
     if FINISHED_MATCH_STATUSES.contains(&m.status.as_str()) {

@@ -171,7 +171,7 @@ async fn has_active_tournament_participation(
     pool: &turnier_db::Pool,
     discord_id: &str,
 ) -> WebResult<bool> {
-    let discord_id = db::parse_discord_id(discord_id)?;
+    let discord_id = db::parse_participant_id(discord_id)?;
     let mut query = QueryBuilder::new(
         r#"SELECT 1::BIGINT FROM turnier."tournament_signups" ts
          JOIN turnier."tournaments" t ON t.id = ts.tournament_id
@@ -193,7 +193,7 @@ async fn has_active_tournament_participation(
 async fn reload_profile(pool: &turnier_db::Pool, user: &UserSession) -> WebResult<UserProfile> {
     let row: ProfileRow =
         sqlx::query_as(r#"SELECT * FROM turnier."user_profiles" WHERE discord_id = $1"#)
-            .bind(db::parse_discord_id(&user.discord_id)?)
+            .bind(db::parse_participant_id(&user.discord_id)?)
             .fetch_one(pool)
             .await?;
     Ok(serialize_profile_row(row, user))
@@ -209,7 +209,7 @@ async fn get_consent(
     let row: Option<(Option<DateTime<Utc>>, i64)> = sqlx::query_as(
         r#"SELECT consented_at, consent_version FROM turnier."user_consents" WHERE discord_id = $1"#,
     )
-    .bind(db::parse_discord_id(&user.discord_id)?)
+    .bind(db::parse_participant_id(&user.discord_id)?)
     .fetch_optional(&state.pool)
     .await?;
 
@@ -242,7 +242,7 @@ async fn set_consent(
          SET consented_at = EXCLUDED.consented_at,
              consent_version = EXCLUDED.consent_version"#,
     )
-    .bind(db::parse_discord_id(&user.discord_id)?)
+    .bind(db::parse_participant_id(&user.discord_id)?)
     .bind(now)
     .bind(body.consent_version)
     .execute(&state.pool)
@@ -270,7 +270,7 @@ async fn revoke_consent(
         ));
     }
     sqlx::query(r#"DELETE FROM turnier."user_consents" WHERE discord_id = $1"#)
-        .bind(db::parse_discord_id(&user.discord_id)?)
+        .bind(db::parse_participant_id(&user.discord_id)?)
         .execute(&state.pool)
         .await?;
     Ok(StatusCode::NO_CONTENT)
@@ -285,7 +285,7 @@ async fn get_my_profile(
 ) -> WebResult<Json<UserProfile>> {
     let row: Option<ProfileRow> =
         sqlx::query_as(r#"SELECT * FROM turnier."user_profiles" WHERE discord_id = $1"#)
-            .bind(db::parse_discord_id(&user.discord_id)?)
+            .bind(db::parse_participant_id(&user.discord_id)?)
             .fetch_optional(&state.pool)
             .await?;
 
@@ -318,7 +318,7 @@ async fn update_my_profile(
     Json(body): Json<UserProfileUpdate>,
 ) -> WebResult<Json<UserProfile>> {
     let pool = &state.pool;
-    let discord_id = db::parse_discord_id(&user.discord_id)?;
+    let discord_id = db::parse_participant_id(&user.discord_id)?;
 
     let existing: Option<(i64,)> =
         sqlx::query_as(r#"SELECT discord_id FROM turnier."user_profiles" WHERE discord_id = $1"#)
@@ -434,6 +434,7 @@ async fn upload_profile_avatar(
     AuthUser(user): AuthUser,
     mut multipart: Multipart,
 ) -> WebResult<Json<UserProfile>> {
+    crate::db::require_discord_account(&user.discord_id)?;
     let pool = &state.pool;
 
     // Datei-Feld `avatar` aus dem Multipart-Body lesen.
@@ -489,7 +490,7 @@ async fn upload_profile_avatar(
         .and_then(|n| n.to_str())
         .unwrap_or("")
         .to_string();
-    let discord_id = db::parse_discord_id(&user.discord_id)?;
+    let discord_id = db::parse_participant_id(&user.discord_id)?;
 
     let existing: Option<(i64,)> =
         sqlx::query_as(r#"SELECT discord_id FROM turnier."user_profiles" WHERE discord_id = $1"#)
@@ -567,7 +568,7 @@ async fn latest_discord_avatar(
          AND discord_avatar IS NOT NULL AND discord_avatar != ''
          ORDER BY created_at DESC LIMIT 1"#,
     )
-    .bind(db::parse_discord_id(discord_id)?)
+    .bind(db::parse_participant_id(discord_id)?)
     .fetch_optional(pool)
     .await?;
     Ok(row.and_then(|(avatar,)| avatar).filter(|a| !a.is_empty()))

@@ -177,7 +177,7 @@ impl From<turnier_scheduler::SchedulerError> for WebError {
             InvalidTransition(msg) => Self::bad_request(msg),
             StatusConflict => Self::conflict("Turnierstatus wurde parallel geändert"),
             StartGapConflict(msg) => Self::conflict(msg),
-            InvalidActorId(_) => Self::bad_request("Ungueltige Actor-Discord-ID"),
+            InvalidActorId(_) => Self::bad_request("Ungültige Actor-Discord-ID"),
             Tournament(e) => e.into(),
             Db(e) => e.into(),
         }
@@ -203,9 +203,9 @@ impl From<turnier_automatik::AutomatikError> for WebError {
                 "Der Vorschlagsplan ist bereits sichtbar oder bewertet und kann nicht ersetzt werden.",
             ),
             InvalidProposalConfig => Self::bad_request("Vorschlagsplan muss ein JSON-Objekt sein"),
-            InvalidNumericId(_) => Self::bad_request("Ungueltige numerische ID"),
-            Json(_) => Self::bad_request("Ungueltiges JSON"),
-            Time(_) => Self::bad_request("Ungueltiger Zeitstempel"),
+            InvalidNumericId(_) => Self::bad_request("Ungültige numerische ID"),
+            Json(_) => Self::bad_request("Ungültiges JSON"),
+            Time(_) => Self::bad_request("Ungültiger Zeitstempel"),
             Db(e) => e.into(),
         }
     }
@@ -240,10 +240,10 @@ impl From<turnier_scrim::ScrimError> for WebError {
             Conflict(message) => Self::conflict(message),
             InvalidProposal(message) | InvalidResponse(message) => Self::bad_request(message),
             InvalidStoredData(message) => {
-                tracing::error!(detail = %message, "Ungueltige gespeicherte Scrim-Daten");
+                tracing::error!(detail = %message, "Ungültige gespeicherte Scrim-Daten");
                 Self::internal("Interner Scrim-Datenfehler")
             }
-            InvalidActor => Self::bad_request("Ungueltige Actor-Discord-ID"),
+            InvalidActor => Self::bad_request("Ungültige Actor-Discord-ID"),
             Database(error) => error.into(),
         }
     }

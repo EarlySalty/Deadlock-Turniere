@@ -1,0 +1,13 @@
+pub const CREATE_CHANNEL: &str = "/internal/master/v1/discord/create-channel";
+pub const SEND_RICH_MESSAGE: &str = "/internal/master/v1/discord/send-rich-message";
+pub const SEND_MESSAGE: &str = "/internal/master/v1/discord/send-message";
+pub const DELETE_CHANNEL: &str = "/internal/master/v1/discord/delete-channel";
+pub const MOVE_VOICE: &str = "/internal/master/v1/discord/member/move-voice";
+pub const VOICE_MEMBERS: &str = "/internal/master/v1/discord/voice-channel/members";
+pub const ROLE_MEMBERS: &str = "/internal/master/v1/discord/role-members";
+pub const PUBLISH_TOURNAMENT_PROPOSAL: &str = "/internal/master/v1/turnier/proposals/publish";
+pub const ADD_REACTION: &str = "/internal/master/v1/discord/add-reaction";
+pub const ADD_ROLE: &str = "/internal/master/v1/discord/member/add-role";
+pub const REMOVE_ROLE: &str = "/internal/master/v1/discord/member/remove-role";
+pub const CREATE_ROLE: &str = "/internal/master/v1/discord/role/create";
+pub const SEND_DM: &str = "/internal/master/v1/discord/send-dm";

@@ -1,3 +1,5 @@
+import { pluralize } from '../../lib/countLabel.ts'
+
 export type ReminderUnit = 'minutes' | 'hours' | 'days' | 'weeks'
 
 export const DEFAULT_REMINDER_OFFSETS = [1440, 120, 15]
@@ -45,10 +47,6 @@ export function removeOffset(offsets: number[], minutes: number): number[] {
 
 export function offsetsOrDefault(offsets: number[], defaults: number[]): number[] {
   return offsets.length > 0 ? sortOffsets(offsets) : defaults
-}
-
-function pluralize(count: number, singular: string, plural: string): string {
-  return `${count} ${count === 1 ? singular : plural}`
 }
 
 export function formatOffset(minutes: number): string {

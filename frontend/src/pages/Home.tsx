@@ -6,7 +6,7 @@ import Card from '@/components/ui/Card'
 import Badge from '@/components/ui/Badge'
 import LoadingSpinner from '@/components/ui/LoadingSpinner'
 import { Trophy, Users, Archive, Swords, Shield, ScrollText, CalendarClock } from 'lucide-react'
-import { bracketFormatLabel } from '@/lib/bracketFormat'
+import { bracketFormatLabel, effectiveBracketFormat } from '@/lib/bracketFormat'
 import type { Tournament } from '@/types/tournament'
 
 const container = {
@@ -173,7 +173,7 @@ function OpenTournamentCard({ tournament: t }: { tournament: Tournament }) {
               <Shield size={16} className="text-primary" />
               {isLeague(t.tournament_mode)
                 ? LEAGUE_LABEL
-                : bracketFormatLabel(t.bracket_format)}
+                : bracketFormatLabel(effectiveBracketFormat(t))}
             </span>
             {t.rules && (
               <span className="flex items-center gap-2 text-amber-500/80">

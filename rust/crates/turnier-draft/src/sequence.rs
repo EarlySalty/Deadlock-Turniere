@@ -66,7 +66,7 @@ impl<'de> Deserialize<'de> for TeamSlot {
             1 => Ok(TeamSlot::One),
             2 => Ok(TeamSlot::Two),
             value => Err(serde::de::Error::custom(format!(
-                "ungueltiger Team-Slot: {value}"
+                "ungültiger Team-Slot: {value}"
             ))),
         }
     }

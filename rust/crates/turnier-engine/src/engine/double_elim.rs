@@ -15,15 +15,23 @@ pub fn expected_bracket_entrants(tournament_mode: &str, team_count: usize) -> Op
         "league" => None,
         "group_stage" => {
             let groups = crate::engine::groups::auto_num_groups(team_count);
-            Some((groups * 2).min(team_count))
+            Some((groups * crate::engine::groups::QUALIFIERS_PER_GROUP).min(team_count))
         }
         _ => Some(team_count),
     }
 }
 
+pub const PLAYED_BRACKET_FORMAT_SQL: &str = r#"(SELECT CASE
+        WHEN count(*) = 0 THEN NULL
+        WHEN bool_or(bm.bracket_type IN ('losers', 'grand_final')) THEN 'double_elimination'
+        ELSE 'single_elimination' END
+    FROM turnier.bracket_matches bm WHERE bm.tournament_id = turnier."tournaments".id)"#;
+
 pub fn effective_bracket_format(stored_format: &str, entrants: Option<usize>) -> &'static str {
     match (stored_format, entrants) {
-        ("double_elimination", Some(n)) if !supports_double_elimination(n) => "single_elimination",
+        ("double_elimination", Some(n)) if n >= 2 && !supports_double_elimination(n) => {
+            "single_elimination"
+        }
         ("double_elimination", _) => "double_elimination",
         _ => "single_elimination",
     }
@@ -93,6 +101,14 @@ mod tests {
         );
         assert_eq!(
             effective_bracket_format("double_elimination", Some(4)),
+            "double_elimination"
+        );
+        assert_eq!(
+            effective_bracket_format("double_elimination", Some(1)),
+            "double_elimination"
+        );
+        assert_eq!(
+            effective_bracket_format("double_elimination", Some(0)),
             "double_elimination"
         );
         assert_eq!(expected_bracket_entrants("bracket_only", 5), Some(5));

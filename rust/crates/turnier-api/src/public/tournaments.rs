@@ -50,10 +50,13 @@ async fn get_tournament(
     Path(tournament_id): Path<i64>,
 ) -> WebResult<Json<TournamentDetailPublic>> {
     let pool = &state.pool;
-    let row = sqlx::query(r#"SELECT * FROM turnier."tournaments" WHERE id = $1"#)
-        .bind(tournament_id)
-        .fetch_optional(pool)
-        .await?;
+    let row = sqlx::query(&format!(
+        r#"SELECT *, {} AS played_bracket_format FROM turnier."tournaments" WHERE id = $1"#,
+        turnier_engine::PLAYED_BRACKET_FORMAT_SQL
+    ))
+    .bind(tournament_id)
+    .fetch_optional(pool)
+    .await?;
     let Some(row) = row else {
         return Err(WebError::not_found("Turnier nicht gefunden"));
     };
@@ -89,7 +92,7 @@ async fn get_my_tournament_status(
 ) -> WebResult<Json<Value>> {
     let pool = &state.pool;
 
-    let user_discord_id = db::parse_discord_id(&user.discord_id)?;
+    let user_discord_id = db::parse_participant_id(&user.discord_id)?;
     let member: Option<(i64, i64)> = sqlx::query_as(
         r#"SELECT tm.team_id, t.captain_discord_id FROM turnier."team_members" tm
          JOIN turnier."teams" t ON tm.team_id = t.id

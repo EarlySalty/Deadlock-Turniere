@@ -21,7 +21,8 @@ use crate::state::AppState;
 use super::helpers::{
     audit, count_team_members, ensure_participant_management_allowed, ensure_team_has_capacity,
     ensure_team_not_locked, load_team_application_or_404, load_team_or_404, load_tournament_or_404,
-    reassign_or_clear_captain, upsert_signup_for_team, upsert_signup_from_member, MemberSnapshot,
+    lock_tournament_or_404, reassign_or_clear_captain, upsert_signup_for_team,
+    upsert_signup_from_member, MemberSnapshot,
 };
 use super::loaders::load_team_detail;
 
@@ -121,7 +122,7 @@ async fn create_team(
     let name = validate_team_name(body.name.as_deref())?;
 
     let mut tx = state.pool.begin().await?;
-    let tournament = load_tournament_or_404(&mut *tx, tournament_id).await?;
+    let tournament = lock_tournament_or_404(&mut tx, tournament_id).await?;
     ensure_participant_management_allowed(tournament.get::<String, _>("status").as_str())?;
     let name_key = turnier_engine::name_key(&name);
 
@@ -173,7 +174,7 @@ async fn rename_team(
     let name = validate_team_name(body.name.as_deref())?;
 
     let mut tx = state.pool.begin().await?;
-    let tournament = load_tournament_or_404(&mut *tx, tournament_id).await?;
+    let tournament = lock_tournament_or_404(&mut tx, tournament_id).await?;
     ensure_participant_management_allowed(tournament.get::<String, _>("status").as_str())?;
     load_team_or_404(&mut *tx, tournament_id, team_id).await?;
     let name_key = turnier_engine::name_key(&name);
@@ -238,7 +239,7 @@ async fn update_recruiting(
     };
 
     let mut tx = state.pool.begin().await?;
-    let tournament = load_tournament_or_404(&mut *tx, tournament_id).await?;
+    let tournament = lock_tournament_or_404(&mut tx, tournament_id).await?;
     ensure_participant_management_allowed(tournament.get::<String, _>("status").as_str())?;
     load_team_or_404(&mut *tx, tournament_id, team_id).await?;
 
@@ -308,7 +309,7 @@ async fn accept_application(
     Path((tournament_id, team_id, app_id)): Path<(i64, i64, i64)>,
 ) -> WebResult<Json<Value>> {
     let mut tx = state.pool.begin().await?;
-    let tournament = load_tournament_or_404(&mut *tx, tournament_id).await?;
+    let tournament = lock_tournament_or_404(&mut tx, tournament_id).await?;
     ensure_participant_management_allowed(tournament.get::<String, _>("status").as_str())?;
     let team_size: i64 = tournament.get("team_size");
     let target_team = load_team_or_404(&mut *tx, tournament_id, team_id).await?;
@@ -437,7 +438,7 @@ async fn reject_application(
     Path((tournament_id, team_id, app_id)): Path<(i64, i64, i64)>,
 ) -> WebResult<Json<Value>> {
     let mut tx = state.pool.begin().await?;
-    let tournament = load_tournament_or_404(&mut *tx, tournament_id).await?;
+    let tournament = lock_tournament_or_404(&mut tx, tournament_id).await?;
     ensure_participant_management_allowed(tournament.get::<String, _>("status").as_str())?;
     load_team_or_404(&mut *tx, tournament_id, team_id).await?;
     let application = load_team_application_or_404(&mut *tx, team_id, app_id).await?;
@@ -482,7 +483,7 @@ async fn delete_team(
     Path((tournament_id, team_id)): Path<(i64, i64)>,
 ) -> WebResult<Json<Value>> {
     let mut tx = state.pool.begin().await?;
-    let tournament = load_tournament_or_404(&mut *tx, tournament_id).await?;
+    let tournament = lock_tournament_or_404(&mut tx, tournament_id).await?;
     ensure_participant_management_allowed(tournament.get::<String, _>("status").as_str())?;
     let team = load_team_or_404(&mut *tx, tournament_id, team_id).await?;
     let team_name: String = team.get("name");
@@ -559,10 +560,10 @@ async fn change_captain(
     if discord_id.is_empty() {
         return Err(WebError::bad_request("discord_id ist erforderlich"));
     }
-    let discord_id_i64 = db::parse_discord_id(&discord_id)?;
+    let discord_id_i64 = db::parse_participant_id(&discord_id)?;
 
     let mut tx = state.pool.begin().await?;
-    let tournament = load_tournament_or_404(&mut *tx, tournament_id).await?;
+    let tournament = lock_tournament_or_404(&mut tx, tournament_id).await?;
     ensure_participant_management_allowed(tournament.get::<String, _>("status").as_str())?;
     load_team_or_404(&mut *tx, tournament_id, team_id).await?;
 
@@ -606,11 +607,11 @@ async fn remove_member(
     Path((tournament_id, team_id, discord_id)): Path<(i64, i64, String)>,
 ) -> WebResult<Json<Team>> {
     let mut tx = state.pool.begin().await?;
-    let tournament = load_tournament_or_404(&mut *tx, tournament_id).await?;
+    let tournament = lock_tournament_or_404(&mut tx, tournament_id).await?;
     ensure_participant_management_allowed(tournament.get::<String, _>("status").as_str())?;
     let team = load_team_or_404(&mut *tx, tournament_id, team_id).await?;
     let captain: i64 = team.get("captain_discord_id");
-    let discord_id_i64 = db::parse_discord_id(&discord_id)?;
+    let discord_id_i64 = db::parse_participant_id(&discord_id)?;
 
     let member = sqlx::query(
         r#"SELECT * FROM turnier."team_members" WHERE team_id = $1 AND discord_id = $2"#,
@@ -677,7 +678,7 @@ async fn move_member(
             "from_team_id und discord_id sind erforderlich",
         ));
     }
-    let discord_id_i64 = db::parse_discord_id(&discord_id)?;
+    let discord_id_i64 = db::parse_participant_id(&discord_id)?;
     if from_team_id == team_id {
         return Err(WebError::bad_request(
             "Quelle und Ziel dürfen nicht identisch sein",
@@ -685,7 +686,7 @@ async fn move_member(
     }
 
     let mut tx = state.pool.begin().await?;
-    let tournament = load_tournament_or_404(&mut *tx, tournament_id).await?;
+    let tournament = lock_tournament_or_404(&mut tx, tournament_id).await?;
     ensure_participant_management_allowed(tournament.get::<String, _>("status").as_str())?;
     let team_size: i64 = tournament.get("team_size");
     let source_team = load_team_or_404(&mut *tx, tournament_id, from_team_id).await?;
@@ -776,7 +777,7 @@ async fn assign_signup(
     };
 
     let mut tx = state.pool.begin().await?;
-    let tournament = load_tournament_or_404(&mut *tx, tournament_id).await?;
+    let tournament = lock_tournament_or_404(&mut tx, tournament_id).await?;
     ensure_participant_management_allowed(tournament.get::<String, _>("status").as_str())?;
     let team_size: i64 = tournament.get("team_size");
     let target_team = load_team_or_404(&mut *tx, tournament_id, team_id).await?;
@@ -877,10 +878,10 @@ async fn add_member(
             "discord_id und discord_name sind erforderlich",
         ));
     }
-    let discord_id_i64 = db::parse_discord_id(&discord_id)?;
+    let discord_id_i64 = db::parse_participant_id(&discord_id)?;
 
     let mut tx = state.pool.begin().await?;
-    let tournament = load_tournament_or_404(&mut *tx, tournament_id).await?;
+    let tournament = lock_tournament_or_404(&mut tx, tournament_id).await?;
     let status: String = tournament.get("status");
     if !matches!(status.as_str(), "group_phase" | "bracket") {
         return Err(WebError::bad_request(
@@ -1047,23 +1048,14 @@ struct AddSignupBody {
     name: Option<String>,
 }
 
-fn admin_signup_name(raw: Option<&str>) -> WebResult<String> {
-    let name = raw.unwrap_or("").trim();
-    if name.is_empty() || name.chars().count() > 32 || name.chars().any(char::is_control) {
-        return Err(WebError::bad_request(
-            "Bitte gib einen Namen mit 1 bis 32 Zeichen ohne Steuerzeichen ein",
-        ));
-    }
-    Ok(name.to_string())
-}
-
 async fn add_signup_by_name(
     State(state): State<AppState>,
     ModUser(user): ModUser,
     Path(tournament_id): Path<i64>,
     Json(body): Json<AddSignupBody>,
 ) -> WebResult<(StatusCode, Json<TournamentSignup>)> {
-    let name = admin_signup_name(body.name.as_deref())?;
+    let name =
+        crate::public::helpers::participant_name(body.name.as_deref().unwrap_or(""))?.to_string();
     let mut tx = state.pool.begin().await?;
     let status = crate::public::helpers::lock_tournament_status(&mut tx, tournament_id).await?;
     if status != "registration" && status != "checkin" {
@@ -1079,11 +1071,7 @@ async fn add_signup_by_name(
         "Ein Spieler mit diesem Namen ist bereits angemeldet",
     )
     .await?;
-    let participant_id: i64 = sqlx::query_scalar(
-        "SELECT -nextval(pg_get_serial_sequence('turnier.tournament_signups', 'id'))",
-    )
-    .fetch_one(&mut *tx)
-    .await?;
+    let participant_id = crate::public::helpers::allocate_guest_participant_id(&mut *tx).await?;
     let row = sqlx::query(
         r#"INSERT INTO turnier."tournament_signups"
          (tournament_id, discord_id, discord_name, rank_score, signed_up_at)
@@ -1152,7 +1140,7 @@ pub(super) async fn insert_member(
     rank_score: i64,
     role: &str,
 ) -> WebResult<()> {
-    let discord_id = db::parse_discord_id(discord_id)?;
+    let discord_id = db::parse_participant_id(discord_id)?;
     sqlx::query(
         r#"INSERT INTO turnier."team_members" (team_id, discord_id, discord_name, steam_id, rank, rank_score, role, joined_at)
          VALUES ($1, $2, $3, $4, $5, $6, $7, now())"#,

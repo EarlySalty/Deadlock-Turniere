@@ -991,7 +991,7 @@ fn build_match_result_payload(m: &MatchRow) -> Value {
 fn require_match_has_live_lobby(m: &MatchRow) -> SteamTaskResult<()> {
     if !VALID_LEAVE_STATUSES.contains(&m.status.as_str()) {
         return Err(SteamTaskError::state(
-            "Live-Events koennen nur fuer Matches mit aktiver oder laufender Lobby gesetzt werden",
+            "Live-Events können nur für Matches mit aktiver oder laufender Lobby gesetzt werden",
         ));
     }
     if m.steam_party_id
@@ -1000,7 +1000,7 @@ fn require_match_has_live_lobby(m: &MatchRow) -> SteamTaskResult<()> {
         .is_none()
     {
         return Err(SteamTaskError::state(
-            "Fuer dieses Match ist keine Party-ID gespeichert",
+            "Für dieses Match ist keine Party-ID gespeichert",
         ));
     }
     Ok(())

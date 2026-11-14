@@ -21,7 +21,7 @@ static COMMAND_SEQ: AtomicU64 = AtomicU64::new(1);
 pub enum VConsoleError {
     #[error("VConsole transport: {0}")]
     Io(#[from] io::Error),
-    #[error("VConsole packet ungueltig: {0}")]
+    #[error("VConsole packet ungültig: {0}")]
     Protocol(String),
     #[error("VConsole command abgelehnt: {0}")]
     CommandRejected(String),

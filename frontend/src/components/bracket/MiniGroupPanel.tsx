@@ -3,6 +3,7 @@ import { Users2, ArrowRight } from 'lucide-react'
 import Card from '@/components/ui/Card'
 import TeamRosterTooltip from '@/components/ui/TeamRosterTooltip'
 import type { BracketMatch, BracketMiniGroup, TeamPublic } from '@/types/tournament'
+import { pluralize } from '@/lib/countLabel'
 
 interface MiniGroupPanelProps {
   miniGroups: BracketMiniGroup[]
@@ -97,7 +98,7 @@ export default function MiniGroupPanel({ miniGroups, matches, teams }: MiniGroup
                       : 'bg-muted/15 text-muted'
                   }`}
                 >
-                  {completed ? 'abgeschlossen' : `${group.team_ids.length} Teams`}
+                  {completed ? 'abgeschlossen' : pluralize(group.team_ids.length, 'Team', 'Teams')}
                 </span>
               </div>
 

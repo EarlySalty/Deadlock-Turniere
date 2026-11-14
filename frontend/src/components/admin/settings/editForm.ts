@@ -132,7 +132,7 @@ export function editDateEntries(
     {
       key: 'group-start',
       label: league ? 'Erste Runde beginnt' : 'Gruppenphase Start',
-      hint: league ? 'Verschiebt den ganzen Spielplan, sobald er steht. Die Rundenlänge stellst du unter „Spielplan“ ein.' : undefined,
+      hint: league ? 'Verschiebt den ganzen Spielplan, sobald er steht. Die Rundenlänge stellst du unter „Spielplan“ ein.' : DATE_HINTS.phaseStart,
       value: form.groupPhaseStart,
       onChange: (groupPhaseStart) => update({ groupPhaseStart }),
     },
@@ -140,6 +140,6 @@ export function editDateEntries(
   if (league) return entries
   return [
     ...entries,
-    { key: 'bracket-start', label: 'Bracket Start', value: form.bracketStart, onChange: (bracketStart) => update({ bracketStart }) },
+    { key: 'bracket-start', label: 'Bracket Start', hint: DATE_HINTS.phaseStart, value: form.bracketStart, onChange: (bracketStart) => update({ bracketStart }) },
   ]
 }

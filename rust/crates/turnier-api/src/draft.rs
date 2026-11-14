@@ -17,7 +17,7 @@ use std::time::{Duration, Instant};
 use axum::body::Bytes;
 use axum::extract::{ConnectInfo, Path, State};
 use axum::http::header::CACHE_CONTROL;
-use axum::http::{HeaderMap, StatusCode};
+use axum::http::HeaderMap;
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use serde::Deserialize;
@@ -484,25 +484,10 @@ pub(crate) fn client_ip(headers: &HeaderMap, peer_ip: std::net::IpAddr) -> std::
 }
 
 fn enforce_lobby_rate_limit(state: &AppState, ip: std::net::IpAddr) -> WebResult<()> {
-    let now = Instant::now();
-    let mut creations = state
-        .draft_lobby_creations
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    // ponytail: Prozesslokal reicht bei einem Prozess; bei mehreren Instanzen neu denken.
-    let per_ip = creations.entry(ip).or_default();
-    per_ip.retain(|created| now.duration_since(*created) < Duration::from_secs(60 * 60));
-    if per_ip.len() >= state.config.limits.draft_creations_per_hour {
-        return Err(WebError::new(
-            StatusCode::TOO_MANY_REQUESTS,
-            format!(
-                "Du kannst höchstens {} Draft-Lobbys pro Stunde erstellen.",
-                state.config.limits.draft_creations_per_hour
-            ),
-        ));
-    }
-    per_ip.push(now);
-    Ok(())
+    let limit = state.config.limits.draft_creations_per_hour;
+    crate::rate_limit::enforce_hourly_limit(&state.draft_lobby_creations, ip, limit, || {
+        format!("Du kannst höchstens {limit} Draft-Lobbys pro Stunde erstellen.")
+    })
 }
 
 /// `POST /api/draft/matches/{match_id}/start`: Draft für ein Bracket-Match starten.

@@ -218,7 +218,7 @@ async fn set_mode(
     if matches!(input.mode, ObserverMode::Auto) {
         if !state.config.observer_game_control_enabled {
             return Err(WebError::conflict(
-                "Auto-Kamerasteuerung ist aus Anti-Cheat-Sicherheitsgruenden serverseitig deaktiviert. Shadow und Assist bleiben verfuegbar.",
+                "Auto-Kamerasteuerung ist aus Anti-Cheat-Sicherheitsgründen serverseitig deaktiviert. Shadow und Assist bleiben verfügbar.",
             ));
         }
         if state.config.observer_agent_token.trim().len() < 24 {
@@ -240,7 +240,7 @@ async fn set_mode(
         let lobby_party_id: Option<i64> = readiness.try_get("lobby_party_id")?;
         if !auto_scope_allowed(scrim_match_id, draft_code.as_deref(), lobby_party_id) {
             return Err(WebError::conflict(
-                "Auto ist nur fuer eine nachweislich eigene Scrim-/Draft-Lobby erlaubt. Manuelle Match-ID- und Public-Tests bleiben Shadow/Assist.",
+                "Auto ist nur für eine nachweislich eigene Scrim-/Draft-Lobby erlaubt. Manuelle Match-ID- und Public-Tests bleiben Shadow/Assist.",
             ));
         }
         let heartbeat: Option<DateTime<Utc>> = readiness.try_get("last_agent_heartbeat_at")?;
@@ -356,7 +356,7 @@ async fn bot2_lease_set(
 async fn proxy_bot2_lease(state: &AppState, reserved: Option<bool>) -> WebResult<Value> {
     if state.config.steam_bot_internal_token.trim().is_empty() {
         return Err(WebError::conflict(
-            "Steam-Bot-Internal-Token ist fuer die Bot-2-Reservierung nicht konfiguriert",
+            "Steam-Bot-Internal-Token ist für die Bot-2-Reservierung nicht konfiguriert",
         ));
     }
     let url = format!(
@@ -488,7 +488,7 @@ async fn agent_heartbeat(
     require_agent(&state, &headers)?;
     if heartbeat.bot_account_id != BOT2_ACCOUNT_ID {
         return Err(WebError::forbidden(
-            "Nur Steam Bot 2 ist fuer den Observer freigegeben",
+            "Nur Steam Bot 2 ist für den Observer freigegeben",
         ));
     }
     sqlx::query(
@@ -521,7 +521,7 @@ pub fn spawn_observer_worker(state: AppState) {
                 tracing::warn!(error = %err, "Observer konnte gestartete Draft-Lobbys nicht automatisch anbinden");
             }
             if let Err(err) = finish_completed_draft_observers(&state).await {
-                tracing::warn!(error = %err, "Observer konnte beendete Draft-Lobbys nicht abschliessen");
+                tracing::warn!(error = %err, "Observer konnte beendete Draft-Lobbys nicht abschließen");
             }
             if let Err(err) = ensure_spectate_lobby_bootstrap(&state).await {
                 tracing::warn!(error = %err, "Observer konnte Steam Bot 2 nicht automatisch in die Spectator-Lobby schicken");

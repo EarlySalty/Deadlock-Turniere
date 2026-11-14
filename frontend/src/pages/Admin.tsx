@@ -12,6 +12,7 @@ import CreateTournamentForm from '@/components/admin/CreateTournamentForm'
 import TournamentManager from '@/components/admin/TournamentManager'
 import ParticipantManager from '@/components/admin/ParticipantManager'
 import TeamBuilderPanel from '@/components/admin/TeamBuilderPanel'
+import { isRegistrationWindowOpen } from '@/lib/tournamentStatus'
 import {
   CollapsedTournamentRow,
   TournamentSidebar,
@@ -305,6 +306,7 @@ export default function Admin() {
                         teamSize={liveDetail.team_size}
                         teams={liveDetail.teams}
                         signups={liveDetail.signups}
+                        canAddPlayers={isRegistrationWindowOpen(liveDetail.status)}
                       />
                     )}
 
@@ -376,7 +378,7 @@ export default function Admin() {
                         <header>
                           <h2 className="text-lg font-semibold text-foreground">Matches</h2>
                           <p className="mt-1 text-sm text-muted">
-                            {effectiveBracketFormat(liveDetail.bracket_format, liveDetail.bracket_matches) === 'double_elimination'
+                            {effectiveBracketFormat(liveDetail) === 'double_elimination'
                               ? 'Bracket-Übersicht und Match-Steuerung. Winner-Bracket läuft auf Stream, Loser-Bracket parallel.'
                               : 'Bracket-Übersicht und Match-Steuerung im K.-o.-System.'}
                           </p>

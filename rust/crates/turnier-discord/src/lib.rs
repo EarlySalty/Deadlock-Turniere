@@ -4,8 +4,8 @@
 //! Kapselt alle Discord-seitigen Effekte (Match-Channel anlegen/löschen,
 //! Lobby-/Stats-Embeds posten, DMs an Spieler/Caster, User in Voice-Kanäle
 //! ziehen, Rollen-/Voice-Mitglieder abfragen). Versand erfolgt nie direkt an die
-//! Discord-API, sondern als POST an interne Broker-Endpunkte mit
-//! `X-Internal-Token`. Ein Teil der Operationen wird zusätzlich in der Tabelle
+//! Discord-API, sondern als POST oder GET an interne Broker-Endpunkte mit
+//! `X-Internal-Token`; alle Pfade stehen in [`paths`]. Ein Teil der Operationen wird zusätzlich in der Tabelle
 //! `discord_tasks` als Lifecycle-Job protokolliert; DM-Versand respektiert die
 //! Opt-out-Flags aus `user_profiles` und `tournament_dm_optout`.
 //!
@@ -20,6 +20,7 @@ pub mod error;
 pub mod event;
 pub mod ids;
 pub mod notifier;
+pub mod paths;
 pub mod tasks;
 
 // Flache Re-Exports der zentralen Typen.

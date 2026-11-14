@@ -31,6 +31,7 @@ struct TournamentRow {
     group_phase_start: Option<DateTime<Utc>>,
     bracket_start: Option<DateTime<Utc>>,
     bracket_format: String,
+    played_bracket_format: Option<String>,
     tournament_mode: String,
     tournament_game_mode: String,
     auto_lobby_enabled: bool,
@@ -72,6 +73,7 @@ impl TournamentRow {
             group_phase_start: db::opt_ts_to_string(self.group_phase_start),
             bracket_start: db::opt_ts_to_string(self.bracket_start),
             bracket_format: self.bracket_format,
+            played_bracket_format: self.played_bracket_format,
             tournament_mode: parse_enum(&self.tournament_mode)?,
             tournament_game_mode: parse_enum(&self.tournament_game_mode)?,
             auto_lobby_enabled: self.auto_lobby_enabled,
@@ -99,21 +101,27 @@ impl TournamentRow {
     }
 }
 
-const TOURNAMENT_SELECT: &str =
-    "SELECT id, name, status, description, team_size, series_format, final_series_format, \
-            registration_start, registration_end, checkin_start, group_phase_start, bracket_start, \
-            bracket_format, tournament_mode, tournament_game_mode, auto_lobby_enabled, created_by, \
-            created_at, updated_at, invite_mode, invite_window_start, invite_window_end, \
-            lobby_settings, exclude_from_leaderboard, reminder_offsets, start_reminder_offsets, \
-            match_objective, no_show_grace_minutes, rules, is_test \
-     FROM turnier.\"tournaments\"";
+fn tournament_select() -> String {
+    format!(
+        "SELECT id, name, status, description, team_size, series_format, final_series_format, \
+                registration_start, registration_end, checkin_start, group_phase_start, bracket_start, \
+                bracket_format, {} AS played_bracket_format, tournament_mode, tournament_game_mode, \
+                auto_lobby_enabled, created_by, created_at, updated_at, invite_mode, \
+                invite_window_start, invite_window_end, lobby_settings, exclude_from_leaderboard, \
+                reminder_offsets, start_reminder_offsets, match_objective, no_show_grace_minutes, \
+                rules, is_test \
+         FROM turnier.\"tournaments\"",
+        turnier_engine::PLAYED_BRACKET_FORMAT_SQL
+    )
+}
 
 /// Lädt ein Turnier als DTO (oder 404).
 pub async fn load_tournament_dto(pool: &Pool, tournament_id: i64) -> WebResult<Tournament> {
-    let row: Option<TournamentRow> = sqlx::query_as(&format!("{TOURNAMENT_SELECT} WHERE id = $1"))
-        .bind(tournament_id)
-        .fetch_optional(pool)
-        .await?;
+    let row: Option<TournamentRow> =
+        sqlx::query_as(&format!("{} WHERE id = $1", tournament_select()))
+            .bind(tournament_id)
+            .fetch_optional(pool)
+            .await?;
     row.ok_or_else(|| WebError::not_found("Turnier nicht gefunden"))?
         .into_dto()
 }
@@ -121,7 +129,7 @@ pub async fn load_tournament_dto(pool: &Pool, tournament_id: i64) -> WebResult<T
 /// Lädt alle Turniere als DTO-Liste (`created_at DESC`).
 pub async fn load_all_tournaments_dto(pool: &Pool) -> WebResult<Vec<Tournament>> {
     let rows: Vec<TournamentRow> =
-        sqlx::query_as(&format!("{TOURNAMENT_SELECT} ORDER BY created_at DESC"))
+        sqlx::query_as(&format!("{} ORDER BY created_at DESC", tournament_select()))
             .fetch_all(pool)
             .await?;
     rows.into_iter().map(TournamentRow::into_dto).collect()

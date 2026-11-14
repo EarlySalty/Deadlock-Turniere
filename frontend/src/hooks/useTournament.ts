@@ -21,6 +21,7 @@ import {
   changeAdminCaptain, removeAdminTeamMember, moveAdminTeamMember,
   assignSignupToAdminTeam, deleteAdminSignup, addAdminSignupByName, checkinAdminParticipant, fetchAdminCheckins, addTeamMember,
   setRecruitingStatus,
+  setAdminRecruitingStatus,
   fetchMyInvitations, acceptInvitation, rejectInvitation,
   applyToTeam, fetchTeamApplications, acceptApplication, rejectApplication,
   fetchConsent, setConsent, revokeConsent,
@@ -819,6 +820,17 @@ export function useSetRecruitingStatus(tournamentId: number) {
   return useMutation({
     mutationFn: ({ teamId, status }: { teamId: number; status: string }) =>
       setRecruitingStatus(tournamentId, teamId, status),
+    onSuccess: () => {
+      invalidateTournamentCaches(qc, tournamentId)
+    },
+  })
+}
+
+export function useSetAdminRecruitingStatus(tournamentId: number) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ teamId, status }: { teamId: number; status: string }) =>
+      setAdminRecruitingStatus(tournamentId, teamId, status),
     onSuccess: () => {
       invalidateTournamentCaches(qc, tournamentId)
     },

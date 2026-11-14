@@ -45,7 +45,7 @@ interface TournamentManagerProps {
 const STATUS_ACTIONS: Record<string, { label: string; confirmMsg: string }> = {
   draft: { label: 'Anmeldung starten', confirmMsg: 'Turnier-Anmeldung wirklich starten?' },
   group_phase: { label: 'Zum Bracket', confirmMsg: 'Gruppenphase beenden und Bracket starten?' },
-  bracket: { label: 'Turnier abschliessen', confirmMsg: 'Turnier wirklich abschliessen?' },
+  bracket: { label: 'Turnier abschließen', confirmMsg: 'Turnier wirklich abschließen?' },
   completed: { label: 'Archivieren', confirmMsg: 'Turnier ins Archiv verschieben?' },
 }
 

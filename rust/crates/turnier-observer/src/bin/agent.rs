@@ -164,7 +164,7 @@ async fn main() -> anyhow::Result<()> {
         let body: CommandsResponse = match response.json().await {
             Ok(body) => body,
             Err(err) => {
-                warn!(error = %err, "Observer-Command-Antwort ungueltig");
+                warn!(error = %err, "Observer-Command-Antwort ungültig");
                 continue;
             }
         };

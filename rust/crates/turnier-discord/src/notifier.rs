@@ -21,17 +21,7 @@ use crate::event::{NotificationEvent, NOTIFY_DM_DEFAULT};
 use crate::ids::{idempotency_key, parse_snowflake, unique_preserve_order};
 use crate::tasks::{self, TaskType};
 
-/// Broker-Endpunkt-Pfade (zentral, statt verstreut wie im Original).
-mod path {
-    pub const CREATE_CHANNEL: &str = "/internal/master/v1/discord/create-channel";
-    pub const SEND_RICH_MESSAGE: &str = "/internal/master/v1/discord/send-rich-message";
-    pub const SEND_MESSAGE: &str = "/internal/master/v1/discord/send-message";
-    pub const DELETE_CHANNEL: &str = "/internal/master/v1/discord/delete-channel";
-    pub const MOVE_VOICE: &str = "/internal/master/v1/discord/member/move-voice";
-    pub const VOICE_MEMBERS: &str = "/internal/master/v1/discord/voice-channel/members";
-    pub const ROLE_MEMBERS: &str = "/internal/master/v1/discord/role-members";
-    pub const PUBLISH_TOURNAMENT_PROPOSAL: &str = "/internal/master/v1/turnier/proposals/publish";
-}
+use crate::paths as path;
 
 /// Ergebnis von [`notify_users`]: dieselbe Wire-Shape wie das Original
 /// (`{sent, skipped, failed}`), damit Aufrufer unverändert bleiben.
@@ -47,6 +37,7 @@ pub struct NotifyUsersResult {
 pub struct MoveVoiceResult {
     pub moved: Vec<String>,
     pub failed: Vec<FailedId>,
+    pub skipped_guests: Vec<String>,
 }
 
 /// Ergebnis von [`notify_casters_match_created`].
@@ -381,7 +372,7 @@ impl DiscordNotifier {
 
         let mut summary = NotifyUsersResult::default();
         for discord_id in &unique_ids {
-            if turnier_core::parse_participant_id(discord_id).is_ok_and(|id| id < 0) {
+            if turnier_core::is_guest_participant_id(discord_id) {
                 summary.skipped.push(discord_id.clone());
                 continue;
             }
@@ -781,6 +772,10 @@ impl DiscordNotifier {
         let unique_ids = unique_preserve_order(discord_ids);
         let mut results = MoveVoiceResult::default();
         for discord_id in &unique_ids {
+            if turnier_core::is_guest_participant_id(discord_id) {
+                results.skipped_guests.push(discord_id.clone());
+                continue;
+            }
             let user_id = match parse_snowflake(discord_id) {
                 Some(id) => id,
                 None => {
@@ -873,10 +868,23 @@ impl PlayerStat {
 
 /// `<@id> <@id> …` für die gegebenen (bereits getrimmten) IDs.
 fn mentions(ids: &[String]) -> String {
-    ids.iter()
+    parse_all(ids)
+        .iter()
         .map(|id| format!("<@{id}>"))
         .collect::<Vec<_>>()
         .join(" ")
+}
+
+fn guest_count_label(ids: &[String]) -> Option<String> {
+    match ids
+        .iter()
+        .filter(|id| turnier_core::is_guest_participant_id(id))
+        .count()
+    {
+        0 => None,
+        1 => Some("1 Gast".to_string()),
+        n => Some(format!("{n} Gäste")),
+    }
 }
 
 fn routine_announcement_payload(tournament_id: i64, channel_id: i64, content: &str) -> Value {
@@ -892,11 +900,12 @@ fn routine_announcement_payload(tournament_id: i64, channel_id: i64, content: &s
 
 /// Wie [`mentions`], aber leere Liste → `"keine"` (für die Team-Felder).
 fn mentions_or_dash(ids: &[String]) -> String {
-    let raw: Vec<String> = ids.iter().map(|id| format!("<@{id}>")).collect();
-    if raw.is_empty() {
-        "keine".to_string()
-    } else {
-        raw.join(" ")
+    let mentioned = mentions(ids);
+    match (mentioned.is_empty(), guest_count_label(ids)) {
+        (true, None) => "keine".to_string(),
+        (true, Some(guests)) => guests,
+        (false, None) => mentioned,
+        (false, Some(guests)) => format!("{mentioned} + {guests}"),
     }
 }
 
@@ -978,6 +987,15 @@ mod tests {
     fn option_str_leer_ist_null() {
         assert_eq!(option_str(""), Value::Null);
         assert_eq!(option_str("x"), Value::String("x".into()));
+    }
+
+    #[test]
+    fn mentions_skip_guests_and_count_them() {
+        let ids = vec!["11".into(), "-4".into(), "-5".into()];
+        assert_eq!(mentions(&ids), "<@11>");
+        assert_eq!(mentions_or_dash(&ids), "<@11> + 2 Gäste");
+        assert_eq!(mentions_or_dash(&["-4".to_string()]), "1 Gast");
+        assert_eq!(mentions_or_dash(&[]), "keine");
     }
 
     #[test]

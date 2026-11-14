@@ -20,6 +20,15 @@ macro_rules! str_enum {
         pub enum $name {
             $( $variant ),+
         }
+
+        impl $name {
+            pub fn parse(value: &str) -> Option<Self> {
+                <Self as serde::Deserialize>::deserialize(
+                    serde::de::value::StrDeserializer::<serde::de::value::Error>::new(value),
+                )
+                .ok()
+            }
+        }
     };
 }
 
@@ -74,6 +83,41 @@ str_enum! {
 str_enum! {
     /// Einladungspolitik eines Turniers.
     InviteMode { Always, Window, Never, SoloOnly }
+}
+
+impl InviteMode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Always => "always",
+            Self::Window => "window",
+            Self::Never => "never",
+            Self::SoloOnly => "solo_only",
+        }
+    }
+
+    pub fn is_solo_only(value: &str) -> bool {
+        Self::parse(value) == Some(Self::SoloOnly)
+    }
+}
+
+#[cfg(test)]
+mod invite_mode_tests {
+    use super::InviteMode;
+
+    #[test]
+    fn as_str_round_trips_through_parse() {
+        for mode in [
+            InviteMode::Always,
+            InviteMode::Window,
+            InviteMode::Never,
+            InviteMode::SoloOnly,
+        ] {
+            assert_eq!(InviteMode::parse(mode.as_str()), Some(mode));
+        }
+        assert!(InviteMode::is_solo_only("solo_only"));
+        assert!(!InviteMode::is_solo_only("Solo_Only"));
+        assert!(!InviteMode::is_solo_only(""));
+    }
 }
 
 str_enum! {

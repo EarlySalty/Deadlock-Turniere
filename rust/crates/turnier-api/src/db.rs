@@ -3,9 +3,22 @@ use serde_json::Value;
 
 use crate::error::{WebError, WebResult};
 
-pub fn parse_discord_id(value: &str) -> WebResult<i64> {
+pub fn parse_participant_id(value: &str) -> WebResult<i64> {
     turnier_core::parse_participant_id(value)
-        .map_err(|_| WebError::bad_request("Ungültige Discord-ID"))
+        .map_err(|_| WebError::bad_request("Ungültige Teilnehmer-ID"))
+}
+
+pub fn parse_discord_user_id(value: &str) -> WebResult<i64> {
+    turnier_core::parse_discord_id(value).map_err(|_| WebError::bad_request("Ungültige Discord-ID"))
+}
+
+pub fn require_discord_account(discord_id: &str) -> WebResult<()> {
+    if turnier_core::is_guest_participant_id(discord_id) {
+        return Err(WebError::forbidden(
+            "Dafür brauchst du eine Discord-Anmeldung. Als Gast geht das nicht.",
+        ));
+    }
+    Ok(())
 }
 
 pub fn parse_actor_id(value: &str) -> WebResult<i64> {
@@ -15,12 +28,13 @@ pub fn parse_actor_id(value: &str) -> WebResult<i64> {
 /// Zentrale PG-Spalten sind BIGINT. Fuer die historische Admin-Funktion
 /// "leeres Team ohne Captain" muss `teams.captain_discord_id` wegen NOT NULL
 /// intern als `0` abgelegt werden; an der HTTP-Grenze bleibt das der alte
-/// leere String. Echte Discord-Snowflakes werden weiter strikt geparst.
+/// leere String. Sonst gilt die Teilnehmer-ID: Discord-Snowflake oder
+/// negative Gast-ID.
 pub fn parse_captain_id(value: &str) -> WebResult<i64> {
     if value.trim().is_empty() {
         Ok(0)
     } else {
-        parse_discord_id(value)
+        parse_participant_id(value)
     }
 }
 

@@ -45,7 +45,7 @@ fn league_never_advances_to_a_bracket_by_time() {
         group_phase_start: earlier,
         ..Default::default()
     };
-    assert_eq!(get_due_next_status(&checkin, now), Some("group_phase"));
+    assert_eq!(get_due_next_status(&checkin, now), None);
 }
 
 #[tokio::test]

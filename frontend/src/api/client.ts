@@ -522,6 +522,12 @@ export const setRecruitingStatus = (tournamentId: number, teamId: number, recrui
     body: JSON.stringify({ recruitment_status: recruitmentStatus }),
   })
 
+export const setAdminRecruitingStatus = (tournamentId: number, teamId: number, recruitmentStatus: string) =>
+  request<void>(`/admin/tournaments/${tournamentId}/teams/${teamId}/recruiting`, {
+    method: 'PATCH',
+    body: JSON.stringify({ recruitment_status: recruitmentStatus }),
+  })
+
 // Invitations
 export const fetchMyInvitations = (tournamentId: number) =>
   request<TeamInvitation[]>(`/tournaments/${tournamentId}/my-invitations`)

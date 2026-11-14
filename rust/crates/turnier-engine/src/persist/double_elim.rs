@@ -24,13 +24,6 @@ async fn record_single_elimination_fallback(
     tournament_id: i64,
     num_teams: usize,
 ) -> TournamentResult<()> {
-    sqlx::query(
-        "UPDATE turnier.tournaments SET bracket_format = 'single_elimination', updated_at = now() \
-         WHERE id = $1 AND bracket_format = 'double_elimination'",
-    )
-    .bind(tournament_id)
-    .execute(&mut **tx)
-    .await?;
     let details = serde_json::json!({
         "tournament_id": tournament_id,
         "num_teams": num_teams,

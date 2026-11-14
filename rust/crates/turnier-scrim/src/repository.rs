@@ -3231,7 +3231,7 @@ async fn pending_expired_substitute_syncs(
             Err(error) => tracing::warn!(
                 %error,
                 receipt_id,
-                "Ungueltiger Scrim-Aushilfe-Rollen-Retry wird uebersprungen"
+                "Ungültiger Scrim-Aushilfe-Rollen-Retry wird übersprungen"
             ),
         }
     }

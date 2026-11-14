@@ -34,7 +34,7 @@ use serde_json::json;
 use sqlx::{Postgres, QueryBuilder};
 
 use turnier_config::Config;
-use turnier_core::TournamentGameMode;
+use turnier_core::{InviteMode, TournamentGameMode};
 use turnier_engine::FinalizeCheckinParams;
 use turnier_match::league::{current_round_match_ids, tournament_is_league};
 use turnier_match::{ApplyBracketParams, ApplyGroupParams};
@@ -912,9 +912,9 @@ async fn create_test_tournament(
     .bind(json!([1440, 120, 15]))
     .bind(json!([120, 15]))
     .bind(if body.solo_signups {
-        "solo_only"
+        InviteMode::SoloOnly.as_str()
     } else {
-        "always"
+        InviteMode::Always.as_str()
     })
     .fetch_one(&mut *tx)
     .await?;

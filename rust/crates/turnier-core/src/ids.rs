@@ -43,14 +43,25 @@ pub fn parse_discord_id(value: &str) -> Result<i64, DiscordIdParseError> {
 }
 
 pub fn parse_participant_id(value: &str) -> Result<i64, DiscordIdParseError> {
-    if let Some(digits) = value.trim().strip_prefix('-') {
-        let magnitude = parse_discord_id(digits)?;
-        if magnitude == 0 {
-            return Err(DiscordIdParseError::NonNumeric);
-        }
-        return Ok(-magnitude);
+    let trimmed = value.trim();
+    let Some(digits) = trimmed.strip_prefix('-') else {
+        return parse_discord_id(trimmed);
+    };
+    if !digits.starts_with(|c: char| c.is_ascii_digit()) {
+        return Err(DiscordIdParseError::NonNumeric);
     }
-    parse_discord_id(value)
+    match parse_discord_id(digits)? {
+        0 => Err(DiscordIdParseError::NonNumeric),
+        magnitude => Ok(-magnitude),
+    }
+}
+
+pub fn is_guest_participant(id: i64) -> bool {
+    id < 0
+}
+
+pub fn is_guest_participant_id(value: &str) -> bool {
+    parse_participant_id(value).is_ok_and(is_guest_participant)
 }
 
 /// Formatiert eine aus PG gelesene Discord-ID zur HTTP-/DTO-kompatiblen Form.
@@ -68,7 +79,12 @@ mod tests {
         assert_eq!(parse_participant_id("123"), Ok(123));
         assert!(parse_participant_id("-0").is_err());
         assert!(parse_participant_id("--1").is_err());
+        assert!(parse_participant_id("- 5").is_err());
+        assert!(parse_participant_id("-+5").is_err());
         assert!(parse_discord_id("-123").is_err());
+        assert!(is_guest_participant_id(" -7 "));
+        assert!(!is_guest_participant_id("7"));
+        assert!(!is_guest_participant_id("-0"));
     }
 
     #[test]

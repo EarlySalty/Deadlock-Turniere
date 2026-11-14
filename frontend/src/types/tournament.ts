@@ -51,6 +51,7 @@ export interface Tournament {
   group_phase_start: string | null
   bracket_start: string | null
   bracket_format: BracketFormat
+  played_bracket_format?: BracketFormat | null
   tournament_mode: TournamentMode
   tournament_game_mode: TournamentGameMode
   auto_lobby_enabled: boolean

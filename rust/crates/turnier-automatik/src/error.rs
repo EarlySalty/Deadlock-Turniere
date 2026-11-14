@@ -8,7 +8,7 @@ use crate::proposals::{ProposalEvent, ProposalState};
 #[derive(Debug, Error)]
 pub enum AutomatikError {
     /// Proposal-State-Machine: der angeforderte Uebergang ist fachlich verboten.
-    #[error("ungueltiger Proposal-Uebergang von {state:?} via {event:?}")]
+    #[error("ungültiger Proposal-Übergang von {state:?} via {event:?}")]
     InvalidTransition {
         /// Ausgangszustand.
         state: ProposalState,
@@ -28,11 +28,11 @@ pub enum AutomatikError {
     MissingFeedback,
 
     /// Fuer denselben Vorschlag wird bereits eine neue Version vorbereitet.
-    #[error("fuer diesen Vorschlag wird bereits eine Revision vorbereitet")]
+    #[error("für diesen Vorschlag wird bereits eine Revision vorbereitet")]
     RevisionInProgress,
 
     /// Der vorbereitete Entwurf gehoert zu einem anderen Elternvorschlag.
-    #[error("revisionsentwurf gehoert nicht zum angegebenen vorschlag")]
+    #[error("revisionsentwurf gehört nicht zum angegebenen vorschlag")]
     RevisionParentMismatch,
 
     /// Ein sichtbarer oder bereits bewerteter Plan darf nicht still ersetzt werden.
@@ -44,7 +44,7 @@ pub enum AutomatikError {
     InvalidProposalConfig,
 
     /// Ungueltige Discord-/Message-ID fuer eine BIGINT-Spalte.
-    #[error("ungueltige numerische ID: {0}")]
+    #[error("ungültige numerische ID: {0}")]
     InvalidNumericId(String),
 
     /// Ungueltiges JSON fuer eine JSONB-Spalte.

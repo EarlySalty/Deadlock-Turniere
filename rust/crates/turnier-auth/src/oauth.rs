@@ -184,7 +184,14 @@ impl OAuthClient {
         })?;
 
         if !status.is_success() {
-            return Err(AuthError::BadGateway(error_detail_from_body(&text)));
+            let detail = error_detail_from_body(&text);
+            tracing::warn!(path, status = status.as_u16(), detail = %detail, "OAuth-Service antwortete mit Fehler");
+            let detail = if detail == OAUTH_DEFAULT_DETAIL {
+                format!("{OAUTH_DEFAULT_DETAIL} (HTTP {})", status.as_u16())
+            } else {
+                detail
+            };
+            return Err(AuthError::BadGateway(detail));
         }
 
         // Erst auf JSON-Objekt prüfen (Original: `isinstance(data, dict)`).
@@ -290,8 +297,10 @@ fn normalize_roles(raw: &[serde_json::Value]) -> Vec<String> {
 /// Extrahiert die Fehler-Detail-Meldung aus einem Non-200-Body, 1:1 zur
 /// Original-Logik: JSON-`error`/`detail` (gestripped, falls non-empty), sonst
 /// gestrippter Plaintext, sonst Default.
+const OAUTH_DEFAULT_DETAIL: &str = "Deadlock-Bots OAuth-Service Fehler";
+
 fn error_detail_from_body(text: &str) -> String {
-    const DEFAULT: &str = "Deadlock-Bots OAuth-Service Fehler";
+    const DEFAULT: &str = OAUTH_DEFAULT_DETAIL;
     if let Ok(serde_json::Value::Object(map)) = serde_json::from_str::<serde_json::Value>(text) {
         let error = map
             .get("error")

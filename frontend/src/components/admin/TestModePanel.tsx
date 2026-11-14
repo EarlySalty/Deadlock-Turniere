@@ -23,6 +23,7 @@ import {
   Trash2,
   Users,
 } from 'lucide-react'
+import { pluralize } from '@/lib/countLabel'
 
 const GAME_MODES: { value: TournamentGameMode; label: string }[] = [
   { value: 'standard', label: 'Standard' },
@@ -110,7 +111,7 @@ export default function TestModePanel() {
       const result = await simulateRound.mutateAsync(tournamentId)
       showStatus({
         kind: 'success',
-        text: `${result.simulated_matches} Matches gewürfelt. Lade Detail erneut, um Folge-Runden zu sehen`,
+        text: `${pluralize(result.simulated_matches, 'Match', 'Matches')} gewürfelt. Lade Detail erneut, um Folge-Runden zu sehen`,
       })
     } catch (err) {
       showStatus({ kind: 'error', text: `Fehler: ${(err as Error).message}` })
@@ -128,7 +129,7 @@ export default function TestModePanel() {
       const result = await wipeAll.mutateAsync()
       showStatus({
         kind: 'success',
-        text: `${result.deleted_tournaments} Test-Turniere und ${result.deleted_users} Test-User entfernt`,
+        text: `${pluralize(result.deleted_tournaments, 'Test-Turnier', 'Test-Turniere')} und ${result.deleted_users} Test-User entfernt`,
       })
     } catch (err) {
       showStatus({ kind: 'error', text: `Fehler: ${(err as Error).message}` })

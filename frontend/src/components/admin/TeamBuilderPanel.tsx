@@ -25,6 +25,9 @@ import {
 import { saveTeamBuilder, type SaveContext } from '@/components/admin/teamBuilderSave'
 import { readDraft, writeDraft } from '@/components/admin/teamBuilderDrafts'
 import { useAddAdminSignupByName, useDeleteAdminSignup } from '@/hooks/useTournament'
+import { PARTICIPANT_NAME_MAX_LENGTH, duplicateNameKeys } from '@/lib/participantName'
+import ParticipantMarks from '@/components/admin/ParticipantMarks'
+import { DuplicateNamesContext } from '@/components/admin/duplicateNamesContext'
 import type { Team, TournamentSignup } from '@/types/tournament'
 
 interface TeamBuilderPanelProps {
@@ -32,6 +35,7 @@ interface TeamBuilderPanelProps {
   teamSize: number
   teams: Team[]
   signups: TournamentSignup[]
+  canAddPlayers: boolean
 }
 
 const DRAG_TYPE = 'text/plain'
@@ -133,7 +137,10 @@ function PlayerChip({ player, selected, onSelect, compact = false }: PlayerChipP
       }`}
     >
       <span className="min-w-0">
-        <span className="block truncate font-medium text-foreground">{player.name}</span>
+        <span className="block truncate font-medium text-foreground">
+          {player.name}
+          <ParticipantMarks discordId={player.discordId} name={player.name} />
+        </span>
         <span className="block truncate text-xs text-muted">
           {player.rank ?? 'Ohne Rang'}
           {compact ? '' : ` · ${formatSignupTime(player.signedUpAt)}`}
@@ -293,7 +300,7 @@ function TeamCard(props: TeamCardProps) {
     <div {...handlers} className="space-y-3 rounded-xl border border-border bg-card/60 p-3">
       <TeamHeader {...props} />
       <p className="text-xs text-muted">
-        {team.members.length}/{teamSize} Plätze belegt
+        {team.members.length}/{teamSize} {teamSize === 1 ? 'Platz' : 'Plätze'} belegt
       </p>
       <ul className="space-y-1.5">
         {team.members.map((player) => (
@@ -332,6 +339,8 @@ interface PoolProps {
   pool: BuilderPlayer[]
   selectedId: string | null
   removableIds: Set<string>
+  removing: boolean
+  canAddPlayers: boolean
   onSelect: (discordId: string) => void
   onPlace: (discordId: string, teamKey: string | null) => void
   onRemove: (player: BuilderPlayer) => void
@@ -356,7 +365,7 @@ function AddPlayerForm({ onAdd }: { onAdd: (name: string) => Promise<boolean> })
       <div className="flex flex-wrap gap-2">
         <input
           value={name}
-          maxLength={32}
+          maxLength={PARTICIPANT_NAME_MAX_LENGTH}
           onChange={(event) => setName(event.target.value)}
           onKeyDown={(event) => event.key === 'Enter' && void submit()}
           placeholder="Spieler ohne Anmeldung"
@@ -368,12 +377,14 @@ function AddPlayerForm({ onAdd }: { onAdd: (name: string) => Promise<boolean> })
           Hinzufügen
         </Button>
       </div>
-      <p className="text-xs text-muted">Für Spieler, die nur im Voice dabei sind. Im Check-in gelten sie sofort als eingecheckt.</p>
+      <p className="text-xs text-muted">
+        Für Spieler, die nur im Voice dabei sind. Wer im Check-in hinzukommt, ist sofort eingecheckt. Wer schon während der Anmeldung hinzukommt, braucht im Check-in noch „Einchecken“.
+      </p>
     </div>
   )
 }
 
-function PoolColumn({ pool, selectedId, removableIds, onSelect, onPlace, onRemove, onAdd }: PoolProps) {
+function PoolColumn({ pool, selectedId, removableIds, removing, canAddPlayers, onSelect, onPlace, onRemove, onAdd }: PoolProps) {
   const [filter, setFilter] = useState('')
   const visible = pool.filter((player) => matchesFilter(player, filter))
   const selectedInTeam = selectedId !== null && !pool.some((p) => p.discordId === selectedId)
@@ -393,7 +404,7 @@ function PoolColumn({ pool, selectedId, removableIds, onSelect, onPlace, onRemov
         aria-label="Spieler filtern"
         className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
       />
-      <AddPlayerForm onAdd={onAdd} />
+      {canAddPlayers && <AddPlayerForm onAdd={onAdd} />}
       {selectedInTeam && (
         <Button variant="secondary" size="sm" className="w-full" onClick={() => onPlace(selectedId, null)}>
           <Undo2 size={14} />
@@ -415,9 +426,10 @@ function PoolColumn({ pool, selectedId, removableIds, onSelect, onPlace, onRemov
                 <button
                   type="button"
                   onClick={() => onRemove(player)}
+                  disabled={removing}
                   aria-label={`${player.name} aus dem Turnier entfernen`}
                   title="Aus dem Turnier entfernen"
-                  className="shrink-0 rounded p-1.5 text-muted hover:bg-red-500/10 hover:text-red-300"
+                  className="shrink-0 rounded p-1.5 text-muted hover:bg-red-500/10 hover:text-red-300 disabled:cursor-not-allowed disabled:opacity-40"
                 >
                   <X size={15} />
                 </button>
@@ -482,7 +494,7 @@ function useUnloadWarning(active: boolean) {
   }, [active])
 }
 
-export default function TeamBuilderPanel({ tournamentId, teamSize, teams, signups }: TeamBuilderPanelProps) {
+export default function TeamBuilderPanel({ tournamentId, teamSize, teams, signups, canAddPlayers }: TeamBuilderPanelProps) {
   const queryClient = useQueryClient()
   const [edits, setEdits] = useState<BuilderEdits>(() => readDraft(tournamentId).edits)
   const [renames, setRenames] = useState<TemporaryRename[]>(() => readDraft(tournamentId).renames)
@@ -492,12 +504,18 @@ export default function TeamBuilderPanel({ tournamentId, teamSize, teams, signup
 
   const snapshot = useMemo(() => snapshotOf(teams, signups), [teams, signups])
   const view = useMemo(() => buildView(teams, signups, edits), [teams, signups, edits])
+  const duplicateNames = useMemo(
+    () => duplicateNameKeys([...view.pool, ...view.teams.flatMap((t) => t.members)].map((p) => p.name)),
+    [view],
+  )
   const steps = useMemo(() => planSave(snapshot, edits, teamSize), [snapshot, edits, teamSize])
   const captains = useMemo(() => captainChanges(view, snapshot, edits, steps), [view, snapshot, edits, steps])
   const changeCount = steps.length + captains.length
   const saving = progress !== null
 
-  useEffect(() => writeDraft(tournamentId, { edits, renames }, changeCount), [tournamentId, edits, renames, changeCount])
+  useEffect(() => {
+    if (!saving) writeDraft(tournamentId, { edits, renames }, changeCount)
+  }, [tournamentId, edits, renames, changeCount, saving])
   useUnloadWarning(changeCount > 0)
 
   const deleteSignup = useDeleteAdminSignup()
@@ -508,7 +526,7 @@ export default function TeamBuilderPanel({ tournamentId, teamSize, teams, signup
   )
 
   const removePlayer = (player: BuilderPlayer) => {
-    if (saving || player.signupId === null) return
+    if (saving || deleteSignup.isPending || player.signupId === null) return
     if (!window.confirm(`${player.name} aus dem Turnier entfernen? Anmeldung und Check-in werden gelöscht.`)) return
     setNotice(null)
     deleteSignup.mutate(
@@ -638,6 +656,7 @@ export default function TeamBuilderPanel({ tournamentId, teamSize, teams, signup
         </div>
       )}
 
+      <DuplicateNamesContext.Provider value={duplicateNames}>
       <fieldset disabled={saving} className="min-w-0 space-y-4">
         <NewTeamForm teams={view.teams} onCreate={createTeam} />
 
@@ -646,6 +665,8 @@ export default function TeamBuilderPanel({ tournamentId, teamSize, teams, signup
             pool={view.pool}
             selectedId={selectedId}
             removableIds={removableIds}
+            removing={deleteSignup.isPending}
+            canAddPlayers={canAddPlayers}
             onSelect={select}
             onPlace={place}
             onRemove={removePlayer}
@@ -675,6 +696,7 @@ export default function TeamBuilderPanel({ tournamentId, teamSize, teams, signup
           )}
         </div>
       </fieldset>
+      </DuplicateNamesContext.Provider>
 
       {notice && (
         <div

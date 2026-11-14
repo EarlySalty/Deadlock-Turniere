@@ -18,9 +18,8 @@
 //!   als next_status; der Zweig greift nur bei externen Aufrufern (turnier-api).
 //! - **5-Minuten-Reminder-Fenster ohne Catch-up** (needs-decision): verpasste
 //!   Fenster nach einem Ausfall werden nicht nachgeholt.
-//! - **bracket_only-Logikfalle** (needs-decision): bei `bracket_only` bleibt das
-//!   Turnier in `checkin`, bis `bracket_start` fällig ist (`group_phase_start`
-//!   dient nur als Auslöse-Gate).
+//! - **Check-in-Ende nur manuell**: der Scheduler beendet den Check-in in keinem
+//!   Modus; das Orga-Team schließt ihn über `finalize-checkin` ab.
 
 pub mod error;
 pub mod loop_runner;

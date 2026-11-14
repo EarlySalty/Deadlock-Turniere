@@ -34,7 +34,6 @@ use crate::time::is_due;
 pub struct DueStatusRow {
     pub status: String,
     pub tournament_mode: Option<String>,
-    pub invite_mode: Option<String>,
     pub registration_start: Option<DateTime<Utc>>,
     pub registration_end: Option<DateTime<Utc>>,
     pub checkin_start: Option<DateTime<Utc>>,
@@ -44,8 +43,9 @@ pub struct DueStatusRow {
 
 /// Ermittelt den nächsten fälligen Status anhand der Zeitstempel und des Modus.
 ///
-/// Liefert `None`, wenn aktuell kein Übergang fällig ist. Ein Turnier ohne
-/// Gruppenphase wechselt zum geplanten Bracket-Start direkt aus dem Check-in.
+/// Liefert `None`, wenn aktuell kein Übergang fällig ist. Den Check-in beendet
+/// nie der Scheduler, sondern immer das Orga-Team über `finalize-checkin`, damit
+/// Vorschau, Team-Bildung und Entwurfsschutz greifen.
 pub fn get_due_next_status(row: &DueStatusRow, now: DateTime<Utc>) -> Option<&'static str> {
     let s = row.status.as_str();
 
@@ -57,19 +57,6 @@ pub fn get_due_next_status(row: &DueStatusRow, now: DateTime<Utc>) -> Option<&'s
     let checkin_trigger = row.checkin_start.as_ref().or(row.registration_end.as_ref());
     if s == "registration" && is_due(checkin_trigger, now) {
         return Some("checkin");
-    }
-
-    if s == "checkin" && row.invite_mode.as_deref() == Some("solo_only") {
-        return None;
-    }
-
-    let bracket_only = row.tournament_mode.as_deref() == Some("bracket_only");
-
-    if s == "checkin" && bracket_only && is_due(row.bracket_start.as_ref(), now) {
-        return Some("bracket");
-    }
-    if s == "checkin" && !bracket_only && is_due(row.group_phase_start.as_ref(), now) {
-        return Some("group_phase");
     }
 
     let league = row.tournament_mode.as_deref() == Some("league");
@@ -317,22 +304,6 @@ mod tests {
     }
 
     #[test]
-    fn solo_only_checkin_waits_for_the_organisers() {
-        let mut r = row("checkin");
-        r.invite_mode = Some("solo_only".to_string());
-        r.tournament_mode = Some("bracket_only".to_string());
-        r.bracket_start = Some(utc("2026-06-14T11:00:00"));
-        r.group_phase_start = Some(utc("2026-06-14T11:00:00"));
-        assert_eq!(get_due_next_status(&r, now()), None);
-        r.tournament_mode = Some("group_stage".to_string());
-        assert_eq!(get_due_next_status(&r, now()), None);
-        r.invite_mode = Some("always".to_string());
-        assert_eq!(get_due_next_status(&r, now()), Some("group_phase"));
-        r.tournament_mode = Some("bracket_only".to_string());
-        assert_eq!(get_due_next_status(&r, now()), Some("bracket"));
-    }
-
-    #[test]
     fn draft_zu_registration_wenn_registration_start_faellig() {
         let mut r = row("draft");
         r.registration_start = Some(utc("2026-06-14T11:00:00"));
@@ -357,24 +328,19 @@ mod tests {
     }
 
     #[test]
-    fn checkin_zu_group_phase_standardmodus() {
-        let mut r = row("checkin");
-        r.group_phase_start = Some(utc("2026-06-14T11:00:00"));
-        assert_eq!(get_due_next_status(&r, now()), Some("group_phase"));
-    }
-
-    #[test]
-    fn checkin_bracket_only_ueberspringt_gruppenphase() {
-        let mut r = row("checkin");
-        r.tournament_mode = Some("bracket_only".into());
-        // Ein Bracket-Turnier braucht keinen Termin für eine Gruppenphase.
-        r.group_phase_start = None;
-        // Vor dem Bracket-Start bleibt der Check-in geöffnet.
-        r.bracket_start = Some(utc("2026-06-14T13:00:00"));
-        assert_eq!(get_due_next_status(&r, now()), None);
-        // bracket_start fällig → direkt nach bracket.
-        r.bracket_start = Some(utc("2026-06-14T11:30:00"));
-        assert_eq!(get_due_next_status(&r, now()), Some("bracket"));
+    fn checkin_never_ends_by_time_in_any_mode() {
+        for mode in [
+            None,
+            Some("group_stage"),
+            Some("bracket_only"),
+            Some("league"),
+        ] {
+            let mut r = row("checkin");
+            r.tournament_mode = mode.map(str::to_string);
+            r.group_phase_start = Some(utc("2026-06-14T11:00:00"));
+            r.bracket_start = Some(utc("2026-06-14T11:30:00"));
+            assert_eq!(get_due_next_status(&r, now()), None);
+        }
     }
 
     #[test]

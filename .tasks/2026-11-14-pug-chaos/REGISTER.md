@@ -1,118 +1,93 @@
 # Register: PUG tournament #16 chaos
 
-Evidence sources: `turnier.audit_log` (tournament 16), Caddy access logs `ddc.access-2026-11-14*` (earliest line 16:34:29 UTC), service journal, Discord #pug-chat message 1571211196634243204, broker probes on 127.0.0.1:8770. All times UTC.
+Evidence sources: `turnier.audit_log` (tournament 16), Caddy access logs `ddc.access-2026-11-14*` (earliest line 16:34:29 UTC), service journal, Discord #pug-chat message 1571211196634243204, broker probes on 127.0.0.1:8770. All times UTC. Gate round 1 classes K1 to K13 are listed in `GATE-R1-TRIAGE.md` and referenced below.
 
 ## A. Random teams
 
 - Mechanism (proven from audit log and code): audit id 241 at 17:16:45.881, action `finalize_checkin` by the organiser account, details `added_players=30`, `created_teams=[JohnnyBlazed Team, 1Sven1 Team, DonRadu Team, Yeezy Team, geansefeuschen Team]`, `advanced_to_bracket=true`, `matches_created=5`. Caddy shows three preview POSTs to `finalize-checkin` (17:16:31, :35, :44) and the confirming POST at :45. `persist/checkin.rs::finalize_checkin` chunks the checked-in solo pool by check-in order into teams of `team_size`, makes the first player of each chunk captain and names the team after him, then generates the bracket. The audit log of #16 holds zero team builder or admin team actions (only create, auto_advance x2, update x3, checkin x31, finalize x1), so the builder was never saved.
 - Why possible: auto-formation of teams on finalize is unconditional; the preview modal "Check-in Vorschau" shows only the counts "Entfernte Spieler" and "Hinzugefügte Spieler", never which teams get created with which members; unsaved team builder drafts live in module memory and nothing warns when the admin switches to the check-in phase and finalizes; there is no PUG setting that forbids automatic team formation.
 - Why unnoticed: all earlier tournaments had players building their own teams before check-in, so the solo pool at finalize was small; the preview counts looked plausible ("30 hinzugefügt"); the builder hint "Erst Speichern überträgt alles" is shown only inside the builder.
-- Where else: `finalize_checkin` is called by the admin route and by the test-mode advance only. The scheduler checkin to bracket transition (`turnier-scheduler/src/transition.rs::advance_tournament_status`) seeds the bracket from stored teams and never forms teams, so it drops an unsaved solo pool instead of shuffling it. SoloBalancePanel and assign-random assign solos too but need an explicit admin action. With zero or one stored team the bracket builders refuse (`entries.len() < 2` validation), the transaction rolls back and the tournament stays in check-in.
-- "Admin view differed from public view": not reproduced from logs. Most likely explanation is the unsaved builder draft still shown in the admin while the public page showed the stored auto-teams; verified on is_test below.
-- Fix: see commit table.
+- Twins: `finalize_checkin` is called by the admin route and the test-mode advance. The scheduler moved every tournament from check-in to bracket or groups at the planned time without finalize, preview or draft guard (K4); audit history shows 6 of 6 real tournaments left check-in through `finalize_checkin`, so the scheduler no longer ends check-in in any mode. With zero or one stored team the bracket builders refuse and the transaction rolls back.
+- "Admin view differed from public view": not reproduced from logs. Most likely the unsaved builder draft still shown in the admin while the public page showed the stored auto-teams.
+- Fix: `invite_mode = solo_only` turns off team formation and the fill loop; the preview lists every team with members, the unsaved-draft alert blocks the start (drafts of other tabs in the same browser count via localStorage, a second browser is covered by the member listing in the preview).
 
 ## B. Team entry unusable
 
-- Contributors (proven from DB):
-  - Captains and players picked in Discord never signed up (several names from message 1571211196634243204 have no signup), and the builder can only place signups.
-  - Duplicate signups from the guest-by-name path (a8478c2): Gembo (Discord signup plus guest), Trippymelo (Discord plus guest, guest in team 66), XerXes (two guests). `auth.rs::guest_login` allocates a new negative id per login and nothing checks the name inside the tournament.
-  - 12 guests without rank, 14 of 32 Discord signups without rank, so the builder and balance show "Ohne Rang" for most.
-  - Test tournaments are filtered out of the live admin list (`Admin.tsx`, `!t.is_test`), and the test generator only creates full teams, so the PUG flow could not be rehearsed.
-  - No solo-only mode, so the public page offered "Team gründen" during a PUG.
-- Why unnoticed: the PUG flow (solo pool, builder, finalize) was never rehearsed end to end; the test tooling did not support it.
-- Where else: same duplicate risk for every guest signup in tournament 17.
-- Fixed: a guest name that matches an existing signup in the tournament is refused (`ensure_participant_name_free`, under the tournament row lock), guest logins are limited per IP and hour (`limits.guest_logins_per_hour`, default 10, 89504ec). Still open: a Discord signup after a guest with the same name is not refused, because the Discord display name is not a reliable identity; the organiser sees both in the builder and can remove one.
+- Mechanism (proven from DB): captains and players picked in Discord never signed up, and the builder can only place signups; duplicate signups from the guest-by-name path (a8478c2): Gembo (Discord plus guest), Trippymelo (Discord plus guest, guest in team 66), XerXes (two guests), because `auth.rs::guest_login` allocated a new negative id per login and nothing checked the name; 12 guests and 14 of 32 Discord signups without rank; no solo-only mode, so the public page offered "Team gründen" during a PUG.
+- Why possible: guest ids were added as negative values into fields every reader treated as Discord snowflakes (K1), the name rule existed twice with different limits (K6), and only one writer checked names.
+- Why unnoticed: test tournaments were filtered out of the live admin list and the test generator only creates full teams, so the PUG flow was never rehearsed.
+- Twins: every signup writer (solo signup, team create and join, invitation accept, admin add by name, admin add to team) and every Discord-bound reader of participant ids (notifier mentions and DMs, voice moves, rank cache and lookup, DM opt-out, avatar upload, OAuth session parse).
+- Fix: one `participant_name` rule (1 to 32 characters, no control or invisible format characters) in Rust and `PARTICIPANT_NAME_MAX_LENGTH` in the UI; one `allocate_guest_participant_id`; a guest name that matches any signup or team member of the tournament is refused under the tournament row lock in every writer; a Discord signup with a guest's name is allowed (Discord display names are not identities, refusing would let guests block names) and both entries carry "Name doppelt" and "Gast" marks in the builder and check-in table; one `is_guest_participant` rule in turnier-core and every Discord-bound reader skips guests; OAuth sessions parse strictly again; guest logins limited per connection (IPv4 address or IPv6 /64) and hour.
 
 ## C. "Austragen" silently fails during check-in
 
-- Mechanism (proven): Caddy shows `DELETE /api/tournaments/16/signup` answered 400 at 16:53:09 and 16:57:24. `public/signups.rs::cancel_solo_signup` rejects with "Anmeldung ist nicht geöffnet" when `status != "registration"`, while the frontend (`isSignupOpen`) offers the button during check-in too. `Tournament.tsx` renders errors only for `signupSoloMutation` and `guestLogin`; withdraw, leave, check-in, join, apply and invite errors are never shown.
-- Why possible: server and client derive "signup open" separately; there is no shared error rendering for mutations.
+- Mechanism (proven): Caddy shows `DELETE /api/tournaments/16/signup` answered 400 at 16:53:09 and 16:57:24. `public/signups.rs::cancel_solo_signup` rejected with "Anmeldung ist nicht geöffnet" when `status != "registration"`, while the frontend (`isSignupOpen`) offers the button during check-in too. `Tournament.tsx` rendered errors only for the solo signup and guest login.
+- Why possible: server and client derived "signup open" separately; there was no shared error rendering for mutations.
 - Why unnoticed: no withdraw happened during check-in in earlier tournaments; a 400 without UI feedback leaves no trace except the access log.
-- Where else: withdraw also leaves the check-in row behind (twin in admin `delete_signup`), every other public mutation lacks error rendering.
+- Twins: withdraw left the check-in row behind (also admin `delete_signup`); every other public mutation lacked error rendering; status checks ran before the tournament row lock in every mutating handler (K2).
+- Fix: one registration-window rule on both sides (`registration_window_open`, `isRegistrationWindowOpen`); withdraw removes the check-in row; the page shows the error of the most recent action; every status-gated mutator locks the tournament row inside its transaction and checks status and mode on the locked row.
 
 ## D. Admin cannot remove a signup
 
-- Mechanism: `admin/teams.rs::delete_signup` exists with audit `signup_delete_admin`, but only for unassigned signups, its button lives in "Offene Solo-Anmeldungen" below the balance panel and is not reachable from the builder pool or the check-in phase; it leaves the check-in row behind.
+- Mechanism: `admin/teams.rs::delete_signup` existed with audit `signup_delete_admin`, but only for unassigned signups, its button lived in "Offene Solo-Anmeldungen" below the balance panel, not reachable from the builder pool or the check-in phase, and it left the check-in row behind.
 - Why possible / unnoticed: P4 moved the participant UI into the builder and kept the old card only in the participants phase.
-- Where else: check-in table has no remove action.
+- Twins: the check-in table had no remove or check-in action; admin check-in and self check-in used different eligibility rules (K13).
+- Fix: X per pool player in the builder (disabled while a removal runs), admin check-in route plus button, one `ensure_checkin_signup` eligibility rule for admin and self check-in, add-by-name only while registration or check-in is open.
 
-## E. Numbers and labels
+## E. Numbers, labels and the double-elimination fallback
 
-- "0 Teams gemeldet": label counts teams only; a PUG has none until finalize.
-- "15 / 33 bereit", later "29 / 43": true snapshots (signups at 16:17:30 were 33 with 15 check-ins, at 16:30 43 with 29), because signups stayed open during check-in. Not a counting bug; the label hides that signups are still open.
-- "Double Elim.": `persist/double_elim.rs` falls back to `build_seeded_bracket` for team counts below 4 or not a power of two, logs a WARN and leaves `bracket_format=double_elimination` stored; Home and Tournament label from the stored field. Admin never sees the fallback before generation.
-- Tournament 17 (group_stage, double_elimination, 4 teams so far, 19 signups): the bracket takes the top 2 per group, so any group count giving a qualifier count that is not a power of two (for example 3 groups, 6 qualifiers) hits the same fallback.
+- Mechanism: "0 Teams gemeldet" counted teams only; "15 / 33 bereit", later "29 / 43", were true snapshots while signups stayed open during check-in; `persist/double_elim.rs` fell back to a single-elimination bracket for counts below 4 or not a power of two and overwrote the stored `bracket_format`.
+- Why possible: the format rule lived in several places (engine, UI copy "4, 8, 16 oder 32"), the label read the configured field, and count labels were built without a plural helper.
+- Why unnoticed: earlier tournaments had 4 or 8 teams; the overwrite looked like the setting.
+- Twins: tournament 17 (group stage, 2 qualifiers per group) hits the fallback with 3 groups; plural labels in overview, test mode, balance, groups, league plan and builder (K8); the preview snapshot token ignored `invite_mode` and `bracket_format` (K5).
+- Fix: the configured format stays stored; the engine serves the played format (`PLAYED_BRACKET_FORMAT_SQL` from the generated matches) to public and admin reads; the preview warns before generation; the snapshot token covers both fields; one `DOUBLE_ELIMINATION_RULE` copy; `pluralize` at every count label; "1 Team, 6 Spieler solo".
+- Decision: before generation the public label shows the configured format, because the number of bracket teams is not fixed yet; the organiser sees the fallback warning in the preview.
 
 ## F. Caster pool "Discord-Broker Fehler"
 
-- Mechanism (proven): Turniere calls `POST http://127.0.0.1:8770/internal/master/v1/discord/role/members`, the broker answers 404 with an empty body, `broker.rs::error_detail` turns that into "Discord-Broker Fehler". The broker route is `GET /internal/master/v1/discord/role-members?guild_id=..&role_id=..` (Deadlock-Bots `dl-broker/src/handlers.rs::role_members`); the probe answered 200 with members.
-- Why possible: path and method constants are duplicated across repos with no shared contract or startup probe.
-- Why unnoticed: the error carries neither HTTP status nor path, the broker does not log 404, and the caster pool is opened rarely.
-- Where else: all other Turniere broker paths answer 401 or 422 on an unauthenticated probe, so they exist; only ROLE_MEMBERS drifted.
+- Mechanism (proven): Turniere called `POST http://127.0.0.1:8770/internal/master/v1/discord/role/members`, the broker answered 404 with an empty body, `broker.rs::error_detail` turned that into "Discord-Broker Fehler". The broker route is `GET /internal/master/v1/discord/role-members?guild_id=..&role_id=..` (Deadlock-Bots `dl-broker/src/handlers.rs::role_members`); the probe answered 200 with members.
+- Why possible: path literals were spread over notifier, internal scrims and the bot binary with no single source.
+- Why unnoticed: the error carried neither HTTP status nor path, three failure branches were not logged (K10), and the caster pool is opened rarely.
+- Twins: all other broker paths answer 401 or 422 on an unauthenticated probe, so they exist; the OAuth client had the same silent default detail.
+- Fix: all broker paths in `turnier_discord::paths`, every failure branch logs method, path and status, the default detail carries the HTTP status, same for the OAuth client. The cross-repo contract has no shared test; that cause stays outside this repo.
 
 ## G. UI pass
 
-Moli pass on a throwaway stack (test-db-run `dlcentral_test_turniere`, turnier-bot on 127.0.0.1:18916, Vite on 5191) at 390 and 1440 px: public registration, check-in and bracket of a PUG test tournament, admin list, builder, check-in, preview, start and bracket. Screenshots in `/home/nathanael/.claude/sichtpruefung/pug-chaos/`.
-
-Fixed (d78a7e3):
-- Check-in table sorted checked-in players above missing ones (inverted flag).
-- Builder kept the module draft after a successful save, so a remount restored stale edits and blocked the preview; a failed save now keeps only the unsaved rest.
-- Builder grid forced horizontal scroll at 390 px (fixed 17rem column); add-player field shrank to about 85 px at 1440 px (flex basis 0).
-- Matches header always promised a loser bracket; now follows `effectiveBracketFormat`.
-- Public page showed an empty "Gruppen" tab for bracket-only tournaments. The results and standings tabs keep their status gate (a d78a7e3 change to them was reverted in 89504ec).
-
-Proven in the browser: solo_only finalize forms no teams; preview shows the unsaved-draft alert with disabled start, the single-elimination fallback alert and the remaining solos; after save the start works (stored `single_elimination`, 1 match); public shows "SINGLE ELIM." and "2 TEAMS GEMELDET"; builder X removes a signup (DELETE 200, notice "Brummbär wurde aus dem Turnier entfernt.", 8 to 6 signups over two removals); scrollWidth equals the viewport on every page at 390 px.
-
-Taste, not changed:
-- Header brand "Deutsche Deadlock Community" truncates at 390 px.
-- Legacy duplicates "Teams & Teilnehmer" and "Offene Solo-Anmeldungen" below the builder (P4b, see TODO.md).
-- ASCII umlauts in Match-Events and Presets ("ausloesen", "fuer", "ZURUECKSETZEN").
-- Overall admin density in the participants phase.
-
-## Independent review (one critic, Opus) and fixes in 89504ec
-
-- Players added by name during registration could never be checked in (no admin check-in route), so finalize removed them. New `POST /api/admin/tournaments/{id}/checkins/{discord_id}` (audit `checkin_admin`) and a "Einchecken" button per missing row in the check-in table.
-- solo_only still filled incomplete saved teams from the solo pool; the fill loop now shares the `auto_team_formation` flag with team creation.
-- Twin: the scheduler moved a solo_only tournament from check-in to the bracket at the planned time without finalize or preview; `get_due_next_status` now leaves solo_only check-in to the organisers.
-- Guest login had no rate limit (see B).
-- Withdraw, admin add and admin delete checked the status before taking the tournament row lock; one `lock_tournament_status` helper now orders lock before check everywhere.
-- Public label showed "1 Teams" and hid the open solo players; `registrationSummary` and `pluralize` now give "1 Team, 6 Spieler solo".
-- Removed added doc comments and a `.expect`, restored detached doc comments, real umlauts in "Ungültige Discord-ID" and "Ungültige Actor-ID".
-
-Browser proof on the fixture (Moli, fresh load per width): public label "1 Team, 6 Spieler solo" at 1440 and 390 (`public-pug-checkin-label-*`); admin "Einchecken" sends `POST .../checkins/910000000000050304`, notice "Feuerqualle ist eingecheckt.", missing buttons 5 to 4, eingecheckt 3 to 4 (`admin-pug-checkin-buttons-1440`, `admin-pug-checkin-done-{1440,390}`, scrollWidth 390 at 390); guest login: 10 times 201, then 429 with the German message, another IP 201.
-
-## Open points
-
-- A Discord signup after a same-named guest still creates a duplicate (see B).
-- The stored fallback format stays when the bracket is reset and rebuilt with more teams; the preview snapshot token ignores `invite_mode` and `bracket_format`.
-- Before generation the public label shows the configured "Double Elim." even when the fallback will apply.
-- Manual "Gruppen neu generieren" uses 4 groups, the preview and finalize use the automatic group count, so only that manual path can differ from the warning.
-- Stale action errors stay visible until the next action; negative participant ids are accepted on all admin routes (guests); the leave-team message in check-in is generic.
-- ASCII umlauts in other crates and older UI texts (see G taste list).
-- Live admin browser pass on the production host after deploy.
+- Mechanism: Moli pass on a throwaway stack (test-db-run `dlcentral_test_turniere`, turnier-bot on 127.0.0.1:18916, Vite on 5191) at 390 and 1440 px found: check-in table sorted by an inverted flag; builder kept the module draft after a save, so a remount restored stale edits; builder grid forced horizontal scroll at 390 px and the add-player field shrank to about 85 px at 1440 px; the matches header always promised a loser bracket; an empty "Gruppen" tab for bracket-only tournaments; the Leitstand headline said "Aktion erforderlich" with nothing to do; ASCII umlauts in user-facing errors and admin texts (K12).
+- Why possible: these views were built for team tournaments and never opened with a PUG fixture or at phone width.
+- Why unnoticed: no browser pass with a solo pool existed; the frontend tests cover helpers, not layouts.
+- Twins: the same draft, label and umlaut patterns in the other admin panels; fixed together (K8, K9, K12).
+- Proven in the browser: solo_only finalize forms no teams; preview shows the unsaved-draft alert with disabled start, the fallback alert and the remaining solos; after save the start works; builder X removes a signup; admin "Einchecken" works; guest login 10 times 201, then 429; scrollWidth equals the viewport on every page at 390 px. Screenshots in `/home/nathanael/.claude/sichtpruefung/pug-chaos/`.
+- Taste, not changed: header brand truncates at 390 px; legacy "Teams & Teilnehmer" and "Offene Solo-Anmeldungen" below the builder (P4b, TODO.md); overall admin density.
 
 ## H. Wave 2
 
-P3b solo-only built in 392872f (`auto_team_formation` off, player team actions answer 403 with a German hint, public page hides "Team gründen"). Rest of wave 2 in TODO.md.
+P3b solo-only built (`auto_team_formation` off, player team actions answer 403 with a German hint, public page hides "Team gründen", `InviteMode::SoloOnly` everywhere, team size 1 creates no team in solo_only). Rest of wave 2 in TODO.md.
 
 ## Tournament 16 and 17
 
-- 16 (not modified): stored `bracket_format` should be `single_elimination`, and the five teams should match the Discord picks in message 1571211196634243204. Correction left to the organisers.
-- 17: with 3 groups (6 qualifiers) it hits the fallback; the preview now warns and the stored format follows the real bracket.
+- 16 (not modified): the five teams should match the Discord picks in message 1571211196634243204. Correction left to the organisers.
+- 17: with 3 groups (6 qualifiers) it hits the fallback; the preview warns and the public label follows the played bracket once generated.
+
+## Open points
+
+- The broker contract between Turniere and Deadlock-Bots has no shared test or startup probe (outside this repo, `OFFENE-URSACHEN.md`).
+- Live admin browser pass on the production host after deploy.
 
 ## Commits
 
 | Finding | SHA | Summary |
 |---|---|---|
 | F | 4c87a61 | Caster pool via broker GET `role-members`, broker errors log method, path and status |
-| A, B, C, D, E, H | 392872f | solo_only mode, team preview with members, unsaved-draft guard, name guard, admin add and remove, withdraw in check-in, error rendering, stored fallback format and labels |
+| A, B, C, D, E, H | 392872f | solo_only mode, team preview with members, unsaved-draft guard, name guard, admin add and remove, withdraw in check-in, error rendering, labels |
 | A, B, C, D, H tests | db74df4 | PUG contract test, migration count 39 to 41 |
 | G | d78a7e3 | UI pass fixes |
-| A, B, C, D, E (review) | 89504ec | admin check-in, solo_only fill loop and scheduler twin, guest login limit, lock before status check, count labels |
+| A, B, C, D, E (review) | 89504ec | admin check-in, solo_only fill loop, guest login limit, lock before status check, count labels |
+| Config test | f8d20d6 | `guest_logins_per_hour` as defaulted key |
+| K1 to K13 | see `git log` | gate round 1 classes |
 
 ## Test evidence
 
-- `cargo fmt --check` per crate and `cargo-slot clippy --workspace --all-targets -- -D warnings`: clean.
-- `test-db-run dlcentral_test_turniere -- cargo-slot test --workspace --features testing --no-fail-fast` on ionos: 630 passed, 1 failed (`turnier-db --test migration`, stale count 39 since 2026-10-11, red on base too); after db74df4 the migration test passes 4/4. `pug_finalize_formation_withdraw_and_admin_signup_contract` ok.
-- Frontend: `npm run lint` 0, `npm test` 31/31, `npm run build` 0, `tsc` 0.
-- After 89504ec: full `--features testing` run on ionos 631 passed, 1 failed (`validation_matrix` treated the new defaulted key `limits.guest_logins_per_hour` as required; it is now listed with the other defaulted keys, `turnier-config` 9/9). `central_routes` 17/17 including the extended PUG contract test, clippy clean, frontend lint 0, test 31/31, build 0.
+- rustfmt `--check` on every changed file and `cargo-slot clippy --workspace --all-targets --features turnier-api/testing,turnier-db/testing -- -D warnings`: clean.
+- `test-db-run dlcentral_test_turniere -- cargo-slot test --workspace --features testing --no-fail-fast` on ionos after the K1 to K13 fixes: 633 passed, 0 failed.
+- Frontend: `npm run lint` 0, `npm test` 31/31, `npx tsc -b` 0, `npm run build` 0.

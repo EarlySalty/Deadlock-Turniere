@@ -11,7 +11,7 @@ use thiserror::Error;
 #[derive(Debug, Error)]
 pub enum SchedulerError {
     /// Ungueltige Routine-Konfiguration am Systemrand.
-    #[error("ungueltige Routine-Turnier-Konfiguration: {0}")]
+    #[error("ungültige Routine-Turnier-Konfiguration: {0}")]
     InvalidRoutineConfig(String),
 
     /// Ungültiger Status-Übergang. Entspricht dem `ValueError` im Original

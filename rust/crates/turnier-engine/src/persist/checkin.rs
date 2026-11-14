@@ -206,10 +206,23 @@ pub async fn assign_random_teams(
     pool: &sqlx::Pool<Postgres>,
     resolver: &dyn RankResolver,
     tournament_id: i64,
-    team_size: i64,
     shuffler: &mut dyn SoloShuffler,
 ) -> TournamentResult<i64> {
     let mut tx = pool.begin().await?;
+    let locked: Option<(String, i64)> = sqlx::query_as(
+        "SELECT status, team_size FROM turnier.tournaments WHERE id = $1 FOR UPDATE",
+    )
+    .bind(tournament_id)
+    .fetch_optional(&mut *tx)
+    .await?;
+    let Some((status, team_size)) = locked else {
+        return Err(TournamentError::Validation("Turnier nicht gefunden".into()));
+    };
+    if status != "registration" {
+        return Err(TournamentError::Validation(
+            "Team-Zuweisung nur während der Registration möglich".into(),
+        ));
+    }
 
     let signups: Vec<SoloSignup> = sqlx::query_as::<_, SoloSignup>(
         "SELECT id, discord_id, discord_name, steam_id, rank, rank_score \
@@ -429,10 +442,19 @@ async fn snapshot_token_in_tx(
     .fetch_all(&mut **tx)
     .await?;
 
+    let settings: Option<(String, String, String, i64)> = sqlx::query_as(
+        "SELECT invite_mode, bracket_format, tournament_mode, team_size \
+         FROM turnier.tournaments WHERE id = $1",
+    )
+    .bind(tournament_id)
+    .fetch_optional(&mut **tx)
+    .await?;
+
     // serde_json::Map ist (ohne preserve_order) ein BTreeMap -> Schlüssel sortiert,
     // exakt wie json.dumps(sort_keys=True). Kompakte Trennzeichen über to_string.
     let payload = serde_json::json!({
         "status": tournament_status,
+        "settings": settings,
         "checkins": checkins.iter().map(|c| serde_json::json!({
             "discord_id": c.discord_id, "checked_in_at": c.checked_in_at,
         })).collect::<Vec<_>>(),
@@ -766,7 +788,7 @@ pub async fn finalize_checkin(
     let mut added_players: Vec<AddedPlayer> = Vec::new();
     let mut created_teams: Vec<CreatedTeamPlan> = Vec::new();
     let mut affected_team_ids: HashSet<i64> = HashSet::new();
-    let auto_team_formation = tournament.invite_mode != "solo_only";
+    let auto_team_formation = !turnier_core::InviteMode::is_solo_only(&tournament.invite_mode);
 
     // Unvollständige bestehende Teams aus dem Pool auffüllen.
     for team_id in &team_order {

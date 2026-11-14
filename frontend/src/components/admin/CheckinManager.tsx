@@ -1,8 +1,13 @@
 import { useMemo, useState } from 'react'
+import ParticipantMarks from '@/components/admin/ParticipantMarks'
+import { DuplicateNamesContext } from '@/components/admin/duplicateNamesContext'
+import { duplicateNameKeys } from '@/lib/participantName'
 import Card from '@/components/ui/Card'
 import Button from '@/components/ui/Button'
-import { useAdminCheckin, useAdminCheckins, useCheckinStatus, useDeleteAdminSignup, useFinalizeCheckin, useRevertCheckin } from '@/hooks/useTournament'
+import { useAdminCheckin, useAdminCheckins, useDeleteAdminSignup, useFinalizeCheckin, useRevertCheckin } from '@/hooks/useTournament'
 import { pendingDraftChanges } from '@/components/admin/teamBuilderDrafts'
+import { bracketFormatLabel, DOUBLE_ELIMINATION_RULE } from '@/lib/bracketFormat'
+import { pluralize } from '@/lib/countLabel'
 import type {
   FinalizeCheckinResult,
   Team,
@@ -26,16 +31,8 @@ interface ParticipantRow {
   signup_id: number | null
 }
 
-function playerLabel(player: { discord_name: string | null }): string {
+function participantName(player: { discord_name: string | null }): string {
   return player.discord_name?.trim() || 'Unbekannt'
-}
-
-function formatName(format: string): string {
-  return format === 'double_elimination' ? 'Double Elimination' : 'Single Elimination'
-}
-
-function participantName(row: ParticipantRow): string {
-  return row.discord_name?.trim() || 'Unbekannt'
 }
 
 export default function CheckinManager({
@@ -45,8 +42,7 @@ export default function CheckinManager({
   signups,
   league = false,
 }: CheckinManagerProps) {
-  const { data: checkinStatus } = useCheckinStatus(tournamentId)
-  const { data: adminCheckins } = useAdminCheckins(tournamentId)
+  const { data: adminCheckins, error: checkinsError } = useAdminCheckins(tournamentId)
   const deleteSignup = useDeleteAdminSignup()
   const adminCheckin = useAdminCheckin(tournamentId)
   const finalizeMutation = useFinalizeCheckin(tournamentId)
@@ -59,11 +55,6 @@ export default function CheckinManager({
   const checkedInIds = useMemo(
     () => new Set((adminCheckins ?? []).map((entry) => entry.discord_id)),
     [adminCheckins],
-  )
-
-  const signupIds = useMemo(
-    () => new Set(signups.map((signup) => signup.discord_id)),
-    [signups],
   )
 
   const participants = useMemo(() => {
@@ -101,10 +92,19 @@ export default function CheckinManager({
     })
   }, [checkedInIds, signups, teams])
 
-  const error = finalizeMutation.error ?? revertMutation.error ?? deleteSignup.error ?? adminCheckin.error
+  const duplicateNames = useMemo(
+    () => duplicateNameKeys(participants.map((row) => row.discord_name)),
+    [participants],
+  )
+
+  const error = finalizeMutation.error ?? revertMutation.error ?? deleteSignup.error ?? adminCheckin.error ?? checkinsError
+  const checkinsKnown = adminCheckins !== undefined
+  const checkedInCount = participants.filter((row) => checkedInIds.has(row.discord_id)).length
   const isBusy = finalizeMutation.isPending || revertMutation.isPending || deleteSignup.isPending || adminCheckin.isPending
-  const pendingBuilderChanges = preview ? pendingDraftChanges(tournamentId) : 0
+  const pendingDrafts = preview ? pendingDraftChanges(tournamentId) : { here: 0, otherTabs: 0 }
+  const pendingBuilderChanges = pendingDrafts.here + pendingDrafts.otherTabs
   const bracketFallback = preview !== null && preview.effective_bracket_format !== preview.bracket_format
+  const bracketTooSmall = preview !== null && preview.bracket_entrants !== null && preview.bracket_entrants < 2
 
   const removeParticipant = (row: ParticipantRow) => {
     if (row.signup_id === null) return
@@ -185,18 +185,21 @@ export default function CheckinManager({
           <ClipboardCheck size={18} className="text-primary" />
           <h2 className="text-lg font-semibold text-foreground">Check-in verwalten</h2>
         </div>
+        <p className="text-sm text-muted">
+          Der Check-in endet nicht von selbst. Wenn alle da sind, schließt du ihn hier mit „Check-in abschließen“ ab.
+        </p>
 
         <div className="grid gap-3 md:grid-cols-3">
           <div className="rounded-xl border border-border bg-background/60 p-4">
             <div className="text-sm text-muted">Registriert</div>
             <div className="mt-1 text-2xl font-semibold text-foreground">
-              {checkinStatus?.total_registered ?? participants.length}
+              {participants.length}
             </div>
           </div>
           <div className="rounded-xl border border-border bg-background/60 p-4">
             <div className="text-sm text-muted">Eingecheckt</div>
             <div className="mt-1 text-2xl font-semibold text-green-400">
-              {checkinStatus?.total_checked_in ?? checkedInIds.size}
+              {checkinsKnown ? checkedInCount : '…'}
             </div>
           </div>
           <div className="rounded-xl border border-border bg-background/60 p-4">
@@ -239,6 +242,7 @@ export default function CheckinManager({
           <p className="text-sm text-muted">Keine registrierten Spieler gefunden.</p>
         ) : (
           <div className="overflow-x-auto">
+            <DuplicateNamesContext.Provider value={duplicateNames}>
             <table className="min-w-full text-sm">
               <thead>
                 <tr className="border-b border-border text-left text-muted">
@@ -253,21 +257,26 @@ export default function CheckinManager({
                   const checkedIn = checkedInIds.has(row.discord_id)
                   return (
                     <tr key={row.discord_id} className="border-b border-border/60">
-                      <td className="px-3 py-2 text-foreground">{participantName(row)}</td>
+                      <td className="px-3 py-2 text-foreground">
+                        {participantName(row)}
+                        <ParticipantMarks discordId={row.discord_id} name={row.discord_name} />
+                      </td>
                       <td className="px-3 py-2 text-muted">{row.team_name}</td>
                       <td className="px-3 py-2">
                         <span
                           className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium ${
-                            checkedIn
-                              ? 'bg-green-500/20 text-green-400'
-                              : 'bg-red-500/15 text-red-300'
+                            !checkinsKnown
+                              ? 'bg-card text-muted'
+                              : checkedIn
+                                ? 'bg-green-500/20 text-green-400'
+                                : 'bg-red-500/15 text-red-300'
                           }`}
                         >
-                          {checkedIn ? 'eingecheckt' : 'fehlt'}
+                          {!checkinsKnown ? 'unbekannt' : checkedIn ? 'eingecheckt' : 'fehlt'}
                         </span>
                       </td>
                       <td className="px-3 py-2 text-right whitespace-nowrap">
-                        {!checkedIn && signupIds.has(row.discord_id) && (
+                        {checkinsKnown && !checkedIn && (
                           <button
                             type="button"
                             disabled={isBusy}
@@ -297,6 +306,7 @@ export default function CheckinManager({
                 })}
               </tbody>
             </table>
+            </DuplicateNamesContext.Provider>
           </div>
         )}
       </Card>
@@ -311,16 +321,24 @@ export default function CheckinManager({
 
             {pendingBuilderChanges > 0 && (
               <div role="alert" className="mt-4 rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-300">
-                Im Team-Builder {pendingBuilderChanges === 1 ? 'ist 1 Änderung' : `sind ${pendingBuilderChanges} Änderungen`} noch nicht gespeichert.
+                Im Team-Builder {pendingBuilderChanges === 1 ? 'ist 1 Änderung' : `sind ${pendingBuilderChanges} Änderungen`} noch nicht gespeichert
+                {pendingDrafts.otherTabs > 0 ? `, davon ${pendingDrafts.otherTabs} in einem anderen Tab dieses Browsers` : ''}.
                 Speichere sie unter „Teilnehmer“, sonst startet das Turnier ohne sie.
               </div>
             )}
 
-            {bracketFallback && (
+            {bracketTooSmall && (
+              <div role="alert" className="mt-4 rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-300">
+                Für das Bracket fehlen Teams. Nötig sind mindestens 2, gerade {preview.bracket_entrants === 1 ? 'ist es 1' : `sind es ${preview.bracket_entrants}`}.
+                Stell die Teams unter „Teilnehmer“ zusammen und prüfe danach erneut.
+              </div>
+            )}
+
+            {bracketFallback && !bracketTooSmall && (
               <div role="alert" className="mt-4 rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-200">
-                Eingestellt ist {formatName(preview.bracket_format)}. Das geht nur mit 4, 8, 16 oder 32 Teams im Bracket.
-                Mit {preview.bracket_entrants ?? 0} Teams im Bracket wird {formatName(preview.effective_bracket_format)} gespielt
-                und das Turnier entsprechend umgestellt.
+                Eingestellt ist {bracketFormatLabel(preview.bracket_format)} Dafür braucht das Bracket {DOUBLE_ELIMINATION_RULE}.
+                Mit {pluralize(preview.bracket_entrants ?? 0, 'Team', 'Teams')} im Bracket wird diesmal {bracketFormatLabel(preview.effective_bracket_format)} gespielt.
+                Die Einstellung des Turniers bleibt.
               </div>
             )}
 
@@ -341,7 +359,7 @@ export default function CheckinManager({
                 <ul className="space-y-1 text-sm text-foreground">
                   {preview.removed_players.map((player) => (
                     <li key={`${player.team_id}-${player.discord_id}`}>
-                      {playerLabel(player)} <span className="text-muted">aus {player.team_name}</span>
+                      {participantName(player)} <span className="text-muted">aus {player.team_name}</span>
                     </li>
                   ))}
                 </ul>
@@ -356,7 +374,7 @@ export default function CheckinManager({
                     .filter((player) => player.source === 'solo_pool')
                     .map((player) => (
                       <li key={`${player.team_id}-${player.discord_id}`}>
-                        {playerLabel(player)} <span className="text-muted">kommt zu {player.team_name}</span>
+                        {participantName(player)} <span className="text-muted">kommt zu {player.team_name}</span>
                       </li>
                     ))}
                 </ul>
@@ -377,7 +395,7 @@ export default function CheckinManager({
                       <ul className="mt-2 space-y-0.5 text-sm text-foreground">
                         {team.members.map((member, index) => (
                           <li key={member.discord_id}>
-                            {playerLabel(member)}
+                            {participantName(member)}
                             {index === 0 && <span className="ml-1 text-xs text-primary">Captain</span>}
                           </li>
                         ))}
@@ -433,7 +451,7 @@ export default function CheckinManager({
                       key={player.discord_id}
                       className="rounded-full bg-card px-3 py-1 text-xs text-foreground"
                     >
-                      {player.discord_name?.trim() || 'Unbekannt'}
+                      {participantName(player)}
                     </span>
                   ))}
                 </div>
@@ -449,7 +467,7 @@ export default function CheckinManager({
               >
                 Schließen
               </Button>
-              <Button variant="primary" size="sm" disabled={isBusy || pendingBuilderChanges > 0} onClick={confirmStart}>
+              <Button variant="primary" size="sm" disabled={isBusy || pendingBuilderChanges > 0 || bracketTooSmall} onClick={confirmStart}>
                 {finalizeMutation.isPending ? 'Startet...' : 'Turnier jetzt starten'}
               </Button>
             </div>

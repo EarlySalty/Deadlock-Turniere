@@ -3,6 +3,7 @@ import { GitBranch } from 'lucide-react'
 import { useMemo } from 'react'
 import Card from '@/components/ui/Card'
 import BracketMatch from './BracketMatch'
+import { hasDoubleEliminationMatches } from '@/lib/bracketFormat'
 import type { BracketMatch as BracketMatchType, TeamPublic } from '@/types/tournament'
 
 interface Props {
@@ -190,7 +191,7 @@ export default function BracketView({ matches, teams }: Props) {
   const losers = matches.filter((m) => m.bracket_type === 'losers')
   const grandFinal = matches.filter((m) => m.bracket_type === 'grand_final')
 
-  const isDoubleElim = losers.length > 0 || grandFinal.length > 0
+  const isDoubleElim = hasDoubleEliminationMatches(matches)
 
   if (!isDoubleElim) {
     return (

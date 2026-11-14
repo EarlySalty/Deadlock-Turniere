@@ -18,7 +18,7 @@ function formatDate(value: string | null): string {
 }
 
 function signupLine(t: AdminTournamentSummary): string {
-  if (t.team_size <= 1) return `${t.signup_count} Anmeldungen`
+  if (t.team_size <= 1) return pluralize(t.signup_count, 'Anmeldung', 'Anmeldungen')
   return `${pluralize(t.team_count, 'Team', 'Teams')} · ${t.open_signup_count} Solo offen`
 }
 
@@ -74,9 +74,7 @@ export function TournamentSidebar({ tournaments, selectedId, creating, onSelect,
                   <span className="block truncate text-sm font-medium text-foreground">{t.name}</span>
                   <span className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1">
                     <Badge status={t.status} mode={t.tournament_mode} />
-                    {t.is_test && (
-                      <span className="rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-medium text-amber-300">Test</span>
-                    )}
+                    {t.is_test && <TestBadge />}
                     <span className="text-[11px] text-muted">Start {formatDate(tournamentStart(t))}</span>
                   </span>
                 </button>
@@ -87,6 +85,10 @@ export function TournamentSidebar({ tournaments, selectedId, creating, onSelect,
       </div>
     </Card>
   )
+}
+
+export function TestBadge() {
+  return <span className="rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-medium text-amber-300">Test</span>
 }
 
 function Fact({ label, value }: { label: string; value: string }) {
@@ -105,6 +107,7 @@ export function TournamentSummaryCard({ tournament: t }: { tournament: AdminTour
         <Trophy size={20} className="shrink-0 text-primary" />
         <h2 className="min-w-0 flex-1 break-words text-xl font-bold text-foreground">{t.name}</h2>
         <Badge status={t.status} mode={t.tournament_mode} />
+        {t.is_test && <TestBadge />}
       </div>
       <dl className="grid grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-4">
         <Fact label="Anmeldung bis" value={formatDate(t.registration_end)} />
@@ -129,6 +132,7 @@ export function CollapsedTournamentRow({ tournament: t, onSelect }: { tournament
     >
       <span className="min-w-0 basis-full truncate font-medium text-foreground sm:basis-auto sm:flex-1">{t.name}</span>
       <Badge status={t.status} mode={t.tournament_mode} />
+      {t.is_test && <TestBadge />}
       <span className="flex items-center gap-1 text-xs text-muted">
         <CalendarDays size={12} />
         Start {formatDate(tournamentStart(t))}

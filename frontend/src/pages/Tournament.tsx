@@ -25,6 +25,8 @@ import BracketView from '@/components/bracket/BracketView'
 import MiniGroupPanel from '@/components/bracket/MiniGroupPanel'
 import MyMatchReport from '@/components/MyMatchReport'
 import LoginButton from '@/components/auth/LoginButton'
+import { PARTICIPANT_NAME_MAX_LENGTH } from '@/lib/participantName'
+import { isRegistrationWindowOpen } from '@/lib/tournamentStatus'
 import {
   Trophy, Users, LayoutGrid, GitBranch, Shield, X, Info, Book,
   ScrollText, CheckCircle2, ClipboardCheck, Mail, BarChart2, User,
@@ -264,10 +266,10 @@ export default function Tournament() {
 
   const isRegistration = tournament.status === 'registration'
   const tournamentStart = plannedTournamentStart(tournament)
-  const isSignupOpen = ['registration', 'checkin'].includes(tournament.status)
+  const isSignupOpen = isRegistrationWindowOpen(tournament.status)
   const isCheckinPhase = tournament.status === 'checkin'
   const soloOnly = tournament.invite_mode === 'solo_only'
-  const formatLabel = bracketFormatLabel(effectiveBracketFormat(tournament.bracket_format, tournament.bracket_matches))
+  const formatLabel = bracketFormatLabel(effectiveBracketFormat(tournament))
   const registrationLabel = registrationSummary(
     tournament.teams.length,
     tournament.signups.filter((signup) => signup.team_id === null).length,
@@ -301,7 +303,7 @@ export default function Tournament() {
     rejectInviteMutation.isPending ||
     applyMutation.isPending
 
-  const actionErrors = [
+  const latestAction = [
     createTeamMutation,
     joinTeamMutation,
     signupSoloMutation,
@@ -311,10 +313,10 @@ export default function Tournament() {
     acceptInviteMutation,
     rejectInviteMutation,
     applyMutation,
-  ]
-    .map((mutation) => mutation.error)
-    .filter((error): error is Error => error instanceof Error && error.message !== 'CONSENT_REQUIRED')
-    .map((error) => error.message)
+  ].reduce((latest, mutation) => (mutation.submittedAt > latest.submittedAt ? mutation : latest))
+  const latestError = latestAction.error
+  const actionErrors =
+    latestError instanceof Error && latestError.message !== 'CONSENT_REQUIRED' ? [latestError.message] : []
 
   // Consent-aware action wrapper
   const withConsent = (action: () => void) => {
@@ -628,7 +630,7 @@ export default function Tournament() {
                            }}>
                              <p className="text-sm text-muted">Kein Discord? Melde dich mit deinem Namen an.</p>
                              <label htmlFor="guest-name" className="block text-sm text-foreground">Dein Spielername</label>
-                             <input id="guest-name" name="guest-name" type="text" required maxLength={32}
+                             <input id="guest-name" name="guest-name" type="text" required maxLength={PARTICIPANT_NAME_MAX_LENGTH}
                                autoComplete="nickname" value={guestName} disabled={guestLogin.isPending}
                                onChange={(event) => setGuestName(event.target.value)}
                                className="w-full rounded-lg border border-border bg-background p-3 text-foreground" />

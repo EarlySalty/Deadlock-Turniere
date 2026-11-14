@@ -121,6 +121,7 @@ comp_clients = 10000
 comp_reads_per_minute = 600
 comp_writes_per_minute = 120
 comp_creations_per_hour = 10
+# Draft-Lobbys und Gastanmeldungen zählen je Anschluss: IPv4-Adresse oder IPv6-/64-Netz.
 draft_creations_per_hour = 10
 guest_logins_per_hour = 10
 draft_viewer_ttl_seconds = 20

@@ -40,6 +40,9 @@ fn parse_scope(value: &str) -> WebResult<Scope> {
 }
 
 async fn current_optouts(pool: &turnier_db::Pool, discord_id: &str) -> WebResult<DmOptOutResponse> {
+    if turnier_core::is_guest_participant_id(discord_id) {
+        return Ok(DmOptOutResponse { scopes: Vec::new() });
+    }
     let optouts = optout::list_optouts(pool, discord_id).await?;
     Ok(DmOptOutResponse {
         scopes: optouts.into_iter().map(|entry| entry.scope).collect(),
@@ -58,6 +61,7 @@ async fn set_dm_optout(
     AuthUser(user): AuthUser,
     Json(body): Json<DmOptOutBody>,
 ) -> WebResult<Json<DmOptOutResponse>> {
+    crate::db::require_discord_account(&user.discord_id)?;
     let scope = parse_scope(&body.scope)?;
     optout::set_optout(&state.pool, &user.discord_id, scope).await?;
     Ok(Json(current_optouts(&state.pool, &user.discord_id).await?))
@@ -68,6 +72,7 @@ async fn clear_dm_optout(
     AuthUser(user): AuthUser,
     Path(scope): Path<String>,
 ) -> WebResult<Json<DmOptOutResponse>> {
+    crate::db::require_discord_account(&user.discord_id)?;
     let scope = parse_scope(&scope)?;
     optout::clear_optout(&state.pool, &user.discord_id, scope).await?;
     Ok(Json(current_optouts(&state.pool, &user.discord_id).await?))

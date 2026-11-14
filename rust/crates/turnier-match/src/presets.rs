@@ -107,7 +107,7 @@ fn normalize_convar_value(name: &str, value: &Value) -> Result<Value, MatchError
     let stripped = s.trim();
     if stripped.is_empty() {
         return Err(MatchError::state(format!(
-            "ConVar-Wert fuer {name} darf nicht leer sein"
+            "ConVar-Wert für {name} darf nicht leer sein"
         )));
     }
     let lowered = stripped.to_lowercase();
@@ -143,7 +143,7 @@ fn event_presets() -> &'static [EventPreset] {
             EventPreset {
                 key: "slowmo",
                 label: "Slow Motion",
-                description: "Verlangsamt das Match fuer Clutch- oder Showmomente.",
+                description: "Verlangsamt das Match für Clutch- oder Showmomente.",
                 requires_cheats: true,
                 convars: Box::leak(Box::new([("host_timescale", json!(0.7))])),
                 reset_convars: Box::leak(Box::new([("host_timescale", json!(1))])),
@@ -159,7 +159,7 @@ fn event_presets() -> &'static [EventPreset] {
             EventPreset {
                 key: "glass_cannon",
                 label: "Glass Cannon",
-                description: "Hoher Schaden fuer schnelle, chaotische Teamfights.",
+                description: "Hoher Schaden für schnelle, chaotische Teamfights.",
                 requires_cheats: true,
                 convars: Box::leak(Box::new([
                     ("citadel_dps_multiplier", json!(2)),
@@ -173,7 +173,7 @@ fn event_presets() -> &'static [EventPreset] {
             EventPreset {
                 key: "walljump_party",
                 label: "Walljump Party",
-                description: "Mehr Mobilitaet fuer alberne Mobility-Runden.",
+                description: "Mehr Mobilität für alberne Mobility-Runden.",
                 requires_cheats: true,
                 convars: Box::leak(Box::new([
                     ("citadel_initial_wall_jump_stamina_cost", json!(0)),
@@ -201,7 +201,7 @@ fn event_presets() -> &'static [EventPreset] {
             EventPreset {
                 key: "zipline_boost",
                 label: "Zipline Boost",
-                description: "Mehr Druck auf Movement und Rotationen ueber Ziplines.",
+                description: "Mehr Druck auf Movement und Rotationen über Ziplines.",
                 requires_cheats: true,
                 convars: Box::leak(Box::new([
                     ("zipline_use_new_latch", json!(2)),

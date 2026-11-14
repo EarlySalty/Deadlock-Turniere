@@ -13,6 +13,7 @@ pub(crate) mod db;
 pub mod error;
 pub mod extract;
 mod proposal_lock;
+pub mod rate_limit;
 pub mod state;
 
 pub mod account;

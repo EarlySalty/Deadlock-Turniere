@@ -13,7 +13,7 @@ import {
   useMoveAdminTeamMember,
   useRemoveAdminTeamMember,
   useRenameAdminTeam,
-  useSetRecruitingStatus,
+  useSetAdminRecruitingStatus,
 } from '@/hooks/useTournament'
 import type { Team, TeamMember, TournamentSignup, TournamentStatus, RecruitmentStatus } from '@/types/tournament'
 import {
@@ -77,7 +77,7 @@ export default function ParticipantManager({
   const moveMemberMutation = useMoveAdminTeamMember()
   const assignSignupMutation = useAssignSignupToAdminTeam()
   const deleteSignupMutation = useDeleteAdminSignup()
-  const recruitingMutation = useSetRecruitingStatus(tournamentId)
+  const recruitingMutation = useSetAdminRecruitingStatus(tournamentId)
 
   const [newTeamName, setNewTeamName] = useState('')
   const [renameValues, setRenameValues] = useState<Record<number, string>>({})

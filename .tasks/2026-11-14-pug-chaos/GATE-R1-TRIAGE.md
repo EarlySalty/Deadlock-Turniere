@@ -1,0 +1,19 @@
+# Gate round 1 triage (f8d20d6, BLOCK, 333 blocking, 54 nits)
+
+Log: scratchpad gate-r1.log. Hook "unit ... mishandles" items mirror the reviewer findings below and clear with them. Every class is fixed in this branch; nothing is parked.
+
+| # | Class | Cause code | Fix |
+|---|---|---|---|
+| K1 | Guest ids (negative) reach readers that expect Discord snowflakes: notifier mentions and mentions_or_dash, voice move, RankCache get/store, load_rank_input Discord lookups, dm-optout, avatar upload, OAuth session parse widened, README:73, db-contract.md | untested (a8478c2) | one `is_guest_participant` rule in turnier-core; every Discord-bound reader skips guests; OAuth session parse strict again; docs |
+| K2 | Status check before the tournament row lock in every mutating handler (solo_signup, checkin_player, create_team, join_team, update_team_recruiting, invitations x4, assign_signup_to_team, name guard discards status, double lock in add_signup_by_name) | instance | every mutator locks via lock_tournament_status inside its tx and checks status and mode on the locked row |
+| K3 | solo_only as raw string in four places; solo_signup with team_size 1 still creates a team in solo_only; scheduler hold on unlocked snapshot | spec | InviteMode::SoloOnly everywhere; team_size 1 rule; K4 removes the scheduler path |
+| K4 | Scheduler moves checkin to bracket or groups without finalize for every invite mode (twin of A) | instance | scheduler never ends check-in in any mode; audit history: 6 of 6 real tournaments left check-in through finalize_checkin, the scheduler never did; copy and doc comments updated |
+| K5 | Fallback writes bracket_format permanently; snapshot token ignores invite_mode and bracket_format; label before generation; format rule in several sources; UI copy "4, 8, 16 oder 32" wrong; 0 or 1 entrants | spec | keep configured format, serve one effective format from the engine; token covers both; copy states the engine rule |
+| K6 | Rules defined twice: participant name rule (Rust x2, UI maxLength x2, Cf chars), guest id allocation SQL x2, hourly limiter copy of draft limiter, ConnectInfo optional | instance | single helpers; generalised limiter; ConnectInfo required; IPv6 keyed by /64 |
+| K7 | Discord signup after same-named guest still duplicates (B twin), add_user_to_team without name guard | instance | name guard for every signup writer, both directions |
+| K8 | Frontend plurals ("1 Anmeldungen", Test-Turniere, Matches, "Teams im Bracket"); pluralize duplicate in reminderOffsets | instance | shared pluralize at every count label |
+| K9 | Frontend error and state: stale action errors, CheckinManager error chain misses useAdminCheckins, counter and rows from two sources, builder draft effect, cross-tab draft guard, AddPlayerForm in every status, hint text wrong, pool X while pending, PresetForm errors, duplicate label helpers | instance | fix each, shared helpers |
+| K10 | Broker: three failure branches unlogged, docs say POST only, OAuth client twin, path literals outside the path module | instance | log every branch, docs, OAuth detail, paths from one module |
+| K11 | Records: REGISTER G and E cause layers, "everywhere" claim, TODO P11 stale, README, auth module doc, transition doc comments, commit messages lack "Twins" layer and contain false claims | spec | rewrite records; reword commits last with tree-hash proof |
+| K12 | ASCII umlauts in user-facing errors (error.rs:180 and twins) | instance | sweep `ue|oe|ae` in German error strings of turnier-api |
+| K13 | Admin and self check-in use different eligibility rules; ensure_player_teams_allowed before captain check | instance | one eligibility rule; order guards |

@@ -112,7 +112,7 @@ impl DeadlockLiveClient {
                     // aktuell genau in dieser Default-Form (`data:` + Leerzeile).
                     if is_message_event(&event) && !data.is_empty() {
                         let value: Value = serde_json::from_str(&data)
-                            .map_err(|e| LiveError::Sse(format!("ungueltiges JSON: {e}")))?;
+                            .map_err(|e| LiveError::Sse(format!("ungültiges JSON: {e}")))?;
                         let received_at = Utc::now();
                         for value in normalize_live_rows(value) {
                             if tx

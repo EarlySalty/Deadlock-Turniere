@@ -1,5 +1,7 @@
 //! Reine Gruppen-Helfer: Auto-Gruppen-Anzahl und Round-Robin-Paarung.
 
+pub const QUALIFIERS_PER_GROUP: usize = 2;
+
 /// Best-Practice-Gruppen-Anzahl aus der Team-Zahl.
 ///
 /// Portiert `_auto_num_groups(team_count)`: Ziel 4 Teams/Gruppe, geklemmt auf

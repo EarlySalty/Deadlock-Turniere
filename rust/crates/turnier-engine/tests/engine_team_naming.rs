@@ -45,7 +45,7 @@ async fn assign_random_teams_uses_captain_names_and_suffixes() {
 
     let resolver = NullResolver;
     let mut shuffler = NoShuffle;
-    let teams_created = assign_random_teams(pool, &resolver, tournament_id, 2, &mut shuffler)
+    let teams_created = assign_random_teams(pool, &resolver, tournament_id, &mut shuffler)
         .await
         .expect("assign");
     assert_eq!(teams_created, 2);

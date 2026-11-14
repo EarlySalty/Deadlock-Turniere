@@ -73,12 +73,13 @@ async fn invite_to_team_by_signup(
     Path((tournament_id, team_id, signup_id)): Path<(i64, i64, i64)>,
 ) -> WebResult<Json<Value>> {
     let pool = &state.pool;
-    let t = helpers::load_tournament_or_404(pool, tournament_id).await?;
+    let mut tx = pool.begin().await?;
+    let t = helpers::lock_tournament_or_404(&mut tx, tournament_id).await?;
+    let team = helpers::load_team_or_404(&mut *tx, tournament_id, team_id).await?;
+    helpers::ensure_captain(&user, &team.captain_discord_id)?;
     helpers::ensure_player_teams_allowed(&t)?;
     helpers::ensure_registration_open(&t.status)?;
-    let team = helpers::load_team_or_404(pool, tournament_id, team_id).await?;
-    helpers::ensure_captain(&user, &team.captain_discord_id)?;
-    helpers::ensure_team_has_capacity(pool, team_id, t.team_size).await?;
+    helpers::ensure_team_has_capacity(&mut *tx, team_id, t.team_size).await?;
 
     let signup: Option<SignupRow> = sqlx::query_as(
         r#"SELECT discord_id, discord_name, steam_id, rank, rank_score, team_id
@@ -86,7 +87,7 @@ async fn invite_to_team_by_signup(
     )
     .bind(signup_id)
     .bind(tournament_id)
-    .fetch_optional(pool)
+    .fetch_optional(&mut *tx)
     .await?;
     let Some(signup) = signup else {
         return Err(WebError::not_found("Signup nicht gefunden"));
@@ -98,7 +99,8 @@ async fn invite_to_team_by_signup(
     }
 
     let signup_discord_id = db::discord_id_to_string(signup.discord_id);
-    helpers::ensure_user_not_in_tournament_team(pool, tournament_id, &signup_discord_id).await?;
+    helpers::ensure_user_not_in_tournament_team(&mut *tx, tournament_id, &signup_discord_id)
+        .await?;
     let expires_at = helpers::ensure_invites_enabled(&t)?;
     let expires_at_ts = helpers::parse_timestamp(expires_at.as_deref());
 
@@ -107,7 +109,7 @@ async fn invite_to_team_by_signup(
             r#"SELECT invite_auto_accept FROM turnier."user_profiles" WHERE discord_id = $1"#,
         )
         .bind(signup.discord_id)
-        .fetch_optional(pool)
+        .fetch_optional(&mut *tx)
         .await?;
         matches!(profile, Some((true,)))
     };
@@ -117,7 +119,7 @@ async fn invite_to_team_by_signup(
     )
     .bind(team_id)
     .bind(signup.discord_id)
-    .fetch_optional(pool)
+    .fetch_optional(&mut *tx)
     .await?;
 
     let target_status = if auto_accept { "accepted" } else { "pending" };
@@ -129,8 +131,6 @@ async fn invite_to_team_by_signup(
             ));
         }
     }
-
-    let mut tx = pool.begin().await?;
 
     let invite_id: i64 = if let Some((existing_id, _)) = existing {
         sqlx::query(
@@ -223,7 +223,7 @@ async fn get_my_invitations(
     Path(tournament_id): Path<i64>,
 ) -> WebResult<Json<Vec<TeamInvitation>>> {
     let pool = &state.pool;
-    let user_discord_id = db::parse_discord_id(&user.discord_id)?;
+    let user_discord_id = db::parse_participant_id(&user.discord_id)?;
     helpers::load_tournament_or_404(pool, tournament_id).await?;
 
     #[derive(sqlx::FromRow)]
@@ -279,32 +279,7 @@ async fn accept_team_invitation(
     Path((tournament_id, invite_id)): Path<(i64, i64)>,
 ) -> WebResult<Json<Value>> {
     let pool = &state.pool;
-    let user_discord_id = db::parse_discord_id(&user.discord_id)?;
-    let t = helpers::load_tournament_or_404(pool, tournament_id).await?;
-    helpers::ensure_player_teams_allowed(&t)?;
-    helpers::ensure_registration_open(&t.status)?;
-
-    let invitation: Option<InvitationRow> = sqlx::query_as(
-        r#"SELECT discord_id, team_id, status
-         FROM turnier."team_invitations" WHERE id = $1 AND tournament_id = $2"#,
-    )
-    .bind(invite_id)
-    .bind(tournament_id)
-    .fetch_optional(pool)
-    .await?;
-    let Some(invitation) = invitation else {
-        return Err(WebError::not_found("Einladung nicht gefunden"));
-    };
-    if invitation.discord_id != user_discord_id {
-        return Err(WebError::forbidden("Diese Einladung gehört nicht zu dir"));
-    }
-    if invitation.status != "pending" {
-        return Err(WebError::bad_request("Einladung ist nicht mehr offen"));
-    }
-
-    helpers::load_team_or_404(pool, tournament_id, invitation.team_id).await?;
-    helpers::ensure_team_has_capacity(pool, invitation.team_id, t.team_size).await?;
-    helpers::ensure_user_not_in_tournament_team(pool, tournament_id, &user.discord_id).await?;
+    let user_discord_id = db::parse_participant_id(&user.discord_id)?;
 
     // Rangdaten aus vorhandenem Signup, sonst frisch vom Resolver.
     let signup: Option<SignupRow> = sqlx::query_as(
@@ -338,6 +313,31 @@ async fn accept_team_invitation(
     };
 
     let mut tx = pool.begin().await?;
+    let t = helpers::lock_tournament_or_404(&mut tx, tournament_id).await?;
+    let invitation: Option<InvitationRow> = sqlx::query_as(
+        r#"SELECT discord_id, team_id, status
+         FROM turnier."team_invitations" WHERE id = $1 AND tournament_id = $2 FOR UPDATE"#,
+    )
+    .bind(invite_id)
+    .bind(tournament_id)
+    .fetch_optional(&mut *tx)
+    .await?;
+    let Some(invitation) = invitation else {
+        return Err(WebError::not_found("Einladung nicht gefunden"));
+    };
+    if invitation.discord_id != user_discord_id {
+        return Err(WebError::forbidden("Diese Einladung gehört nicht zu dir"));
+    }
+    if invitation.status != "pending" {
+        return Err(WebError::bad_request("Einladung ist nicht mehr offen"));
+    }
+
+    helpers::ensure_player_teams_allowed(&t)?;
+    helpers::ensure_registration_open(&t.status)?;
+    helpers::load_team_or_404(&mut *tx, tournament_id, invitation.team_id).await?;
+    helpers::ensure_team_has_capacity(&mut *tx, invitation.team_id, t.team_size).await?;
+    helpers::ensure_user_not_in_tournament_team(&mut *tx, tournament_id, &user.discord_id).await?;
+
     helpers::add_user_to_team(
         pool,
         &mut tx,
@@ -367,7 +367,7 @@ async fn reject_team_invitation(
     Path((tournament_id, invite_id)): Path<(i64, i64)>,
 ) -> WebResult<Json<Value>> {
     let pool = &state.pool;
-    let user_discord_id = db::parse_discord_id(&user.discord_id)?;
+    let user_discord_id = db::parse_participant_id(&user.discord_id)?;
     helpers::load_tournament_or_404(pool, tournament_id).await?;
 
     let invitation: Option<(i64, String)> = sqlx::query_as(
@@ -405,29 +405,30 @@ async fn apply_to_team(
     Path((tournament_id, team_id)): Path<(i64, i64)>,
 ) -> WebResult<Json<Value>> {
     let pool = &state.pool;
-    let user_discord_id = db::parse_discord_id(&user.discord_id)?;
-    let t = helpers::load_tournament_or_404(pool, tournament_id).await?;
+    let user_discord_id = db::parse_participant_id(&user.discord_id)?;
+    let discord_name =
+        helpers::resolve_discord_name(pool, &user.discord_id, user.discord_name.as_deref()).await?;
+
+    let mut tx = pool.begin().await?;
+    let t = helpers::lock_tournament_or_404(&mut tx, tournament_id).await?;
     helpers::ensure_player_teams_allowed(&t)?;
     helpers::ensure_registration_open(&t.status)?;
-    let team = helpers::load_team_or_404(pool, tournament_id, team_id).await?;
+    let team = helpers::load_team_or_404(&mut *tx, tournament_id, team_id).await?;
     if team.recruitment_status != "application" {
         return Err(WebError::forbidden(
             "Dieses Team nimmt aktuell keine Bewerbungen an",
         ));
     }
 
-    helpers::ensure_user_not_in_tournament_team(pool, tournament_id, &user.discord_id).await?;
+    helpers::ensure_user_not_in_tournament_team(&mut *tx, tournament_id, &user.discord_id).await?;
 
     let existing: Option<(i64, String)> = sqlx::query_as(
         r#"SELECT id, status FROM turnier."team_applications" WHERE team_id = $1 AND discord_id = $2"#,
     )
     .bind(team_id)
     .bind(user_discord_id)
-    .fetch_optional(pool)
+    .fetch_optional(&mut *tx)
     .await?;
-
-    let discord_name =
-        helpers::resolve_discord_name(pool, &user.discord_id, user.discord_name.as_deref()).await?;
 
     if let Some((_, ref status)) = existing {
         if status == "pending" {
@@ -444,7 +445,7 @@ async fn apply_to_team(
         )
         .bind(&discord_name)
         .bind(id)
-        .execute(pool)
+        .execute(&mut *tx)
         .await?;
     } else {
         sqlx::query(
@@ -454,12 +455,13 @@ async fn apply_to_team(
         .bind(team_id)
         .bind(user_discord_id)
         .bind(&discord_name)
-        .execute(pool)
+        .execute(&mut *tx)
         .await
         .map_err(|err| {
             map_unique_conflict(err, "Für dieses Team existiert bereits eine Bewerbung")
         })?;
     }
+    tx.commit().await?;
 
     Ok(Json(json!({ "status": "applied", "team_id": team_id })))
 }
@@ -510,7 +512,6 @@ async fn get_team_applications(
 struct ApplicationRow {
     discord_id: i64,
     discord_name: String,
-    status: String,
 }
 
 /// `POST .../applications/{app_id}/accept`: Bewerbung annehmen (Captain|Mod).
@@ -520,14 +521,8 @@ async fn accept_team_application(
     Path((tournament_id, team_id, app_id)): Path<(i64, i64, i64)>,
 ) -> WebResult<Json<Value>> {
     let pool = &state.pool;
-    let t = helpers::load_tournament_or_404(pool, tournament_id).await?;
-    helpers::ensure_player_teams_allowed(&t)?;
-    helpers::ensure_registration_open(&t.status)?;
-    let team = helpers::load_team_or_404(pool, tournament_id, team_id).await?;
-    helpers::ensure_captain_or_mod(&user, &team.captain_discord_id)?;
-
     let application: Option<ApplicationRow> = sqlx::query_as(
-        r#"SELECT discord_id, discord_name, status FROM turnier."team_applications"
+        r#"SELECT discord_id, discord_name FROM turnier."team_applications"
          WHERE id = $1 AND team_id = $2"#,
     )
     .bind(app_id)
@@ -537,14 +532,7 @@ async fn accept_team_application(
     let Some(application) = application else {
         return Err(WebError::not_found("Bewerbung nicht gefunden"));
     };
-    if application.status != "pending" {
-        return Err(WebError::bad_request("Bewerbung ist nicht mehr offen"));
-    }
-
-    helpers::ensure_team_has_capacity(pool, team_id, t.team_size).await?;
     let application_discord_id = db::discord_id_to_string(application.discord_id);
-    helpers::ensure_user_not_in_tournament_team(pool, tournament_id, &application_discord_id)
-        .await?;
 
     // Rangdaten aus vorhandenem Signup, sonst frisch vom Resolver.
     let signup: Option<SignupRow> = sqlx::query_as(
@@ -577,6 +565,31 @@ async fn accept_team_application(
     };
 
     let mut tx = pool.begin().await?;
+    let t = helpers::lock_tournament_or_404(&mut tx, tournament_id).await?;
+    let team = helpers::load_team_or_404(&mut *tx, tournament_id, team_id).await?;
+    helpers::ensure_captain_or_mod(&user, &team.captain_discord_id)?;
+    helpers::ensure_player_teams_allowed(&t)?;
+    helpers::ensure_registration_open(&t.status)?;
+    let locked: Option<(i64, String)> = sqlx::query_as(
+        r#"SELECT discord_id, status FROM turnier."team_applications"
+         WHERE id = $1 AND team_id = $2 FOR UPDATE"#,
+    )
+    .bind(app_id)
+    .bind(team_id)
+    .fetch_optional(&mut *tx)
+    .await?;
+    match locked {
+        Some((discord_id, status)) if discord_id == application.discord_id => {
+            if status != "pending" {
+                return Err(WebError::bad_request("Bewerbung ist nicht mehr offen"));
+            }
+        }
+        _ => return Err(WebError::not_found("Bewerbung nicht gefunden")),
+    }
+    helpers::ensure_team_has_capacity(&mut *tx, team_id, t.team_size).await?;
+    helpers::ensure_user_not_in_tournament_team(&mut *tx, tournament_id, &application_discord_id)
+        .await?;
+
     helpers::add_user_to_team(
         pool,
         &mut tx,

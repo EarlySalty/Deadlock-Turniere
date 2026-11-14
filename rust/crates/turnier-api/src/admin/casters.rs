@@ -205,7 +205,7 @@ async fn assign_tournament_caster(
         return Err(WebError::bad_request("Discord-User ist kein Caster"));
     }
 
-    let caster_id = db::parse_discord_id(&body.discord_id)?;
+    let caster_id = db::parse_discord_user_id(&body.discord_id)?;
     let actor_id = db::parse_actor_id(&user.discord_id)?;
     load_tournament_or_404(&state.pool, tournament_id).await?;
     sqlx::query(
@@ -242,7 +242,7 @@ async fn remove_tournament_caster(
         r#"DELETE FROM turnier."tournament_casters" WHERE tournament_id = $1 AND discord_id = $2"#,
     )
     .bind(tournament_id)
-    .bind(db::parse_discord_id(&discord_id)?)
+    .bind(db::parse_discord_user_id(&discord_id)?)
     .execute(&state.pool)
     .await?;
     audit(

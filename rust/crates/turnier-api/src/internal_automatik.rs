@@ -374,7 +374,7 @@ async fn materialize(state: &AppState, proposal_id: i64, actor_id: &str) -> WebR
         .await?
         .ok_or_else(|| WebError::not_found("Preset nicht gefunden"))?;
     let config: Value = serde_json::from_str(&proposal.config_json)
-        .map_err(|_| WebError::bad_request("Vorschlagsplan ist ungueltig"))?;
+        .map_err(|_| WebError::bad_request("Vorschlagsplan ist ungültig"))?;
     let approved_preset = approved_preset(preset, &config)?;
     let plan = RoutineTournamentPlan {
         registration_start: config_time(&config, "registration_start")?,
@@ -398,7 +398,7 @@ async fn materialize(state: &AppState, proposal_id: i64, actor_id: &str) -> WebR
         .await?;
     } else if ensured.status != "registration" {
         return Err(WebError::conflict(
-            "Turnier wurde bereits ueber die Anmeldung hinaus fortgesetzt",
+            "Turnier wurde bereits über die Anmeldung hinaus fortgesetzt",
         ));
     }
     proposals::approve_and_attach_tournament(&state.pool, proposal_id, ensured.id).await?;
@@ -443,7 +443,7 @@ fn config_field<T: DeserializeOwned>(config: &Value, key: &str) -> WebResult<T> 
         .cloned()
         .ok_or_else(|| WebError::bad_request(format!("Vorschlagsplan ohne {key}")))?;
     serde_json::from_value(value)
-        .map_err(|_| WebError::bad_request(format!("Ungueltiger Vorschlagswert: {key}")))
+        .map_err(|_| WebError::bad_request(format!("Ungültiger Vorschlagswert: {key}")))
 }
 
 fn config_time(config: &Value, key: &str) -> WebResult<DateTime<Utc>> {
@@ -453,5 +453,5 @@ fn config_time(config: &Value, key: &str) -> WebResult<DateTime<Utc>> {
         .ok_or_else(|| WebError::bad_request(format!("Vorschlagsplan ohne {key}")))?;
     DateTime::parse_from_rfc3339(raw)
         .map(|value| value.with_timezone(&Utc))
-        .map_err(|_| WebError::bad_request(format!("Ungueltiger Zeitpunkt: {key}")))
+        .map_err(|_| WebError::bad_request(format!("Ungültiger Zeitpunkt: {key}")))
 }

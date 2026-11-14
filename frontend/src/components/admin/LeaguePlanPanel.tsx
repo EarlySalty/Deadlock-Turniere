@@ -18,6 +18,7 @@ import {
   toLocalInput,
 } from '@/lib/league'
 import type { Group, Team } from '@/types/tournament'
+import { pluralize } from '@/lib/countLabel'
 
 interface LeaguePlanPanelProps {
   tournamentId: number
@@ -89,7 +90,7 @@ function ScheduleEditor({ tournamentId, initialStart, initialSlot, canRebuild }:
       'Spielplan neu erstellen?\n\n' +
       'Alle Spiele des aktuellen Plans werden gelöscht und aus der aktuellen Teamliste neu angelegt. ' +
       'Sind die Teams unverändert, kommen dieselben Paarungen wieder heraus.\n\n' +
-      `Runde 1 beginnt zur gespeicherten Startzeit, jede Runde dauert ${slot} Minuten.`
+      `Runde 1 beginnt zur gespeicherten Startzeit, jede Runde dauert ${pluralize(slot, 'Minute', 'Minuten')}.`
     if (!window.confirm(question)) return
     rebuild.mutate(
       { tournamentId, slotMinutes: slot },

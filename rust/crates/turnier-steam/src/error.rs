@@ -17,7 +17,7 @@ pub enum SteamError {
     Db(#[from] sqlx::Error),
 
     /// Discord-ID konnte nicht in den zentralen BIGINT-DB-Typ konvertiert werden.
-    #[error("Ungueltige Discord-ID: {0}")]
+    #[error("Ungültige Discord-ID: {0}")]
     InvalidDiscordId(#[from] DiscordIdParseError),
 
     /// HTTP-Aufruf an die Discord-REST-API fehlgeschlagen.
