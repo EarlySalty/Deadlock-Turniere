@@ -85,11 +85,12 @@ P3b solo-only built (`auto_team_formation` off, player team actions answer 403 w
 | G | 5a84931 | UI pass fixes |
 | A, B, C, D, E (review) | 43e71e8 | admin check-in, solo_only fill loop, guest login limit, lock before status check, count labels |
 | Config test | 987525d | `guest_logins_per_hour` as defaulted key |
-| K1 to K13 | 53f2bf3 | gate round 1 classes |
+| K1 to K13 | ad2ae59 | gate round 1 classes |
+| K5, K2, K11 self-review | 3a9021a | played format and token test, update_tournament row lock, shared window rule, records |
 
 ## Test evidence
 
 - rustfmt `--check` on every changed file and `cargo-slot clippy --workspace --all-targets --features turnier-api/testing,turnier-db/testing -- -D warnings`: clean.
-- `test-db-run dlcentral_test_turniere -- cargo-slot test --workspace --features testing --no-fail-fast` on ionos after the K1 to K13 fixes: 633 passed, 0 failed.
+- `test-db-run dlcentral_test_turniere -- cargo-slot test --workspace --features testing --no-fail-fast` on ionos after the K1 to K13 fixes and again on the final tree (3a9021a plus records): 633 passed, 0 failed; the PUG contract test now also covers the played format and the snapshot token.
 - Frontend: `npm run lint` 0, `npm test` 31/31, `npx tsc -b` 0, `npm run build` 0.
-Commit messages of 1dcf35d, f7e7899, 5a84931 and 43e71e8 were reworded (layer 4 named Twins, claims matched to HEAD); every rewritten commit has the tree of its original.
+Commit messages of 1dcf35d, f7e7899, 5a84931 and 43e71e8 were reworded (layer 4 named Twins, claims matched to HEAD), and the K1 to K13 message was corrected on the add-by-name window; every rewritten commit has the tree of its original (checked per commit, plus git range-diff).
