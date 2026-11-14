@@ -252,6 +252,7 @@ export default function PresetForm({ preset, onDone }: PresetFormProps) {
               <option value="always">{AUTOMATIK_COPY.inviteAlways}</option>
               <option value="window">{AUTOMATIK_COPY.inviteWindow}</option>
               <option value="never">{AUTOMATIK_COPY.inviteNever}</option>
+              <option value="solo_only">{AUTOMATIK_COPY.inviteSoloOnly}</option>
             </select>
           </label>
 

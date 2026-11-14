@@ -463,6 +463,10 @@ pub struct FinalizeCheckinResult {
     pub created_teams: Vec<CreatedTeam>,
     pub deleted_team_ids: Vec<i64>,
     pub remaining_solo_players: Vec<SoloPlayer>,
+    pub auto_team_formation: bool,
+    pub bracket_format: String,
+    pub effective_bracket_format: &'static str,
+    pub bracket_entrants: Option<usize>,
     pub dry_run: bool,
     pub snapshot_token: String,
     pub groups_created: Option<i64>,
@@ -497,6 +501,7 @@ pub struct AddedPlayer {
 pub struct CreatedTeam {
     pub team_id: Option<i64>,
     pub team_name: String,
+    pub members: Vec<SoloPlayer>,
 }
 #[derive(Debug, Clone)]
 pub struct SoloPlayer {
@@ -510,6 +515,7 @@ struct TournamentRow {
     team_size: i64,
     tournament_mode: String,
     bracket_format: String,
+    invite_mode: String,
 }
 
 /// Mitglieds-Sicht im Check-in-Algorithmus. Es werden nur `discord_id` (für die
@@ -585,7 +591,7 @@ pub async fn finalize_checkin(
     }
 
     let tournament: Option<TournamentRow> = sqlx::query_as::<_, TournamentRow>(
-        "SELECT status, team_size, tournament_mode, bracket_format \
+        "SELECT status, team_size, tournament_mode, bracket_format, invite_mode \
          FROM turnier.tournaments WHERE id = $1 FOR UPDATE",
     )
     .bind(tournament_id)
@@ -791,7 +797,8 @@ pub async fn finalize_checkin(
             .fetch_all(&mut *tx)
             .await?;
     let mut name_pool = TeamNamePool::new(existing_keys.into_iter().map(|(k,)| k));
-    while pool.len() >= team_size as usize {
+    let auto_team_formation = tournament.invite_mode != "solo_only";
+    while auto_team_formation && team_size > 0 && pool.len() >= team_size as usize {
         let chunk: Vec<SignupData> = (0..team_size).map(|_| pool.pop_front().unwrap()).collect();
         let captain_name = captain_team_name(&mut tx, tournament_id, chunk[0].discord_id).await?;
         let team_name = name_pool.from_captain(captain_name.as_deref());
@@ -832,6 +839,17 @@ pub async fn finalize_checkin(
             });
         }
     }
+
+    let final_team_count =
+        team_order.len().saturating_sub(deleted_team_ids.len()) + created_teams.len();
+    let bracket_entrants = crate::engine::double_elim::expected_bracket_entrants(
+        &tournament.tournament_mode,
+        final_team_count,
+    );
+    let effective_bracket_format = crate::engine::double_elim::effective_bracket_format(
+        &tournament.bracket_format,
+        bracket_entrants,
+    );
 
     let missing_allowed: Vec<&TeamWarning> = warnings
         .iter()
@@ -1060,6 +1078,12 @@ pub async fn finalize_checkin(
             "added_players": added_players.len(),
             "deleted_team_ids": deleted_team_ids,
             "created_teams": created_teams.iter().map(|t| t.name.clone()).collect::<Vec<_>>(),
+            "created_team_members": created_teams.iter().map(|t| serde_json::json!({
+                "team_name": t.name,
+                "discord_ids": t.members.iter().map(|m| discord_id_to_string(m.discord_id)).collect::<Vec<_>>(),
+            })).collect::<Vec<_>>(),
+            "auto_team_formation": auto_team_formation,
+            "effective_bracket_format": effective_bracket_format,
             "tournament_mode": tournament.tournament_mode,
             "advanced_to_group_phase": params.advance_to_group_phase,
             "advanced_to_bracket": advanced_to_bracket,
@@ -1079,6 +1103,14 @@ pub async fn finalize_checkin(
             .map(|t| CreatedTeam {
                 team_id: t.team_id,
                 team_name: t.name.clone(),
+                members: t
+                    .members
+                    .iter()
+                    .map(|m| SoloPlayer {
+                        discord_id: discord_id_to_string(m.discord_id),
+                        discord_name: m.discord_name.clone(),
+                    })
+                    .collect(),
             })
             .collect(),
         deleted_team_ids,
@@ -1089,6 +1121,10 @@ pub async fn finalize_checkin(
                 discord_name: s.discord_name.clone(),
             })
             .collect(),
+        auto_team_formation,
+        bracket_format: tournament.bracket_format.clone(),
+        effective_bracket_format,
+        bracket_entrants,
         dry_run: !params.confirm,
         snapshot_token,
         groups_created: if params.confirm && params.advance_to_group_phase {

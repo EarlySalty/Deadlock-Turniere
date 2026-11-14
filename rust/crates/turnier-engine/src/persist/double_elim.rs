@@ -9,15 +9,37 @@
 use sqlx::{Postgres, Transaction};
 
 use crate::engine::double_elim::{
-    higher_winners_loser_drop, losers_round_size, total_losers_rounds, total_winners_rounds,
-    wr1_loser_drop,
+    higher_winners_loser_drop, losers_round_size, supports_double_elimination, total_losers_rounds,
+    total_winners_rounds, wr1_loser_drop,
 };
-use crate::engine::seeding::{is_power_of_two, seed_slot_order};
+use crate::engine::seeding::seed_slot_order;
 use crate::engine::slots::BracketSlot;
 use crate::error::{TournamentError, TournamentResult};
 
 use super::bracket::{build_seeded_bracket, DoubleElimInput};
 use super::insert_bracket_match;
+
+async fn record_single_elimination_fallback(
+    tx: &mut Transaction<'_, Postgres>,
+    tournament_id: i64,
+    num_teams: usize,
+) -> TournamentResult<()> {
+    sqlx::query(
+        "UPDATE turnier.tournaments SET bracket_format = 'single_elimination', updated_at = now() \
+         WHERE id = $1 AND bracket_format = 'double_elimination'",
+    )
+    .bind(tournament_id)
+    .execute(&mut **tx)
+    .await?;
+    let details = serde_json::json!({
+        "tournament_id": tournament_id,
+        "num_teams": num_teams,
+        "from": "double_elimination",
+        "to": "single_elimination",
+    })
+    .to_string();
+    super::audit(tx, "bracket_format_fallback", None, &details).await
+}
 
 /// Baut das Double-Elimination-Bracket. Liefert die Anzahl erzeugter Matches.
 /// Fällt für Nicht-Power-of-2 / < 4 Teams auf Single-Elim zurück (wie im
@@ -52,12 +74,13 @@ pub(crate) async fn build_double_elimination_bracket(
     };
 
     let num_teams = fallback_entries.len();
-    if num_teams < 4 || !is_power_of_two(num_teams) {
+    if !supports_double_elimination(num_teams) {
         tracing::warn!(
             tournament_id,
             num_teams,
             "Double-Elimination nur für Power-of-2-Qualifier unterstützt, fallback auf Single-Elim"
         );
+        record_single_elimination_fallback(tx, tournament_id, num_teams).await?;
         return build_seeded_bracket(tx, tournament_id, fallback_entries).await;
     }
 

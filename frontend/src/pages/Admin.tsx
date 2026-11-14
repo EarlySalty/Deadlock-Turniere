@@ -79,12 +79,10 @@ export default function Admin() {
   const liveTournaments = useMemo(
     () =>
       sortByStart(
-        (tournaments ?? []).filter(
-          (t) =>
-            ['draft', 'registration', 'checkin', 'group_phase', 'bracket'].includes(t.status) &&
-            !t.is_test,
+        (tournaments ?? []).filter((t) =>
+          ['draft', 'registration', 'checkin', 'group_phase', 'bracket'].includes(t.status),
         ),
-      ),
+      ).sort((a, b) => Number(a.is_test) - Number(b.is_test)),
     [tournaments],
   )
   const archivedTournaments = useMemo(
@@ -239,7 +237,7 @@ export default function Admin() {
 
       {adminMode === 'live' && (
         <div className="grid gap-6 lg:grid-cols-[280px_1fr]">
-          <aside className="lg:sticky lg:top-4 lg:self-start lg:max-h-[calc(100vh-2rem)] lg:overflow-y-auto">
+          <aside className="lg:sticky lg:top-20 lg:self-start lg:max-h-[calc(100vh-6rem)] lg:overflow-y-auto">
             <TournamentSidebar
               tournaments={liveTournaments}
               selectedId={liveSelectedId}
@@ -476,7 +474,7 @@ export default function Admin() {
 
       {adminMode === 'archive' && (
         <div className="grid gap-6 lg:grid-cols-[320px_1fr]">
-          <aside className="lg:sticky lg:top-4 lg:self-start lg:max-h-[calc(100vh-2rem)] lg:overflow-y-auto">
+          <aside className="lg:sticky lg:top-20 lg:self-start lg:max-h-[calc(100vh-6rem)] lg:overflow-y-auto">
             <Card className="space-y-3 p-4">
               <h2 className="flex items-center gap-2 text-sm font-semibold uppercase tracking-wider text-muted">
                 <Archive size={14} />

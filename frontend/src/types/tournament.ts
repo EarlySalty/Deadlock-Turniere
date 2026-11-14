@@ -4,7 +4,7 @@ export type TournamentMode = 'group_stage' | 'bracket_only' | 'league'
 export type TournamentGameMode = 'standard' | 'mirror' | 'all_same' | 'random_heroes' | 'single_lane'
 export type MatchStatus = 'pending' | 'checkin' | 'lobby_created' | 'in_progress' | 'completed' | 'forfeit' | 'cancelled'
 export type RecruitmentStatus = 'open' | 'application' | 'closed'
-export type InviteMode = 'always' | 'window' | 'never'
+export type InviteMode = 'always' | 'window' | 'never' | 'solo_only'
 export type Category = 'fun' | 'comp'
 export type DmScope = 'fun' | 'comp' | 'all'
 export type ProposalState = 'draft' | 'pending_approval' | 'approved' | 'rejected' | 'expired'
@@ -212,7 +212,15 @@ export interface FinalizeCheckinResult {
   warnings: FinalizeCheckinWarning[]
   removed_players: FinalizeCheckinPlayerChange[]
   added_players: FinalizeCheckinPlayerChange[]
-  created_teams: { team_id: number | null; team_name: string }[]
+  created_teams: {
+    team_id: number | null
+    team_name: string
+    members: { discord_id: string; discord_name: string | null }[]
+  }[]
+  auto_team_formation: boolean
+  bracket_format: BracketFormat
+  effective_bracket_format: BracketFormat
+  bracket_entrants: number | null
   deleted_team_ids: number[]
   remaining_solo_players: {
     discord_id: string
@@ -689,6 +697,7 @@ export interface CreateTestTournamentRequest {
   mode: 'bracket_only' | 'group_then_bracket' | 'league'
   tournament_game_mode?: TournamentGameMode
   advance_to?: 'checkin' | 'group_phase' | 'bracket'
+  solo_signups?: boolean
 }
 
 export interface CreateTestTournamentResult {

@@ -6,6 +6,29 @@
 //! abgesichert. 1:1 portiert aus `engine.py`
 //! (`_double_elimination_losers_round_size` und die zwei Loser-Drop-Schleifen).
 
+pub fn supports_double_elimination(entrants: usize) -> bool {
+    entrants >= 4 && crate::engine::seeding::is_power_of_two(entrants)
+}
+
+pub fn expected_bracket_entrants(tournament_mode: &str, team_count: usize) -> Option<usize> {
+    match tournament_mode {
+        "league" => None,
+        "group_stage" => {
+            let groups = crate::engine::groups::auto_num_groups(team_count);
+            Some((groups * 2).min(team_count))
+        }
+        _ => Some(team_count),
+    }
+}
+
+pub fn effective_bracket_format(stored_format: &str, entrants: Option<usize>) -> &'static str {
+    match (stored_format, entrants) {
+        ("double_elimination", Some(n)) if !supports_double_elimination(n) => "single_elimination",
+        ("double_elimination", _) => "double_elimination",
+        _ => "single_elimination",
+    }
+}
+
 /// Anzahl der Matches einer Losers-Bracket-Runde.
 ///
 /// Portiert `_double_elimination_losers_round_size(num_teams, round_num)`:
@@ -59,6 +82,25 @@ pub fn higher_winners_loser_drop(position: usize, destination_count: usize) -> u
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn double_elimination_fallback_contract() {
+        assert!(!supports_double_elimination(5));
+        assert!(!supports_double_elimination(2));
+        assert!(supports_double_elimination(8));
+        assert_eq!(
+            effective_bracket_format("double_elimination", Some(5)),
+            "single_elimination"
+        );
+        assert_eq!(
+            effective_bracket_format("double_elimination", Some(4)),
+            "double_elimination"
+        );
+        assert_eq!(expected_bracket_entrants("bracket_only", 5), Some(5));
+        assert_eq!(expected_bracket_entrants("group_stage", 4), Some(4));
+        assert_eq!(expected_bracket_entrants("group_stage", 12), Some(6));
+        assert_eq!(expected_bracket_entrants("league", 6), None);
+    }
+
     use super::*;
 
     #[test]

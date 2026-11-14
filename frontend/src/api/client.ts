@@ -449,6 +449,15 @@ export const deleteAdminSignup = (tournamentId: number, signupId: number) =>
     method: 'DELETE',
   })
 
+export const addAdminSignupByName = (tournamentId: number, name: string) =>
+  request<TournamentSignup>(`/admin/tournaments/${tournamentId}/signups`, {
+    method: 'POST',
+    body: JSON.stringify({ name }),
+  })
+
+export const fetchAdminCheckins = (tournamentId: number) =>
+  request<{ discord_id: string; checked_in_at: string }[]>(`/admin/tournaments/${tournamentId}/checkins`)
+
 // Groups & Bracket Generation
 export const generateGroups = (tournamentId: number, numGroups: number = 4, slotMinutes?: number) =>
   request<{ groups_created: number; matches_created: number }>(

@@ -75,6 +75,7 @@ async fn create_team(
     let user_discord_id = db::parse_discord_id(&user.discord_id)?;
 
     let t = helpers::load_tournament_or_404(pool, tournament_id).await?;
+    helpers::ensure_player_teams_allowed(&t)?;
     helpers::ensure_registration_open(&t.status)?;
 
     // Name-Einzigartigkeit (casefold).
@@ -109,6 +110,13 @@ async fn create_team(
     let rank = helpers::load_rank_input(&state, &user.discord_id).await;
 
     let mut tx = pool.begin().await?;
+    helpers::ensure_guest_name_free(
+        &mut tx,
+        tournament_id,
+        user_discord_id,
+        user.discord_name.as_deref(),
+    )
+    .await?;
     let team_id: i64 = sqlx::query_scalar(
         r#"INSERT INTO turnier."teams"
          (tournament_id, name, name_key, captain_discord_id, created_at, recruitment_status)
@@ -164,14 +172,21 @@ async fn join_team(
     let user_discord_id = db::parse_discord_id(&user.discord_id)?;
 
     let t = helpers::load_tournament_or_404(pool, tournament_id).await?;
+    helpers::ensure_player_teams_allowed(&t)?;
     helpers::ensure_registration_open(&t.status)?;
     helpers::load_team_or_404(pool, tournament_id, team_id).await?;
 
     let rank = helpers::load_rank_input(&state, &user.discord_id).await;
 
     let mut tx = pool.begin().await?;
+    helpers::ensure_guest_name_free(
+        &mut tx,
+        tournament_id,
+        user_discord_id,
+        user.discord_name.as_deref(),
+    )
+    .await?;
 
-    // Team-Größe prüfen.
     helpers::ensure_team_has_capacity(&mut *tx, team_id, t.team_size).await?;
 
     // Bereits in einem Team dieses Turniers? → automatisch austreten.
@@ -314,6 +329,7 @@ async fn update_team_recruiting(
 
     let pool = &state.pool;
     let t = helpers::load_tournament_or_404(pool, tournament_id).await?;
+    helpers::ensure_player_teams_allowed(&t)?;
     helpers::ensure_registration_open(&t.status)?;
     let team = helpers::load_team_or_404(pool, tournament_id, team_id).await?;
     helpers::ensure_captain_or_mod(&user, &team.captain_discord_id)?;
@@ -341,6 +357,7 @@ async fn kick_team_member(
 
     let pool = &state.pool;
     let t = helpers::load_tournament_or_404(pool, tournament_id).await?;
+    helpers::ensure_player_teams_allowed(&t)?;
     if t.status != "registration" {
         return Err(WebError::bad_request("Anmeldung ist nicht geöffnet"));
     }
@@ -504,6 +521,7 @@ async fn invite_to_team(
 
     let pool = &state.pool;
     let t = helpers::load_tournament_or_404(pool, tournament_id).await?;
+    helpers::ensure_player_teams_allowed(&t)?;
     if t.status != "registration" {
         return Err(WebError::bad_request("Anmeldung ist nicht geöffnet"));
     }

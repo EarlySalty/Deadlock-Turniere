@@ -46,6 +46,7 @@ export const AUTOMATIK_COPY = {
   inviteAlways: 'Immer erlaubt',
   inviteWindow: 'Nur im Zeitfenster',
   inviteNever: 'Deaktiviert (Auto-Balance)',
+  inviteSoloOnly: 'Nur Solo-Anmeldung (PUG, Orga bildet Teams)',
   reminderOffsetsLabel: 'Reminder vor Turnier-Start (Minuten)',
   startReminderOffsetsLabel: 'Erinnerung vor Match-Start (Minuten)',
   rulesLabel: 'Regelwerk',

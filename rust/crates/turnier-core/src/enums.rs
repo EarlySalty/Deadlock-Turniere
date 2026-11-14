@@ -73,7 +73,7 @@ str_enum! {
 
 str_enum! {
     /// Einladungspolitik eines Turniers.
-    InviteMode { Always, Window, Never }
+    InviteMode { Always, Window, Never, SoloOnly }
 }
 
 str_enum! {

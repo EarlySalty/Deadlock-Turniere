@@ -321,6 +321,7 @@ export default function TestModePanel() {
               <label className="text-xs text-muted">Sofort advancen bis</label>
               <select
                 value={tournamentForm.advance_to}
+                disabled={tournamentForm.solo_signups ?? false}
                 onChange={(e) =>
                   setTournamentForm({
                     ...tournamentForm,
@@ -336,9 +337,27 @@ export default function TestModePanel() {
                 {tournamentForm.mode === 'league' && (
                   <option value="group_phase">Spielplan</option>
                 )}
-                {tournamentForm.mode !== 'league' && <option value="bracket">Bracket</option>}
+                {tournamentForm.mode !== 'league' && !tournamentForm.solo_signups && <option value="bracket">Bracket</option>}
               </select>
             </div>
+            <label className="flex items-start gap-2 text-sm text-foreground sm:col-span-2">
+              <input
+                type="checkbox"
+                checked={tournamentForm.solo_signups ?? false}
+                onChange={(e) =>
+                  setTournamentForm({
+                    ...tournamentForm,
+                    solo_signups: e.target.checked,
+                    advance_to: e.target.checked ? 'checkin' : tournamentForm.advance_to,
+                  })
+                }
+                className="mt-1"
+              />
+              <span>
+                PUG-Probe: alle Spieler nur solo angemeldet und eingecheckt, ohne Teams. Das Turnier bleibt im
+                Check-in und erscheint unter „Live“ mit dem Hinweis „Test“.
+              </span>
+            </label>
           </div>
           <Button
             variant="primary"

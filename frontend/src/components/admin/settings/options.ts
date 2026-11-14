@@ -88,6 +88,11 @@ export const INVITE_MODE_OPTIONS: Choice<InviteMode>[] = [
     label: 'Keine Einladungen',
     description: 'Captains können niemanden einladen. Teams gründen, beitreten und sich bewerben geht weiterhin.',
   },
+  {
+    value: 'solo_only',
+    label: 'Nur Solo-Anmeldung (PUG)',
+    description: 'Spieler melden sich nur einzeln an. Teams gründen, beitreten, bewerben und einladen ist aus. Das Orga-Team baut die Teams im Team-Builder, und beim Check-in-Abschluss entstehen keine automatischen Teams.',
+  },
 ]
 
 export const MATCH_OBJECTIVE_OPTIONS: { value: string; label: string }[] = [

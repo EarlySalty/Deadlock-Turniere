@@ -123,7 +123,7 @@ export default function Leitstand({ tournamentId }: LeitstandProps) {
           <CheckCircle2 size={16} className="text-green-400" />
         )}
         <h2 className="text-sm font-semibold uppercase tracking-wider text-foreground">
-          Aktion erforderlich
+          {items.length > 0 ? 'Aktion erforderlich' : 'Gemeldete Ergebnisse'}
         </h2>
         {items.length > 0 && (
           <span className="rounded-full bg-warning/20 px-2 py-0.5 text-[10px] font-medium text-warning">

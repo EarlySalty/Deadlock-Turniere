@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type DragEvent } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
-import { AlertCircle, Pencil, Plus, Save, Star, Trash2, Undo2, UserMinus, Users } from 'lucide-react'
+import { AlertCircle, Pencil, Plus, Save, Star, Trash2, Undo2, UserMinus, UserPlus, Users, X } from 'lucide-react'
 import Card from '@/components/ui/Card'
 import Button from '@/components/ui/Button'
 import {
@@ -24,6 +24,7 @@ import {
 } from '@/lib/teamBuilder'
 import { saveTeamBuilder, type SaveContext } from '@/components/admin/teamBuilderSave'
 import { readDraft, writeDraft } from '@/components/admin/teamBuilderDrafts'
+import { useAddAdminSignupByName, useDeleteAdminSignup } from '@/hooks/useTournament'
 import type { Team, TournamentSignup } from '@/types/tournament'
 
 interface TeamBuilderPanelProps {
@@ -330,11 +331,49 @@ function TeamCard(props: TeamCardProps) {
 interface PoolProps {
   pool: BuilderPlayer[]
   selectedId: string | null
+  removableIds: Set<string>
   onSelect: (discordId: string) => void
   onPlace: (discordId: string, teamKey: string | null) => void
+  onRemove: (player: BuilderPlayer) => void
+  onAdd: (name: string) => Promise<boolean>
 }
 
-function PoolColumn({ pool, selectedId, onSelect, onPlace }: PoolProps) {
+function AddPlayerForm({ onAdd }: { onAdd: (name: string) => Promise<boolean> }) {
+  const [name, setName] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  const submit = async () => {
+    const trimmed = name.trim()
+    if (!trimmed || busy) return
+    setBusy(true)
+    const added = await onAdd(trimmed)
+    setBusy(false)
+    if (added) setName('')
+  }
+
+  return (
+    <div className="space-y-1">
+      <div className="flex gap-2">
+        <input
+          value={name}
+          maxLength={32}
+          onChange={(event) => setName(event.target.value)}
+          onKeyDown={(event) => event.key === 'Enter' && void submit()}
+          placeholder="Spieler ohne Anmeldung"
+          aria-label="Name eines Spielers ohne Anmeldung"
+          className="min-w-0 flex-1 rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
+        />
+        <Button variant="secondary" size="sm" disabled={!name.trim() || busy} onClick={() => void submit()}>
+          <UserPlus size={14} />
+          Hinzufügen
+        </Button>
+      </div>
+      <p className="text-xs text-muted">Für Spieler, die nur im Voice dabei sind. Im Check-in gelten sie sofort als eingecheckt.</p>
+    </div>
+  )
+}
+
+function PoolColumn({ pool, selectedId, removableIds, onSelect, onPlace, onRemove, onAdd }: PoolProps) {
   const [filter, setFilter] = useState('')
   const visible = pool.filter((player) => matchesFilter(player, filter))
   const selectedInTeam = selectedId !== null && !pool.some((p) => p.discordId === selectedId)
@@ -354,6 +393,7 @@ function PoolColumn({ pool, selectedId, onSelect, onPlace }: PoolProps) {
         aria-label="Spieler filtern"
         className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
       />
+      <AddPlayerForm onAdd={onAdd} />
       {selectedInTeam && (
         <Button variant="secondary" size="sm" className="w-full" onClick={() => onPlace(selectedId, null)}>
           <Undo2 size={14} />
@@ -367,8 +407,21 @@ function PoolColumn({ pool, selectedId, onSelect, onPlace }: PoolProps) {
       ) : (
         <ul className="max-h-[32rem] space-y-1.5 overflow-y-auto pr-1">
           {visible.map((player) => (
-            <li key={player.discordId}>
-              <PlayerChip player={player} selected={selectedId === player.discordId} onSelect={onSelect} />
+            <li key={player.discordId} className="flex items-center gap-1">
+              <div className="min-w-0 flex-1">
+                <PlayerChip player={player} selected={selectedId === player.discordId} onSelect={onSelect} />
+              </div>
+              {removableIds.has(player.discordId) && (
+                <button
+                  type="button"
+                  onClick={() => onRemove(player)}
+                  aria-label={`${player.name} aus dem Turnier entfernen`}
+                  title="Aus dem Turnier entfernen"
+                  className="shrink-0 rounded p-1.5 text-muted hover:bg-red-500/10 hover:text-red-300"
+                >
+                  <X size={15} />
+                </button>
+              )}
             </li>
           ))}
         </ul>
@@ -444,8 +497,40 @@ export default function TeamBuilderPanel({ tournamentId, teamSize, teams, signup
   const changeCount = steps.length + captains.length
   const saving = progress !== null
 
-  useEffect(() => writeDraft(tournamentId, { edits, renames }), [tournamentId, edits, renames])
+  useEffect(() => writeDraft(tournamentId, { edits, renames }, changeCount), [tournamentId, edits, renames, changeCount])
   useUnloadWarning(changeCount > 0)
+
+  const deleteSignup = useDeleteAdminSignup()
+  const addSignup = useAddAdminSignupByName(tournamentId)
+  const removableIds = useMemo(
+    () => new Set(signups.filter((signup) => signup.team_id === null).map((signup) => signup.discord_id)),
+    [signups],
+  )
+
+  const removePlayer = (player: BuilderPlayer) => {
+    if (saving || player.signupId === null) return
+    if (!window.confirm(`${player.name} aus dem Turnier entfernen? Anmeldung und Check-in werden gelöscht.`)) return
+    setNotice(null)
+    deleteSignup.mutate(
+      { tournamentId, signupId: player.signupId },
+      {
+        onSuccess: () => setNotice({ tone: 'ok', text: `${player.name} wurde aus dem Turnier entfernt.` }),
+        onError: (error) => setNotice({ tone: 'error', text: error instanceof Error ? error.message : 'Entfernen fehlgeschlagen.' }),
+      },
+    )
+  }
+
+  const addPlayer = async (name: string): Promise<boolean> => {
+    setNotice(null)
+    try {
+      await addSignup.mutateAsync(name)
+      setNotice({ tone: 'ok', text: `${name} steht jetzt in der Liste.` })
+      return true
+    } catch (error) {
+      setNotice({ tone: 'error', text: error instanceof Error ? error.message : 'Hinzufügen fehlgeschlagen.' })
+      return false
+    }
+  }
 
   const edit = (change: (current: BuilderEdits) => BuilderEdits) => {
     if (!saving) setEdits(change)
@@ -532,11 +617,33 @@ export default function TeamBuilderPanel({ tournamentId, teamSize, teams, signup
         </div>
       </div>
 
+      {changeCount > 0 && !saving && (
+        <div role="status" className="flex flex-wrap items-center gap-3 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-200">
+          <AlertCircle size={16} className="shrink-0" />
+          <span className="min-w-0 flex-1">
+            {changeCount === 1 ? '1 Änderung ist noch nicht gespeichert.' : `${changeCount} Änderungen sind noch nicht gespeichert.`}{' '}
+            Die öffentliche Seite und der Check-in-Abschluss sehen nur gespeicherte Teams.
+          </span>
+          <Button variant="primary" size="sm" onClick={() => void save()}>
+            <Save size={14} />
+            Jetzt speichern
+          </Button>
+        </div>
+      )}
+
       <fieldset disabled={saving} className="min-w-0 space-y-4">
         <NewTeamForm teams={view.teams} onCreate={createTeam} />
 
         <div className="grid gap-4 md:grid-cols-[minmax(0,17rem)_minmax(0,1fr)]">
-          <PoolColumn pool={view.pool} selectedId={selectedId} onSelect={select} onPlace={place} />
+          <PoolColumn
+            pool={view.pool}
+            selectedId={selectedId}
+            removableIds={removableIds}
+            onSelect={select}
+            onPlace={place}
+            onRemove={removePlayer}
+            onAdd={addPlayer}
+          />
           {view.teams.length === 0 ? (
             <p className="rounded-xl border border-dashed border-border p-4 text-sm text-muted">
               Noch kein Team. Lege oben eins an.

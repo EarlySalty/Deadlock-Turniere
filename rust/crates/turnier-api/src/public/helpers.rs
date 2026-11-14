@@ -1029,6 +1029,81 @@ pub async fn load_team_or_404(
 
 /// Prüft, ob die Anmeldung offen ist (status in registration|checkin), 400 sonst.
 /// Entspricht `_ensure_registration_open` (routes.py:441).
+pub const GUEST_NAME_TAKEN: &str = "Dieser Name ist in diesem Turnier schon angemeldet. Bitte wähle einen anderen Namen oder melde dich beim Orga-Team.";
+
+pub async fn ensure_guest_name_free(
+    tx: &mut sqlx::Transaction<'_, Postgres>,
+    tournament_id: i64,
+    participant_id: i64,
+    name: Option<&str>,
+) -> WebResult<()> {
+    if participant_id >= 0 {
+        return Ok(());
+    }
+    ensure_participant_name_free(
+        tx,
+        tournament_id,
+        name.unwrap_or(""),
+        participant_id,
+        GUEST_NAME_TAKEN,
+    )
+    .await
+}
+
+pub async fn ensure_participant_name_free(
+    tx: &mut sqlx::Transaction<'_, Postgres>,
+    tournament_id: i64,
+    name: &str,
+    own_id: i64,
+    taken_message: &str,
+) -> WebResult<()> {
+    sqlx::query(r#"SELECT id FROM turnier."tournaments" WHERE id = $1 FOR UPDATE"#)
+        .bind(tournament_id)
+        .execute(&mut **tx)
+        .await?;
+    let taken: Option<i64> = sqlx::query_scalar(
+        r#"SELECT 1::BIGINT FROM turnier."tournament_signups"
+         WHERE tournament_id = $1 AND discord_id <> $3
+           AND lower(btrim(discord_name)) = lower(btrim($2))
+         UNION ALL
+         SELECT 1::BIGINT FROM turnier."team_members" tm JOIN turnier."teams" t ON t.id = tm.team_id
+         WHERE t.tournament_id = $1 AND tm.discord_id <> $3
+           AND lower(btrim(tm.discord_name)) = lower(btrim($2))
+         LIMIT 1"#,
+    )
+    .bind(tournament_id)
+    .bind(name)
+    .bind(own_id)
+    .fetch_optional(&mut **tx)
+    .await?;
+    if taken.is_some() {
+        return Err(WebError::conflict(taken_message));
+    }
+    Ok(())
+}
+
+pub async fn remove_signup_and_checkin(
+    tx: &mut sqlx::Transaction<'_, Postgres>,
+    tournament_id: i64,
+    discord_id: i64,
+) -> WebResult<()> {
+    sqlx::query(
+        r#"DELETE FROM turnier."tournament_signups" WHERE tournament_id = $1 AND discord_id = $2"#,
+    )
+    .bind(tournament_id)
+    .bind(discord_id)
+    .execute(&mut **tx)
+    .await?;
+    sqlx::query(
+        r#"DELETE FROM turnier."tournament_checkins" WHERE tournament_id = $1 AND discord_id = $2"#,
+    )
+    .bind(tournament_id)
+    .bind(discord_id)
+    .execute(&mut **tx)
+    .await?;
+    Ok(())
+}
+
 pub fn ensure_registration_open(status: &str) -> WebResult<()> {
     if status != "registration" && status != "checkin" {
         return Err(WebError::bad_request("Anmeldung ist nicht geöffnet"));
@@ -1065,6 +1140,17 @@ pub fn ensure_captain_or_mod(user: &UserSession, captain_discord_id: &str) -> We
 /// Prüft, ob Einladungen erlaubt sind, und liefert ggf. das Ablaufdatum
 /// (Window-Ende). 403 bei `never` oder außerhalb des Fensters.
 /// Entspricht `_ensure_invites_enabled` (routes.py:470).
+pub const SOLO_ONLY_MODE: &str = "solo_only";
+
+pub fn ensure_player_teams_allowed(t: &TournamentGuard) -> WebResult<()> {
+    if t.invite_mode.as_deref() == Some(SOLO_ONLY_MODE) {
+        return Err(WebError::forbidden(
+            "In diesem Turnier stellt das Orga-Team die Teams zusammen. Melde dich bitte solo an.",
+        ));
+    }
+    Ok(())
+}
+
 pub fn ensure_invites_enabled(t: &TournamentGuard) -> WebResult<Option<String>> {
     // Vergleich auf den rohen DB-String wie im Original (`mode == InviteMode.x.value`);
     // leerer/NULL-Wert defaultet auf "always".

@@ -38,6 +38,7 @@ const GAME_MODE_LABEL: Record<TournamentGameMode, string> = {
   single_lane: 'Single Lane Battle',
 }
 import { ApiError } from '@/api/client'
+import { bracketFormatLabel, effectiveBracketFormat } from '@/lib/bracketFormat'
 import ReactMarkdown from 'react-markdown'
 
 type Tab = 'übersicht' | 'kodex' | 'gruppen' | 'bracket' | 'teams' | 'ergebnisse' | 'rangliste'
@@ -262,6 +263,11 @@ export default function Tournament() {
   const tournamentStart = plannedTournamentStart(tournament)
   const isSignupOpen = ['registration', 'checkin'].includes(tournament.status)
   const isCheckinPhase = tournament.status === 'checkin'
+  const soloOnly = tournament.invite_mode === 'solo_only'
+  const formatLabel = bracketFormatLabel(effectiveBracketFormat(tournament.bracket_format, tournament.bracket_matches))
+  const registrationLabel = tournament.teams.length > 0
+    ? `${tournament.teams.length} Teams gemeldet`
+    : `${tournament.signups.length} Spieler angemeldet`
 
   // User state from status endpoint (no discord_id scanning needed)
   const userTeam = myStatus?.team_id != null
@@ -290,6 +296,21 @@ export default function Tournament() {
     acceptInviteMutation.isPending ||
     rejectInviteMutation.isPending ||
     applyMutation.isPending
+
+  const actionErrors = [
+    createTeamMutation,
+    joinTeamMutation,
+    signupSoloMutation,
+    withdrawSoloMutation,
+    leaveTeamMutation,
+    checkinMutation,
+    acceptInviteMutation,
+    rejectInviteMutation,
+    applyMutation,
+  ]
+    .map((mutation) => mutation.error)
+    .filter((error): error is Error => error instanceof Error && error.message !== 'CONSENT_REQUIRED')
+    .map((error) => error.message)
 
   // Consent-aware action wrapper
   const withConsent = (action: () => void) => {
@@ -410,11 +431,11 @@ export default function Tournament() {
             </div>
             <div className="space-y-1">
               <p className="text-[10px] uppercase font-bold text-muted tracking-widest">Anmeldungen</p>
-              <p className="text-sm font-bold text-foreground uppercase">{tournament.teams.length} Teams gemeldet</p>
+              <p className="text-sm font-bold text-foreground uppercase">{registrationLabel}</p>
             </div>
             <div className="space-y-1">
               <p className="text-[10px] uppercase font-bold text-muted tracking-widest">Format</p>
-              <p className="text-sm font-bold text-foreground uppercase">{league ? LEAGUE_LABEL : tournament.bracket_format === 'single_elimination' ? 'Single Elim.' : 'Double Elim.'}</p>
+              <p className="text-sm font-bold text-foreground uppercase">{league ? LEAGUE_LABEL : formatLabel}</p>
             </div>
             {tournament.tournament_game_mode !== 'standard' && (
               <div className="space-y-1">
@@ -428,11 +449,11 @@ export default function Tournament() {
 
       {/* Action Banner Group */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {signupSoloMutation.isError && (
-          <p role="alert" className="md:col-span-2 rounded-lg border border-red-500/20 bg-red-500/10 p-4 text-sm text-red-400">
-            {signupSoloMutation.error.message}
+        {actionErrors.map((message, index) => (
+          <p key={`${index}-${message}`} role="alert" className="md:col-span-2 rounded-lg border border-red-500/20 bg-red-500/10 p-4 text-sm text-red-400">
+            {message}
           </p>
-        )}
+        ))}
         {/* Success message */}
         {successMsg && (
           <motion.div
@@ -461,7 +482,7 @@ export default function Tournament() {
               </div>
               <div className="flex items-center justify-between">
                 <div className="text-xs text-muted">
-                  <span className="text-foreground font-bold">{checkinStatus?.total_checked_in ?? 0}</span> / {checkinStatus?.total_registered ?? tournament.signups.length} bereit
+                  <span className="text-foreground font-bold">{checkinStatus?.total_checked_in ?? 0}</span> / {checkinStatus?.total_registered ?? tournament.signups.length} eingecheckt
                 </div>
                 {isLoggedIn && isUserRegistered && (
                   <Button
@@ -616,14 +637,20 @@ export default function Tournament() {
                         </div>
                      ) : !userTeam && !userHasSoloSignup ? (
                         <div className="space-y-4">
-                          <p className="text-muted italic text-sm">Melde dich allein an oder gründe ein Team.</p>
+                          <p className="text-muted italic text-sm">
+                            {soloOnly
+                              ? 'Melde dich einzeln an. Das Orga-Team stellt die Teams zusammen.'
+                              : 'Melde dich allein an oder gründe ein Team.'}
+                          </p>
                           <div className="flex flex-wrap gap-4">
                             <Button variant="primary" onClick={handleSignupSolo} disabled={signupSoloMutation.isPending}>
                               Solo anmelden
                             </Button>
-                            <Button variant="secondary" onClick={() => setActiveTab('teams')}>
-                              Team gründen
-                            </Button>
+                            {!soloOnly && (
+                              <Button variant="secondary" onClick={() => setActiveTab('teams')}>
+                                Team gründen
+                              </Button>
+                            )}
                           </div>
                         </div>
                      ) : userHasSoloSignup && !userTeam ? (
@@ -664,6 +691,12 @@ export default function Tournament() {
                 <Card className="p-6">
                   <h3 className="text-xs font-bold uppercase tracking-widest text-muted mb-4 border-b border-white/5 pb-2">Hinweise</h3>
                   <div className="space-y-4">
+                    {soloOnly && (
+                       <div className="space-y-1">
+                          <p className="text-[10px] uppercase font-bold text-primary tracking-widest">PUG</p>
+                          <p className="text-xs text-foreground italic">Nur Solo-Anmeldung. Die Teams stellt das Orga-Team zusammen.</p>
+                       </div>
+                    )}
                     {tournament.invite_mode === 'window' && (
                        <div className="space-y-1">
                           <p className="text-[10px] uppercase font-bold text-amber-500 tracking-widest">Einladungsfenster</p>
@@ -724,7 +757,7 @@ export default function Tournament() {
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
               {/* Sidebar: Your Team / Create Team */}
               <div className="space-y-6">
-                 {isSignupOpen && isLoggedIn && !userTeam && !userHasSoloSignup && (
+                 {isSignupOpen && !soloOnly && isLoggedIn && !userTeam && !userHasSoloSignup && (
                     <Card className="p-6 space-y-6 border-primary/10">
                       <h3 className="text-sm font-bold uppercase tracking-widest text-foreground">Team gründen</h3>
                       <div className="space-y-4">
@@ -873,7 +906,7 @@ export default function Tournament() {
                              )}
                           </div>
 
-                          {!isMyTeam && isSignupOpen && (
+                          {!isMyTeam && isSignupOpen && !soloOnly && (
                             <div className="pt-2">
                                {team.recruitment_status === 'open' ? (
                                  <Button variant="secondary" size="sm" className="w-full" onClick={() => handleJoinTeam(team)}>

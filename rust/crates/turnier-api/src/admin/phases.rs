@@ -5,7 +5,7 @@
 use std::collections::HashSet;
 
 use axum::extract::{Path, Query, State};
-use axum::routing::post;
+use axum::routing::{get, post};
 use axum::{Json, Router};
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -27,9 +27,38 @@ pub fn router() -> Router<AppState> {
             post(finalize_checkin_route),
         )
         .route(
+            "/api/admin/tournaments/{tournament_id}/checkins",
+            get(list_checkins),
+        )
+        .route(
             "/api/admin/tournaments/{tournament_id}/assign-random",
             post(assign_random),
         )
+}
+
+async fn list_checkins(
+    State(state): State<AppState>,
+    ModUser(_user): ModUser,
+    Path(tournament_id): Path<i64>,
+) -> WebResult<Json<Value>> {
+    load_tournament_or_404(&state.pool, tournament_id).await?;
+    let rows: Vec<(i64, chrono::DateTime<chrono::Utc>)> = sqlx::query_as(
+        r#"SELECT discord_id, checked_in_at FROM turnier."tournament_checkins"
+         WHERE tournament_id = $1 ORDER BY checked_in_at, id"#,
+    )
+    .bind(tournament_id)
+    .fetch_all(&state.pool)
+    .await?;
+    Ok(Json(Value::Array(
+        rows.into_iter()
+            .map(|(discord_id, checked_in_at)| {
+                json!({
+                    "discord_id": crate::db::discord_id_to_string(discord_id),
+                    "checked_in_at": crate::db::ts_to_string(checked_in_at),
+                })
+            })
+            .collect(),
+    )))
 }
 
 /// Query-Parameter `?confirm=bool` für die Check-in-Finalisierung.
@@ -116,7 +145,15 @@ async fn finalize_checkin_route(
         "created_teams": result.created_teams.iter().map(|t| json!({
             "team_id": t.team_id,
             "team_name": t.team_name,
+            "members": t.members.iter().map(|m| json!({
+                "discord_id": m.discord_id,
+                "discord_name": m.discord_name,
+            })).collect::<Vec<_>>(),
         })).collect::<Vec<_>>(),
+        "auto_team_formation": result.auto_team_formation,
+        "bracket_format": result.bracket_format,
+        "effective_bracket_format": result.effective_bracket_format,
+        "bracket_entrants": result.bracket_entrants,
         "deleted_team_ids": result.deleted_team_ids,
         "remaining_solo_players": result.remaining_solo_players.iter().map(|p| json!({
             "discord_id": p.discord_id,

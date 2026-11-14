@@ -73,6 +73,14 @@ async fn solo_signup(
 
     let mut tx = pool.begin().await?;
 
+    helpers::ensure_guest_name_free(
+        &mut tx,
+        tournament_id,
+        user_discord_id,
+        user.discord_name.as_deref(),
+    )
+    .await?;
+
     sqlx::query(
         r#"INSERT INTO turnier."tournament_signups"
          (tournament_id, discord_id, discord_name, steam_id, rank, rank_score, signed_up_at)
@@ -159,7 +167,6 @@ async fn solo_signup(
 }
 
 /// `DELETE /api/tournaments/{tournament_id}/signup`: Solo-Anmeldung zurückziehen.
-/// Nur bei `status = 'registration'` und wenn `team_id` NULL ist.
 async fn cancel_solo_signup(
     State(state): State<AppState>,
     AuthUser(user): AuthUser,
@@ -169,16 +176,20 @@ async fn cancel_solo_signup(
     let user_discord_id = db::parse_discord_id(&user.discord_id)?;
 
     let t = helpers::load_tournament_or_404(pool, tournament_id).await?;
-    if t.status != "registration" {
-        return Err(WebError::bad_request("Anmeldung ist nicht geöffnet"));
+    if t.status != "registration" && t.status != "checkin" {
+        return Err(WebError::bad_request(
+            "Austragen ist nur bis zum Ende des Check-ins möglich",
+        ));
     }
 
+    let mut tx = pool.begin().await?;
     let signup: Option<(Option<i64>,)> = sqlx::query_as(
-        r#"SELECT team_id FROM turnier."tournament_signups" WHERE tournament_id = $1 AND discord_id = $2"#,
+        r#"SELECT team_id FROM turnier."tournament_signups"
+         WHERE tournament_id = $1 AND discord_id = $2 FOR UPDATE"#,
     )
     .bind(tournament_id)
     .bind(user_discord_id)
-    .fetch_optional(pool)
+    .fetch_optional(&mut *tx)
     .await?;
     let Some((team_id,)) = signup else {
         return Err(WebError::not_found("Keine Anmeldung gefunden"));
@@ -189,13 +200,15 @@ async fn cancel_solo_signup(
         ));
     }
 
-    sqlx::query(
-        r#"DELETE FROM turnier."tournament_signups" WHERE tournament_id = $1 AND discord_id = $2"#,
+    helpers::remove_signup_and_checkin(&mut tx, tournament_id, user_discord_id).await?;
+    helpers::audit(
+        &mut *tx,
+        "signup_withdraw",
+        Some(&user.discord_id),
+        &json!({ "tournament_id": tournament_id, "discord_id": user.discord_id, "status": t.status }),
     )
-    .bind(tournament_id)
-    .bind(user_discord_id)
-    .execute(pool)
     .await?;
+    tx.commit().await?;
 
     Ok(Json(
         json!({ "status": "abgemeldet", "tournament_id": tournament_id }),

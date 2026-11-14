@@ -76,6 +76,10 @@ pub fn router() -> Router<AppState> {
             "/api/admin/tournaments/{tournament_id}/signups/{signup_id}",
             delete(delete_signup),
         )
+        .route(
+            "/api/admin/tournaments/{tournament_id}/signups",
+            post(add_signup_by_name),
+        )
 }
 
 /// Body mit einem `name`-Feld (create/rename).
@@ -1019,10 +1023,12 @@ async fn delete_signup(
         signed_up_at: db::ts_to_string(signup.get::<DateTime<Utc>, _>("signed_up_at")),
     };
 
-    sqlx::query(r#"DELETE FROM turnier."tournament_signups" WHERE id = $1"#)
-        .bind(signup_id)
-        .execute(&mut *tx)
-        .await?;
+    crate::public::helpers::remove_signup_and_checkin(
+        &mut tx,
+        tournament_id,
+        signup.get::<i64, _>("discord_id"),
+    )
+    .await?;
     audit(
         &mut *tx,
         "signup_delete_admin",
@@ -1033,6 +1039,104 @@ async fn delete_signup(
     tx.commit().await?;
 
     Ok(Json(dto))
+}
+
+#[derive(Debug, Deserialize)]
+struct AddSignupBody {
+    #[serde(default)]
+    name: Option<String>,
+}
+
+fn admin_signup_name(raw: Option<&str>) -> WebResult<String> {
+    let name = raw.unwrap_or("").trim();
+    if name.is_empty() || name.chars().count() > 32 || name.chars().any(char::is_control) {
+        return Err(WebError::bad_request(
+            "Bitte gib einen Namen mit 1 bis 32 Zeichen ohne Steuerzeichen ein",
+        ));
+    }
+    Ok(name.to_string())
+}
+
+async fn add_signup_by_name(
+    State(state): State<AppState>,
+    ModUser(user): ModUser,
+    Path(tournament_id): Path<i64>,
+    Json(body): Json<AddSignupBody>,
+) -> WebResult<(StatusCode, Json<TournamentSignup>)> {
+    let name = admin_signup_name(body.name.as_deref())?;
+    let mut tx = state.pool.begin().await?;
+    let tournament = load_tournament_or_404(&mut *tx, tournament_id).await?;
+    let status: String = tournament.get("status");
+    if status != "registration" && status != "checkin" {
+        return Err(WebError::bad_request(
+            "Spieler können nur während Anmeldung und Check-in hinzugefügt werden",
+        ));
+    }
+    crate::public::helpers::ensure_participant_name_free(
+        &mut tx,
+        tournament_id,
+        &name,
+        0,
+        "Ein Spieler mit diesem Namen ist bereits angemeldet",
+    )
+    .await?;
+    let participant_id: i64 = sqlx::query_scalar(
+        "SELECT -nextval(pg_get_serial_sequence('turnier.tournament_signups', 'id'))",
+    )
+    .fetch_one(&mut *tx)
+    .await?;
+    let row = sqlx::query(
+        r#"INSERT INTO turnier."tournament_signups"
+         (tournament_id, discord_id, discord_name, rank_score, signed_up_at)
+         VALUES ($1, $2, $3, 0, now())
+         RETURNING id, signed_up_at"#,
+    )
+    .bind(tournament_id)
+    .bind(participant_id)
+    .bind(&name)
+    .fetch_one(&mut *tx)
+    .await?;
+    let checked_in = status == "checkin";
+    if checked_in {
+        sqlx::query(
+            r#"INSERT INTO turnier."tournament_checkins" (tournament_id, discord_id, checked_in_at)
+             VALUES ($1, $2, now())"#,
+        )
+        .bind(tournament_id)
+        .bind(participant_id)
+        .execute(&mut *tx)
+        .await?;
+    }
+    let discord_id = participant_id.to_string();
+    audit(
+        &mut *tx,
+        "signup_add_admin",
+        &user.discord_id,
+        json!({
+            "tournament_id": tournament_id,
+            "signup_id": row.get::<i64, _>("id"),
+            "discord_id": discord_id,
+            "name": name,
+            "checked_in": checked_in,
+        }),
+    )
+    .await?;
+    tx.commit().await?;
+
+    Ok((
+        StatusCode::CREATED,
+        Json(TournamentSignup {
+            id: row.get("id"),
+            tournament_id,
+            discord_id,
+            discord_name: Some(name),
+            steam_id: None,
+            rank: None,
+            rank_score: 0,
+            team_id: None,
+            signed_up_at: db::ts_to_string(row.get::<DateTime<Utc>, _>("signed_up_at")),
+        }),
+    ))
 }
 
 // --- gemeinsame Mutations-Helfer (innerhalb der Transaktion) ----------------

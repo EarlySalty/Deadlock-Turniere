@@ -94,7 +94,7 @@ export function MatchFormatFields({ idPrefix, value, onChange, league }: FieldGr
       </Field>
       {!league && (
         <>
-          <Field id={`${idPrefix}-bracket-format`} label="Bracket-Format" hint="Double: erst nach zwei Niederlagen raus.">
+          <Field id={`${idPrefix}-bracket-format`} label="Bracket-Format" hint="Double: erst nach zwei Niederlagen raus. Klappt nur mit 4, 8, 16 oder 32 Teams im Bracket, sonst wird Single Elimination gespielt.">
             <select
               id={`${idPrefix}-bracket-format`}
               value={value.bracketFormat}

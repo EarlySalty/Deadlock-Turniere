@@ -124,6 +124,8 @@ struct TestTournamentCreateRequest {
     tournament_game_mode: TournamentGameMode,
     #[serde(default = "default_advance_to")]
     advance_to: String,
+    #[serde(default)]
+    solo_signups: bool,
 }
 
 fn default_game_mode() -> TournamentGameMode {
@@ -831,6 +833,12 @@ async fn create_test_tournament(
         ));
     }
 
+    if body.solo_signups && body.advance_to != "checkin" {
+        return Err(WebError::bad_request(
+            "Ein PUG-Test bleibt im Check-in, damit die Teams im Team-Builder gebaut werden",
+        ));
+    }
+
     if body.mode == "league" && body.advance_to == "bracket" {
         return Err(WebError::bad_request(
             "Das Format Jeder gegen jeden hat kein Bracket",
@@ -884,7 +892,7 @@ async fn create_test_tournament(
             no_show_grace_minutes, source
          )
          VALUES ($1, 'checkin', $2, $3, $4, $5, $6, $7, $8, 'single_elimination', $9,
-                 $10, $11, false, true, true, $12, $13, now(), now(), 'always', 1,
+                 $10, $11, false, true, true, $12, $13, now(), now(), $14, 1,
                  'match_win', 10, 'test_mode')
          RETURNING id"#,
     )
@@ -903,11 +911,21 @@ async fn create_test_tournament(
     // (identisch zum Schema-Default), exakt wie im Original.
     .bind(json!([1440, 120, 15]))
     .bind(json!([120, 15]))
+    .bind(if body.solo_signups {
+        "solo_only"
+    } else {
+        "always"
+    })
     .fetch_one(&mut *tx)
     .await?;
 
+    if body.solo_signups {
+        insert_solo_test_signups(&mut tx, tournament_id, &user_rows).await?;
+    }
+
     let mut existing_keys: HashSet<String> = HashSet::new();
-    for team_index in 0..body.num_teams {
+    let team_count = if body.solo_signups { 0 } else { body.num_teams };
+    for team_index in 0..team_count {
         let start = (team_index * body.team_size) as usize;
         let end = ((team_index + 1) * body.team_size) as usize;
         let members = &user_rows[start..end];
@@ -992,6 +1010,7 @@ async fn create_test_tournament(
             "num_teams": body.num_teams,
             "mode": body.mode,
             "advance_to": body.advance_to,
+            "solo_signups": body.solo_signups,
         }),
     )
     .await?;
@@ -1012,6 +1031,40 @@ async fn create_test_tournament(
     }
 
     Ok(Json(TestTournamentCreateResponse { tournament_id }))
+}
+
+async fn insert_solo_test_signups(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    tournament_id: i64,
+    users: &[PoolUserRow],
+) -> WebResult<()> {
+    for member in users {
+        let display_name = member
+            .display_name
+            .clone()
+            .unwrap_or_else(|| db::discord_id_to_string(member.discord_id));
+        sqlx::query(
+            r#"INSERT INTO turnier."tournament_signups"
+             (tournament_id, discord_id, discord_name, steam_id, rank, rank_score, signed_up_at)
+             VALUES ($1, $2, $3, NULL, $4, $5, now())"#,
+        )
+        .bind(tournament_id)
+        .bind(member.discord_id)
+        .bind(&display_name)
+        .bind(&member.rank)
+        .bind(member.rank_score.unwrap_or(0))
+        .execute(&mut **tx)
+        .await?;
+        sqlx::query(
+            r#"INSERT INTO turnier."tournament_checkins" (tournament_id, discord_id, checked_in_at)
+             VALUES ($1, $2, now())"#,
+        )
+        .bind(tournament_id)
+        .bind(member.discord_id)
+        .execute(&mut **tx)
+        .await?;
+    }
+    Ok(())
 }
 
 /// Rückt ein frisch erzeugtes Test-Turnier je nach `advance_to` vor. Nutzt die

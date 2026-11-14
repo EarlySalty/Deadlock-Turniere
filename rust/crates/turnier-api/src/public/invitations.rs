@@ -74,6 +74,7 @@ async fn invite_to_team_by_signup(
 ) -> WebResult<Json<Value>> {
     let pool = &state.pool;
     let t = helpers::load_tournament_or_404(pool, tournament_id).await?;
+    helpers::ensure_player_teams_allowed(&t)?;
     helpers::ensure_registration_open(&t.status)?;
     let team = helpers::load_team_or_404(pool, tournament_id, team_id).await?;
     helpers::ensure_captain(&user, &team.captain_discord_id)?;
@@ -280,6 +281,7 @@ async fn accept_team_invitation(
     let pool = &state.pool;
     let user_discord_id = db::parse_discord_id(&user.discord_id)?;
     let t = helpers::load_tournament_or_404(pool, tournament_id).await?;
+    helpers::ensure_player_teams_allowed(&t)?;
     helpers::ensure_registration_open(&t.status)?;
 
     let invitation: Option<InvitationRow> = sqlx::query_as(
@@ -405,6 +407,7 @@ async fn apply_to_team(
     let pool = &state.pool;
     let user_discord_id = db::parse_discord_id(&user.discord_id)?;
     let t = helpers::load_tournament_or_404(pool, tournament_id).await?;
+    helpers::ensure_player_teams_allowed(&t)?;
     helpers::ensure_registration_open(&t.status)?;
     let team = helpers::load_team_or_404(pool, tournament_id, team_id).await?;
     if team.recruitment_status != "application" {
@@ -518,6 +521,7 @@ async fn accept_team_application(
 ) -> WebResult<Json<Value>> {
     let pool = &state.pool;
     let t = helpers::load_tournament_or_404(pool, tournament_id).await?;
+    helpers::ensure_player_teams_allowed(&t)?;
     helpers::ensure_registration_open(&t.status)?;
     let team = helpers::load_team_or_404(pool, tournament_id, team_id).await?;
     helpers::ensure_captain_or_mod(&user, &team.captain_discord_id)?;

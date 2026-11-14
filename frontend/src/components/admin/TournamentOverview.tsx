@@ -73,6 +73,9 @@ export function TournamentSidebar({ tournaments, selectedId, creating, onSelect,
                   <span className="block truncate text-sm font-medium text-foreground">{t.name}</span>
                   <span className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1">
                     <Badge status={t.status} mode={t.tournament_mode} />
+                    {t.is_test && (
+                      <span className="rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-medium text-amber-300">Test</span>
+                    )}
                     <span className="text-[11px] text-muted">Start {formatDate(tournamentStart(t))}</span>
                   </span>
                 </button>
