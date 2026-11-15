@@ -177,13 +177,13 @@ async fn run_auto_lobby(
     State(state): State<AppState>,
     _mod: ModUser,
     Path(tournament_id): Path<i64>,
-) -> WebResult<Json<Value>> {
+) -> WebResult<Json<turnier_match::AutoLobbyRun>> {
     load_tournament_or_404(&state.pool, tournament_id).await?;
-    state
+    let run = state
         .match_manager
         .schedule_auto_lobbies_for_tournament(tournament_id)
         .await?;
-    Ok(Json(json!({ "ok": true, "tournament_id": tournament_id })))
+    Ok(Json(run))
 }
 
 async fn create_tournament(

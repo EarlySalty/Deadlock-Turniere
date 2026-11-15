@@ -600,9 +600,12 @@ export interface VoiceTeamMoveResult {
   team2: VoiceMoveResult
 }
 
-export interface VoiceChannelMember {
-  user_id: number
-  display_name: string
+export type VoiceTarget = 'sammelpunkt' | 'team1' | 'team2'
+
+export interface AutoLobbyRun {
+  active: boolean
+  created: number
+  failed: number
 }
 
 export interface DraftState {

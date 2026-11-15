@@ -8,10 +8,18 @@
 //! Crate-Schichtung: diese Methoden hängen am [`MatchManager`] und rufen direkt
 //! `create_lobby`/`create_group_lobby` ([`crate::lobby`]).
 
+use serde::Serialize;
 use sqlx::Row;
 
 use crate::error::MatchResult;
 use crate::MatchManager;
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+pub struct AutoLobbyRun {
+    pub active: bool,
+    pub created: usize,
+    pub failed: usize,
+}
 
 impl MatchManager {
     /// Plant Auto-Lobbys für alle spielbereiten Bracket- und Group-Matches eines
@@ -21,10 +29,12 @@ impl MatchManager {
     pub async fn schedule_auto_lobbies_for_tournament(
         &self,
         tournament_id: i64,
-    ) -> MatchResult<()> {
+    ) -> MatchResult<AutoLobbyRun> {
+        let mut run = AutoLobbyRun::default();
         if !self.auto_lobby_active(tournament_id).await? {
-            return Ok(());
+            return Ok(run);
         }
+        run.active = true;
 
         let bracket_ids: Vec<i64> = sqlx::query(
             "SELECT id FROM turnier.bracket_matches \
@@ -43,22 +53,30 @@ impl MatchManager {
         let group_ids = self.auto_lobby_group_match_ids(tournament_id).await?;
 
         for match_id in bracket_ids {
-            if let Err(err) = self.create_lobby(tournament_id, match_id).await {
-                tracing::error!(
-                    tournament_id, match_id, error = %err,
-                    "Auto-Lobby für Bracket-Match fehlgeschlagen"
-                );
+            match self.create_lobby(tournament_id, match_id).await {
+                Ok(_) => run.created += 1,
+                Err(err) => {
+                    run.failed += 1;
+                    tracing::error!(
+                        tournament_id, match_id, error = %err,
+                        "Auto-Lobby für Bracket-Match fehlgeschlagen"
+                    );
+                }
             }
         }
         for match_id in group_ids {
-            if let Err(err) = self.create_group_lobby(tournament_id, match_id).await {
-                tracing::error!(
-                    tournament_id, match_id, error = %err,
-                    "Auto-Lobby für Group-Match fehlgeschlagen"
-                );
+            match self.create_group_lobby(tournament_id, match_id).await {
+                Ok(_) => run.created += 1,
+                Err(err) => {
+                    run.failed += 1;
+                    tracing::error!(
+                        tournament_id, match_id, error = %err,
+                        "Auto-Lobby für Group-Match fehlgeschlagen"
+                    );
+                }
             }
         }
-        Ok(())
+        Ok(run)
     }
 
     async fn auto_lobby_group_match_ids(&self, tournament_id: i64) -> MatchResult<Vec<i64>> {

@@ -2,7 +2,7 @@
 //! Sammelpunkt, einzelne User verschieben, Channel-Mitglieder abfragen.
 
 use axum::extract::{Path, Query, State};
-use axum::routing::{get, post};
+use axum::routing::post;
 use axum::{Json, Router};
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -26,10 +26,6 @@ pub fn router() -> Router<AppState> {
             post(move_sammelpunkt),
         )
         .route("/api/admin/voice/move-user", post(move_user))
-        .route(
-            "/api/admin/voice/channel-members/{channel_id}",
-            get(channel_members),
-        )
 }
 
 /// `?match_id=int`-Query für `move-teams` (Pflicht).
@@ -118,11 +114,29 @@ async fn move_sammelpunkt(
     Ok(Json(serde_json::to_value(result).unwrap_or_default()))
 }
 
-/// Body von `move-user` (`discord_id` + `channel_id`).
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum VoiceTarget {
+    Sammelpunkt,
+    Team1,
+    Team2,
+}
+
+impl VoiceTarget {
+    fn channel_id(self, config: &turnier_config::Config) -> i64 {
+        match self {
+            VoiceTarget::Sammelpunkt => config.discord_sammelpunkt_channel_id,
+            VoiceTarget::Team1 => config.discord_team1_voice_channel_id,
+            VoiceTarget::Team2 => config.discord_team2_voice_channel_id,
+        }
+    }
+}
+
+/// Body von `move-user` (`discord_id` + `target`).
 #[derive(Debug, Deserialize)]
 struct VoiceMoveBody {
     discord_id: String,
-    channel_id: i64,
+    target: VoiceTarget,
 }
 
 /// `POST /api/admin/voice/move-user`: einzelnen User in einen Voice-Kanal verschieben.
@@ -132,28 +146,10 @@ async fn move_user(
     Json(body): Json<VoiceMoveBody>,
 ) -> WebResult<Json<Value>> {
     let guild_id: i64 = state.config.discord_guild_id.parse().unwrap_or(0);
+    let channel_id = body.target.channel_id(&state.config);
     let result = state
         .notifier
-        .move_users_to_voice_channel(&[body.discord_id], body.channel_id, guild_id)
+        .move_users_to_voice_channel(&[body.discord_id], channel_id, guild_id)
         .await;
     Ok(Json(serde_json::to_value(result).unwrap_or_default()))
-}
-
-/// `GET /api/admin/voice/channel-members/{channel_id}`: Mitglieder eines VC.
-async fn channel_members(
-    State(state): State<AppState>,
-    _admin: AdminUser,
-    Path(channel_id): Path<i64>,
-) -> WebResult<Json<Value>> {
-    let members = state
-        .notifier
-        .get_voice_channel_members(channel_id)
-        .await
-        .map_err(|err| {
-            tracing::error!(channel_id, error = %err, "Voice-Channel-Mitglieder konnten nicht geladen werden");
-            WebError::internal("Voice-Channel-Mitglieder konnten nicht geladen werden")
-        })?;
-    Ok(Json(
-        json!({ "channel_id": channel_id, "members": members }),
-    ))
 }

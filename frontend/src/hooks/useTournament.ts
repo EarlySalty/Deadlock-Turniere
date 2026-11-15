@@ -37,6 +37,7 @@ import type {
   UserProfileUpdate,
   CreateTestTournamentRequest,
   MatchResultReportCreate,
+  VoiceTarget,
 } from '@/types/tournament'
 
 import type { BalancePreview } from '@/types/soloBalance'
@@ -984,8 +985,8 @@ export function useVoiceMoveSammelpunkt(tournamentId: number) {
 
 export function useVoiceMoveUser() {
   return useMutation({
-    mutationFn: ({ discordId, channelId }: { discordId: string; channelId: string }) =>
-      voiceMoveUser(discordId, channelId),
+    mutationFn: ({ discordId, target }: { discordId: string; target: VoiceTarget }) =>
+      voiceMoveUser(discordId, target),
   })
 }
 

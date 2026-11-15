@@ -23,7 +23,8 @@ import type {
   TeamMoveRequest,
   VoiceTeamMoveResult,
   VoiceMoveResult,
-  VoiceChannelMember,
+  VoiceTarget,
+  AutoLobbyRun,
   DraftState,
   SeriesGameResult,
   ConsentStatus,
@@ -485,7 +486,7 @@ export const generateBracket = (tournamentId: number) =>
 
 // Auto-Lobby + Mini-Groups
 export const triggerAutoLobby = (tournamentId: number) =>
-  request<{ created: number; skipped: number; failed: number }>(
+  request<AutoLobbyRun>(
     `/admin/tournaments/${tournamentId}/auto-lobby/run`,
     { method: 'POST' },
   )
@@ -604,16 +605,11 @@ export const voiceMoveSammelpunkt = (tournamentId: number) =>
     { method: 'POST' }
   )
 
-export const voiceMoveUser = (discordId: string, channelId: string) =>
+export const voiceMoveUser = (discordId: string, target: VoiceTarget) =>
   request<VoiceMoveResult>('/admin/voice/move-user', {
     method: 'POST',
-    body: JSON.stringify({ discord_id: discordId, channel_id: parseInt(channelId, 10) }),
+    body: JSON.stringify({ discord_id: discordId, target }),
   })
-
-export const voiceGetChannelMembers = (channelId: string) =>
-  request<{ channel_id: number; members: VoiceChannelMember[] }>(
-    `/admin/voice/channel-members/${channelId}`
-  )
 
 // --- Draft ---
 // fetchDraftHeroes liefert seit der Live-Heldenquelle Objekte statt nackter

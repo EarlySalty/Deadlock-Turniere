@@ -46,6 +46,7 @@ use turnier_db::Pool;
 use turnier_discord::DiscordNotifier;
 
 // Flache Re-Exports der zentralen Typen.
+pub use auto_lobby::AutoLobbyRun;
 pub use error::{MatchError, MatchResult, SteamTaskError, SteamTaskResult};
 pub use kind::MatchKind;
 pub use modes::{resolve_match_objective, ModeAssignments};

@@ -7,12 +7,13 @@ import {
   useVoiceMoveUser,
 } from '@/hooks/useTournament'
 import { Mic, MicOff, Users, AlertCircle, CheckCircle2 } from 'lucide-react'
-import { pluralize } from '@/lib/countLabel'
+import type { VoiceTarget } from '@/types/tournament'
+import { summarizeVoiceMove, type VoiceMoveSummary } from './voiceMoveSummary'
 
-const VOICE_CHANNELS: { id: string; label: string }[] = [
-  { id: '1426160735469174875', label: 'Sammelpunkt' },
-  { id: '1462434609563173019', label: 'Team 1 VC' },
-  { id: '1462434639858897017', label: 'Team 2 VC' },
+const VOICE_TARGETS: { target: VoiceTarget; label: string }[] = [
+  { target: 'sammelpunkt', label: 'Sammelpunkt' },
+  { target: 'team1', label: 'Team 1 VC' },
+  { target: 'team2', label: 'Team 2 VC' },
 ]
 
 interface Props {
@@ -20,19 +21,14 @@ interface Props {
   currentMatchId: number | null
 }
 
-type StatusMsg = { kind: 'success' | 'error'; text: string }
-
-function guestHint(guests: number): string {
-  if (guests === 0) return ''
-  return guests === 1
-    ? '. 1 Gast ohne Discord-Login bitte selbst verschieben'
-    : `. ${guests} Gäste ohne Discord-Login bitte selbst verschieben`
+function failureSummary(error: unknown): VoiceMoveSummary {
+  return { kind: 'error', text: error instanceof Error ? error.message : 'Verschieben fehlgeschlagen' }
 }
 
 export default function VoiceChannelPanel({ tournamentId, currentMatchId }: Props) {
   const [manualDiscordId, setManualDiscordId] = useState('')
-  const [manualChannelId, setManualChannelId] = useState<string>(VOICE_CHANNELS[0].id)
-  const [status, setStatus] = useState<StatusMsg | null>(null)
+  const [manualTarget, setManualTarget] = useState<VoiceTarget>('sammelpunkt')
+  const [status, setStatus] = useState<VoiceMoveSummary | null>(null)
 
   const moveTeams = useVoiceMoveTeams(tournamentId)
   const moveSammelpunkt = useVoiceMoveSammelpunkt(tournamentId)
@@ -43,56 +39,31 @@ export default function VoiceChannelPanel({ tournamentId, currentMatchId }: Prop
     setStatus(null)
     try {
       const result = await moveTeams.mutateAsync(currentMatchId)
-      const total = result.team1.moved.length + result.team2.moved.length
-      const failed = result.team1.failed.length + result.team2.failed.length
-      const guests = result.team1.skipped_guests.length + result.team2.skipped_guests.length
-      const base =
-        failed > 0
-          ? `${total} verschoben, ${failed} fehlgeschlagen (User evtl. nicht im Voice)`
-          : `Teams aufgeteilt: ${pluralize(total, 'Spieler', 'Spieler')} verschoben`
-      setStatus({
-        kind: failed > 0 || guests > 0 ? 'error' : 'success',
-        text: base + guestHint(guests),
-      })
-    } catch {
-      setStatus({ kind: 'error', text: 'Verschieben fehlgeschlagen' })
+      setStatus(summarizeVoiceMove([result.team1, result.team2]))
+    } catch (error) {
+      setStatus(failureSummary(error))
     }
   }
 
   const handleMoveSammelpunkt = async () => {
     setStatus(null)
     try {
-      const result = await moveSammelpunkt.mutateAsync()
-      const failed = result.failed.length
-      const guests = result.skipped_guests.length
-      const base = failed > 0 ? `Teilweise fehlgeschlagen (${failed} User)` : 'Alle mit Discord-Login in Sammelpunkt verschoben'
-      setStatus({
-        kind: failed > 0 || guests > 0 ? 'error' : 'success',
-        text: base + guestHint(guests),
-      })
-    } catch {
-      setStatus({ kind: 'error', text: 'Verschieben fehlgeschlagen' })
+      setStatus(summarizeVoiceMove([await moveSammelpunkt.mutateAsync()]))
+    } catch (error) {
+      setStatus(failureSummary(error))
     }
   }
 
   const handleMoveUser = async () => {
-    if (!manualDiscordId.trim()) return
+    const discordId = manualDiscordId.trim()
+    if (!discordId) return
     setStatus(null)
     try {
-      const result = await moveUser.mutateAsync({ discordId: manualDiscordId.trim(), channelId: manualChannelId })
-      if (result.moved.length === 0) {
-        setStatus({
-          kind: 'error',
-          text: result.skipped_guests.length > 0
-            ? 'Gäste ohne Discord-Login lassen sich nicht verschieben'
-            : 'User konnte nicht verschoben werden (im Voice?)',
-        })
-        return
-      }
-      setStatus({ kind: 'success', text: `User ${manualDiscordId} verschoben` })
-      setManualDiscordId('')
-    } catch {
-      setStatus({ kind: 'error', text: 'User konnte nicht verschoben werden (im Voice?)' })
+      const summary = summarizeVoiceMove([await moveUser.mutateAsync({ discordId, target: manualTarget })])
+      setStatus(summary)
+      if (summary.kind === 'success') setManualDiscordId('')
+    } catch (error) {
+      setStatus(failureSummary(error))
     }
   }
 
@@ -150,13 +121,13 @@ export default function VoiceChannelPanel({ tournamentId, currentMatchId }: Prop
             </label>
             <select
               id="manual-channel-id"
-              value={manualChannelId}
-              onChange={(e) => setManualChannelId(e.target.value)}
+              value={manualTarget}
+              onChange={(e) => setManualTarget(e.target.value as VoiceTarget)}
               className="rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
             >
-              {VOICE_CHANNELS.map((channel) => (
-                <option key={channel.id} value={channel.id}>
-                  {channel.label}
+              {VOICE_TARGETS.map((entry) => (
+                <option key={entry.target} value={entry.target}>
+                  {entry.label}
                 </option>
               ))}
             </select>
