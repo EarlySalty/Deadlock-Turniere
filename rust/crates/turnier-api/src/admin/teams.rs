@@ -91,14 +91,7 @@ struct NameBody {
 
 /// Validiert einen Team-Namen (2–32 Zeichen nach Trim).
 fn validate_team_name(raw: Option<&str>) -> WebResult<String> {
-    let name = raw.unwrap_or("").trim().to_string();
-    let len = name.chars().count();
-    if !(2..=32).contains(&len) {
-        return Err(WebError::bad_request(
-            "Team-Name muss zwischen 2 und 32 Zeichen lang sein",
-        ));
-    }
-    Ok(name)
+    turnier_engine::check_team_name(raw.unwrap_or("")).map_err(WebError::bad_request)
 }
 
 /// Bestimmt die Rolle eines neuen Mitglieds (`captain`, wenn Team leer oder ohne

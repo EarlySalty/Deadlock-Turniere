@@ -29,6 +29,26 @@ pub fn name_key(name: &str) -> String {
     name.to_lowercase().replace('ß', "ss")
 }
 
+pub const TEAM_NAME_MIN_CHARS: usize = 2;
+pub const TEAM_NAME_MAX_CHARS: usize = 32;
+
+pub fn check_team_name(raw: &str) -> Result<String, String> {
+    let name = raw.trim();
+    if (TEAM_NAME_MIN_CHARS..=TEAM_NAME_MAX_CHARS).contains(&name.chars().count()) {
+        Ok(name.to_string())
+    } else {
+        Err(format!(
+            "Team-Name muss zwischen {TEAM_NAME_MIN_CHARS} und {TEAM_NAME_MAX_CHARS} Zeichen lang sein"
+        ))
+    }
+}
+
+fn fit_team_name(base: &str, suffix: &str) -> String {
+    let room = TEAM_NAME_MAX_CHARS.saturating_sub(suffix.chars().count());
+    let head: String = base.chars().take(room).collect();
+    format!("{}{suffix}", head.trim_end())
+}
+
 /// Hält die bereits vergebenen `name_key`s und vergibt neue, kollisionsfreie
 /// Namen. Spiegelt das mutierende `existing_keys`-Set des Originals.
 #[derive(Debug, Clone, Default)]
@@ -64,10 +84,10 @@ impl TeamNamePool {
         }
 
         let mut suffix = 1u32;
-        let mut team_name = candidate.to_string();
+        let mut team_name = fit_team_name(candidate, "");
         while self.keys.contains(&name_key(&team_name)) {
             suffix += 1;
-            team_name = format!("{candidate} ({suffix})");
+            team_name = fit_team_name(candidate, &format!(" ({suffix})"));
         }
 
         self.keys.insert(name_key(&team_name));
@@ -129,6 +149,25 @@ mod tests {
         assert_eq!(pool.reserve("Earlysalty Team"), "Earlysalty Team");
         assert_eq!(pool.reserve("Earlysalty Team"), "Earlysalty Team (2)");
         assert_eq!(pool.reserve("Earlysalty Team"), "Earlysalty Team (3)");
+    }
+
+    #[test]
+    fn reserve_keeps_long_names_and_suffixes_within_the_limit() {
+        let mut pool = TeamNamePool::default();
+        let long = "A".repeat(40);
+        let first = pool.reserve(&long);
+        let second = pool.reserve(&long);
+        assert_eq!(first.chars().count(), TEAM_NAME_MAX_CHARS);
+        assert_eq!(second.chars().count(), TEAM_NAME_MAX_CHARS);
+        assert!(second.ends_with(" (2)"));
+        assert_ne!(name_key(&first), name_key(&second));
+    }
+
+    #[test]
+    fn check_team_name_trims_and_bounds() {
+        assert_eq!(check_team_name("  Nova  "), Ok("Nova".to_string()));
+        assert!(check_team_name("N").is_err());
+        assert!(check_team_name(&"N".repeat(TEAM_NAME_MAX_CHARS + 1)).is_err());
     }
 
     #[test]

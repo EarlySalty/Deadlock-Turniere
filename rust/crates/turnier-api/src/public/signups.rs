@@ -104,26 +104,13 @@ async fn solo_signup(
             helpers::sanitize_discord_name(user.discord_name.as_deref(), Some(&user.discord_id))
                 .unwrap_or_else(|| user.discord_id.clone());
 
-        let mut team_name = truncate_chars(&resolved_name, 32);
-        let mut name_key = turnier_engine::name_key(&team_name);
-        let mut suffix = 1;
-        loop {
-            let exists: Option<(i64,)> = sqlx::query_as(
-                r#"SELECT id FROM turnier."teams" WHERE tournament_id = $1 AND name_key = $2"#,
-            )
-            .bind(tournament_id)
-            .bind(&name_key)
-            .fetch_optional(&mut *tx)
-            .await?;
-            if exists.is_none() {
-                break;
-            }
-            suffix += 1;
-            let suffix_text = suffix.to_string();
-            let base = truncate_chars(&resolved_name, 32 - suffix_text.len());
-            team_name = format!("{base}{suffix_text}");
-            name_key = turnier_engine::name_key(&team_name);
-        }
+        let existing_keys: Vec<String> =
+            sqlx::query_scalar(r#"SELECT name_key FROM turnier."teams" WHERE tournament_id = $1"#)
+                .bind(tournament_id)
+                .fetch_all(&mut *tx)
+                .await?;
+        let team_name = turnier_engine::TeamNamePool::new(existing_keys).reserve(&resolved_name);
+        let name_key = turnier_engine::name_key(&team_name);
 
         let team_id: i64 = sqlx::query_scalar(
             r#"INSERT INTO turnier."teams"
@@ -264,10 +251,4 @@ async fn checkin_player(
     Ok(Json(
         json!({ "checked_in": true, "already_checked_in": already_checked_in }),
     ))
-}
-
-/// Kürzt einen String auf höchstens `max` Zeichen (Codepoints), wie das
-/// Python-Slicing `name[:32]`.
-fn truncate_chars(value: &str, max: usize) -> String {
-    value.chars().take(max).collect()
 }

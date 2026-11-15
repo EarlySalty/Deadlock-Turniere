@@ -61,13 +61,8 @@ async fn create_team(
     Path(tournament_id): Path<i64>,
     Json(body): Json<CreateTeamBody>,
 ) -> WebResult<(StatusCode, Json<Team>)> {
-    let name = body.name.unwrap_or_default().trim().to_string();
-    let name_len = name.chars().count();
-    if !(2..=32).contains(&name_len) {
-        return Err(WebError::bad_request(
-            "Team-Name muss zwischen 2 und 32 Zeichen lang sein",
-        ));
-    }
+    let name = turnier_engine::check_team_name(body.name.as_deref().unwrap_or(""))
+        .map_err(WebError::bad_request)?;
     let name_key = turnier_engine::name_key(&name);
 
     let pool = &state.pool;
