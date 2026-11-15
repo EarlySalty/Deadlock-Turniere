@@ -35,13 +35,7 @@ async fn reschedule_plan(
 ) -> WebResult<Json<Value>> {
     let mut tx = state.pool.begin().await?;
     turnier_scheduler::acquire_tournament_schedule_lock(&mut tx).await?;
-    let row = sqlx::query(
-        r#"SELECT status, tournament_mode FROM turnier."tournaments" WHERE id = $1 FOR UPDATE"#,
-    )
-    .bind(tournament_id)
-    .fetch_optional(&mut *tx)
-    .await?
-    .ok_or_else(|| WebError::not_found("Turnier nicht gefunden"))?;
+    let row = crate::public::helpers::lock_tournament_row(&mut tx, tournament_id).await?;
     let status: String = row.get("status");
     let mode: String = row.get("tournament_mode");
     if mode != "league" {
