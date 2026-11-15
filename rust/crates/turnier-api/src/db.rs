@@ -64,3 +64,21 @@ pub fn json_object(value: Option<Value>) -> Option<Value> {
         _ => None,
     })
 }
+
+pub async fn discord_account_id_by_name(
+    pool: &sqlx::PgPool,
+    discord_name: &str,
+) -> WebResult<Option<i64>> {
+    let ids: Vec<(i64,)> = sqlx::query_as(
+        r#"SELECT discord_id FROM turnier."sessions"
+         WHERE discord_name = $1
+         ORDER BY created_at DESC, discord_id"#,
+    )
+    .bind(discord_name)
+    .fetch_all(pool)
+    .await?;
+    Ok(ids
+        .into_iter()
+        .map(|(id,)| id)
+        .find(|id| !turnier_core::is_guest_participant(*id)))
+}

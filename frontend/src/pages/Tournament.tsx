@@ -961,7 +961,7 @@ export default function Tournament() {
                 teams={tournament.teams}
               />
             )}
-            <BracketView matches={tournament.bracket_matches} teams={tournament.teams} />
+            <BracketView matches={tournament.bracket_matches} teams={tournament.teams} format={effectiveBracketFormat(tournament)} />
           </div>
         )}
 

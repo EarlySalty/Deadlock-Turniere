@@ -51,8 +51,8 @@ pub fn router() -> Router<AppState> {
 
 // --- Hilfsfunktionen ---
 
-/// Normalisiert einen Display-Namen (wie `_normalize_display_name`): trimmen,
-/// nicht leer, höchstens 32 Zeichen, keine Steuerzeichen (< U+0020).
+/// Normalisiert einen Display-Namen: trimmen, nicht leer, höchstens 32 Zeichen,
+/// keine unsichtbaren Zeichen (dieselbe Regel wie für Teilnehmernamen).
 fn normalize_display_name(display_name: &str) -> WebResult<String> {
     let value = display_name.trim();
     if value.is_empty() {
@@ -64,7 +64,7 @@ fn normalize_display_name(display_name: &str) -> WebResult<String> {
             "Display Name darf maximal 32 Zeichen lang sein",
         ));
     }
-    if value.chars().any(|c| (c as u32) < 32) {
+    if crate::public::helpers::has_hidden_chars(value) {
         return Err(WebError::bad_request(
             "Display Name enthält ungültige Steuerzeichen",
         ));
@@ -319,6 +319,11 @@ async fn update_my_profile(
 ) -> WebResult<Json<UserProfile>> {
     let pool = &state.pool;
     let discord_id = db::parse_participant_id(&user.discord_id)?;
+    if body.display_name.is_some() && turnier_core::is_guest_participant(discord_id) {
+        return Err(WebError::bad_request(
+            "Gäste behalten den Namen aus ihrer Anmeldung",
+        ));
+    }
 
     let existing: Option<(i64,)> =
         sqlx::query_as(r#"SELECT discord_id FROM turnier."user_profiles" WHERE discord_id = $1"#)
@@ -593,13 +598,8 @@ async fn get_avatar_by_name(
     State(state): State<AppState>,
     Path(discord_name): Path<String>,
 ) -> WebResult<Response> {
-    let session: Option<(i64,)> = sqlx::query_as(
-        r#"SELECT discord_id FROM turnier."sessions" WHERE discord_name = $1 LIMIT 1"#,
-    )
-    .bind(&discord_name)
-    .fetch_optional(&state.pool)
-    .await?;
-    let Some((discord_id,)) = session else {
+    let session = db::discord_account_id_by_name(&state.pool, &discord_name).await?;
+    let Some(discord_id) = session else {
         return Err(WebError::not_found("Spieler nicht gefunden"));
     };
     let discord_id = db::discord_id_to_string(discord_id);

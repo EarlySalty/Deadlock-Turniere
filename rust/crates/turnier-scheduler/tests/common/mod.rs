@@ -144,6 +144,48 @@ pub async fn insert_team_member(pool: &Pool, team_id: i64, discord_id: i64) {
     .expect("insert team member");
 }
 
+pub async fn finalize_checkin_and_advance(
+    pool: &Pool,
+    tournament_id: i64,
+) -> Result<turnier_engine::FinalizeCheckinResult, turnier_engine::TournamentError> {
+    sqlx::query(
+        "INSERT INTO turnier.tournament_checkins (tournament_id, discord_id, checked_in_at) \
+         SELECT t.tournament_id, tm.discord_id, now() FROM turnier.team_members tm \
+         JOIN turnier.teams t ON t.id = tm.team_id WHERE t.tournament_id = $1 \
+         ON CONFLICT DO NOTHING",
+    )
+    .bind(tournament_id)
+    .execute(pool)
+    .await
+    .expect("check in team members");
+    let team_ids: std::collections::HashSet<i64> =
+        sqlx::query_scalar("SELECT id FROM turnier.teams WHERE tournament_id = $1")
+            .bind(tournament_id)
+            .fetch_all(pool)
+            .await
+            .expect("team ids")
+            .into_iter()
+            .collect();
+    let preview = turnier_engine::finalize_checkin(
+        pool,
+        tournament_id,
+        turnier_engine::FinalizeCheckinParams::default(),
+    )
+    .await?;
+    turnier_engine::finalize_checkin(
+        pool,
+        tournament_id,
+        turnier_engine::FinalizeCheckinParams {
+            confirm: true,
+            allowed_team_ids: team_ids,
+            actor_id: None,
+            expected_snapshot_token: Some(&preview.snapshot_token),
+            advance_to_group_phase: true,
+        },
+    )
+    .await
+}
+
 pub async fn insert_signup(pool: &Pool, tournament_id: i64, discord_id: i64) {
     sqlx::query(
         "INSERT INTO turnier.tournament_signups (tournament_id, discord_id, signed_up_at) \

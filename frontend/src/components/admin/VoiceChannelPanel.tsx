@@ -7,6 +7,7 @@ import {
   useVoiceMoveUser,
 } from '@/hooks/useTournament'
 import { Mic, MicOff, Users, AlertCircle, CheckCircle2 } from 'lucide-react'
+import { pluralize } from '@/lib/countLabel'
 
 const VOICE_CHANNELS: { id: string; label: string }[] = [
   { id: '1426160735469174875', label: 'Sammelpunkt' },
@@ -20,6 +21,13 @@ interface Props {
 }
 
 type StatusMsg = { kind: 'success' | 'error'; text: string }
+
+function guestHint(guests: number): string {
+  if (guests === 0) return ''
+  return guests === 1
+    ? '. 1 Gast ohne Discord-Login bitte selbst verschieben'
+    : `. ${guests} Gäste ohne Discord-Login bitte selbst verschieben`
+}
 
 export default function VoiceChannelPanel({ tournamentId, currentMatchId }: Props) {
   const [manualDiscordId, setManualDiscordId] = useState('')
@@ -37,12 +45,14 @@ export default function VoiceChannelPanel({ tournamentId, currentMatchId }: Prop
       const result = await moveTeams.mutateAsync(currentMatchId)
       const total = result.team1.moved.length + result.team2.moved.length
       const failed = result.team1.failed.length + result.team2.failed.length
+      const guests = result.team1.skipped_guests.length + result.team2.skipped_guests.length
+      const base =
+        failed > 0
+          ? `${total} verschoben, ${failed} fehlgeschlagen (User evtl. nicht im Voice)`
+          : `Teams aufgeteilt: ${pluralize(total, 'Spieler', 'Spieler')} verschoben`
       setStatus({
-        kind: failed > 0 ? 'error' : 'success',
-        text:
-          failed > 0
-            ? `${total} verschoben, ${failed} fehlgeschlagen (User evtl. nicht im Voice)`
-            : `Teams aufgeteilt: ${total} Spieler verschoben`,
+        kind: failed > 0 || guests > 0 ? 'error' : 'success',
+        text: base + guestHint(guests),
       })
     } catch {
       setStatus({ kind: 'error', text: 'Verschieben fehlgeschlagen' })
@@ -54,9 +64,11 @@ export default function VoiceChannelPanel({ tournamentId, currentMatchId }: Prop
     try {
       const result = await moveSammelpunkt.mutateAsync()
       const failed = result.failed.length
+      const guests = result.skipped_guests.length
+      const base = failed > 0 ? `Teilweise fehlgeschlagen (${failed} User)` : 'Alle mit Discord-Login in Sammelpunkt verschoben'
       setStatus({
-        kind: failed > 0 ? 'error' : 'success',
-        text: failed > 0 ? `Teilweise fehlgeschlagen (${failed} User)` : 'Alle in Sammelpunkt verschoben',
+        kind: failed > 0 || guests > 0 ? 'error' : 'success',
+        text: base + guestHint(guests),
       })
     } catch {
       setStatus({ kind: 'error', text: 'Verschieben fehlgeschlagen' })
@@ -67,7 +79,16 @@ export default function VoiceChannelPanel({ tournamentId, currentMatchId }: Prop
     if (!manualDiscordId.trim()) return
     setStatus(null)
     try {
-      await moveUser.mutateAsync({ discordId: manualDiscordId.trim(), channelId: manualChannelId })
+      const result = await moveUser.mutateAsync({ discordId: manualDiscordId.trim(), channelId: manualChannelId })
+      if (result.moved.length === 0) {
+        setStatus({
+          kind: 'error',
+          text: result.skipped_guests.length > 0
+            ? 'Gäste ohne Discord-Login lassen sich nicht verschieben'
+            : 'User konnte nicht verschoben werden (im Voice?)',
+        })
+        return
+      }
       setStatus({ kind: 'success', text: `User ${manualDiscordId} verschoben` })
       setManualDiscordId('')
     } catch {

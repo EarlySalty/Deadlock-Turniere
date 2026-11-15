@@ -1,5 +1,5 @@
-//! Gruppen-/Bracket-Generierung. Delegiert an [`turnier_engine::generate_groups`],
-//! [`turnier_engine::generate_group_matches`] und [`turnier_engine::generate_bracket`].
+//! Gruppen-/Bracket-Generierung. Delegiert an [`turnier_engine::generate_groups_in_tx`],
+//! [`turnier_engine::generate_group_matches_in_tx`] und [`turnier_engine::generate_bracket_in_tx`].
 
 use axum::extract::{Path, State};
 use axum::routing::post;
@@ -7,12 +7,12 @@ use axum::{Json, Router};
 use serde::Deserialize;
 use serde_json::{json, Value};
 
+use sqlx::Row;
 use turnier_engine::league::DEFAULT_SLOT_MINUTES;
 use turnier_engine::{
-    generate_bracket, generate_group_matches, generate_groups, generate_league_plan_in_tx,
-    league_slot_minutes_in_tx,
+    generate_bracket_in_tx, generate_group_matches_in_tx, generate_groups_in_tx,
+    generate_league_plan_in_tx, league_slot_minutes_in_tx,
 };
-use turnier_match::league::tournament_is_league;
 
 use crate::error::{WebError, WebResult};
 use crate::extract::ModUser;
@@ -33,6 +33,15 @@ pub fn router() -> Router<AppState> {
         )
 }
 
+async fn locked_tournament_is_league(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    tournament_id: i64,
+) -> WebResult<bool> {
+    let row = crate::public::helpers::lock_tournament_row(tx, tournament_id).await?;
+    let mode: String = row.try_get("tournament_mode")?;
+    Ok(mode == "league")
+}
+
 /// Body von `groups/generate` (`num_groups` optional).
 #[derive(Debug, Default, Deserialize)]
 struct GroupsBody {
@@ -51,18 +60,20 @@ async fn generate_groups_route(
     body: Option<Json<GroupsBody>>,
 ) -> WebResult<Json<Value>> {
     let body = body.map(|Json(b)| b).unwrap_or_default();
-    if tournament_is_league(&state.pool, tournament_id).await? {
+    let mut tx = state.pool.begin().await?;
+    if locked_tournament_is_league(&mut tx, tournament_id).await? {
+        drop(tx);
         return generate_league_plan(&state, &user.discord_id, tournament_id, body.slot_minutes)
             .await;
     }
     // num_groups auf [2, 8] klemmen (wie das Original); fehlend → None (Auto).
     let num_groups = body.num_groups.map(|n| n.clamp(2, 8) as usize);
 
-    let group_ids = generate_groups(&state.pool, tournament_id, num_groups).await?;
-    let match_count = generate_group_matches(&state.pool, tournament_id).await?;
+    let group_ids = generate_groups_in_tx(&mut tx, tournament_id, num_groups).await?;
+    let match_count = generate_group_matches_in_tx(&mut tx, tournament_id).await?;
 
     audit(
-        &state.pool,
+        &mut *tx,
         "groups_generate",
         &user.discord_id,
         json!({
@@ -72,6 +83,7 @@ async fn generate_groups_route(
         }),
     )
     .await?;
+    tx.commit().await?;
 
     Ok(Json(json!({
         "groups_created": group_ids.len(),
@@ -87,11 +99,7 @@ async fn generate_league_plan(
 ) -> WebResult<Json<Value>> {
     let mut tx = state.pool.begin().await?;
     turnier_scheduler::acquire_tournament_schedule_lock(&mut tx).await?;
-    let status: String =
-        sqlx::query_scalar(r#"SELECT status FROM turnier."tournaments" WHERE id = $1 FOR UPDATE"#)
-            .bind(tournament_id)
-            .fetch_one(&mut *tx)
-            .await?;
+    let status = crate::public::helpers::lock_tournament_status(&mut tx, tournament_id).await?;
     if status != "group_phase" {
         return Err(WebError::bad_request(
             "Der Rundenplan lässt sich nur neu erstellen, solange das Turnier läuft",
@@ -133,20 +141,22 @@ async fn generate_bracket_route(
     ModUser(user): ModUser,
     Path(tournament_id): Path<i64>,
 ) -> WebResult<Json<Value>> {
-    if tournament_is_league(&state.pool, tournament_id).await? {
+    let mut tx = state.pool.begin().await?;
+    if locked_tournament_is_league(&mut tx, tournament_id).await? {
         return Err(WebError::bad_request(
             "Das Format Jeder gegen jeden hat kein Bracket",
         ));
     }
-    let match_count = generate_bracket(&state.pool, tournament_id).await?;
+    let match_count = generate_bracket_in_tx(&mut tx, tournament_id).await?;
 
     audit(
-        &state.pool,
+        &mut *tx,
         "bracket_generate",
         &user.discord_id,
         json!({ "tournament_id": tournament_id, "matches": match_count }),
     )
     .await?;
+    tx.commit().await?;
 
     Ok(Json(json!({ "bracket_matches_created": match_count })))
 }

@@ -123,23 +123,29 @@ export function buildUpdatePayload(
 export function editDateEntries(
   form: EditForm,
   update: (patch: Partial<EditForm>) => void,
-  league: boolean,
+  mode: TournamentMode,
 ): DateEntry[] {
+  const league = mode === 'league'
   const entries: DateEntry[] = [
     { key: 'reg-start', label: 'Anmeldung Start', value: form.registrationStart, onChange: (registrationStart) => update({ registrationStart }) },
     { key: 'reg-end', label: 'Turnier-Start', hint: DATE_HINTS.registrationEnd, value: form.registrationEnd, onChange: (registrationEnd) => update({ registrationEnd }) },
     { key: 'checkin-start', label: 'Check-in Start', hint: DATE_HINTS.checkinStart, value: form.checkinStart, onChange: (checkinStart) => update({ checkinStart }) },
-    {
-      key: 'group-start',
-      label: league ? 'Erste Runde beginnt' : 'Gruppenphase Start',
-      hint: league ? 'Verschiebt den ganzen Spielplan, sobald er steht. Die Rundenlänge stellst du unter „Spielplan“ ein.' : DATE_HINTS.phaseStart,
-      value: form.groupPhaseStart,
-      onChange: (groupPhaseStart) => update({ groupPhaseStart }),
-    },
   ]
-  if (league) return entries
-  return [
-    ...entries,
-    { key: 'bracket-start', label: 'Bracket Start', hint: DATE_HINTS.phaseStart, value: form.bracketStart, onChange: (bracketStart) => update({ bracketStart }) },
-  ]
+  const groupStart: DateEntry = {
+    key: 'group-start',
+    label: league ? 'Erste Runde beginnt' : 'Gruppenphase Start',
+    hint: league ? 'Verschiebt den ganzen Spielplan, sobald er steht. Die Rundenlänge stellst du unter „Spielplan“ ein.' : DATE_HINTS.groupStart,
+    value: form.groupPhaseStart,
+    onChange: (groupPhaseStart) => update({ groupPhaseStart }),
+  }
+  const bracketStart: DateEntry = {
+    key: 'bracket-start',
+    label: 'Bracket Start',
+    hint: mode === 'bracket_only' ? DATE_HINTS.bracketOnly : DATE_HINTS.bracketAfterGroups,
+    value: form.bracketStart,
+    onChange: (bracketStart) => update({ bracketStart }),
+  }
+  if (league) return [...entries, groupStart]
+  if (mode === 'bracket_only') return [...entries, bracketStart]
+  return [...entries, groupStart, bracketStart]
 }

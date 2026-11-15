@@ -6,6 +6,7 @@ import BracketView from '@/components/bracket/BracketView'
 import MiniGroupPanel from '@/components/bracket/MiniGroupPanel'
 import GroupMatchList from '@/components/groups/GroupMatchList'
 import { LEAGUE_LABEL, isLeague } from '@/lib/league'
+import { bracketFormatLabel, effectiveBracketFormat } from '@/lib/bracketFormat'
 import TournamentCasterPanel from '@/components/admin/TournamentCasterPanel'
 import Button from '@/components/ui/Button'
 import { Archive, Copy, Trophy, Users2, ListChecks } from 'lucide-react'
@@ -120,7 +121,7 @@ export default function ArchivedTournamentView({ tournament, onUseAsTemplate }: 
             {!league && (
               <div>
                 <dt className="text-xs uppercase text-muted">Format</dt>
-                <dd>{tournament.bracket_format}</dd>
+                <dd>{bracketFormatLabel(effectiveBracketFormat(tournament))}</dd>
               </div>
             )}
             <div>
@@ -151,6 +152,7 @@ export default function ArchivedTournamentView({ tournament, onUseAsTemplate }: 
           <BracketView
             matches={tournament.bracket_matches}
             teams={tournament.teams}
+            format={effectiveBracketFormat(tournament)}
           />
         </div>
       )}

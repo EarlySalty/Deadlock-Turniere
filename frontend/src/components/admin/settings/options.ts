@@ -156,5 +156,7 @@ export function optionDescription<T extends string>(options: Choice<T>[], value:
 export const DATE_HINTS = {
   registrationEnd: 'Gleichzeitig Anmeldeschluss. Die Erinnerungen richten sich danach.',
   checkinStart: 'Leer: Check-in startet mit dem Turnier-Start.',
-  phaseStart: 'Nur zur Planung. Die Phase beginnt erst, wenn ihr den Check-in abschließt.',
+  groupStart: 'Danach richten sich die Start-Erinnerungen. Die Gruppenphase beginnt, sobald ihr den Check-in abschließt.',
+  bracketAfterGroups: 'Zu diesem Zeitpunkt wechselt das Turnier automatisch von der Gruppenphase ins Bracket.',
+  bracketOnly: 'Danach richten sich die Start-Erinnerungen. Das Bracket beginnt, sobald ihr den Check-in abschließt.',
 }

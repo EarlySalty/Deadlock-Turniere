@@ -988,14 +988,8 @@ async fn create_test_tournament(
             .execute(&mut *tx)
             .await?;
 
-            sqlx::query(
-                r#"INSERT INTO turnier."tournament_checkins" (tournament_id, discord_id, checked_in_at)
-                 VALUES ($1, $2, now())"#,
-            )
-            .bind(tournament_id)
-            .bind(member.discord_id)
-            .execute(&mut *tx)
-            .await?;
+            crate::public::helpers::insert_checkin(&mut tx, tournament_id, member.discord_id)
+                .await?;
         }
     }
 
@@ -1055,14 +1049,7 @@ async fn insert_solo_test_signups(
         .bind(member.rank_score.unwrap_or(0))
         .execute(&mut **tx)
         .await?;
-        sqlx::query(
-            r#"INSERT INTO turnier."tournament_checkins" (tournament_id, discord_id, checked_in_at)
-             VALUES ($1, $2, now())"#,
-        )
-        .bind(tournament_id)
-        .bind(member.discord_id)
-        .execute(&mut **tx)
-        .await?;
+        crate::public::helpers::insert_checkin(tx, tournament_id, member.discord_id).await?;
     }
     Ok(())
 }
@@ -1087,8 +1074,8 @@ async fn advance_test_tournament(
             },
         )
         .await?;
-        turnier_engine::finalize_checkin(
-            &state.pool,
+        crate::admin::phases::finalize_checkin_and_plan_lobbies(
+            state,
             tournament_id,
             FinalizeCheckinParams {
                 confirm: true,

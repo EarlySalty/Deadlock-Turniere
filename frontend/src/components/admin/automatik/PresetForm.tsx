@@ -15,6 +15,7 @@ import type {
   TournamentMode,
 } from '@/types/tournament'
 import { AUTOMATIK_COPY } from './copy'
+import { INVITE_MODE_OPTIONS } from '@/components/admin/settings/options'
 
 interface PresetFormProps {
   preset?: Preset | null
@@ -250,10 +251,9 @@ export default function PresetForm({ preset, onDone }: PresetFormProps) {
               onChange={(event) => setInviteMode(event.target.value as InviteMode)}
               className={fieldClass}
             >
-              <option value="always">{AUTOMATIK_COPY.inviteAlways}</option>
-              <option value="window">{AUTOMATIK_COPY.inviteWindow}</option>
-              <option value="never">{AUTOMATIK_COPY.inviteNever}</option>
-              <option value="solo_only">{AUTOMATIK_COPY.inviteSoloOnly}</option>
+              {INVITE_MODE_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>{option.label}</option>
+              ))}
             </select>
           </label>
 

@@ -304,10 +304,7 @@ async fn apply(
 ) -> WebResult<Json<PreviewDto>> {
     let profiles = refreshed_profiles(&state, tournament_id).await?;
     let mut tx = state.pool.begin().await?;
-    sqlx::query("SELECT id FROM turnier.tournaments WHERE id = $1 FOR UPDATE")
-        .bind(tournament_id)
-        .fetch_optional(&mut *tx)
-        .await?;
+    crate::public::helpers::lock_tournament_row(&mut tx, tournament_id).await?;
     sqlx::query("LOCK TABLE turnier.teams, turnier.team_members, turnier.tournament_signups IN SHARE ROW EXCLUSIVE MODE").execute(&mut *tx).await?;
     let inputs = load_inputs(&mut tx, tournament_id).await?;
     let dto = build_preview(&inputs, &profiles, Some(body.team_count))?;
@@ -322,11 +319,17 @@ async fn apply(
     for team in &dto.teams {
         create_balanced_team(&mut tx, tournament_id, team).await?;
     }
-    for (index, player) in dto.waitlist.iter().enumerate() {
+    let mut position = 0i64;
+    for player in &dto.waitlist {
         sqlx::query("UPDATE turnier.tournament_signups SET steam_id = $1, rank = $2, rank_score = $3 WHERE id = $4")
             .bind(&player.steam_id).bind(&player.rank).bind(player.rank_score).bind(player.signup_id).execute(&mut *tx).await?;
+        let participant_id = db::parse_participant_id(&player.discord_id)?;
+        if turnier_core::is_guest_participant(participant_id) {
+            continue;
+        }
+        position += 1;
         sqlx::query("INSERT INTO turnier.solo_balance_waitlist (tournament_id, signup_id, discord_id, position) VALUES ($1, $2, $3, $4)")
-            .bind(tournament_id).bind(player.signup_id).bind(db::parse_participant_id(&player.discord_id)?).bind(index as i64 + 1).execute(&mut *tx).await?;
+            .bind(tournament_id).bind(player.signup_id).bind(participant_id).bind(position).execute(&mut *tx).await?;
     }
     audit(&mut *tx, "solo_balance_apply", &user.discord_id,
         json!({ "tournament_id": tournament_id, "team_count": dto.team_count, "waitlist_count": dto.waitlist.len(), "gap": dto.gap, "median_score": dto.median_score })).await?;

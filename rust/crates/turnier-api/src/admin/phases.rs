@@ -10,7 +10,10 @@ use axum::{Json, Router};
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use turnier_engine::{assign_random_teams, finalize_checkin, FinalizeCheckinParams, SoloShuffler};
+use turnier_engine::{
+    assign_random_teams, finalize_checkin, FinalizeCheckinParams, FinalizeCheckinResult,
+    SoloShuffler,
+};
 
 use crate::error::{WebError, WebResult};
 use crate::extract::ModUser;
@@ -72,9 +75,7 @@ async fn checkin_participant(
     let participant_id = crate::db::parse_participant_id(&discord_id)?;
     let mut tx = state.pool.begin().await?;
     let status = crate::public::helpers::lock_tournament_status(&mut tx, tournament_id).await?;
-    if status != "checkin" {
-        return Err(WebError::bad_request("Check-in ist aktuell nicht geöffnet"));
-    }
+    crate::public::helpers::ensure_checkin_open(&status)?;
     if !crate::public::helpers::ensure_checkin_signup(&mut tx, tournament_id, participant_id, None)
         .await?
     {
@@ -117,6 +118,23 @@ struct FinalizeBody {
     snapshot_token: Option<String>,
 }
 
+pub(crate) async fn finalize_checkin_and_plan_lobbies(
+    state: &AppState,
+    tournament_id: i64,
+    params: FinalizeCheckinParams<'_>,
+) -> WebResult<FinalizeCheckinResult> {
+    let result = finalize_checkin(&state.pool, tournament_id, params).await?;
+    if let Some(entered) = result.entered_status {
+        turnier_scheduler::schedule_lobbies_best_effort(
+            &state.match_manager,
+            tournament_id,
+            entered,
+        )
+        .await;
+    }
+    Ok(result)
+}
+
 /// `POST /api/admin/tournaments/{id}/finalize-checkin?confirm=bool`: Check-in
 /// abschließen, Teams bereinigen, optional Gruppenphase starten.
 async fn finalize_checkin_route(
@@ -148,8 +166,8 @@ async fn finalize_checkin_route(
         .filter(|s| !s.is_empty())
         .map(str::to_string);
 
-    let result = finalize_checkin(
-        &state.pool,
+    let result = finalize_checkin_and_plan_lobbies(
+        &state,
         tournament_id,
         FinalizeCheckinParams {
             confirm: query.confirm,
@@ -161,7 +179,6 @@ async fn finalize_checkin_route(
     )
     .await?;
 
-    // Wire-Form 1:1 zum Python-Result-Dict.
     let mut out = json!({
         "warnings": result.warnings.iter().map(|w| json!({
             "team_id": w.team_id,
@@ -193,6 +210,7 @@ async fn finalize_checkin_route(
         "auto_team_formation": result.auto_team_formation,
         "bracket_format": result.bracket_format,
         "effective_bracket_format": result.effective_bracket_format,
+        "double_elimination_rule": turnier_engine::engine::double_elim::DOUBLE_ELIMINATION_RULE,
         "bracket_entrants": result.bracket_entrants,
         "deleted_team_ids": result.deleted_team_ids,
         "remaining_solo_players": result.remaining_solo_players.iter().map(|p| json!({

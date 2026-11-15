@@ -172,7 +172,6 @@ async fn invite_to_team_by_signup(
             rank_score: signup.rank_score.unwrap_or(0),
         };
         helpers::add_user_to_team(
-            pool,
             &mut tx,
             tournament_id,
             team_id,
@@ -242,6 +241,7 @@ async fn get_my_invitations(
                 ti.status, ti.created_at, ti.expires_at
          FROM turnier."team_invitations" ti JOIN turnier."teams" t ON t.id = ti.team_id
          WHERE ti.tournament_id = $1 AND ti.discord_id = $2 AND ti.status = 'pending'
+           AND (ti.expires_at IS NULL OR ti.expires_at > now())
          ORDER BY ti.created_at DESC"#,
     )
     .bind(tournament_id)
@@ -270,6 +270,29 @@ struct InvitationRow {
     discord_id: i64,
     team_id: i64,
     status: String,
+    expires_at: Option<DateTime<Utc>>,
+}
+
+fn ensure_invitation_open(
+    invitation: Option<&InvitationRow>,
+    user_discord_id: i64,
+) -> WebResult<&InvitationRow> {
+    let Some(invitation) = invitation else {
+        return Err(WebError::not_found("Einladung nicht gefunden"));
+    };
+    if invitation.discord_id != user_discord_id {
+        return Err(WebError::forbidden("Diese Einladung gehört nicht zu dir"));
+    }
+    if invitation.status != "pending" {
+        return Err(WebError::bad_request("Einladung ist nicht mehr offen"));
+    }
+    if invitation
+        .expires_at
+        .is_some_and(|expires| expires <= chrono::Utc::now())
+    {
+        return Err(WebError::bad_request("Einladung ist abgelaufen"));
+    }
+    Ok(invitation)
 }
 
 /// `POST .../invitations/{invite_id}/accept`: Einladung annehmen.
@@ -280,6 +303,16 @@ async fn accept_team_invitation(
 ) -> WebResult<Json<Value>> {
     let pool = &state.pool;
     let user_discord_id = db::parse_participant_id(&user.discord_id)?;
+    helpers::precheck_player_team_registration(pool, tournament_id).await?;
+    let open_invitation: Option<InvitationRow> = sqlx::query_as(
+        r#"SELECT discord_id, team_id, status, expires_at
+         FROM turnier."team_invitations" WHERE id = $1 AND tournament_id = $2"#,
+    )
+    .bind(invite_id)
+    .bind(tournament_id)
+    .fetch_optional(pool)
+    .await?;
+    ensure_invitation_open(open_invitation.as_ref(), user_discord_id)?;
 
     // Rangdaten aus vorhandenem Signup, sonst frisch vom Resolver.
     let signup: Option<SignupRow> = sqlx::query_as(
@@ -315,22 +348,14 @@ async fn accept_team_invitation(
     let mut tx = pool.begin().await?;
     let t = helpers::lock_tournament_or_404(&mut tx, tournament_id).await?;
     let invitation: Option<InvitationRow> = sqlx::query_as(
-        r#"SELECT discord_id, team_id, status
+        r#"SELECT discord_id, team_id, status, expires_at
          FROM turnier."team_invitations" WHERE id = $1 AND tournament_id = $2 FOR UPDATE"#,
     )
     .bind(invite_id)
     .bind(tournament_id)
     .fetch_optional(&mut *tx)
     .await?;
-    let Some(invitation) = invitation else {
-        return Err(WebError::not_found("Einladung nicht gefunden"));
-    };
-    if invitation.discord_id != user_discord_id {
-        return Err(WebError::forbidden("Diese Einladung gehört nicht zu dir"));
-    }
-    if invitation.status != "pending" {
-        return Err(WebError::bad_request("Einladung ist nicht mehr offen"));
-    }
+    let invitation = ensure_invitation_open(invitation.as_ref(), user_discord_id)?;
 
     helpers::ensure_player_teams_allowed(&t)?;
     helpers::ensure_registration_open(&t.status)?;
@@ -339,7 +364,6 @@ async fn accept_team_invitation(
     helpers::ensure_user_not_in_tournament_team(&mut *tx, tournament_id, &user.discord_id).await?;
 
     helpers::add_user_to_team(
-        pool,
         &mut tx,
         tournament_id,
         invitation.team_id,
@@ -387,10 +411,16 @@ async fn reject_team_invitation(
         return Err(WebError::bad_request("Einladung ist nicht mehr offen"));
     }
 
-    sqlx::query(r#"UPDATE turnier."team_invitations" SET status = 'rejected' WHERE id = $1"#)
-        .bind(invite_id)
-        .execute(pool)
-        .await?;
+    let rejected = sqlx::query(
+        r#"UPDATE turnier."team_invitations" SET status = 'rejected'
+         WHERE id = $1 AND status = 'pending'"#,
+    )
+    .bind(invite_id)
+    .execute(pool)
+    .await?;
+    if rejected.rows_affected() == 0 {
+        return Err(WebError::bad_request("Einladung ist nicht mehr offen"));
+    }
 
     Ok(Json(
         json!({ "status": "rejected", "invite_id": invite_id }),
@@ -405,7 +435,9 @@ async fn apply_to_team(
     Path((tournament_id, team_id)): Path<(i64, i64)>,
 ) -> WebResult<Json<Value>> {
     let pool = &state.pool;
+    helpers::ensure_consent(pool, &user.discord_id).await?;
     let user_discord_id = db::parse_participant_id(&user.discord_id)?;
+    helpers::precheck_player_team_registration(pool, tournament_id).await?;
     let discord_name =
         helpers::resolve_discord_name(pool, &user.discord_id, user.discord_name.as_deref()).await?;
 
@@ -521,6 +553,11 @@ async fn accept_team_application(
     Path((tournament_id, team_id, app_id)): Path<(i64, i64, i64)>,
 ) -> WebResult<Json<Value>> {
     let pool = &state.pool;
+    let precheck = helpers::load_tournament_or_404(pool, tournament_id).await?;
+    let precheck_team = helpers::load_team_or_404(pool, tournament_id, team_id).await?;
+    helpers::ensure_captain_or_mod(&user, &precheck_team.captain_discord_id)?;
+    helpers::ensure_player_teams_allowed(&precheck)?;
+    helpers::ensure_registration_open(&precheck.status)?;
     let application: Option<ApplicationRow> = sqlx::query_as(
         r#"SELECT discord_id, discord_name FROM turnier."team_applications"
          WHERE id = $1 AND team_id = $2"#,
@@ -591,7 +628,6 @@ async fn accept_team_application(
         .await?;
 
     helpers::add_user_to_team(
-        pool,
         &mut tx,
         tournament_id,
         team_id,
@@ -637,10 +673,16 @@ async fn reject_team_application(
         return Err(WebError::bad_request("Bewerbung ist nicht mehr offen"));
     }
 
-    sqlx::query(r#"UPDATE turnier."team_applications" SET status = 'rejected' WHERE id = $1"#)
-        .bind(app_id)
-        .execute(pool)
-        .await?;
+    let rejected = sqlx::query(
+        r#"UPDATE turnier."team_applications" SET status = 'rejected'
+         WHERE id = $1 AND status = 'pending'"#,
+    )
+    .bind(app_id)
+    .execute(pool)
+    .await?;
+    if rejected.rows_affected() == 0 {
+        return Err(WebError::bad_request("Bewerbung ist nicht mehr offen"));
+    }
 
     Ok(Json(
         json!({ "status": "rejected", "application_id": app_id }),

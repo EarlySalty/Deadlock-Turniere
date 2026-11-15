@@ -125,6 +125,7 @@ pub async fn advance_tournament_status(
     if stored_status != current_status {
         return Err(SchedulerError::StatusConflict);
     }
+    ensure_not_leaving_checkin(current_status, next_status)?;
     let mode: TournamentMode = serde_json::from_value(serde_json::Value::String(stored_mode))
         .map_err(|_| SchedulerError::InvalidTransition("Unbekannter Turniermodus".to_string()))?;
     // --- 1. Übergang validieren ---
@@ -244,9 +245,20 @@ async fn ensure_league_is_finished(
     Ok(())
 }
 
+pub const CHECKIN_EXIT_MESSAGE: &str = "Check-in bitte über „Check-in abschließen“ beenden";
+
+pub fn ensure_not_leaving_checkin(current_status: &str, next_status: &str) -> SchedulerResult<()> {
+    if current_status == "checkin" && next_status != "checkin" {
+        return Err(SchedulerError::InvalidTransition(
+            CHECKIN_EXIT_MESSAGE.to_string(),
+        ));
+    }
+    Ok(())
+}
+
 /// Plant Auto-Lobbys nach `group_phase`/`bracket`; Fehler werden nur geloggt
 /// (best-effort, wie im Original Z.185-193).
-async fn schedule_lobbies_best_effort(
+pub async fn schedule_lobbies_best_effort(
     matchmgr: &MatchManager,
     tournament_id: i64,
     next_status: &str,

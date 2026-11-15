@@ -43,17 +43,6 @@ where
         .ok_or_else(|| WebError::not_found("Turnier nicht gefunden"))
 }
 
-pub async fn lock_tournament_or_404(
-    tx: &mut sqlx::Transaction<'_, Postgres>,
-    tournament_id: i64,
-) -> WebResult<PgRow> {
-    sqlx::query(r#"SELECT * FROM turnier."tournaments" WHERE id = $1 FOR UPDATE"#)
-        .bind(tournament_id)
-        .fetch_optional(&mut **tx)
-        .await?
-        .ok_or_else(|| WebError::not_found("Turnier nicht gefunden"))
-}
-
 /// Lädt eine `teams`-Zeile (an das Turnier gebunden) oder liefert 404.
 pub async fn load_team_or_404<'e, E>(
     executor: E,
@@ -278,6 +267,8 @@ pub async fn upsert_signup_for_team(
     team_id: i64,
 ) -> WebResult<()> {
     let discord_id_i64 = db::parse_participant_id(discord_id)?;
+    crate::public::helpers::ensure_guest_name_free(tx, tournament_id, discord_id_i64, discord_name)
+        .await?;
     let existing: Option<i64> = sqlx::query_scalar(
         r#"SELECT id FROM turnier."tournament_signups" WHERE tournament_id = $1 AND discord_id = $2"#,
     )

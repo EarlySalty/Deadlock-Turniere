@@ -1,7 +1,6 @@
 import DateTimeInput from '@/components/ui/DateTimeInput'
 import type { BracketFormat } from '@/types/tournament'
 import Field from './Field'
-import { DOUBLE_ELIMINATION_RULE } from '@/lib/bracketFormat'
 import ReminderOffsetsInput from '../ReminderOffsetsInput'
 import { SubHeading } from './SettingsSection'
 import { INPUT_CLASS } from './options'
@@ -95,7 +94,7 @@ export function MatchFormatFields({ idPrefix, value, onChange, league }: FieldGr
       </Field>
       {!league && (
         <>
-          <Field id={`${idPrefix}-bracket-format`} label="Bracket-Format" hint={`Double: erst nach zwei Niederlagen raus. Das Bracket braucht dafür ${DOUBLE_ELIMINATION_RULE}, sonst wird Single Elimination gespielt.`}>
+          <Field id={`${idPrefix}-bracket-format`} label="Bracket-Format" hint="Double: erst nach zwei Niederlagen raus. Passt die Teamzahl nicht dazu, wird Single Elimination gespielt. Die Vorschau beim Check-in-Abschluss nennt die genaue Bedingung.">
             <select
               id={`${idPrefix}-bracket-format`}
               value={value.bracketFormat}

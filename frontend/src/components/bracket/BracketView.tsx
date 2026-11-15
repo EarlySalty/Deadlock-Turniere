@@ -3,12 +3,12 @@ import { GitBranch } from 'lucide-react'
 import { useMemo } from 'react'
 import Card from '@/components/ui/Card'
 import BracketMatch from './BracketMatch'
-import { hasDoubleEliminationMatches } from '@/lib/bracketFormat'
-import type { BracketMatch as BracketMatchType, TeamPublic } from '@/types/tournament'
+import type { BracketFormat, BracketMatch as BracketMatchType, TeamPublic } from '@/types/tournament'
 
 interface Props {
   matches: BracketMatchType[]
   teams: TeamPublic[]
+  format: BracketFormat
 }
 
 interface SlotPlaceholders {
@@ -175,7 +175,7 @@ function BracketColumns({ matches, teams, roundLabel, placeholders }: BracketCol
   )
 }
 
-export default function BracketView({ matches, teams }: Props) {
+export default function BracketView({ matches, teams, format }: Props) {
   const placeholders = useMemo(() => buildPlaceholderMap(matches), [matches])
 
   if (matches.length === 0) {
@@ -191,7 +191,7 @@ export default function BracketView({ matches, teams }: Props) {
   const losers = matches.filter((m) => m.bracket_type === 'losers')
   const grandFinal = matches.filter((m) => m.bracket_type === 'grand_final')
 
-  const isDoubleElim = hasDoubleEliminationMatches(matches)
+  const isDoubleElim = format === 'double_elimination'
 
   if (!isDoubleElim) {
     return (

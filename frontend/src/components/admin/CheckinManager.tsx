@@ -6,7 +6,7 @@ import Card from '@/components/ui/Card'
 import Button from '@/components/ui/Button'
 import { useAdminCheckin, useAdminCheckins, useDeleteAdminSignup, useFinalizeCheckin, useRevertCheckin } from '@/hooks/useTournament'
 import { pendingDraftChanges } from '@/components/admin/teamBuilderDrafts'
-import { bracketFormatLabel, DOUBLE_ELIMINATION_RULE } from '@/lib/bracketFormat'
+import { bracketFormatLabel } from '@/lib/bracketFormat'
 import { pluralize } from '@/lib/countLabel'
 import type {
   FinalizeCheckinResult,
@@ -336,7 +336,7 @@ export default function CheckinManager({
 
             {bracketFallback && !bracketTooSmall && (
               <div role="alert" className="mt-4 rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-200">
-                Eingestellt ist {bracketFormatLabel(preview.bracket_format)} Dafür braucht das Bracket {DOUBLE_ELIMINATION_RULE}.
+                Eingestellt ist {bracketFormatLabel(preview.bracket_format)} Dafür braucht das Bracket {preview.double_elimination_rule}.
                 Mit {pluralize(preview.bracket_entrants ?? 0, 'Team', 'Teams')} im Bracket wird diesmal {bracketFormatLabel(preview.effective_bracket_format)} gespielt.
                 Die Einstellung des Turniers bleibt.
               </div>

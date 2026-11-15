@@ -213,6 +213,9 @@ pub async fn recalculate_player_points_in_tx(
         .await?;
 
         for (discord_id, team_id) in participants {
+            if turnier_core::is_guest_participant(discord_id) {
+                continue;
+            }
             let contribution = contribution_for_team(
                 team_id,
                 &results.placements,

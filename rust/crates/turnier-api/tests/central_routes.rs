@@ -820,7 +820,6 @@ async fn public_helpers_unique_violations_return_conflict() {
             rank_score: 0,
         };
         public_helpers::add_user_to_team(
-            &pool,
             &mut tx,
             tournament_id,
             team_id,
@@ -884,6 +883,7 @@ async fn public_invitations_unique_violations_return_conflict() {
         .execute(&ctx.pool)
         .await
         .expect("enable applications");
+    seed_consent(&ctx.pool, APPLICANT_ID).await;
     let mut held_application = ctx.pool.begin().await.expect("held application tx");
     sqlx::query(
         r#"INSERT INTO turnier."team_applications"

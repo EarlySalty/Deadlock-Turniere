@@ -299,7 +299,7 @@ export default function TournamentManager({
               />
               <MatchFormatFields idPrefix="admin" value={form} onChange={update} league={league} />
             </div>
-            <DateFields idPrefix="admin" entries={editDateEntries(form, update, league)} />
+            <DateFields idPrefix="admin" entries={editDateEntries(form, update, form.tournamentMode)} />
             <ReminderFields idPrefix="admin" value={form} onChange={update} />
           </SettingsSection>
 

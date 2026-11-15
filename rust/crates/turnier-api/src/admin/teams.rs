@@ -21,8 +21,7 @@ use crate::state::AppState;
 use super::helpers::{
     audit, count_team_members, ensure_participant_management_allowed, ensure_team_has_capacity,
     ensure_team_not_locked, load_team_application_or_404, load_team_or_404, load_tournament_or_404,
-    lock_tournament_or_404, reassign_or_clear_captain, upsert_signup_for_team,
-    upsert_signup_from_member, MemberSnapshot,
+    reassign_or_clear_captain, upsert_signup_for_team, upsert_signup_from_member, MemberSnapshot,
 };
 use super::loaders::load_team_detail;
 
@@ -122,7 +121,7 @@ async fn create_team(
     let name = validate_team_name(body.name.as_deref())?;
 
     let mut tx = state.pool.begin().await?;
-    let tournament = lock_tournament_or_404(&mut tx, tournament_id).await?;
+    let tournament = crate::public::helpers::lock_tournament_row(&mut tx, tournament_id).await?;
     ensure_participant_management_allowed(tournament.get::<String, _>("status").as_str())?;
     let name_key = turnier_engine::name_key(&name);
 
@@ -174,7 +173,7 @@ async fn rename_team(
     let name = validate_team_name(body.name.as_deref())?;
 
     let mut tx = state.pool.begin().await?;
-    let tournament = lock_tournament_or_404(&mut tx, tournament_id).await?;
+    let tournament = crate::public::helpers::lock_tournament_row(&mut tx, tournament_id).await?;
     ensure_participant_management_allowed(tournament.get::<String, _>("status").as_str())?;
     load_team_or_404(&mut *tx, tournament_id, team_id).await?;
     let name_key = turnier_engine::name_key(&name);
@@ -239,7 +238,7 @@ async fn update_recruiting(
     };
 
     let mut tx = state.pool.begin().await?;
-    let tournament = lock_tournament_or_404(&mut tx, tournament_id).await?;
+    let tournament = crate::public::helpers::lock_tournament_row(&mut tx, tournament_id).await?;
     ensure_participant_management_allowed(tournament.get::<String, _>("status").as_str())?;
     load_team_or_404(&mut *tx, tournament_id, team_id).await?;
 
@@ -309,7 +308,7 @@ async fn accept_application(
     Path((tournament_id, team_id, app_id)): Path<(i64, i64, i64)>,
 ) -> WebResult<Json<Value>> {
     let mut tx = state.pool.begin().await?;
-    let tournament = lock_tournament_or_404(&mut tx, tournament_id).await?;
+    let tournament = crate::public::helpers::lock_tournament_row(&mut tx, tournament_id).await?;
     ensure_participant_management_allowed(tournament.get::<String, _>("status").as_str())?;
     let team_size: i64 = tournament.get("team_size");
     let target_team = load_team_or_404(&mut *tx, tournament_id, team_id).await?;
@@ -438,7 +437,7 @@ async fn reject_application(
     Path((tournament_id, team_id, app_id)): Path<(i64, i64, i64)>,
 ) -> WebResult<Json<Value>> {
     let mut tx = state.pool.begin().await?;
-    let tournament = lock_tournament_or_404(&mut tx, tournament_id).await?;
+    let tournament = crate::public::helpers::lock_tournament_row(&mut tx, tournament_id).await?;
     ensure_participant_management_allowed(tournament.get::<String, _>("status").as_str())?;
     load_team_or_404(&mut *tx, tournament_id, team_id).await?;
     let application = load_team_application_or_404(&mut *tx, team_id, app_id).await?;
@@ -483,7 +482,7 @@ async fn delete_team(
     Path((tournament_id, team_id)): Path<(i64, i64)>,
 ) -> WebResult<Json<Value>> {
     let mut tx = state.pool.begin().await?;
-    let tournament = lock_tournament_or_404(&mut tx, tournament_id).await?;
+    let tournament = crate::public::helpers::lock_tournament_row(&mut tx, tournament_id).await?;
     ensure_participant_management_allowed(tournament.get::<String, _>("status").as_str())?;
     let team = load_team_or_404(&mut *tx, tournament_id, team_id).await?;
     let team_name: String = team.get("name");
@@ -563,7 +562,7 @@ async fn change_captain(
     let discord_id_i64 = db::parse_participant_id(&discord_id)?;
 
     let mut tx = state.pool.begin().await?;
-    let tournament = lock_tournament_or_404(&mut tx, tournament_id).await?;
+    let tournament = crate::public::helpers::lock_tournament_row(&mut tx, tournament_id).await?;
     ensure_participant_management_allowed(tournament.get::<String, _>("status").as_str())?;
     load_team_or_404(&mut *tx, tournament_id, team_id).await?;
 
@@ -607,7 +606,7 @@ async fn remove_member(
     Path((tournament_id, team_id, discord_id)): Path<(i64, i64, String)>,
 ) -> WebResult<Json<Team>> {
     let mut tx = state.pool.begin().await?;
-    let tournament = lock_tournament_or_404(&mut tx, tournament_id).await?;
+    let tournament = crate::public::helpers::lock_tournament_row(&mut tx, tournament_id).await?;
     ensure_participant_management_allowed(tournament.get::<String, _>("status").as_str())?;
     let team = load_team_or_404(&mut *tx, tournament_id, team_id).await?;
     let captain: i64 = team.get("captain_discord_id");
@@ -686,7 +685,7 @@ async fn move_member(
     }
 
     let mut tx = state.pool.begin().await?;
-    let tournament = lock_tournament_or_404(&mut tx, tournament_id).await?;
+    let tournament = crate::public::helpers::lock_tournament_row(&mut tx, tournament_id).await?;
     ensure_participant_management_allowed(tournament.get::<String, _>("status").as_str())?;
     let team_size: i64 = tournament.get("team_size");
     let source_team = load_team_or_404(&mut *tx, tournament_id, from_team_id).await?;
@@ -777,7 +776,7 @@ async fn assign_signup(
     };
 
     let mut tx = state.pool.begin().await?;
-    let tournament = lock_tournament_or_404(&mut tx, tournament_id).await?;
+    let tournament = crate::public::helpers::lock_tournament_row(&mut tx, tournament_id).await?;
     ensure_participant_management_allowed(tournament.get::<String, _>("status").as_str())?;
     let team_size: i64 = tournament.get("team_size");
     let target_team = load_team_or_404(&mut *tx, tournament_id, team_id).await?;
@@ -863,6 +862,9 @@ struct AddMemberBody {
     discord_name: Option<String>,
 }
 
+const GUEST_SUBSTITUTE_NEEDS_SIGNUP: &str =
+    "Gäste ohne Discord-Login können nur aus ihrer Anmeldung in diesem Turnier nachrücken";
+
 /// `POST .../teams/{team_id}/add-member`: Ersatzspieler direkt hinzufügen (Admin,
 /// nur ab group_phase/bracket).
 async fn add_member(
@@ -879,9 +881,14 @@ async fn add_member(
         ));
     }
     let discord_id_i64 = db::parse_participant_id(&discord_id)?;
+    let guest = turnier_core::is_guest_participant(discord_id_i64);
+    if !guest {
+        db::parse_discord_user_id(&discord_id)?;
+    }
+    let discord_name = crate::public::helpers::participant_name(&discord_name)?.to_string();
 
     let mut tx = state.pool.begin().await?;
-    let tournament = lock_tournament_or_404(&mut tx, tournament_id).await?;
+    let tournament = crate::public::helpers::lock_tournament_row(&mut tx, tournament_id).await?;
     let status: String = tournament.get("status");
     if !matches!(status.as_str(), "group_phase" | "bracket") {
         return Err(WebError::bad_request(
@@ -931,13 +938,14 @@ async fn add_member(
         rank = s.get("rank");
         rank_score = s.get::<Option<i64>, _>("rank_score").unwrap_or(0);
         signup_name = s.get("discord_name");
+    } else if guest {
+        return Err(WebError::bad_request(GUEST_SUBSTITUTE_NEEDS_SIGNUP));
     }
 
-    // effective_name: discord_name (immer gesetzt) hat Vorrang vor Signup-Name.
-    let effective_name = if !discord_name.is_empty() {
-        Some(discord_name.clone())
+    let effective_name = if guest {
+        signup_name
     } else {
-        signup_name.or_else(|| Some(discord_id.clone()))
+        Some(discord_name.clone())
     };
 
     let count = count_team_members(&mut *tx, team_id).await?;
@@ -1085,14 +1093,7 @@ async fn add_signup_by_name(
     .await?;
     let checked_in = status == "checkin";
     if checked_in {
-        sqlx::query(
-            r#"INSERT INTO turnier."tournament_checkins" (tournament_id, discord_id, checked_in_at)
-             VALUES ($1, $2, now())"#,
-        )
-        .bind(tournament_id)
-        .bind(participant_id)
-        .execute(&mut *tx)
-        .await?;
+        crate::public::helpers::insert_checkin(&mut tx, tournament_id, participant_id).await?;
     }
     let discord_id = participant_id.to_string();
     audit(

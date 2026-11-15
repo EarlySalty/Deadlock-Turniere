@@ -221,6 +221,7 @@ export interface FinalizeCheckinResult {
   auto_team_formation: boolean
   bracket_format: BracketFormat
   effective_bracket_format: BracketFormat
+  double_elimination_rule: string
   bracket_entrants: number | null
   deleted_team_ids: number[]
   remaining_solo_players: {
@@ -587,6 +588,7 @@ export interface TeamMoveRequest {
 export interface VoiceMoveResult {
   moved: string[]
   failed: { discord_id: string; error: string }[]
+  skipped_guests: string[]
 }
 
 export interface VoiceTeamMoveResult {

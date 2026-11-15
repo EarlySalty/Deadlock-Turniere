@@ -6,8 +6,8 @@ use std::sync::Arc;
 
 use chrono::{Duration, Utc};
 use common::{
-    fake_match_manager, fake_notifier, insert_team, insert_team_member, insert_tournament,
-    test_config, tournament_status,
+    fake_match_manager, fake_notifier, finalize_checkin_and_advance, insert_team,
+    insert_team_member, insert_tournament, test_config, tournament_status,
 };
 use sqlx::postgres::PgConnection;
 use sqlx::sqlite::SqlitePoolOptions;
@@ -62,22 +62,12 @@ async fn league_goes_from_checkin_to_plan_to_completed_without_bracket() {
         .await
         .expect("mode");
     for index in 0..10 {
-        insert_team(&pool, id, &format!("Team {index}"), CAPTAIN + index).await;
+        let team = insert_team(&pool, id, &format!("Team {index}"), CAPTAIN + index).await;
+        insert_team_member(&pool, team, CAPTAIN + index).await;
     }
 
-    let meta = advance_tournament_status(
-        &pool,
-        &matchmgr,
-        &notifier,
-        id,
-        "checkin",
-        "group_phase",
-        "scheduler",
-        None,
-    )
-    .await
-    .expect("plan");
-    assert_eq!(meta["matches_created"], 45);
+    let finalized = finalize_checkin_and_advance(&pool, id).await.expect("plan");
+    assert_eq!(finalized.matches_created, Some(45));
     assert_eq!(tournament_status(&pool, id).await, "group_phase");
 
     let refused_bracket = advance_tournament_status(
@@ -152,7 +142,6 @@ async fn first_round_gets_its_reminder_after_lobbies_opened_at_the_transition() 
     let pool = db.pool().clone();
     let config = test_config();
     let notifier = fake_notifier(pool.clone(), &config);
-    let matchmgr = fake_match_manager(pool.clone(), &config);
     let id = insert_tournament(&pool, "Liga", "checkin", false).await;
     sqlx::query(
         "UPDATE turnier.tournaments SET tournament_mode = 'league', group_phase_start = $1 \
@@ -167,18 +156,7 @@ async fn first_round_gets_its_reminder_after_lobbies_opened_at_the_transition() 
         let team = insert_team(&pool, id, &format!("Team {index}"), CAPTAIN + index).await;
         insert_team_member(&pool, team, CAPTAIN + index).await;
     }
-    advance_tournament_status(
-        &pool,
-        &matchmgr,
-        &notifier,
-        id,
-        "checkin",
-        "group_phase",
-        "scheduler",
-        None,
-    )
-    .await
-    .expect("plan");
+    finalize_checkin_and_advance(&pool, id).await.expect("plan");
     sqlx::query(
         "UPDATE turnier.group_matches SET status = 'lobby_created', steam_party_id = 'party' \
          WHERE scheduled_at = (SELECT group_phase_start FROM turnier.tournaments WHERE id = $1) \
@@ -232,7 +210,6 @@ async fn result_queued_behind_the_finish_changes_nothing() {
     let db = turnier_db::test_pool().await.expect("central test pool");
     let pool = db.pool().clone();
     let config = test_config();
-    let notifier = fake_notifier(pool.clone(), &config);
     let matchmgr = fake_match_manager(pool.clone(), &config);
     let id = insert_tournament(&pool, "Liga", "checkin", false).await;
     sqlx::query("UPDATE turnier.tournaments SET tournament_mode = 'league' WHERE id = $1")
@@ -244,18 +221,7 @@ async fn result_queued_behind_the_finish_changes_nothing() {
         let team = insert_team(&pool, id, &format!("Team {index}"), CAPTAIN + index).await;
         insert_team_member(&pool, team, CAPTAIN + index).await;
     }
-    advance_tournament_status(
-        &pool,
-        &matchmgr,
-        &notifier,
-        id,
-        "checkin",
-        "group_phase",
-        "scheduler",
-        None,
-    )
-    .await
-    .expect("plan");
+    finalize_checkin_and_advance(&pool, id).await.expect("plan");
     let (match_id, group_id, team1, team2): (i64, i64, i64, i64) = sqlx::query_as(
         "UPDATE turnier.group_matches gm \
          SET status = 'in_progress', steam_party_id = 'party' \
@@ -364,18 +330,7 @@ async fn result_reply_after_the_league_finished_changes_nothing() {
         Some(SteamBridge::from_pool(steam.clone())),
         &config,
     ));
-    advance_tournament_status(
-        &pool,
-        &matchmgr,
-        &notifier,
-        id,
-        "checkin",
-        "group_phase",
-        "scheduler",
-        None,
-    )
-    .await
-    .expect("plan");
+    finalize_checkin_and_advance(&pool, id).await.expect("plan");
     let (match_id, group_id, team1, team2): (i64, i64, i64, i64) = sqlx::query_as(
         "UPDATE turnier.group_matches gm \
          SET status = 'in_progress', steam_party_id = 'party' \

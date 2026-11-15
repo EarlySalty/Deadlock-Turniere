@@ -94,13 +94,8 @@ async fn get_player_profile(
 ) -> WebResult<Json<PlayerProfile>> {
     let pool = &state.pool;
 
-    let discord_id: Option<(i64,)> = sqlx::query_as(
-        r#"SELECT discord_id FROM turnier."sessions" WHERE discord_name = $1 LIMIT 1"#,
-    )
-    .bind(&discord_name)
-    .fetch_optional(pool)
-    .await?;
-    let Some((discord_id,)) = discord_id else {
+    let discord_id = crate::db::discord_account_id_by_name(pool, &discord_name).await?;
+    let Some(discord_id) = discord_id else {
         return Err(WebError::not_found("Spieler nicht gefunden"));
     };
 

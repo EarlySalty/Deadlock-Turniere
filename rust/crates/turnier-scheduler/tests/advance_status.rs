@@ -1,9 +1,9 @@
 //! Integrationstests für [`advance_tournament_status`] mit zentraler
 //! Wegwerf-PG-DB.
 //!
-//! Getestet wird der Übergang OHNE Generierungs-Seiteneffekte (registration →
-//! checkin); die Generierung selbst (group_phase/bracket) ist in turnier-engine
-//! abgedeckt. Discord/Match sind No-op-Fakes.
+//! Getestet werden die Übergänge über die geteilte Orchestrierung. Den
+//! Check-in verlässt ein Turnier nur über `finalize_checkin`; die Tests dafür
+//! laufen über diesen echten Ausgang. Discord/Match sind No-op-Fakes.
 
 mod common;
 
@@ -11,15 +11,17 @@ use std::sync::Arc;
 
 use chrono::{DateTime, Duration, Utc};
 use common::{
-    audit_count, fake_match_manager, fake_notifier, insert_team, insert_team_member,
-    insert_tournament, temp_db, test_config, tournament_status,
+    audit_count, fake_match_manager, fake_notifier, finalize_checkin_and_advance, insert_team,
+    insert_team_member, insert_tournament, temp_db, test_config, tournament_status,
 };
 use serde_json::Value;
 use tokio::sync::Barrier;
 use turnier_core::now_utc;
 use turnier_discord::DiscordNotifier;
 use turnier_match::MatchManager;
-use turnier_scheduler::{advance_tournament_status, SchedulerError, SchedulerResult};
+use turnier_scheduler::{
+    advance_tournament_status, SchedulerError, SchedulerResult, CHECKIN_EXIT_MESSAGE,
+};
 
 struct ConcurrentAdvance {
     pool: turnier_db::Pool,
@@ -34,7 +36,7 @@ struct ConcurrentAdvance {
 }
 
 #[tokio::test]
-async fn bracket_only_checkin_erzeugt_bracket_und_auditet_atomar() {
+async fn checkin_endet_nur_ueber_finalize() {
     let db = temp_db().await;
     let pool = db.pool().clone();
     let config = test_config();
@@ -44,29 +46,31 @@ async fn bracket_only_checkin_erzeugt_bracket_und_auditet_atomar() {
     insert_team(&pool, id, "Team A", TEST_CAPTAIN_A).await;
     insert_team(&pool, id, "Team B", TEST_CAPTAIN_B).await;
 
-    let meta = advance_tournament_status(
-        &pool,
-        &matchmgr,
-        &notifier,
-        id,
-        "checkin",
-        "bracket",
-        "scheduler",
-        None,
-    )
-    .await
-    .expect("Bracket ohne Gruppenphase");
-
-    assert_eq!(tournament_status(&pool, id).await, "bracket");
-    assert_eq!(meta["bracket_matches_created"], 1);
-    assert_eq!(audit_count(&pool, "tournament_auto_advance").await, 1);
-    let (groups,): (i64,) =
-        sqlx::query_as("SELECT COUNT(*) FROM turnier.groups WHERE tournament_id = $1")
+    for (mode, next) in [("bracket_only", "bracket"), ("group_stage", "group_phase")] {
+        sqlx::query("UPDATE turnier.tournaments SET tournament_mode = $1 WHERE id = $2")
+            .bind(mode)
             .bind(id)
-            .fetch_one(&pool)
+            .execute(&pool)
             .await
             .unwrap();
-    assert_eq!(groups, 0);
+        let err = advance_tournament_status(
+            &pool,
+            &matchmgr,
+            &notifier,
+            id,
+            "checkin",
+            next,
+            "scheduler",
+            None,
+        )
+        .await
+        .expect_err("Check-in endet nur über finalize-checkin");
+        assert!(
+            matches!(&err, SchedulerError::InvalidTransition(msg) if msg == CHECKIN_EXIT_MESSAGE)
+        );
+        assert_eq!(tournament_status(&pool, id).await, "checkin");
+    }
+    assert_eq!(audit_count(&pool, "tournament_auto_advance").await, 0);
 }
 
 const TEST_CAPTAIN_A: i64 = 123_456_789_012_345_710;
@@ -273,59 +277,34 @@ async fn insert_ranked_team(pool: &turnier_db::Pool, tournament_id: i64, team_nu
 }
 
 #[tokio::test]
-async fn paralleler_group_phase_uebergang_erzeugt_gruppen_nur_einmal() {
+async fn paralleler_check_in_abschluss_erzeugt_gruppen_nur_einmal() {
     let db = temp_db().await;
     let pool = db.pool().clone();
-    let config = test_config();
-    let notifier = fake_notifier(pool.clone(), &config);
-    let matchmgr = fake_match_manager(pool.clone(), &config);
     let id = insert_tournament(&pool, "T", "checkin", false).await;
-    sqlx::query("UPDATE turnier.tournaments SET tournament_mode = 'group_stage' WHERE id = $1")
-        .bind(id)
-        .execute(&pool)
-        .await
-        .unwrap();
+    sqlx::query(
+        "UPDATE turnier.tournaments SET tournament_mode = 'group_stage', team_size = 1 \
+         WHERE id = $1",
+    )
+    .bind(id)
+    .execute(&pool)
+    .await
+    .unwrap();
     for team_number in 1..=4 {
         insert_ranked_team(&pool, id, team_number).await;
     }
 
     let barrier = Arc::new(Barrier::new(2));
-    let first = tokio::spawn(concurrent_advance(ConcurrentAdvance {
-        pool: pool.clone(),
-        matchmgr: matchmgr.clone(),
-        notifier: notifier.clone(),
-        barrier: barrier.clone(),
-        tournament_id: id,
-        current_status: "checkin",
-        next_status: "group_phase",
-        source: "scheduler",
-        actor_id: None,
-    }));
-    let second = tokio::spawn(concurrent_advance(ConcurrentAdvance {
-        pool: pool.clone(),
-        matchmgr: matchmgr.clone(),
-        notifier: notifier.clone(),
-        barrier,
-        tournament_id: id,
-        current_status: "checkin",
-        next_status: "group_phase",
-        source: "scheduler",
-        actor_id: None,
-    }));
-
+    let run = |barrier: Arc<Barrier>, pool: turnier_db::Pool| async move {
+        barrier.wait().await;
+        finalize_checkin_and_advance(&pool, id).await
+    };
+    let first = tokio::spawn(run(barrier.clone(), pool.clone()));
+    let second = tokio::spawn(run(barrier, pool.clone()));
     let results = [
         first.await.expect("first task"),
         second.await.expect("second task"),
     ];
     assert_eq!(results.iter().filter(|result| result.is_ok()).count(), 1);
-    let status_conflicts = results
-        .iter()
-        .map(|result| match result {
-            Err(SchedulerError::StatusConflict) => 1,
-            _ => 0,
-        })
-        .sum::<usize>();
-    assert_eq!(status_conflicts, 1);
 
     assert_eq!(tournament_status(&pool, id).await, "group_phase");
     let (groups, group_teams, group_matches): (i64, i64, i64) = sqlx::query_as(
@@ -341,7 +320,6 @@ async fn paralleler_group_phase_uebergang_erzeugt_gruppen_nur_einmal() {
     .await
     .expect("group counts");
     assert_eq!((groups, group_teams, group_matches), (2, 4, 2));
-    assert_eq!(audit_count(&pool, "tournament_auto_advance").await, 1);
 }
 
 #[tokio::test]

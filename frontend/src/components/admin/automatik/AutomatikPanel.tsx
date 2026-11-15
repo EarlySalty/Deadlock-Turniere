@@ -264,6 +264,7 @@ export default function AutomatikPanel() {
 
         {showPresetForm && (
           <PresetForm
+            key={activePreset?.id ?? 'new'}
             preset={activePreset}
             onDone={() => {
               setShowPresetForm(false)

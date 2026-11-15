@@ -6,6 +6,9 @@
 //! abgesichert. 1:1 portiert aus `engine.py`
 //! (`_double_elimination_losers_round_size` und die zwei Loser-Drop-Schleifen).
 
+pub const DOUBLE_ELIMINATION_RULE: &str =
+    "mindestens 4 Teams, und die Zahl muss eine Zweierpotenz sein (4, 8, 16, 32 …)";
+
 pub fn supports_double_elimination(entrants: usize) -> bool {
     entrants >= 4 && crate::engine::seeding::is_power_of_two(entrants)
 }

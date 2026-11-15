@@ -88,6 +88,18 @@ pub async fn resolve_discord_name(
     if let Some(name) = sanitize_discord_name(preferred_name, Some(discord_id)) {
         return Ok(name);
     }
+    let mut conn = pool.acquire().await?;
+    resolve_discord_name_in(&mut conn, discord_id, preferred_name).await
+}
+
+pub async fn resolve_discord_name_in(
+    conn: &mut sqlx::PgConnection,
+    discord_id: &str,
+    preferred_name: Option<&str>,
+) -> WebResult<String> {
+    if let Some(name) = sanitize_discord_name(preferred_name, Some(discord_id)) {
+        return Ok(name);
+    }
 
     let session_name: Option<(Option<String>,)> = sqlx::query_as(
         r#"SELECT discord_name FROM turnier."sessions"
@@ -95,7 +107,7 @@ pub async fn resolve_discord_name(
          ORDER BY token DESC LIMIT 1"#,
     )
     .bind(db::parse_participant_id(discord_id)?)
-    .fetch_optional(pool)
+    .fetch_optional(&mut *conn)
     .await?;
     if let Some((Some(name),)) = session_name {
         if let Some(sanitized) = sanitize_discord_name(Some(&name), Some(discord_id)) {
@@ -109,7 +121,7 @@ pub async fn resolve_discord_name(
          ORDER BY joined_at DESC LIMIT 1"#,
     )
     .bind(db::parse_participant_id(discord_id)?)
-    .fetch_optional(pool)
+    .fetch_optional(&mut *conn)
     .await?;
     if let Some((Some(name),)) = member_name {
         if let Some(sanitized) = sanitize_discord_name(Some(&name), Some(discord_id)) {
@@ -123,7 +135,7 @@ pub async fn resolve_discord_name(
          ORDER BY updated_at DESC LIMIT 1"#,
     )
     .bind(db::parse_participant_id(discord_id)?)
-    .fetch_optional(pool)
+    .fetch_optional(&mut *conn)
     .await?;
     if let Some((Some(name),)) = profile_name {
         if let Some(sanitized) = sanitize_discord_name(Some(&name), Some(discord_id)) {
@@ -982,17 +994,22 @@ pub async fn load_tournament_or_404(pool: &Pool, tournament_id: i64) -> WebResul
     tournament_guard_from_row(row)
 }
 
+pub async fn lock_tournament_row(
+    tx: &mut sqlx::Transaction<'_, Postgres>,
+    tournament_id: i64,
+) -> WebResult<sqlx::postgres::PgRow> {
+    sqlx::query(r#"SELECT * FROM turnier."tournaments" WHERE id = $1 FOR UPDATE"#)
+        .bind(tournament_id)
+        .fetch_optional(&mut **tx)
+        .await?
+        .ok_or_else(|| WebError::not_found("Turnier nicht gefunden"))
+}
+
 pub async fn lock_tournament_or_404(
     tx: &mut sqlx::Transaction<'_, Postgres>,
     tournament_id: i64,
 ) -> WebResult<TournamentGuard> {
-    let row = sqlx::query(&format!(
-        "{TOURNAMENT_GUARD_SELECT} WHERE id = $1 FOR UPDATE"
-    ))
-    .bind(tournament_id)
-    .fetch_optional(&mut **tx)
-    .await?;
-    tournament_guard_from_row(row)
+    tournament_guard_from_row(Some(lock_tournament_row(tx, tournament_id).await?))
 }
 
 const TOURNAMENT_GUARD_SELECT: &str = r#"SELECT id, name, status, team_size, invite_mode,
@@ -1130,36 +1147,53 @@ pub async fn remove_signup_and_checkin(
     Ok(())
 }
 
-/// Prüft, ob die Anmeldung offen ist (status in registration|checkin), 400 sonst.
-/// Entspricht `_ensure_registration_open` (routes.py:441).
 pub const PARTICIPANT_NAME_MAX_CHARS: usize = 32;
 
-fn is_invisible_format_char(c: char) -> bool {
-    matches!(
-        c,
-        '\u{00AD}'
-            | '\u{061C}'
-            | '\u{180E}'
-            | '\u{200B}'..='\u{200F}'
-            | '\u{202A}'..='\u{202E}'
-            | '\u{2060}'..='\u{2064}'
-            | '\u{2066}'..='\u{206F}'
-            | '\u{FEFF}'
-            | '\u{FFF9}'..='\u{FFFB}'
-    )
+fn is_hidden_char(c: char) -> bool {
+    c.is_control()
+        || matches!(
+            c,
+            '\u{00AD}'
+                | '\u{034F}'
+                | '\u{061C}'
+                | '\u{115F}'
+                | '\u{1160}'
+                | '\u{17B4}'
+                | '\u{17B5}'
+                | '\u{180B}'..='\u{180F}'
+                | '\u{200B}'..='\u{200F}'
+                | '\u{202A}'..='\u{202E}'
+                | '\u{2060}'..='\u{206F}'
+                | '\u{2800}'
+                | '\u{3164}'
+                | '\u{FE00}'..='\u{FE0F}'
+                | '\u{FEFF}'
+                | '\u{FFA0}'
+                | '\u{FFF0}'..='\u{FFFB}'
+                | '\u{1BCA0}'..='\u{1BCA3}'
+                | '\u{1D173}'..='\u{1D17A}'
+                | '\u{E0000}'..='\u{E0FFF}'
+        )
+}
+
+pub fn has_hidden_chars(name: &str) -> bool {
+    name.chars().any(is_hidden_char)
 }
 
 pub fn participant_name(raw: &str) -> WebResult<&str> {
     let name = raw.trim();
     let invalid = name.is_empty()
         || name.chars().count() > PARTICIPANT_NAME_MAX_CHARS
-        || name
-            .chars()
-            .any(|c| c.is_control() || is_invisible_format_char(c));
+        || has_hidden_chars(name);
     if invalid {
         return Err(WebError::bad_request(format!(
             "Bitte gib einen Namen mit 1 bis {PARTICIPANT_NAME_MAX_CHARS} Zeichen ohne unsichtbare Steuerzeichen ein"
         )));
+    }
+    if looks_like_discord_id(Some(name)) {
+        return Err(WebError::bad_request(
+            "Bitte gib einen Namen ein, der nicht wie eine Discord-ID aussieht",
+        ));
     }
     Ok(name)
 }
@@ -1179,6 +1213,8 @@ pub fn registration_window_open(status: &str) -> bool {
     matches!(status, "registration" | "checkin")
 }
 
+/// Prüft, ob die Anmeldung offen ist (status in registration|checkin), 400 sonst.
+/// Entspricht `_ensure_registration_open` (routes.py:441).
 pub fn ensure_registration_open(status: &str) -> WebResult<()> {
     if !registration_window_open(status) {
         return Err(WebError::bad_request("Anmeldung ist nicht geöffnet"));
@@ -1192,6 +1228,26 @@ pub fn is_mod_user(user: &UserSession) -> bool {
 }
 
 /// Erzwingt Captain-Rechte (403 sonst). Entspricht `_ensure_captain` (routes.py:453).
+pub const TEAM_ROSTER_LOCKED_MESSAGE: &str =
+    "Teams lassen sich nur während der Anmeldung ändern, nicht mehr im Check-in";
+
+pub fn ensure_team_roster_open(status: &str) -> WebResult<()> {
+    if status != "registration" {
+        return Err(WebError::bad_request(TEAM_ROSTER_LOCKED_MESSAGE));
+    }
+    Ok(())
+}
+
+pub async fn precheck_player_team_registration(
+    pool: &Pool,
+    tournament_id: i64,
+) -> WebResult<TournamentGuard> {
+    let t = load_tournament_or_404(pool, tournament_id).await?;
+    ensure_player_teams_allowed(&t)?;
+    ensure_registration_open(&t.status)?;
+    Ok(t)
+}
+
 pub fn ensure_captain(user: &UserSession, captain_discord_id: &str) -> WebResult<()> {
     if user.discord_id != captain_discord_id {
         return Err(WebError::forbidden(
@@ -1394,8 +1450,6 @@ pub async fn load_rank_input(state: &AppState, discord_id: &str) -> RankInput {
     }
 }
 
-/// Upsert in `tournament_signups`: aktualisiert den vorhandenen Eintrag oder legt
-/// einen neuen an. Entspricht `_upsert_signup` (routes.py:366).
 #[derive(sqlx::FromRow)]
 struct CheckinMembershipRow {
     discord_name: Option<String>,
@@ -1454,6 +1508,13 @@ pub async fn ensure_checkin_signup(
     Ok(true)
 }
 
+pub fn ensure_checkin_open(status: &str) -> WebResult<()> {
+    if status != "checkin" {
+        return Err(WebError::bad_request("Check-in ist aktuell nicht geöffnet"));
+    }
+    Ok(())
+}
+
 pub async fn insert_checkin(
     tx: &mut sqlx::Transaction<'_, Postgres>,
     tournament_id: i64,
@@ -1461,10 +1522,8 @@ pub async fn insert_checkin(
 ) -> WebResult<bool> {
     let inserted = sqlx::query(
         r#"INSERT INTO turnier."tournament_checkins" (tournament_id, discord_id, checked_in_at)
-         SELECT $1, $2, now()
-         WHERE NOT EXISTS (
-             SELECT 1 FROM turnier."tournament_checkins" WHERE tournament_id = $1 AND discord_id = $2
-         )"#,
+         VALUES ($1, $2, now())
+         ON CONFLICT DO NOTHING"#,
     )
     .bind(tournament_id)
     .bind(participant_id)
@@ -1474,6 +1533,8 @@ pub async fn insert_checkin(
     Ok(inserted > 0)
 }
 
+/// Upsert in `tournament_signups`: aktualisiert den vorhandenen Eintrag oder legt
+/// einen neuen an. Entspricht `_upsert_signup` (routes.py:366).
 pub async fn upsert_signup(
     tx: &mut sqlx::Transaction<'_, Postgres>,
     tournament_id: i64,
@@ -1527,7 +1588,6 @@ pub async fn upsert_signup(
 /// Fügt einen Spieler einem Team hinzu (Member-Insert + Signup-Sync mit
 /// aufgelöstem Namen). Entspricht `_add_user_to_team` (routes.py:581).
 pub async fn add_user_to_team(
-    pool: &Pool,
     tx: &mut sqlx::Transaction<'_, Postgres>,
     tournament_id: i64,
     team_id: i64,
@@ -1536,7 +1596,7 @@ pub async fn add_user_to_team(
     rank: &RankInput,
 ) -> WebResult<()> {
     let discord_id_i64 = db::parse_participant_id(discord_id)?;
-    let resolved_name = resolve_discord_name(pool, discord_id, discord_name).await?;
+    let resolved_name = resolve_discord_name_in(tx, discord_id, discord_name).await?;
     ensure_guest_name_free(tx, tournament_id, discord_id_i64, Some(&resolved_name)).await?;
     sqlx::query(
         r#"INSERT INTO turnier."team_members"

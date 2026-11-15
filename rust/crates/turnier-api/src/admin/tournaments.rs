@@ -28,8 +28,7 @@ use crate::state::AppState;
 
 use super::helpers::{
     audit, delete_group_phase_tree, delete_tournament_tree, group_phase_has_played_matches,
-    load_tournament_or_404, lock_tournament_or_404, serialize_lobby_settings,
-    serialize_reminder_offsets,
+    load_tournament_or_404, serialize_lobby_settings, serialize_reminder_offsets,
 };
 use super::loaders::{
     load_bracket_matches, load_groups_for_tournament, load_mini_groups_for_tournament,
@@ -288,13 +287,7 @@ async fn update_tournament(
 
     let mut tx = state.pool.begin().await?;
     turnier_scheduler::acquire_tournament_schedule_lock(&mut tx).await?;
-    let existing = sqlx::query(
-        r#"SELECT status, tournament_mode FROM turnier."tournaments" WHERE id = $1 FOR UPDATE"#,
-    )
-    .bind(tournament_id)
-    .fetch_optional(&mut *tx)
-    .await?
-    .ok_or_else(|| WebError::not_found("Turnier nicht gefunden"))?;
+    let existing = crate::public::helpers::lock_tournament_row(&mut tx, tournament_id).await?;
     let current_status: String = existing.get("status");
     let existing_mode: String = existing.get("tournament_mode");
 
@@ -328,11 +321,8 @@ async fn update_tournament(
                     "Check-in bitte über den dedizierten Endpoint öffnen",
                 ));
             }
-            if current_status == "checkin" && new_status_s == "group_phase" {
-                return Err(WebError::bad_request(
-                    "Check-in bitte über finalize-checkin abschließen",
-                ));
-            }
+            turnier_scheduler::ensure_not_leaving_checkin(&current_status, new_status_s)
+                .map_err(scheduler_error)?;
             if existing_mode == "league" && new_status_s == "completed" {
                 return Err(WebError::bad_request(
                     "Bitte über Turnier abschließen beenden, damit die Tabelle gewertet wird",
@@ -667,7 +657,7 @@ async fn delete_tournament(
     Path(tournament_id): Path<i64>,
 ) -> WebResult<Json<Value>> {
     let mut tx = state.pool.begin().await?;
-    let existing = lock_tournament_or_404(&mut tx, tournament_id).await?;
+    let existing = crate::public::helpers::lock_tournament_row(&mut tx, tournament_id).await?;
     let name: String = existing.get("name");
 
     delete_tournament_tree(&mut tx, tournament_id).await?;
@@ -695,7 +685,7 @@ async fn open_checkin(
         let status: String = existing.get("status");
         if status != "registration" {
             return Err(WebError::bad_request(
-                "Check-in kann nur aus der Registration geöffnet werden",
+                "Check-in kann nur aus der Anmeldung geöffnet werden",
             ));
         }
         let count: i64 =
@@ -727,7 +717,7 @@ async fn revert_checkin(
     Path(tournament_id): Path<i64>,
 ) -> WebResult<Json<Tournament>> {
     let mut tx = state.pool.begin().await?;
-    let existing = lock_tournament_or_404(&mut tx, tournament_id).await?;
+    let existing = crate::public::helpers::lock_tournament_row(&mut tx, tournament_id).await?;
     let status: String = existing.get("status");
     if status != "checkin" {
         return Err(WebError::bad_request(
@@ -816,11 +806,6 @@ async fn advance_tournament(
                 "Check-in bitte über open-checkin öffnen",
             ));
         }
-        if current_status == "checkin" {
-            return Err(WebError::bad_request(
-                "Check-in bitte über finalize-checkin abschließen",
-            ));
-        }
         let allowed: Vec<&'static str> = parse_status(&current_status)
             .map(|s| {
                 next_statuses_for_stored_mode(s, &stored_mode)
@@ -875,12 +860,16 @@ async fn advance_status_shared(
     )
     .await
     .map(|_| ())
-    .map_err(|err| match err {
+    .map_err(scheduler_error)
+}
+
+fn scheduler_error(err: turnier_scheduler::SchedulerError) -> WebError {
+    match err {
         turnier_scheduler::SchedulerError::InvalidTransition(msg) => WebError::bad_request(msg),
         turnier_scheduler::SchedulerError::StatusConflict => {
             WebError::conflict("Turnierstatus wurde parallel geändert")
         }
         turnier_scheduler::SchedulerError::StartGapConflict(msg) => WebError::conflict(msg),
         other => other.into(),
-    })
+    }
 }

@@ -98,7 +98,12 @@ export default function SoloBalancePanel({ tournamentId, tournamentStatus, teamS
           </div>
           <section aria-label="Vorgeschlagene Warteliste">
             <h4 className="font-medium text-foreground">Warteliste ({proposal.waitlist.length})</h4>
-            {proposal.waitlist.length > 0 ? <PlayerList players={proposal.waitlist} /> : <p className="mt-1 text-sm text-muted">Alle Anmeldungen passen in die Teams.</p>}
+            {proposal.waitlist.length > 0 ? (
+              <>
+                <PlayerList players={proposal.waitlist} />
+                <p className="mt-1 text-sm text-muted">Vorrang beim nächsten Solo-Teamausgleich bekommen nur Spieler mit Discord-Login. Gäste stehen nur in diesem Turnier auf der Warteliste.</p>
+              </>
+            ) : <p className="mt-1 text-sm text-muted">Alle Anmeldungen passen in die Teams.</p>}
           </section>
           <div className="flex flex-wrap items-center gap-3">
             <Button disabled={busy || !canBalance || apply.isError} onClick={() => apply.mutate(proposal)}>

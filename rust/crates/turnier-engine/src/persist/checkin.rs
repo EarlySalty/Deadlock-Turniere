@@ -208,6 +208,7 @@ pub async fn assign_random_teams(
     tournament_id: i64,
     shuffler: &mut dyn SoloShuffler,
 ) -> TournamentResult<i64> {
+    let profiles = solo_rank_profiles(pool, resolver, tournament_id).await?;
     let mut tx = pool.begin().await?;
     let locked: Option<(String, i64)> = sqlx::query_as(
         "SELECT status, team_size FROM turnier.tournaments WHERE id = $1 FOR UPDATE",
@@ -220,7 +221,7 @@ pub async fn assign_random_teams(
     };
     if status != "registration" {
         return Err(TournamentError::Validation(
-            "Team-Zuweisung nur während der Registration möglich".into(),
+            "Team-Zuweisung nur während der Anmeldung möglich".into(),
         ));
     }
 
@@ -280,9 +281,8 @@ pub async fn assign_random_teams(
 
         for (i, signup) in chunk.iter().enumerate() {
             let role = if i == 0 { "captain" } else { "member" };
-            let signup_discord_id = discord_id_to_string(signup.discord_id);
-            let rank_data = resolver.rank_profile(&signup_discord_id).await?;
-            let (steam_id, rank, score) = match rank_data {
+            let rank_data = profiles.get(&discord_id_to_string(signup.discord_id));
+            let (steam_id, rank, score) = match rank_data.cloned() {
                 Some(profile) => (
                     profile.steam_id.or_else(|| signup.steam_id.clone()),
                     profile.rank.or_else(|| signup.rank.clone()),
@@ -332,6 +332,25 @@ pub async fn assign_random_teams(
 
     tx.commit().await?;
     Ok(teams_created)
+}
+
+async fn solo_rank_profiles(
+    pool: &sqlx::Pool<Postgres>,
+    resolver: &dyn RankResolver,
+    tournament_id: i64,
+) -> TournamentResult<HashMap<String, turnier_core::RankProfile>> {
+    let ids: Vec<(i64,)> = sqlx::query_as(
+        "SELECT discord_id FROM turnier.tournament_signups \
+         WHERE tournament_id = $1 AND team_id IS NULL",
+    )
+    .bind(tournament_id)
+    .fetch_all(pool)
+    .await?;
+    let ids: Vec<String> = ids
+        .into_iter()
+        .map(|(id,)| discord_id_to_string(id))
+        .collect();
+    Ok(resolver.rank_profiles(&ids).await?)
 }
 
 /// Liefert den (jüngsten, nicht-leeren) Captain-Discord-Namen für die
@@ -495,6 +514,7 @@ pub struct FinalizeCheckinResult {
     pub matches_created: Option<i64>,
     pub advanced_to_group_phase: Option<bool>,
     pub advanced_to_bracket: Option<bool>,
+    pub entered_status: Option<&'static str>,
 }
 
 #[derive(Debug, Clone)]
@@ -891,6 +911,7 @@ pub async fn finalize_checkin(
     let mut groups_created = 0i64;
     let mut matches_created = 0i64;
     let mut advanced_to_bracket = false;
+    let mut entered_status: Option<&'static str> = None;
 
     if params.confirm {
         // Entfernte Mitglieder löschen + Signup entkoppeln.
@@ -1033,6 +1054,7 @@ pub async fn finalize_checkin(
                 .await?;
                 groups_created = 1;
                 matches_created = plan.matches;
+                entered_status = Some("group_phase");
                 let res = sqlx::query(
                     "UPDATE turnier.tournaments SET status = 'group_phase', updated_at = $1 \
                      WHERE id = $2 AND status = 'checkin'",
@@ -1046,6 +1068,7 @@ pub async fn finalize_checkin(
                 let group_ids = generate_groups_in_tx(&mut tx, tournament_id, None).await?;
                 groups_created = group_ids.len() as i64;
                 matches_created = generate_group_matches_in_tx(&mut tx, tournament_id).await?;
+                entered_status = Some("group_phase");
                 let res = sqlx::query(
                     "UPDATE turnier.tournaments SET status = 'group_phase', updated_at = $1 \
                      WHERE id = $2 AND status = 'checkin'",
@@ -1087,6 +1110,7 @@ pub async fn finalize_checkin(
                 .await?;
                 status_changed = res.rows_affected();
                 advanced_to_bracket = true;
+                entered_status = Some("bracket");
             }
             if status_changed == 0 {
                 return Err(TournamentError::StatusConflict);
@@ -1169,6 +1193,7 @@ pub async fn finalize_checkin(
         } else {
             None
         },
+        entered_status,
     };
 
     tx.commit().await?;

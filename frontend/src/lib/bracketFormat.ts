@@ -1,10 +1,4 @@
-import type { BracketFormat, BracketMatch } from '../types/tournament'
-
-export const DOUBLE_ELIMINATION_RULE = 'mindestens 4 Teams, und die Zahl muss eine Zweierpotenz sein (4, 8, 16, 32 …)'
-
-export function hasDoubleEliminationMatches(matches: Pick<BracketMatch, 'bracket_type'>[]): boolean {
-  return matches.some((match) => match.bracket_type === 'losers' || match.bracket_type === 'grand_final')
-}
+import type { BracketFormat } from '../types/tournament'
 
 export function effectiveBracketFormat(tournament: {
   bracket_format: BracketFormat

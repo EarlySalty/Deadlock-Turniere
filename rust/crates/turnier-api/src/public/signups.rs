@@ -36,6 +36,8 @@ async fn solo_signup(
     let pool = &state.pool;
     helpers::ensure_consent(pool, &user.discord_id).await?;
     let user_discord_id = db::parse_participant_id(&user.discord_id)?;
+    let precheck = helpers::load_tournament_or_404(pool, tournament_id).await?;
+    helpers::ensure_registration_open(&precheck.status)?;
     let rank = helpers::load_rank_input(&state, &user.discord_id).await;
 
     let mut tx = pool.begin().await?;
@@ -106,8 +108,7 @@ async fn solo_signup(
                 .unwrap_or_else(|| user.discord_id.clone());
 
         let mut team_name = truncate_chars(&resolved_name, 32);
-        let base_key = team_name.to_lowercase();
-        let mut name_key = base_key.clone();
+        let mut name_key = turnier_engine::name_key(&team_name);
         let mut suffix = 1;
         loop {
             let exists: Option<(i64,)> = sqlx::query_as(
@@ -121,8 +122,10 @@ async fn solo_signup(
                 break;
             }
             suffix += 1;
-            name_key = format!("{base_key}{suffix}");
-            team_name = truncate_chars(&format!("{resolved_name}{suffix}"), 32);
+            let suffix_text = suffix.to_string();
+            let base = truncate_chars(&resolved_name, 32 - suffix_text.len());
+            team_name = format!("{base}{suffix_text}");
+            name_key = turnier_engine::name_key(&team_name);
         }
 
         let team_id: i64 = sqlx::query_scalar(
@@ -230,9 +233,7 @@ async fn checkin_player(
 
     let mut tx = pool.begin().await?;
     let status = helpers::lock_tournament_status(&mut tx, tournament_id).await?;
-    if status != "checkin" {
-        return Err(WebError::bad_request("Check-in ist aktuell nicht geöffnet"));
-    }
+    helpers::ensure_checkin_open(&status)?;
 
     if !helpers::ensure_checkin_signup(
         &mut tx,

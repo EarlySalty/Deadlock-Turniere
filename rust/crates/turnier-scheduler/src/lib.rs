@@ -1,8 +1,8 @@
 //! `turnier-scheduler`: Phasenübergänge + Reminder-Hintergrund-Loop des
 //! Turnier-Backends.
 //!
-//! Portiert `backend/tournament/scheduler.py` 1:1 im Verhalten. Zwei
-//! Verantwortungen:
+//! Portiert `backend/tournament/scheduler.py`; die einzige bewusste Abweichung
+//! steht unten unter „Bewusste Abweichungen“. Zwei Verantwortungen:
 //!
 //! 1. **Geteilte Orchestrierung** [`advance_tournament_status`]: wechselt den
 //!    Turnierstatus, generiert Seiteneffekte (Gruppen/Matches/Bracket), schreibt
@@ -18,8 +18,12 @@
 //!   als next_status; der Zweig greift nur bei externen Aufrufern (turnier-api).
 //! - **5-Minuten-Reminder-Fenster ohne Catch-up** (needs-decision): verpasste
 //!   Fenster nach einem Ausfall werden nicht nachgeholt.
+//!
+//! ## Bewusste Abweichungen
 //! - **Check-in-Ende nur manuell**: der Scheduler beendet den Check-in in keinem
-//!   Modus; das Orga-Team schließt ihn über `finalize-checkin` ab.
+//!   Modus, und [`advance_tournament_status`] lehnt jeden Übergang aus `checkin`
+//!   ab. Das Orga-Team schließt ihn über `finalize-checkin` ab, das danach die
+//!   Auto-Lobbys über [`schedule_lobbies_best_effort`] plant.
 
 pub mod error;
 pub mod loop_runner;
@@ -46,4 +50,7 @@ pub use time::{
     is_due, is_within_window, offset_label, parse_reminder_offsets, DEFAULT_REMINDER_OFFSETS,
     REMINDER_WINDOW_MINUTES,
 };
-pub use transition::{advance_tournament_status, get_due_next_status, DueStatusRow};
+pub use transition::{
+    advance_tournament_status, ensure_not_leaving_checkin, get_due_next_status,
+    schedule_lobbies_best_effort, DueStatusRow, CHECKIN_EXIT_MESSAGE,
+};

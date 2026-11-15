@@ -397,6 +397,7 @@ export default function Admin() {
                         <BracketView
                           matches={liveDetail.bracket_matches}
                           teams={liveDetail.teams}
+                          format={effectiveBracketFormat(liveDetail)}
                         />
                         <MatchAdminPanel
                           tournamentId={liveDetail.id}
