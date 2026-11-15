@@ -37,12 +37,12 @@ async fn solo_signup(
     helpers::ensure_consent(pool, &user.discord_id).await?;
     let user_discord_id = db::parse_participant_id(&user.discord_id)?;
     let precheck = helpers::load_tournament_or_404(pool, tournament_id).await?;
-    helpers::ensure_registration_open(&precheck.status)?;
+    helpers::ensure_registration_open(precheck.status)?;
     let rank = helpers::load_rank_input(&state, &user.discord_id).await;
 
     let mut tx = pool.begin().await?;
     let t = helpers::lock_tournament_or_404(&mut tx, tournament_id).await?;
-    helpers::ensure_registration_open(&t.status)?;
+    helpers::ensure_registration_open(t.status)?;
 
     // Bereits angemeldet?
     let signup_exists: Option<(i64,)> = sqlx::query_as(
@@ -153,7 +153,7 @@ async fn cancel_solo_signup(
 
     let mut tx = pool.begin().await?;
     let status = helpers::lock_tournament_status(&mut tx, tournament_id).await?;
-    if !helpers::registration_window_open(&status) {
+    if !status.registration_window_open() {
         return Err(WebError::bad_request(
             "Austragen ist nur bis zum Ende des Check-ins möglich",
         ));
@@ -202,7 +202,7 @@ async fn checkin_player(
 
     let mut tx = pool.begin().await?;
     let status = helpers::lock_tournament_status(&mut tx, tournament_id).await?;
-    helpers::ensure_checkin_open(&status)?;
+    helpers::ensure_checkin_open(status)?;
 
     if !helpers::ensure_checkin_signup(
         &mut tx,

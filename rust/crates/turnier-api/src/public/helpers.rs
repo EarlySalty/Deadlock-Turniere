@@ -795,125 +795,50 @@ pub fn tournament_select() -> String {
     )
 }
 
-/// Die für die Turnier-DTOs relevanten Spalten der `tournaments`-Tabelle.
-/// Wird über [`tournament_select`] befüllt, das die berechnete Spalte
-/// `played_bracket_format` mitliefert.
-pub struct TournamentRowData {
-    pub id: i64,
-    pub name: String,
-    pub status: turnier_core::TournamentStatus,
-    pub description: Option<String>,
-    pub team_size: i64,
-    pub series_format: i64,
-    pub final_series_format: Option<i64>,
-    pub registration_start: Option<String>,
-    pub registration_end: Option<String>,
-    pub checkin_start: Option<String>,
-    pub group_phase_start: Option<String>,
-    pub bracket_start: Option<String>,
-    pub bracket_format: String,
-    pub played_bracket_format: Option<String>,
-    pub tournament_mode: turnier_core::TournamentMode,
-    pub tournament_game_mode: turnier_core::TournamentGameMode,
-    pub auto_lobby_enabled: bool,
-    pub created_by: String,
-    pub created_at: String,
-    pub updated_at: String,
-    pub invite_mode: InviteMode,
-    pub invite_window_start: Option<String>,
-    pub invite_window_end: Option<String>,
-    pub lobby_settings: Option<String>,
-    pub exclude_from_leaderboard: bool,
-    pub reminder_offsets: Vec<i64>,
-    pub start_reminder_offsets: Vec<i64>,
-    pub match_objective: String,
-    pub no_show_grace_minutes: i64,
-    pub rules: Option<String>,
-    pub is_test: bool,
-}
-
-impl TournamentRowData {
-    /// Liest die DTO-relevanten Spalten aus einer `tournaments`-Zeile.
-    pub fn from_row(row: &sqlx::postgres::PgRow) -> WebResult<Self> {
-        let reminder_offsets = db::json_to_wire(row.try_get("reminder_offsets")?);
-        let start_reminder_offsets = db::json_to_wire(row.try_get("start_reminder_offsets")?);
-        Ok(Self {
-            id: row.try_get("id")?,
-            name: row.try_get("name")?,
-            status: row.try_get("status")?,
-            description: row.try_get("description")?,
-            team_size: row.try_get("team_size")?,
-            series_format: row.try_get("series_format")?,
-            final_series_format: row.try_get("final_series_format")?,
-            registration_start: db::opt_ts_to_string(row.try_get("registration_start")?),
-            registration_end: db::opt_ts_to_string(row.try_get("registration_end")?),
-            checkin_start: db::opt_ts_to_string(row.try_get("checkin_start")?),
-            group_phase_start: db::opt_ts_to_string(row.try_get("group_phase_start")?),
-            bracket_start: db::opt_ts_to_string(row.try_get("bracket_start")?),
-            bracket_format: row.try_get("bracket_format")?,
-            played_bracket_format: row.try_get("played_bracket_format")?,
-            tournament_mode: row.try_get("tournament_mode")?,
-            tournament_game_mode: row.try_get("tournament_game_mode")?,
-            auto_lobby_enabled: row.try_get("auto_lobby_enabled")?,
-            created_by: db::discord_id_to_string(row.try_get("created_by")?),
-            created_at: db::ts_to_string(row.try_get("created_at")?),
-            updated_at: db::ts_to_string(row.try_get("updated_at")?),
-            invite_mode: row.try_get("invite_mode")?,
-            invite_window_start: db::opt_ts_to_string(row.try_get("invite_window_start")?),
-            invite_window_end: db::opt_ts_to_string(row.try_get("invite_window_end")?),
-            lobby_settings: db::json_to_wire(row.try_get("lobby_settings")?),
-            exclude_from_leaderboard: row.try_get("exclude_from_leaderboard")?,
-            reminder_offsets: turnier_core::json::parse_offsets(
-                reminder_offsets.as_deref(),
-                &turnier_core::json::default_reminder_offsets(),
-            ),
-            start_reminder_offsets: turnier_core::json::parse_offsets(
-                start_reminder_offsets.as_deref(),
-                &turnier_core::json::default_start_reminder_offsets(),
-            ),
-            match_objective: row.try_get("match_objective")?,
-            no_show_grace_minutes: row.try_get("no_show_grace_minutes")?,
-            rules: row.try_get("rules")?,
-            is_test: row.try_get("is_test")?,
-        })
-    }
-
-    /// Baut die volle `Tournament`-Lese-Sicht.
-    pub fn into_tournament(self) -> Tournament {
-        Tournament {
-            id: self.id,
-            name: self.name,
-            status: self.status,
-            description: self.description,
-            team_size: self.team_size,
-            series_format: self.series_format,
-            final_series_format: self.final_series_format,
-            registration_start: self.registration_start,
-            registration_end: self.registration_end,
-            checkin_start: self.checkin_start,
-            group_phase_start: self.group_phase_start,
-            bracket_start: self.bracket_start,
-            bracket_format: self.bracket_format,
-            played_bracket_format: self.played_bracket_format,
-            tournament_mode: self.tournament_mode,
-            tournament_game_mode: self.tournament_game_mode,
-            auto_lobby_enabled: self.auto_lobby_enabled,
-            created_by: self.created_by,
-            created_at: self.created_at,
-            updated_at: self.updated_at,
-            invite_mode: self.invite_mode,
-            invite_window_start: self.invite_window_start,
-            invite_window_end: self.invite_window_end,
-            lobby_settings: self.lobby_settings,
-            exclude_from_leaderboard: self.exclude_from_leaderboard,
-            reminder_offsets: self.reminder_offsets,
-            start_reminder_offsets: self.start_reminder_offsets,
-            match_objective: self.match_objective,
-            no_show_grace_minutes: self.no_show_grace_minutes,
-            rules: self.rules,
-            is_test: self.is_test,
-        }
-    }
+pub fn tournament_from_row(row: &sqlx::postgres::PgRow) -> WebResult<Tournament> {
+    let status: turnier_core::TournamentStatus = row.try_get("status")?;
+    let reminder_offsets = db::json_to_wire(row.try_get("reminder_offsets")?);
+    let start_reminder_offsets = db::json_to_wire(row.try_get("start_reminder_offsets")?);
+    Ok(Tournament {
+        id: row.try_get("id")?,
+        name: row.try_get("name")?,
+        status,
+        registration_open: status.registration_window_open(),
+        description: row.try_get("description")?,
+        team_size: row.try_get("team_size")?,
+        series_format: row.try_get("series_format")?,
+        final_series_format: row.try_get("final_series_format")?,
+        registration_start: db::opt_ts_to_string(row.try_get("registration_start")?),
+        registration_end: db::opt_ts_to_string(row.try_get("registration_end")?),
+        checkin_start: db::opt_ts_to_string(row.try_get("checkin_start")?),
+        group_phase_start: db::opt_ts_to_string(row.try_get("group_phase_start")?),
+        bracket_start: db::opt_ts_to_string(row.try_get("bracket_start")?),
+        bracket_format: row.try_get("bracket_format")?,
+        played_bracket_format: row.try_get("played_bracket_format")?,
+        tournament_mode: row.try_get("tournament_mode")?,
+        tournament_game_mode: row.try_get("tournament_game_mode")?,
+        auto_lobby_enabled: row.try_get("auto_lobby_enabled")?,
+        created_by: db::discord_id_to_string(row.try_get("created_by")?),
+        created_at: db::ts_to_string(row.try_get("created_at")?),
+        updated_at: db::ts_to_string(row.try_get("updated_at")?),
+        invite_mode: row.try_get("invite_mode")?,
+        invite_window_start: db::opt_ts_to_string(row.try_get("invite_window_start")?),
+        invite_window_end: db::opt_ts_to_string(row.try_get("invite_window_end")?),
+        lobby_settings: db::json_to_wire(row.try_get("lobby_settings")?),
+        exclude_from_leaderboard: row.try_get("exclude_from_leaderboard")?,
+        reminder_offsets: turnier_core::json::parse_offsets(
+            reminder_offsets.as_deref(),
+            &turnier_core::json::default_reminder_offsets(),
+        ),
+        start_reminder_offsets: turnier_core::json::parse_offsets(
+            start_reminder_offsets.as_deref(),
+            &turnier_core::json::default_start_reminder_offsets(),
+        ),
+        match_objective: row.try_get("match_objective")?,
+        no_show_grace_minutes: row.try_get("no_show_grace_minutes")?,
+        rules: row.try_get("rules")?,
+        is_test: row.try_get("is_test")?,
+    })
 }
 
 /// Liest alle Turniere (DTO-Form) gemäß einer Filterbedingung.
@@ -923,7 +848,7 @@ pub async fn list_tournament_dtos(pool: &Pool, where_order: &str) -> WebResult<V
         .await?;
     let mut out = Vec::with_capacity(rows.len());
     for row in rows {
-        out.push(TournamentRowData::from_row(&row)?.into_tournament());
+        out.push(tournament_from_row(&row)?);
     }
     Ok(out)
 }
@@ -931,7 +856,7 @@ pub async fn list_tournament_dtos(pool: &Pool, where_order: &str) -> WebResult<V
 /// Baut die öffentliche Turnier-Detail-Sicht aus Rohdaten + geladenen Listen.
 #[allow(clippy::too_many_arguments)]
 pub fn build_detail_public(
-    t: TournamentRowData,
+    t: Tournament,
     teams: Vec<TeamPublic>,
     groups: Vec<Group>,
     bracket_matches: Vec<BracketMatch>,
@@ -942,6 +867,7 @@ pub fn build_detail_public(
         id: t.id,
         name: t.name,
         status: t.status,
+        registration_open: t.registration_open,
         description: t.description,
         team_size: t.team_size,
         series_format: t.series_format,
@@ -981,7 +907,7 @@ pub fn build_detail_public(
 pub struct TournamentGuard {
     pub id: i64,
     pub name: String,
-    pub status: String,
+    pub status: turnier_core::TournamentStatus,
     pub team_size: i64,
     pub invite_mode: Option<InviteMode>,
     pub invite_window_start: Option<String>,
@@ -1096,7 +1022,7 @@ pub async fn ensure_guest_name_free(
 pub async fn lock_tournament_status(
     tx: &mut sqlx::Transaction<'_, Postgres>,
     tournament_id: i64,
-) -> WebResult<String> {
+) -> WebResult<turnier_core::TournamentStatus> {
     Ok(lock_tournament_or_404(tx, tournament_id).await?.status)
 }
 
@@ -1244,14 +1170,10 @@ where
     .await?)
 }
 
-pub fn registration_window_open(status: &str) -> bool {
-    matches!(status, "registration" | "checkin")
-}
-
 /// Prüft, ob die Anmeldung offen ist (status in registration|checkin), 400 sonst.
 /// Entspricht `_ensure_registration_open` (routes.py:441).
-pub fn ensure_registration_open(status: &str) -> WebResult<()> {
-    if !registration_window_open(status) {
+pub fn ensure_registration_open(status: turnier_core::TournamentStatus) -> WebResult<()> {
+    if !status.registration_window_open() {
         return Err(WebError::bad_request("Anmeldung ist nicht geöffnet"));
     }
     Ok(())
@@ -1266,8 +1188,8 @@ pub fn is_mod_user(user: &UserSession) -> bool {
 pub const TEAM_ROSTER_LOCKED_MESSAGE: &str =
     "Teams lassen sich nur während der Anmeldung ändern, nicht mehr im Check-in";
 
-pub fn ensure_team_roster_open(status: &str) -> WebResult<()> {
-    if status != "registration" {
+pub fn ensure_team_roster_open(status: turnier_core::TournamentStatus) -> WebResult<()> {
+    if status != turnier_core::TournamentStatus::Registration {
         return Err(WebError::bad_request(TEAM_ROSTER_LOCKED_MESSAGE));
     }
     Ok(())
@@ -1279,7 +1201,7 @@ pub async fn precheck_player_team_registration(
 ) -> WebResult<TournamentGuard> {
     let t = load_tournament_or_404(pool, tournament_id).await?;
     ensure_player_teams_allowed(&t)?;
-    ensure_registration_open(&t.status)?;
+    ensure_registration_open(t.status)?;
     Ok(t)
 }
 
@@ -1535,8 +1457,8 @@ pub async fn ensure_checkin_signup(
     Ok(true)
 }
 
-pub fn ensure_checkin_open(status: &str) -> WebResult<()> {
-    if status != "checkin" {
+pub fn ensure_checkin_open(status: turnier_core::TournamentStatus) -> WebResult<()> {
+    if status != turnier_core::TournamentStatus::Checkin {
         return Err(WebError::bad_request("Check-in ist aktuell nicht geöffnet"));
     }
     Ok(())

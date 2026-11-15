@@ -28,6 +28,12 @@ str_enum! {
     TournamentStatus { Draft, Registration, Checkin, GroupPhase, Bracket, Completed, Archived }
 }
 
+impl TournamentStatus {
+    pub fn registration_window_open(self) -> bool {
+        matches!(self, Self::Registration | Self::Checkin)
+    }
+}
+
 str_enum! {
     /// Zustand eines einzelnen Matches (Gruppe oder Bracket).
     MatchStatus { Pending, Checkin, LobbyCreated, InProgress, Completed, Forfeit, Cancelled }

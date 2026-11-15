@@ -117,7 +117,7 @@ async fn create_team(
 
     let mut tx = state.pool.begin().await?;
     let tournament = crate::public::helpers::lock_tournament_row(&mut tx, tournament_id).await?;
-    ensure_participant_management_allowed(tournament.get::<String, _>("status").as_str())?;
+    ensure_participant_management_allowed(tournament.try_get("status")?)?;
     let name_key = turnier_engine::name_key(&name);
 
     let exists: Option<i64> = sqlx::query_scalar(
@@ -166,7 +166,7 @@ async fn rename_team(
 
     let mut tx = state.pool.begin().await?;
     let tournament = crate::public::helpers::lock_tournament_row(&mut tx, tournament_id).await?;
-    ensure_participant_management_allowed(tournament.get::<String, _>("status").as_str())?;
+    ensure_participant_management_allowed(tournament.try_get("status")?)?;
     load_team_or_404(&mut *tx, tournament_id, team_id).await?;
     let name_key = turnier_engine::name_key(&name);
 
@@ -225,7 +225,7 @@ async fn update_recruiting(
 
     let mut tx = state.pool.begin().await?;
     let tournament = crate::public::helpers::lock_tournament_row(&mut tx, tournament_id).await?;
-    ensure_participant_management_allowed(tournament.get::<String, _>("status").as_str())?;
+    ensure_participant_management_allowed(tournament.try_get("status")?)?;
     load_team_or_404(&mut *tx, tournament_id, team_id).await?;
 
     sqlx::query(r#"UPDATE turnier."teams" SET recruitment_status = $1 WHERE id = $2"#)
@@ -254,7 +254,7 @@ async fn list_applications(
     Path((tournament_id, team_id)): Path<(i64, i64)>,
 ) -> WebResult<Json<Vec<TeamApplication>>> {
     let tournament = load_tournament_or_404(&state.pool, tournament_id).await?;
-    ensure_participant_management_allowed(tournament.get::<String, _>("status").as_str())?;
+    ensure_participant_management_allowed(tournament.try_get("status")?)?;
     load_team_or_404(&state.pool, tournament_id, team_id).await?;
 
     #[derive(sqlx::FromRow)]
@@ -295,7 +295,7 @@ async fn accept_application(
 ) -> WebResult<Json<Value>> {
     let mut tx = state.pool.begin().await?;
     let tournament = crate::public::helpers::lock_tournament_row(&mut tx, tournament_id).await?;
-    ensure_participant_management_allowed(tournament.get::<String, _>("status").as_str())?;
+    ensure_participant_management_allowed(tournament.try_get("status")?)?;
     let team_size: i64 = tournament.get("team_size");
     let target_team = load_team_or_404(&mut *tx, tournament_id, team_id).await?;
     let captain: i64 = target_team.get("captain_discord_id");
@@ -424,7 +424,7 @@ async fn reject_application(
 ) -> WebResult<Json<Value>> {
     let mut tx = state.pool.begin().await?;
     let tournament = crate::public::helpers::lock_tournament_row(&mut tx, tournament_id).await?;
-    ensure_participant_management_allowed(tournament.get::<String, _>("status").as_str())?;
+    ensure_participant_management_allowed(tournament.try_get("status")?)?;
     load_team_or_404(&mut *tx, tournament_id, team_id).await?;
     let application = load_team_application_or_404(&mut *tx, team_id, app_id).await?;
     let app_status: String = application.get("status");
@@ -469,7 +469,7 @@ async fn delete_team(
 ) -> WebResult<Json<Value>> {
     let mut tx = state.pool.begin().await?;
     let tournament = crate::public::helpers::lock_tournament_row(&mut tx, tournament_id).await?;
-    ensure_participant_management_allowed(tournament.get::<String, _>("status").as_str())?;
+    ensure_participant_management_allowed(tournament.try_get("status")?)?;
     let team = load_team_or_404(&mut *tx, tournament_id, team_id).await?;
     let team_name: String = team.get("name");
     ensure_team_not_locked(&mut tx, team_id).await?;
@@ -549,7 +549,7 @@ async fn change_captain(
 
     let mut tx = state.pool.begin().await?;
     let tournament = crate::public::helpers::lock_tournament_row(&mut tx, tournament_id).await?;
-    ensure_participant_management_allowed(tournament.get::<String, _>("status").as_str())?;
+    ensure_participant_management_allowed(tournament.try_get("status")?)?;
     load_team_or_404(&mut *tx, tournament_id, team_id).await?;
 
     let is_member: Option<i64> = sqlx::query_scalar(
@@ -593,7 +593,7 @@ async fn remove_member(
 ) -> WebResult<Json<Team>> {
     let mut tx = state.pool.begin().await?;
     let tournament = crate::public::helpers::lock_tournament_row(&mut tx, tournament_id).await?;
-    ensure_participant_management_allowed(tournament.get::<String, _>("status").as_str())?;
+    ensure_participant_management_allowed(tournament.try_get("status")?)?;
     let team = load_team_or_404(&mut *tx, tournament_id, team_id).await?;
     let captain: i64 = team.get("captain_discord_id");
     let discord_id_i64 = db::parse_participant_id(&discord_id)?;
@@ -672,7 +672,7 @@ async fn move_member(
 
     let mut tx = state.pool.begin().await?;
     let tournament = crate::public::helpers::lock_tournament_row(&mut tx, tournament_id).await?;
-    ensure_participant_management_allowed(tournament.get::<String, _>("status").as_str())?;
+    ensure_participant_management_allowed(tournament.try_get("status")?)?;
     let team_size: i64 = tournament.get("team_size");
     let source_team = load_team_or_404(&mut *tx, tournament_id, from_team_id).await?;
     let target_team = load_team_or_404(&mut *tx, tournament_id, team_id).await?;
@@ -763,7 +763,7 @@ async fn assign_signup(
 
     let mut tx = state.pool.begin().await?;
     let tournament = crate::public::helpers::lock_tournament_row(&mut tx, tournament_id).await?;
-    ensure_participant_management_allowed(tournament.get::<String, _>("status").as_str())?;
+    ensure_participant_management_allowed(tournament.try_get("status")?)?;
     let team_size: i64 = tournament.get("team_size");
     let target_team = load_team_or_404(&mut *tx, tournament_id, team_id).await?;
     let captain: i64 = target_team.get("captain_discord_id");
@@ -986,7 +986,7 @@ async fn delete_signup(
 ) -> WebResult<Json<TournamentSignup>> {
     let mut tx = state.pool.begin().await?;
     let status = crate::public::helpers::lock_tournament_status(&mut tx, tournament_id).await?;
-    ensure_participant_management_allowed(&status)?;
+    ensure_participant_management_allowed(status)?;
 
     let signup = sqlx::query(
         r#"SELECT id, tournament_id, discord_id, discord_name, steam_id, rank, rank_score, team_id, signed_up_at
@@ -1052,7 +1052,7 @@ async fn add_signup_by_name(
         crate::public::helpers::participant_name(body.name.as_deref().unwrap_or(""))?.to_string();
     let mut tx = state.pool.begin().await?;
     let status = crate::public::helpers::lock_tournament_status(&mut tx, tournament_id).await?;
-    if !crate::public::helpers::registration_window_open(&status) {
+    if !status.registration_window_open() {
         return Err(WebError::bad_request(
             "Spieler können nur während Anmeldung und Check-in hinzugefügt werden",
         ));
@@ -1075,7 +1075,7 @@ async fn add_signup_by_name(
         None,
     )
     .await?;
-    let checked_in = status == "checkin";
+    let checked_in = status == turnier_core::TournamentStatus::Checkin;
     if checked_in {
         crate::public::helpers::insert_checkin(&mut tx, tournament_id, participant_id).await?;
     }

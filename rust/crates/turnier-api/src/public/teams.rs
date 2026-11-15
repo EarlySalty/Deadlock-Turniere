@@ -74,7 +74,7 @@ async fn create_team(
     let mut tx = pool.begin().await?;
     let t = helpers::lock_tournament_or_404(&mut tx, tournament_id).await?;
     helpers::ensure_player_teams_allowed(&t)?;
-    helpers::ensure_registration_open(&t.status)?;
+    helpers::ensure_registration_open(t.status)?;
 
     // Name-Einzigartigkeit (casefold).
     let name_taken: Option<(i64,)> = sqlx::query_as(
@@ -165,7 +165,7 @@ async fn join_team(
     let mut tx = pool.begin().await?;
     let t = helpers::lock_tournament_or_404(&mut tx, tournament_id).await?;
     helpers::ensure_player_teams_allowed(&t)?;
-    helpers::ensure_registration_open(&t.status)?;
+    helpers::ensure_registration_open(t.status)?;
     let team = helpers::load_team_or_404(&mut *tx, tournament_id, team_id).await?;
     ensure_team_open_for_join(&team)?;
     helpers::ensure_guest_name_free(
@@ -327,7 +327,7 @@ async fn update_team_recruiting(
     let team = helpers::load_team_or_404(&mut *tx, tournament_id, team_id).await?;
     helpers::ensure_captain_or_mod(&user, &team.captain_discord_id)?;
     helpers::ensure_player_teams_allowed(&t)?;
-    helpers::ensure_registration_open(&t.status)?;
+    helpers::ensure_registration_open(t.status)?;
 
     sqlx::query(r#"UPDATE turnier."teams" SET recruitment_status = $1 WHERE id = $2"#)
         .bind(status)
@@ -360,7 +360,7 @@ async fn kick_team_member(
         ));
     }
     helpers::ensure_player_teams_allowed(&t)?;
-    helpers::ensure_team_roster_open(&t.status)?;
+    helpers::ensure_team_roster_open(t.status)?;
     if db::parse_participant_id(&user.discord_id).ok() == Some(target_discord_id) {
         return Err(WebError::bad_request("Du kannst dich nicht selbst kicken"));
     }
@@ -404,7 +404,7 @@ async fn leave_team(
     let mut tx = pool.begin().await?;
     let t = helpers::lock_tournament_or_404(&mut tx, tournament_id).await?;
     helpers::ensure_player_teams_allowed(&t)?;
-    helpers::ensure_team_roster_open(&t.status)?;
+    helpers::ensure_team_roster_open(t.status)?;
     let team = helpers::load_team_or_404(&mut *tx, tournament_id, team_id).await?;
 
     let member: Option<OldMemberRow> = sqlx::query_as(
@@ -487,7 +487,7 @@ async fn invite_to_team(
         return Err(WebError::forbidden("Nur der Captain darf Spieler einladen"));
     }
     helpers::ensure_player_teams_allowed(&t)?;
-    helpers::ensure_team_roster_open(&t.status)?;
+    helpers::ensure_team_roster_open(t.status)?;
 
     // Spieler nicht bereits in einem Team.
     let in_team: Option<(i64,)> = sqlx::query_as(

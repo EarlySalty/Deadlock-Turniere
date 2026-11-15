@@ -100,7 +100,7 @@ async fn generate_league_plan(
     let mut tx = state.pool.begin().await?;
     turnier_scheduler::acquire_tournament_schedule_lock(&mut tx).await?;
     let status = crate::public::helpers::lock_tournament_status(&mut tx, tournament_id).await?;
-    if status != "group_phase" {
+    if status != turnier_core::TournamentStatus::GroupPhase {
         return Err(WebError::bad_request(
             "Der Rundenplan lässt sich nur neu erstellen, solange das Turnier läuft",
         ));

@@ -4,125 +4,29 @@
 //! `Vec<i64>` geparst. Die Wire-Form bleibt bei Zeitstempeln und Discord-IDs
 //! String-kompatibel.
 
-use chrono::{DateTime, Utc};
-use serde_json::Value;
 use std::collections::HashMap;
 
 use turnier_core::{AdminTournamentSummary, Tournament};
 use turnier_db::Pool;
 
-use crate::db;
 use crate::error::{WebError, WebResult};
-
-/// Typisierte Rohzeile eines Turniers. Enum-Spalten werden (wie überall in der
-/// Codebase) als `String` dekodiert und im Mapping konvertiert.
-#[derive(sqlx::FromRow)]
-struct TournamentRow {
-    id: i64,
-    name: String,
-    status: String,
-    description: Option<String>,
-    team_size: i64,
-    series_format: i64,
-    final_series_format: Option<i64>,
-    registration_start: Option<DateTime<Utc>>,
-    registration_end: Option<DateTime<Utc>>,
-    checkin_start: Option<DateTime<Utc>>,
-    group_phase_start: Option<DateTime<Utc>>,
-    bracket_start: Option<DateTime<Utc>>,
-    bracket_format: String,
-    played_bracket_format: Option<String>,
-    tournament_mode: String,
-    tournament_game_mode: String,
-    auto_lobby_enabled: bool,
-    created_by: i64,
-    created_at: DateTime<Utc>,
-    updated_at: DateTime<Utc>,
-    invite_mode: String,
-    invite_window_start: Option<DateTime<Utc>>,
-    invite_window_end: Option<DateTime<Utc>>,
-    lobby_settings: Option<Value>,
-    exclude_from_leaderboard: bool,
-    reminder_offsets: Option<Value>,
-    start_reminder_offsets: Option<Value>,
-    match_objective: String,
-    no_show_grace_minutes: i64,
-    rules: Option<String>,
-    is_test: bool,
-}
-
-/// String → Domänen-Enum (snake_case-serde); Fehler → 500.
-fn parse_enum<T: serde::de::DeserializeOwned>(value: &str) -> WebResult<T> {
-    serde_json::from_value(serde_json::Value::String(value.to_string()))
-        .map_err(|_| WebError::internal("Ungültiger Enum-Wert in der DB"))
-}
-
-impl TournamentRow {
-    fn into_dto(self) -> WebResult<Tournament> {
-        Ok(Tournament {
-            id: self.id,
-            name: self.name,
-            status: parse_enum(&self.status)?,
-            description: self.description,
-            team_size: self.team_size,
-            series_format: self.series_format,
-            final_series_format: self.final_series_format,
-            registration_start: db::opt_ts_to_string(self.registration_start),
-            registration_end: db::opt_ts_to_string(self.registration_end),
-            checkin_start: db::opt_ts_to_string(self.checkin_start),
-            group_phase_start: db::opt_ts_to_string(self.group_phase_start),
-            bracket_start: db::opt_ts_to_string(self.bracket_start),
-            bracket_format: self.bracket_format,
-            played_bracket_format: self.played_bracket_format,
-            tournament_mode: parse_enum(&self.tournament_mode)?,
-            tournament_game_mode: parse_enum(&self.tournament_game_mode)?,
-            auto_lobby_enabled: self.auto_lobby_enabled,
-            created_by: db::discord_id_to_string(self.created_by),
-            created_at: db::ts_to_string(self.created_at),
-            updated_at: db::ts_to_string(self.updated_at),
-            invite_mode: parse_enum(&self.invite_mode)?,
-            invite_window_start: db::opt_ts_to_string(self.invite_window_start),
-            invite_window_end: db::opt_ts_to_string(self.invite_window_end),
-            lobby_settings: db::json_to_wire(self.lobby_settings),
-            exclude_from_leaderboard: self.exclude_from_leaderboard,
-            reminder_offsets: turnier_core::json::parse_offsets(
-                db::json_to_wire(self.reminder_offsets).as_deref(),
-                &turnier_core::json::default_reminder_offsets(),
-            ),
-            start_reminder_offsets: turnier_core::json::parse_offsets(
-                db::json_to_wire(self.start_reminder_offsets).as_deref(),
-                &turnier_core::json::default_start_reminder_offsets(),
-            ),
-            match_objective: self.match_objective,
-            no_show_grace_minutes: self.no_show_grace_minutes,
-            rules: self.rules,
-            is_test: self.is_test,
-        })
-    }
-}
 
 /// Lädt ein Turnier als DTO (oder 404).
 pub async fn load_tournament_dto(pool: &Pool, tournament_id: i64) -> WebResult<Tournament> {
-    let row: Option<TournamentRow> = sqlx::query_as(&format!(
+    let row = sqlx::query(&format!(
         "{} WHERE id = $1",
         crate::public::helpers::tournament_select()
     ))
     .bind(tournament_id)
     .fetch_optional(pool)
-    .await?;
-    row.ok_or_else(|| WebError::not_found("Turnier nicht gefunden"))?
-        .into_dto()
+    .await?
+    .ok_or_else(|| WebError::not_found("Turnier nicht gefunden"))?;
+    crate::public::helpers::tournament_from_row(&row)
 }
 
 /// Lädt alle Turniere als DTO-Liste (`created_at DESC`).
 pub async fn load_all_tournaments_dto(pool: &Pool) -> WebResult<Vec<Tournament>> {
-    let rows: Vec<TournamentRow> = sqlx::query_as(&format!(
-        "{} ORDER BY created_at DESC",
-        crate::public::helpers::tournament_select()
-    ))
-    .fetch_all(pool)
-    .await?;
-    rows.into_iter().map(TournamentRow::into_dto).collect()
+    crate::public::helpers::list_tournament_dtos(pool, "ORDER BY created_at DESC").await
 }
 
 #[derive(sqlx::FromRow)]

@@ -75,7 +75,7 @@ async fn checkin_participant(
     let participant_id = crate::db::parse_participant_id(&discord_id)?;
     let mut tx = state.pool.begin().await?;
     let status = crate::public::helpers::lock_tournament_status(&mut tx, tournament_id).await?;
-    crate::public::helpers::ensure_checkin_open(&status)?;
+    crate::public::helpers::ensure_checkin_open(status)?;
     if !crate::public::helpers::ensure_checkin_signup(&mut tx, tournament_id, participant_id, None)
         .await?
     {

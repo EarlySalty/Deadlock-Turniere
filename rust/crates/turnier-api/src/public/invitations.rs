@@ -78,7 +78,7 @@ async fn invite_to_team_by_signup(
     let team = helpers::load_team_or_404(&mut *tx, tournament_id, team_id).await?;
     helpers::ensure_captain(&user, &team.captain_discord_id)?;
     helpers::ensure_player_teams_allowed(&t)?;
-    helpers::ensure_registration_open(&t.status)?;
+    helpers::ensure_registration_open(t.status)?;
     helpers::ensure_team_has_capacity(&mut *tx, team_id, t.team_size).await?;
 
     let signup: Option<SignupRow> = sqlx::query_as(
@@ -358,7 +358,7 @@ async fn accept_team_invitation(
     let invitation = ensure_invitation_open(invitation.as_ref(), user_discord_id)?;
 
     helpers::ensure_player_teams_allowed(&t)?;
-    helpers::ensure_registration_open(&t.status)?;
+    helpers::ensure_registration_open(t.status)?;
     helpers::load_team_or_404(&mut *tx, tournament_id, invitation.team_id).await?;
     helpers::ensure_team_has_capacity(&mut *tx, invitation.team_id, t.team_size).await?;
     helpers::ensure_user_not_in_tournament_team(&mut *tx, tournament_id, &user.discord_id).await?;
@@ -444,7 +444,7 @@ async fn apply_to_team(
     let mut tx = pool.begin().await?;
     let t = helpers::lock_tournament_or_404(&mut tx, tournament_id).await?;
     helpers::ensure_player_teams_allowed(&t)?;
-    helpers::ensure_registration_open(&t.status)?;
+    helpers::ensure_registration_open(t.status)?;
     let team = helpers::load_team_or_404(&mut *tx, tournament_id, team_id).await?;
     if team.recruitment_status != turnier_core::RecruitmentStatus::Application {
         return Err(WebError::forbidden(
@@ -557,7 +557,7 @@ async fn accept_team_application(
     let precheck_team = helpers::load_team_or_404(pool, tournament_id, team_id).await?;
     helpers::ensure_captain_or_mod(&user, &precheck_team.captain_discord_id)?;
     helpers::ensure_player_teams_allowed(&precheck)?;
-    helpers::ensure_registration_open(&precheck.status)?;
+    helpers::ensure_registration_open(precheck.status)?;
     let application: Option<ApplicationRow> = sqlx::query_as(
         r#"SELECT discord_id, discord_name FROM turnier."team_applications"
          WHERE id = $1 AND team_id = $2"#,
@@ -606,7 +606,7 @@ async fn accept_team_application(
     let team = helpers::load_team_or_404(&mut *tx, tournament_id, team_id).await?;
     helpers::ensure_captain_or_mod(&user, &team.captain_discord_id)?;
     helpers::ensure_player_teams_allowed(&t)?;
-    helpers::ensure_registration_open(&t.status)?;
+    helpers::ensure_registration_open(t.status)?;
     let locked: Option<(i64, String)> = sqlx::query_as(
         r#"SELECT discord_id, status FROM turnier."team_applications"
          WHERE id = $1 AND team_id = $2 FOR UPDATE"#,

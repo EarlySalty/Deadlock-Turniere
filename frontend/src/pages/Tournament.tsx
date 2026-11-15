@@ -26,7 +26,6 @@ import BracketView from '@/components/bracket/BracketView'
 import MiniGroupPanel from '@/components/bracket/MiniGroupPanel'
 import MyMatchReport from '@/components/MyMatchReport'
 import LoginButton from '@/components/auth/LoginButton'
-import { isRegistrationWindowOpen } from '@/lib/tournamentStatus'
 import {
   Trophy, Users, LayoutGrid, GitBranch, Shield, X, Info, Book,
   ScrollText, CheckCircle2, ClipboardCheck, Mail, BarChart2, User,
@@ -266,7 +265,7 @@ export default function Tournament() {
 
   const isRegistration = tournament.status === 'registration'
   const tournamentStart = plannedTournamentStart(tournament)
-  const isSignupOpen = isRegistrationWindowOpen(tournament.status)
+  const isSignupOpen = tournament.registration_open
   const isCheckinPhase = tournament.status === 'checkin'
   const soloOnly = tournament.invite_mode === 'solo_only'
   const formatLabel = bracketFormatLabel(effectiveBracketFormat(tournament))

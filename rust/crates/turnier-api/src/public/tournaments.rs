@@ -63,7 +63,7 @@ async fn get_tournament(
         return Err(WebError::not_found("Turnier nicht gefunden"));
     }
 
-    let t = helpers::TournamentRowData::from_row(&row)?;
+    let t = helpers::tournament_from_row(&row)?;
     let teams = helpers::load_teams_public(pool, tournament_id).await?;
     let groups = helpers::load_groups_for_tournament(pool, tournament_id).await?;
     let bracket_matches = helpers::load_bracket_matches(pool, tournament_id).await?;

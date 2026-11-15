@@ -14,7 +14,6 @@ import TournamentManager from '@/components/admin/TournamentManager'
 import ParticipantManager from '@/components/admin/ParticipantManager'
 import TeamBuilderPanel from '@/components/admin/TeamBuilderPanel'
 import { ParticipantMarksContext } from '@/components/admin/participantMarksContext'
-import { isRegistrationWindowOpen } from '@/lib/tournamentStatus'
 import {
   CollapsedTournamentRow,
   TournamentSidebar,
@@ -316,7 +315,7 @@ export default function Admin() {
                           teamSize={liveDetail.team_size}
                           teams={liveDetail.teams}
                           signups={liveDetail.signups}
-                          canAddPlayers={isRegistrationWindowOpen(liveDetail.status)}
+                          canAddPlayers={liveDetail.registration_open}
                         />
                       </ParticipantMarksContext.Provider>
                     )}
