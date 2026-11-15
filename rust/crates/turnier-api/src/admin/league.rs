@@ -5,6 +5,7 @@ use chrono::{DateTime, Utc};
 use serde::Deserialize;
 use serde_json::{json, Value};
 use sqlx::Row;
+use turnier_core::{TournamentMode, TournamentStatus};
 
 use turnier_engine::reschedule_league_plan_in_tx;
 
@@ -36,14 +37,14 @@ async fn reschedule_plan(
     let mut tx = state.pool.begin().await?;
     turnier_scheduler::acquire_tournament_schedule_lock(&mut tx).await?;
     let row = crate::public::helpers::lock_tournament_row(&mut tx, tournament_id).await?;
-    let status: String = row.get("status");
-    let mode: String = row.get("tournament_mode");
-    if mode != "league" {
+    let status: TournamentStatus = row.try_get("status")?;
+    let mode: TournamentMode = row.try_get("tournament_mode")?;
+    if mode != TournamentMode::League {
         return Err(WebError::bad_request(
             "Nur Turniere im Format Jeder gegen jeden haben einen Rundenplan",
         ));
     }
-    if status != "group_phase" {
+    if status != TournamentStatus::GroupPhase {
         return Err(WebError::bad_request(
             "Der Rundenplan lässt sich nur ändern, solange das Turnier läuft",
         ));

@@ -1,5 +1,6 @@
 use chrono::{DateTime, Duration, Utc};
 use sqlx::PgConnection;
+use turnier_core::{TournamentMode, TournamentStatus};
 
 use crate::error::{TournamentError, TournamentResult};
 
@@ -7,15 +8,13 @@ pub const MIN_START_GAP_HOURS: i64 = 4;
 
 pub const TOURNAMENT_SCHEDULE_ADVISORY_LOCK_KEY: i64 = i64::from_be_bytes(*b"trnactv1");
 
-const PLANNED_STATUSES: [&str; 5] = ["draft", "registration", "checkin", "group_phase", "bracket"];
-
 #[derive(Debug, Clone, sqlx::FromRow)]
 struct StartRow {
     id: i64,
     name: String,
-    status: String,
+    status: TournamentStatus,
     is_test: bool,
-    tournament_mode: Option<String>,
+    tournament_mode: TournamentMode,
     group_phase_start: Option<DateTime<Utc>>,
     bracket_start: Option<DateTime<Utc>>,
     registration_end: Option<DateTime<Utc>>,
@@ -24,7 +23,7 @@ struct StartRow {
 impl StartRow {
     fn start(&self) -> Option<DateTime<Utc>> {
         effective_start(
-            self.tournament_mode.as_deref(),
+            self.tournament_mode,
             self.group_phase_start,
             self.bracket_start,
             self.registration_end,
@@ -32,17 +31,17 @@ impl StartRow {
     }
 
     fn takes_part(&self) -> bool {
-        !self.is_test && PLANNED_STATUSES.contains(&self.status.as_str())
+        !self.is_test && TournamentStatus::PLANNED.contains(&self.status)
     }
 }
 
 pub fn effective_start(
-    tournament_mode: Option<&str>,
+    tournament_mode: TournamentMode,
     group_phase_start: Option<DateTime<Utc>>,
     bracket_start: Option<DateTime<Utc>>,
     registration_end: Option<DateTime<Utc>>,
 ) -> Option<DateTime<Utc>> {
-    let planned = if tournament_mode == Some("bracket_only") {
+    let planned = if tournament_mode == TournamentMode::BracketOnly {
         bracket_start
     } else {
         group_phase_start.or(bracket_start)
@@ -123,7 +122,7 @@ async fn load_other_planned_rows(
          ORDER BY id",
     )
     .bind(tournament_id)
-    .bind(PLANNED_STATUSES.as_slice())
+    .bind(TournamentStatus::PLANNED.as_slice())
     .fetch_all(conn)
     .await?;
     Ok(rows)
@@ -139,13 +138,13 @@ mod tests {
             .unwrap_or_default()
     }
 
-    fn row(id: i64, status: &str, is_test: bool, start: DateTime<Utc>) -> StartRow {
+    fn row(id: i64, status: TournamentStatus, is_test: bool, start: DateTime<Utc>) -> StartRow {
         StartRow {
             id,
             name: format!("Turnier {id}"),
-            status: status.to_string(),
+            status,
             is_test,
-            tournament_mode: None,
+            tournament_mode: TournamentMode::GroupStage,
             group_phase_start: Some(start),
             bracket_start: None,
             registration_end: None,
@@ -163,10 +162,10 @@ mod tests {
     #[test]
     fn konflikt_nur_mit_geplanten_echten_turnieren() {
         let others = vec![
-            row(1, "registration", true, at(13, 0)),
-            row(2, "completed", false, at(13, 0)),
-            row(3, "draft", false, at(20, 0)),
-            row(4, "checkin", false, at(14, 0)),
+            row(1, TournamentStatus::Registration, true, at(13, 0)),
+            row(2, TournamentStatus::Completed, false, at(13, 0)),
+            row(3, TournamentStatus::Draft, false, at(20, 0)),
+            row(4, TournamentStatus::Checkin, false, at(14, 0)),
         ];
         assert_eq!(first_conflict(at(12, 0), &others).map(|r| r.id), Some(4));
         assert_eq!(first_conflict(at(8, 0), &others).map(|r| r.id), None);
@@ -184,7 +183,7 @@ mod tests {
     fn bracket_only_startet_mit_dem_bracket() {
         assert_eq!(
             effective_start(
-                Some("bracket_only"),
+                TournamentMode::BracketOnly,
                 Some(at(10, 0)),
                 Some(at(12, 0)),
                 Some(at(9, 0))
@@ -192,7 +191,12 @@ mod tests {
             Some(at(12, 0))
         );
         assert_eq!(
-            effective_start(None, None, Some(at(12, 0)), Some(at(9, 0))),
+            effective_start(
+                TournamentMode::GroupStage,
+                None,
+                Some(at(12, 0)),
+                Some(at(9, 0))
+            ),
             Some(at(12, 0))
         );
     }
@@ -200,11 +204,11 @@ mod tests {
     #[test]
     fn anmeldeschluss_gilt_als_start_ohne_phasenzeiten() {
         assert_eq!(
-            effective_start(Some("bracket_only"), None, None, Some(at(18, 0))),
+            effective_start(TournamentMode::BracketOnly, None, None, Some(at(18, 0))),
             Some(at(18, 0))
         );
         assert_eq!(
-            effective_start(Some("group_stage"), None, None, Some(at(18, 0))),
+            effective_start(TournamentMode::GroupStage, None, None, Some(at(18, 0))),
             Some(at(18, 0))
         );
     }

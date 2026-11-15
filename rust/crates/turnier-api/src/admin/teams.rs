@@ -13,6 +13,7 @@ use sqlx::{Postgres, Row, Transaction};
 
 use turnier_core::{
     ApplicationStatus, RecruitmentStatus, Team, TeamApplication, TeamRole, TournamentSignup,
+    TournamentStatus,
 };
 
 use crate::db;
@@ -875,8 +876,8 @@ async fn add_member(
 
     let mut tx = state.pool.begin().await?;
     let tournament = crate::public::helpers::lock_tournament_row(&mut tx, tournament_id).await?;
-    let status: String = tournament.get("status");
-    if !matches!(status.as_str(), "group_phase" | "bracket") {
+    let status: TournamentStatus = tournament.try_get("status")?;
+    if !status.is_match_phase() {
         return Err(WebError::bad_request(
             "Ersatzspieler können erst ab der Gruppenphase hinzugefügt werden",
         ));

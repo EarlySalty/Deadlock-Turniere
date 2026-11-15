@@ -5,9 +5,8 @@ use axum::extract::{Path, State};
 use axum::routing::get;
 use axum::{Json, Router};
 use serde_json::{json, Value};
-use sqlx::Row;
 
-use turnier_core::{BracketMatch, Group, Tournament, TournamentDetailPublic};
+use turnier_core::{BracketMatch, Group, Tournament, TournamentDetailPublic, TournamentStatus};
 
 use crate::db;
 use crate::error::{WebError, WebResult};
@@ -57,13 +56,11 @@ async fn get_tournament(
     let Some(row) = row else {
         return Err(WebError::not_found("Turnier nicht gefunden"));
     };
-    let status: String = row.try_get("status")?;
-    let is_test: bool = row.try_get("is_test")?;
-    if status == "draft" || is_test {
+    let t = helpers::tournament_from_row(&row)?;
+    if t.status == TournamentStatus::Draft || t.is_test {
         return Err(WebError::not_found("Turnier nicht gefunden"));
     }
 
-    let t = helpers::tournament_from_row(&row)?;
     let teams = helpers::load_teams_public(pool, tournament_id).await?;
     let groups = helpers::load_groups_for_tournament(pool, tournament_id).await?;
     let bracket_matches = helpers::load_bracket_matches(pool, tournament_id).await?;

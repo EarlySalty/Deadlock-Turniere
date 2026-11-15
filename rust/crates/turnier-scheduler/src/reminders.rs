@@ -15,7 +15,7 @@
 use chrono::{DateTime, Duration, Utc};
 use serde_json::Value;
 
-use turnier_core::{discord_id_to_string, now_utc};
+use turnier_core::{discord_id_to_string, now_utc, TournamentMode};
 use turnier_db::{dynamic_sql::ReminderDedupeTable, Pool};
 use turnier_discord::{DiscordNotifier, NotificationEvent};
 use turnier_match::league::current_round_match_ids;
@@ -69,7 +69,7 @@ struct RegistrationReminderRow {
 struct StartReminderRow {
     id: i64,
     name: String,
-    tournament_mode: Option<String>,
+    tournament_mode: TournamentMode,
     registration_end: Option<DateTime<Utc>>,
     group_phase_start: Option<DateTime<Utc>>,
     bracket_start: Option<DateTime<Utc>>,
@@ -88,7 +88,7 @@ struct MatchReminderRow {
 
 fn tournament_start_value(row: &StartReminderRow) -> Option<DateTime<Utc>> {
     effective_start(
-        row.tournament_mode.as_deref(),
+        row.tournament_mode,
         row.group_phase_start,
         row.bracket_start,
         row.registration_end,
@@ -465,11 +465,11 @@ async fn load_match_member_ids(
 mod tests {
     use super::*;
 
-    fn srow(mode: Option<&str>, group: Option<&str>, bracket: Option<&str>) -> StartReminderRow {
+    fn srow(mode: TournamentMode, group: Option<&str>, bracket: Option<&str>) -> StartReminderRow {
         StartReminderRow {
             id: 1,
             name: "T".into(),
-            tournament_mode: mode.map(str::to_string),
+            tournament_mode: mode,
             registration_end: None,
             group_phase_start: group.map(utc),
             bracket_start: bracket.map(utc),
@@ -487,13 +487,13 @@ mod tests {
     #[test]
     fn start_value_standardmodus_nimmt_group_phase() {
         let r = srow(
-            None,
+            TournamentMode::GroupStage,
             Some("2026-06-14T10:00:00"),
             Some("2026-06-14T12:00:00"),
         );
         assert_eq!(tournament_start_value(&r), Some(utc("2026-06-14T10:00:00")));
         let r2 = srow(
-            Some("group_stage"),
+            TournamentMode::GroupStage,
             Some("2026-06-14T10:00:00"),
             Some("2026-06-14T12:00:00"),
         );
@@ -505,28 +505,40 @@ mod tests {
 
     #[test]
     fn start_value_fallback_auf_bracket_wenn_kein_group() {
-        let r = srow(None, None, Some("2026-06-14T12:00:00"));
+        let r = srow(
+            TournamentMode::GroupStage,
+            None,
+            Some("2026-06-14T12:00:00"),
+        );
         assert_eq!(tournament_start_value(&r), Some(utc("2026-06-14T12:00:00")));
     }
 
     #[test]
     fn start_value_bracket_only_nimmt_bracket() {
         let r = srow(
-            Some("bracket_only"),
+            TournamentMode::BracketOnly,
             Some("2026-06-14T10:00:00"),
             Some("2026-06-14T12:00:00"),
         );
         assert_eq!(tournament_start_value(&r), Some(utc("2026-06-14T12:00:00")));
-        let r2 = srow(Some("bracket_only"), Some("2026-06-14T10:00:00"), None);
+        let r2 = srow(
+            TournamentMode::BracketOnly,
+            Some("2026-06-14T10:00:00"),
+            None,
+        );
         assert_eq!(tournament_start_value(&r2), None);
     }
 
     #[test]
     fn start_value_bracket_only_ohne_bracket_start_nimmt_anmeldeschluss() {
-        let mut r = srow(Some("bracket_only"), None, None);
+        let mut r = srow(TournamentMode::BracketOnly, None, None);
         r.registration_end = Some(utc("2026-11-14T18:00:00"));
         assert_eq!(tournament_start_value(&r), Some(utc("2026-11-14T18:00:00")));
-        let mut explicit = srow(Some("bracket_only"), None, Some("2026-11-14T19:00:00"));
+        let mut explicit = srow(
+            TournamentMode::BracketOnly,
+            None,
+            Some("2026-11-14T19:00:00"),
+        );
         explicit.registration_end = Some(utc("2026-11-14T18:00:00"));
         assert_eq!(
             tournament_start_value(&explicit),

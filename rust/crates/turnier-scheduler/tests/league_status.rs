@@ -11,6 +11,7 @@ use common::{
 };
 use sqlx::postgres::PgConnection;
 use sqlx::sqlite::SqlitePoolOptions;
+use turnier_core::{TournamentMode, TournamentStatus};
 use turnier_engine::recalculate_player_points_in_tx;
 use turnier_match::league::write_league_manual_result_in_tx;
 use turnier_match::{MatchManager, SteamBridge};
@@ -26,24 +27,33 @@ fn league_never_advances_to_a_bracket_by_time() {
     let now = Utc::now();
     let earlier = Some(now - Duration::hours(1));
     let league = DueStatusRow {
-        status: "group_phase".to_string(),
-        tournament_mode: Some("league".to_string()),
+        status: TournamentStatus::GroupPhase,
+        tournament_mode: TournamentMode::League,
+        registration_start: None,
+        registration_end: None,
+        checkin_start: None,
+        group_phase_start: None,
         bracket_start: earlier,
-        ..Default::default()
     };
     assert_eq!(get_due_next_status(&league, now), None);
 
     let group_stage = DueStatusRow {
-        tournament_mode: Some("group_stage".to_string()),
+        tournament_mode: TournamentMode::GroupStage,
         ..league.clone()
     };
-    assert_eq!(get_due_next_status(&group_stage, now), Some("bracket"));
+    assert_eq!(
+        get_due_next_status(&group_stage, now),
+        Some(TournamentStatus::Bracket)
+    );
 
     let checkin = DueStatusRow {
-        status: "checkin".to_string(),
-        tournament_mode: Some("league".to_string()),
+        status: TournamentStatus::Checkin,
+        tournament_mode: TournamentMode::League,
+        registration_start: None,
+        registration_end: None,
+        checkin_start: None,
         group_phase_start: earlier,
-        ..Default::default()
+        bracket_start: None,
     };
     assert_eq!(get_due_next_status(&checkin, now), None);
 }
@@ -75,8 +85,8 @@ async fn league_goes_from_checkin_to_plan_to_completed_without_bracket() {
         &matchmgr,
         &notifier,
         id,
-        "group_phase",
-        "bracket",
+        TournamentStatus::GroupPhase,
+        TournamentStatus::Bracket,
         "manual",
         None,
     )
@@ -91,8 +101,8 @@ async fn league_goes_from_checkin_to_plan_to_completed_without_bracket() {
         &matchmgr,
         &notifier,
         id,
-        "group_phase",
-        "completed",
+        TournamentStatus::GroupPhase,
+        TournamentStatus::Completed,
         "manual",
         None,
     )
@@ -119,8 +129,8 @@ async fn league_goes_from_checkin_to_plan_to_completed_without_bracket() {
         &matchmgr,
         &notifier,
         id,
-        "group_phase",
-        "completed",
+        TournamentStatus::GroupPhase,
+        TournamentStatus::Completed,
         "manual",
         None,
     )
@@ -367,8 +377,8 @@ async fn result_reply_after_the_league_finished_changes_nothing() {
             &matchmgr,
             &notifier,
             id,
-            "group_phase",
-            "completed",
+            TournamentStatus::GroupPhase,
+            TournamentStatus::Completed,
             "manual",
             None,
         )

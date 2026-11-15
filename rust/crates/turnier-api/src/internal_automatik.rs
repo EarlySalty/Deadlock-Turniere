@@ -12,6 +12,7 @@ use serde_json::{json, Value};
 use turnier_automatik::presets;
 use turnier_automatik::proposals::{self, ProposalState, VoteDecision};
 use turnier_automatik::routine::{self, RoutineTournamentPlan};
+use turnier_core::TournamentStatus;
 
 use crate::error::{WebError, WebResult};
 use crate::proposal_lock::{self, ProposalLock};
@@ -384,19 +385,19 @@ async fn materialize(state: &AppState, proposal_id: i64, actor_id: &str) -> WebR
         bracket_start: config_time(&config, "bracket_start")?,
     };
     let ensured = ensure_checked_routine_tournament(state, &approved_preset, &plan).await?;
-    if ensured.status == "draft" {
+    if ensured.status == TournamentStatus::Draft {
         turnier_scheduler::advance_tournament_status(
             &state.pool,
             &state.match_manager,
             &state.notifier,
             ensured.id,
-            "draft",
-            "registration",
+            TournamentStatus::Draft,
+            TournamentStatus::Registration,
             "discord_approval",
             Some(actor_id),
         )
         .await?;
-    } else if ensured.status != "registration" {
+    } else if ensured.status != TournamentStatus::Registration {
         return Err(WebError::conflict(
             "Turnier wurde bereits über die Anmeldung hinaus fortgesetzt",
         ));
@@ -413,7 +414,7 @@ async fn ensure_checked_routine_tournament(
     let mut tx = state.pool.begin().await?;
     turnier_scheduler::acquire_tournament_schedule_lock(&mut tx).await?;
     let ensured = routine::ensure_routine_tournament(&mut tx, preset, plan).await?;
-    if ensured.status == "draft" {
+    if ensured.status == TournamentStatus::Draft {
         turnier_scheduler::ensure_start_gap(&mut tx, ensured.id).await?;
     }
     tx.commit().await?;

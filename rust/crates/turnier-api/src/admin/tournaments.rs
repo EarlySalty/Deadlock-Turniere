@@ -71,27 +71,6 @@ pub fn router() -> Router<AppState> {
         )
 }
 
-/// Hilfsfunktion: serde-String eines Status (für SQL-Vergleiche/Audit).
-fn status_str(status: TournamentStatus) -> &'static str {
-    match status {
-        TournamentStatus::Draft => "draft",
-        TournamentStatus::Registration => "registration",
-        TournamentStatus::Checkin => "checkin",
-        TournamentStatus::GroupPhase => "group_phase",
-        TournamentStatus::Bracket => "bracket",
-        TournamentStatus::Completed => "completed",
-        TournamentStatus::Archived => "archived",
-    }
-}
-
-fn mode_str(mode: TournamentMode) -> &'static str {
-    match mode {
-        TournamentMode::GroupStage => "group_stage",
-        TournamentMode::BracketOnly => "bracket_only",
-        TournamentMode::League => "league",
-    }
-}
-
 async fn list_tournaments(
     State(state): State<AppState>,
     _mod: ModUser,
@@ -222,18 +201,18 @@ async fn create_tournament(
     .bind(&body.name)
     .bind(&body.description)
     .bind(body.team_size)
-    .bind(serde_value_str(&body.bracket_format))
+    .bind(body.bracket_format)
     .bind(&body.registration_start)
     .bind(&body.registration_end)
     .bind(&body.checkin_start)
     .bind(&body.group_phase_start)
     .bind(&body.bracket_start)
     .bind(db::parse_actor_id(&user.discord_id)?)
-    .bind(serde_value_str(&body.invite_mode))
+    .bind(body.invite_mode)
     .bind(&body.invite_window_start)
     .bind(&body.invite_window_end)
-    .bind(mode_str(tournament_mode))
-    .bind(serde_value_str(&body.tournament_game_mode))
+    .bind(tournament_mode)
+    .bind(body.tournament_game_mode)
     .bind(body.auto_lobby_enabled)
     .bind(body.exclude_from_leaderboard)
     .bind(body.is_test)
@@ -307,42 +286,37 @@ async fn update_tournament(
     let mut tx = state.pool.begin().await?;
     turnier_scheduler::acquire_tournament_schedule_lock(&mut tx).await?;
     let existing = crate::public::helpers::lock_tournament_row(&mut tx, tournament_id).await?;
-    let current_status: String = existing.get("status");
-    let existing_mode: String = existing.get("tournament_mode");
+    let current_status: TournamentStatus = existing.try_get("status")?;
+    let existing_mode: TournamentMode = existing.try_get("tournament_mode")?;
 
-    // Status-Übergang validieren (nur wenn ein abweichender Status gesetzt wird).
     if let Some(new_status) = body.status {
-        let new_status_s = status_str(new_status);
-        if new_status_s != current_status {
-            let allowed: Vec<&'static str> = parse_status(&current_status)
-                .map(|s| {
-                    next_statuses_for_stored_mode(s, &existing_mode)
-                        .iter()
-                        .map(|t| status_str(*t))
-                        .collect()
-                })
-                .unwrap_or_default();
-            let transition_ok = parse_status(&current_status)
-                .map(|f| next_statuses_for_stored_mode(f, &existing_mode).contains(&new_status))
-                .unwrap_or(false);
-            if !transition_ok {
+        if new_status != current_status {
+            let allowed = next_statuses_for_stored_mode(current_status, existing_mode);
+            if !allowed.contains(&new_status) {
                 let allowed_text = if allowed.is_empty() {
                     "keine".to_string()
                 } else {
-                    allowed.join(", ")
+                    allowed
+                        .iter()
+                        .map(|status| status.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ")
                 };
                 return Err(WebError::bad_request(format!(
-                    "Ungültiger Status-Übergang: {current_status} -> {new_status_s}. Erlaubt: {allowed_text}"
+                    "Ungültiger Status-Übergang: {current_status} -> {new_status}. Erlaubt: {allowed_text}"
                 )));
             }
-            if current_status == "registration" && new_status_s == "checkin" {
+            if current_status == TournamentStatus::Registration
+                && new_status == TournamentStatus::Checkin
+            {
                 return Err(WebError::bad_request(
                     "Check-in bitte über den dedizierten Endpoint öffnen",
                 ));
             }
-            turnier_scheduler::ensure_not_leaving_checkin(&current_status, new_status_s)
+            turnier_scheduler::ensure_not_leaving_checkin(current_status, new_status)
                 .map_err(scheduler_error)?;
-            if existing_mode == "league" && new_status_s == "completed" {
+            if existing_mode == TournamentMode::League && new_status == TournamentStatus::Completed
+            {
                 return Err(WebError::bad_request(
                     "Bitte über Turnier abschließen beenden, damit die Tabelle gewertet wird",
                 ));
@@ -374,8 +348,8 @@ async fn update_tournament(
     if let Some(v) = body.status {
         push_typed!(
             "status",
-            json!(status_str(v)),
-            PatchBind::Text(Some(status_str(v).to_string()))
+            json!(v.as_str()),
+            PatchBind::Text(Some(v.as_str().to_string()))
         );
     }
     if let Some(v) = body.team_size {
@@ -446,34 +420,41 @@ async fn update_tournament(
         Patch::Value(v) => push_typed!("rules", json!(v), PatchBind::Text(Some(v.clone()))),
     }
 
-    // Mode-Wechsel (nur in draft/checkin/group_phase, group_phase nur ungespielt).
     let mut mode_changed_to_bracket_only = false;
     if let Some(force_mode) = body.force_tournament_mode {
-        if !matches!(current_status.as_str(), "draft" | "checkin" | "group_phase") {
+        if !matches!(
+            current_status,
+            TournamentStatus::Draft | TournamentStatus::Checkin | TournamentStatus::GroupPhase
+        ) {
             return Err(WebError::bad_request(
                 "Turnier-Modus kann nur in Draft-, Check-in- oder ungespielter Gruppenphase geändert werden",
             ));
         }
-        if current_status == "group_phase"
+        if current_status == TournamentStatus::GroupPhase
             && group_phase_has_played_matches(&mut *tx, tournament_id).await?
         {
             return Err(WebError::bad_request(
                 "Turnier-Modus kann nach Start der Gruppenmatches nicht mehr geändert werden",
             ));
         }
-        let mode_s = mode_str(force_mode);
-        let league_involved = mode_s == "league" || existing_mode == "league";
-        if current_status == "group_phase" && league_involved && mode_s != existing_mode {
+        let league_involved =
+            force_mode == TournamentMode::League || existing_mode == TournamentMode::League;
+        if current_status == TournamentStatus::GroupPhase
+            && league_involved
+            && force_mode != existing_mode
+        {
             return Err(WebError::bad_request(
                 "Das Format Jeder gegen jeden lässt sich in der laufenden Phase nicht wechseln",
             ));
         }
+        let mode_s = serde_value_str(&force_mode);
         push_typed!(
             "tournament_mode",
             json!(mode_s),
-            PatchBind::Text(Some(mode_s.to_string()))
+            PatchBind::Text(Some(mode_s))
         );
-        mode_changed_to_bracket_only = mode_s == "bracket_only" && existing_mode != "bracket_only";
+        mode_changed_to_bracket_only = force_mode == TournamentMode::BracketOnly
+            && existing_mode != TournamentMode::BracketOnly;
     }
 
     // Bool-/Enum-Spezialfelder.
@@ -585,21 +566,21 @@ async fn update_tournament(
     builder.push_bind(tournament_id);
     builder.build().execute(&mut *tx).await?;
 
-    // Mode-Wechsel group_phase → bracket_only: Delete + Rebuild + Status
-    // zusammen mit dem Update committen.
-    let rebuild_bracket_only = current_status == "group_phase" && mode_changed_to_bracket_only;
+    let rebuild_bracket_only =
+        current_status == TournamentStatus::GroupPhase && mode_changed_to_bracket_only;
     if rebuild_bracket_only {
         delete_group_phase_tree(&mut tx, tournament_id).await?;
         generate_bracket_in_tx(&mut tx, tournament_id).await?;
         sqlx::query(
-            r#"UPDATE turnier."tournaments" SET status = 'bracket', updated_at = now() WHERE id = $1"#,
+            r#"UPDATE turnier."tournaments" SET status = $1, updated_at = now() WHERE id = $2"#,
         )
+        .bind(TournamentStatus::Bracket)
         .bind(tournament_id)
         .execute(&mut *tx)
         .await?;
     }
 
-    if existing_mode == "league" && current_status == "group_phase" {
+    if existing_mode == TournamentMode::League && current_status == TournamentStatus::GroupPhase {
         shift_league_plan_to_stored_start(&mut tx, tournament_id).await?;
     }
     turnier_scheduler::ensure_start_gap(&mut tx, tournament_id).await?;
@@ -701,8 +682,8 @@ async fn open_checkin(
 ) -> WebResult<Json<Tournament>> {
     {
         let existing = load_tournament_or_404(&state.pool, tournament_id).await?;
-        let status: String = existing.get("status");
-        if status != "registration" {
+        let status: TournamentStatus = existing.try_get("status")?;
+        if status != TournamentStatus::Registration {
             return Err(WebError::bad_request(
                 "Check-in kann nur aus der Anmeldung geöffnet werden",
             ));
@@ -722,8 +703,8 @@ async fn open_checkin(
     advance_status_shared(
         &state,
         tournament_id,
-        "registration",
-        "checkin",
+        TournamentStatus::Registration,
+        TournamentStatus::Checkin,
         &user.discord_id,
     )
     .await?;
@@ -737,8 +718,8 @@ async fn revert_checkin(
 ) -> WebResult<Json<Tournament>> {
     let mut tx = state.pool.begin().await?;
     let existing = crate::public::helpers::lock_tournament_row(&mut tx, tournament_id).await?;
-    let status: String = existing.get("status");
-    if status != "checkin" {
+    let status: TournamentStatus = existing.try_get("status")?;
+    if status != TournamentStatus::Checkin {
         return Err(WebError::bad_request(
             "Check-in kann nur aus der Check-in-Phase zurückgesetzt werden",
         ));
@@ -752,7 +733,7 @@ async fn revert_checkin(
         r#"UPDATE turnier."tournaments" SET status = $1, registration_end = NULL, checkin_start = NULL,
          updated_at = now() WHERE id = $2"#,
     )
-    .bind("registration")
+    .bind(TournamentStatus::Registration)
     .bind(tournament_id)
     .execute(&mut *tx)
     .await?;
@@ -762,8 +743,8 @@ async fn revert_checkin(
         &user.discord_id,
         json!({
             "tournament_id": tournament_id,
-            "from_status": "checkin",
-            "to_status": "registration",
+            "from_status": TournamentStatus::Checkin,
+            "to_status": TournamentStatus::Registration,
             "cleared_schedule_fields": ["registration_end", "checkin_start"],
         }),
     )
@@ -794,9 +775,9 @@ async fn shift_league_plan_to_stored_start(
 
 fn next_statuses_for_stored_mode(
     status: TournamentStatus,
-    stored_mode: &str,
+    stored_mode: TournamentMode,
 ) -> &'static [TournamentStatus] {
-    if stored_mode == "league" {
+    if stored_mode == TournamentMode::League {
         valid_next_statuses_for_mode(status, TournamentMode::League)
     } else {
         valid_next_statuses(status)
@@ -817,23 +798,16 @@ async fn advance_tournament(
         .fetch_optional(&mut *tx)
         .await?
         .ok_or_else(|| WebError::not_found("Turnier nicht gefunden"))?;
-        let current_status: String = existing.get("status");
-        let stored_mode: String = existing.get("tournament_mode");
+        let current_status: TournamentStatus = existing.try_get("status")?;
+        let stored_mode: TournamentMode = existing.try_get("tournament_mode")?;
 
-        if current_status == "registration" {
+        if current_status == TournamentStatus::Registration {
             return Err(WebError::bad_request(
                 "Check-in bitte über open-checkin öffnen",
             ));
         }
-        let allowed: Vec<&'static str> = parse_status(&current_status)
-            .map(|s| {
-                next_statuses_for_stored_mode(s, &stored_mode)
-                    .iter()
-                    .map(|t| status_str(*t))
-                    .collect()
-            })
-            .unwrap_or_default();
-        let Some(&next_status) = allowed.first() else {
+        let Some(&next_status) = next_statuses_for_stored_mode(current_status, stored_mode).first()
+        else {
             return Err(WebError::bad_request(format!(
                 "Keine weitere Phase möglich (aktuell: {current_status})"
             )));
@@ -845,7 +819,7 @@ async fn advance_tournament(
     advance_status_shared(
         &state,
         tournament_id,
-        &current_status,
+        current_status,
         next_status,
         &user.discord_id,
     )
@@ -853,18 +827,13 @@ async fn advance_tournament(
     Ok(Json(load_tournament_dto(&state.pool, tournament_id).await?))
 }
 
-/// String-Status → Enum (für die Übergangstabelle).
-fn parse_status(value: &str) -> Option<TournamentStatus> {
-    serde_json::from_value(Value::String(value.to_string())).ok()
-}
-
 /// Ruft `advance_tournament_status` mit `source="manual"` und mappt die
 /// Scheduler-Fehler exakt wie das Original (ValueError→400, RuntimeError→409).
 async fn advance_status_shared(
     state: &AppState,
     tournament_id: i64,
-    current_status: &str,
-    next_status: &str,
+    current_status: TournamentStatus,
+    next_status: TournamentStatus,
     actor_id: &str,
 ) -> WebResult<()> {
     turnier_scheduler::advance_tournament_status(

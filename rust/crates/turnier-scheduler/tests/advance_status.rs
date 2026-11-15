@@ -16,7 +16,7 @@ use common::{
 };
 use serde_json::Value;
 use tokio::sync::Barrier;
-use turnier_core::now_utc;
+use turnier_core::{now_utc, TournamentStatus};
 use turnier_discord::DiscordNotifier;
 use turnier_match::MatchManager;
 use turnier_scheduler::{
@@ -29,8 +29,8 @@ struct ConcurrentAdvance {
     notifier: DiscordNotifier,
     barrier: Arc<Barrier>,
     tournament_id: i64,
-    current_status: &'static str,
-    next_status: &'static str,
+    current_status: TournamentStatus,
+    next_status: TournamentStatus,
     source: &'static str,
     actor_id: Option<&'static str>,
 }
@@ -46,7 +46,10 @@ async fn checkin_endet_nur_ueber_finalize() {
     insert_team(&pool, id, "Team A", TEST_CAPTAIN_A).await;
     insert_team(&pool, id, "Team B", TEST_CAPTAIN_B).await;
 
-    for (mode, next) in [("bracket_only", "bracket"), ("group_stage", "group_phase")] {
+    for (mode, next) in [
+        ("bracket_only", TournamentStatus::Bracket),
+        ("group_stage", TournamentStatus::GroupPhase),
+    ] {
         sqlx::query("UPDATE turnier.tournaments SET tournament_mode = $1 WHERE id = $2")
             .bind(mode)
             .bind(id)
@@ -58,7 +61,7 @@ async fn checkin_endet_nur_ueber_finalize() {
             &matchmgr,
             &notifier,
             id,
-            "checkin",
+            TournamentStatus::Checkin,
             next,
             "scheduler",
             None,
@@ -95,8 +98,8 @@ async fn gruppenturnier_darf_die_gruppenphase_nicht_ueberspringen() {
         &matchmgr,
         &notifier,
         id,
-        "checkin",
-        "bracket",
+        TournamentStatus::Checkin,
+        TournamentStatus::Bracket,
         "scheduler",
         None,
     )
@@ -147,8 +150,8 @@ async fn scheduler_quelle_advanciert_und_auditet_auto_advance() {
         &matchmgr,
         &notifier,
         id,
-        "registration",
-        "checkin",
+        TournamentStatus::Registration,
+        TournamentStatus::Checkin,
         "scheduler",
         None,
     )
@@ -179,8 +182,8 @@ async fn admin_quelle_auditet_tournament_advance_mit_actor() {
         &matchmgr,
         &notifier,
         id,
-        "registration",
-        "checkin",
+        TournamentStatus::Registration,
+        TournamentStatus::Checkin,
         "admin",
         Some("123456789012345710"),
     )
@@ -212,8 +215,8 @@ async fn ungueltiger_uebergang_wirft_und_aendert_nichts() {
         &matchmgr,
         &notifier,
         id,
-        "registration",
-        "bracket",
+        TournamentStatus::Registration,
+        TournamentStatus::Bracket,
         "scheduler",
         None,
     )
@@ -245,8 +248,8 @@ async fn optimistic_lock_konflikt_bei_falschem_current_status() {
         &matchmgr,
         &notifier,
         id,
-        "registration",
-        "checkin",
+        TournamentStatus::Registration,
+        TournamentStatus::Checkin,
         "scheduler",
         None,
     )
@@ -366,8 +369,8 @@ async fn zu_naher_start_neben_laufender_anmeldung_wird_abgelehnt() {
         &matchmgr,
         &notifier,
         draft_id,
-        "draft",
-        "registration",
+        TournamentStatus::Draft,
+        TournamentStatus::Registration,
         "scheduler",
         None,
     )
@@ -414,8 +417,8 @@ async fn advance_both_to_registration(
         notifier: notifier.clone(),
         barrier: barrier.clone(),
         tournament_id: first_id,
-        current_status: "draft",
-        next_status: "registration",
+        current_status: TournamentStatus::Draft,
+        next_status: TournamentStatus::Registration,
         source: "scheduler",
         actor_id: None,
     }));
@@ -425,8 +428,8 @@ async fn advance_both_to_registration(
         notifier,
         barrier,
         tournament_id: second_id,
-        current_status: "draft",
-        next_status: "registration",
+        current_status: TournamentStatus::Draft,
+        next_status: TournamentStatus::Registration,
         source: "manual",
         actor_id: Some("123456789012345710"),
     }));
@@ -512,8 +515,8 @@ async fn completed_transition_setzt_status_und_rechnet_punkte() {
         &matchmgr,
         &notifier,
         id,
-        "bracket",
-        "completed",
+        TournamentStatus::Bracket,
+        TournamentStatus::Completed,
         "scheduler",
         None,
     )
@@ -577,8 +580,8 @@ async fn completed_transition_rollt_status_und_audit_bei_recompute_fehler_zuruec
         &matchmgr,
         &notifier,
         id,
-        "bracket",
-        "completed",
+        TournamentStatus::Bracket,
+        TournamentStatus::Completed,
         "scheduler",
         None,
     )

@@ -21,7 +21,9 @@ use axum::{Json, Router};
 use chrono::{DateTime, Utc};
 use sqlx::QueryBuilder;
 
-use turnier_core::{ConsentCreate, ConsentStatus, UserProfile, UserProfileUpdate, UserSession};
+use turnier_core::{
+    ConsentCreate, ConsentStatus, TournamentStatus, UserProfile, UserProfileUpdate, UserSession,
+};
 
 use crate::db;
 use crate::error::{WebError, WebResult};
@@ -30,8 +32,6 @@ use crate::state::AppState;
 
 /// Aktuell geforderte Einwilligungsversion (wie `_CURRENT_CONSENT_VERSION`).
 const CURRENT_CONSENT_VERSION: i64 = 2;
-/// Turnierstatus, die eine aktive Teilnahme darstellen (wie `_ACTIVE_TOURNAMENT_STATUSES`).
-const ACTIVE_TOURNAMENT_STATUSES: [&str; 4] = ["registration", "checkin", "group_phase", "bracket"];
 
 /// Router der Consent-/Profil-/Avatar-Endpunkte.
 pub fn router() -> Router<AppState> {
@@ -180,7 +180,7 @@ async fn has_active_tournament_participation(
     query.push_bind(discord_id).push(" AND t.status IN (");
     {
         let mut separated = query.separated(", ");
-        for status in ACTIVE_TOURNAMENT_STATUSES {
+        for status in TournamentStatus::PARTICIPATING {
             separated.push_bind(status);
         }
     }

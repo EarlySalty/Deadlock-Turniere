@@ -10,7 +10,7 @@ use chrono::{DateTime, Utc};
 use tokio::sync::watch;
 
 use turnier_automatik::{presets, routine as routine_store};
-use turnier_core::TournamentMode;
+use turnier_core::{TournamentMode, TournamentStatus};
 use turnier_db::Pool;
 use turnier_discord::DiscordNotifier;
 use turnier_match::league::running_league_ids_with_auto_lobby;
@@ -230,8 +230,8 @@ impl Scheduler {
     /// (Z.198-269). Rückgabe `true`, wenn das Turnier advanciert wurde.
     async fn advance_due_tournament(&self, row: &AdvanceRow, now: DateTime<Utc>) -> bool {
         let due_row = DueStatusRow {
-            status: row.status.clone(),
-            tournament_mode: row.tournament_mode.clone(),
+            status: row.status,
+            tournament_mode: row.tournament_mode,
             registration_start: row.registration_start,
             registration_end: row.registration_end,
             checkin_start: row.checkin_start,
@@ -247,7 +247,7 @@ impl Scheduler {
             &self.matchmgr,
             &self.notifier,
             row.id,
-            &row.status,
+            row.status,
             next_status,
             "scheduler",
             None,
@@ -258,7 +258,7 @@ impl Scheduler {
             Err(crate::SchedulerError::InvalidTransition(msg)) => {
                 tracing::warn!(
                     tournament_id = row.id,
-                    next_status,
+                    next_status = %next_status,
                     "Scheduler konnte Turnier nicht verschieben: {msg}"
                 );
                 return false;
@@ -266,7 +266,7 @@ impl Scheduler {
             Err(crate::SchedulerError::StartGapConflict(msg)) => {
                 tracing::warn!(
                     tournament_id = row.id,
-                    next_status,
+                    next_status = %next_status,
                     "Scheduler überspringt Turnier: {msg}"
                 );
                 return false;
@@ -279,7 +279,7 @@ impl Scheduler {
                 return false;
             }
             Err(err) => {
-                tracing::error!(tournament_id = row.id, next_status, error = %err, "Statuswechsel fehlgeschlagen");
+                tracing::error!(tournament_id = row.id, next_status = %next_status, error = %err, "Statuswechsel fehlgeschlagen");
                 return false;
             }
         }
@@ -287,7 +287,7 @@ impl Scheduler {
         tracing::info!(
             tournament_id = row.id,
             from = %row.status,
-            to = next_status,
+            to = %next_status,
             "Scheduler hat Turnier verschoben"
         );
 
@@ -299,7 +299,7 @@ impl Scheduler {
         if let Err(err) = self.notify_after_advance(row.id, next_status).await {
             tracing::error!(
                 tournament_id = row.id,
-                next_status,
+                next_status = %next_status,
                 error = %err,
                 "Scheduler notifications failed"
             );
@@ -312,10 +312,10 @@ impl Scheduler {
     async fn notify_after_advance(
         &self,
         tournament_id: i64,
-        next_status: &str,
+        next_status: TournamentStatus,
     ) -> sqlx::Result<()> {
         match next_status {
-            "checkin" => {
+            TournamentStatus::Checkin => {
                 let ids = load_tournament_participant_ids(&self.pool, tournament_id).await?;
                 let _ = self
                     .notifier
@@ -326,7 +326,7 @@ impl Scheduler {
                     )
                     .await;
             }
-            "registration" => {
+            TournamentStatus::Registration => {
                 let ids = load_all_profile_ids(&self.pool).await?;
                 let _ = self
                     .notifier
@@ -349,8 +349,8 @@ impl Scheduler {
 #[derive(sqlx::FromRow)]
 struct AdvanceRow {
     id: i64,
-    status: String,
-    tournament_mode: Option<String>,
+    status: TournamentStatus,
+    tournament_mode: TournamentMode,
     registration_start: Option<DateTime<Utc>>,
     registration_end: Option<DateTime<Utc>>,
     checkin_start: Option<DateTime<Utc>>,

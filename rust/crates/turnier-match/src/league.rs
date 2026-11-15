@@ -1,5 +1,6 @@
 use chrono::{DateTime, Utc};
 use sqlx::{Executor, PgConnection, Postgres, Transaction};
+use turnier_core::{TournamentMode, TournamentStatus};
 use turnier_engine::league::{league_table, LeagueGame};
 
 const CURRENT_ROUND_CTE: &str = "WITH rounds AS ( \
@@ -17,35 +18,35 @@ pub async fn tournament_is_league<'e, E>(executor: E, tournament_id: i64) -> sql
 where
     E: Executor<'e, Database = Postgres>,
 {
-    let mode: Option<String> =
+    let mode: Option<TournamentMode> =
         sqlx::query_scalar("SELECT tournament_mode FROM turnier.tournaments WHERE id = $1")
             .bind(tournament_id)
             .fetch_optional(executor)
             .await?;
-    Ok(mode.as_deref() == Some("league"))
+    Ok(mode == Some(TournamentMode::League))
 }
 
 pub async fn group_is_league<'e, E>(executor: E, group_id: i64) -> sqlx::Result<bool>
 where
     E: Executor<'e, Database = Postgres>,
 {
-    let mode: Option<String> = sqlx::query_scalar(
+    let mode: Option<TournamentMode> = sqlx::query_scalar(
         "SELECT t.tournament_mode FROM turnier.groups g \
          JOIN turnier.tournaments t ON t.id = g.tournament_id WHERE g.id = $1",
     )
     .bind(group_id)
     .fetch_optional(executor)
     .await?;
-    Ok(mode.as_deref() == Some("league"))
+    Ok(mode == Some(TournamentMode::League))
 }
 
 pub async fn league_is_running(conn: &mut PgConnection, tournament_id: i64) -> sqlx::Result<bool> {
-    let status: Option<String> =
+    let status: Option<TournamentStatus> =
         sqlx::query_scalar("SELECT status FROM turnier.tournaments WHERE id = $1 FOR SHARE")
             .bind(tournament_id)
             .fetch_optional(conn)
             .await?;
-    Ok(status.as_deref() == Some("group_phase"))
+    Ok(status == Some(TournamentStatus::GroupPhase))
 }
 
 pub async fn record_group_standing_in_tx(

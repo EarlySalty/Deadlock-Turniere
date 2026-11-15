@@ -49,10 +49,6 @@ use crate::extract::ModUser;
 use crate::public::helpers;
 use crate::state::AppState;
 
-/// Aktive Turnierstatus, in denen Test-User nicht gelöscht werden dürfen
-/// (entspricht dem Status-Filter aller drei Lösch-Guards im Original).
-const ACTIVE_TOURNAMENT_STATUSES: [&str; 4] = ["registration", "checkin", "group_phase", "bracket"];
-
 /// Match-Status, die als abgeschlossen gelten (nicht mehr simulierbar).
 const FINISHED_MATCH_STATUSES: [&str; 3] = ["completed", "forfeit", "cancelled"];
 
@@ -460,7 +456,7 @@ where
         .push(" AND tr.status IN (");
     {
         let mut separated = query.separated(", ");
-        for status in ACTIVE_TOURNAMENT_STATUSES {
+        for status in TournamentStatus::PARTICIPATING {
             separated.push_bind(status);
         }
     }
@@ -478,7 +474,7 @@ where
         .push(" AND tr.status IN (");
     {
         let mut separated = query.separated(", ");
-        for status in ACTIVE_TOURNAMENT_STATUSES {
+        for status in TournamentStatus::PARTICIPATING {
             separated.push_bind(status);
         }
     }
@@ -496,7 +492,7 @@ where
         .push(" AND tr.status IN (");
     {
         let mut separated = query.separated(", ");
-        for status in ACTIVE_TOURNAMENT_STATUSES {
+        for status in TournamentStatus::PARTICIPATING {
             separated.push_bind(status);
         }
     }
@@ -1159,8 +1155,8 @@ async fn advance_test_tournament(
                 &state.match_manager,
                 &state.notifier,
                 tournament_id,
-                "group_phase",
-                "bracket",
+                TournamentStatus::GroupPhase,
+                TournamentStatus::Bracket,
                 "manual",
                 Some(actor_id),
             )

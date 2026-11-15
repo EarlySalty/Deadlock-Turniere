@@ -27,13 +27,11 @@ use crate::time::is_due;
 
 /// Die für die Übergangsentscheidung relevanten Felder einer `tournaments`-Zeile.
 ///
-/// Die Zeitstempel kommen aus PG-`TIMESTAMPTZ`-Spalten als UTC-Instants. Das
-/// Feld `status`/`tournament_mode` kommt weiter roh, damit die Entscheidung 1:1
-/// die Original-String-Vergleiche abbildet.
-#[derive(Debug, Clone, Default)]
+/// Die Zeitstempel kommen aus PG-`TIMESTAMPTZ`-Spalten als UTC-Instants.
+#[derive(Debug, Clone)]
 pub struct DueStatusRow {
-    pub status: String,
-    pub tournament_mode: Option<String>,
+    pub status: TournamentStatus,
+    pub tournament_mode: TournamentMode,
     pub registration_start: Option<DateTime<Utc>>,
     pub registration_end: Option<DateTime<Utc>>,
     pub checkin_start: Option<DateTime<Utc>>,
@@ -46,30 +44,21 @@ pub struct DueStatusRow {
 /// Liefert `None`, wenn aktuell kein Übergang fällig ist. Den Check-in beendet
 /// nie der Scheduler, sondern immer das Orga-Team über `finalize-checkin`, damit
 /// Vorschau, Team-Bildung und Entwurfsschutz greifen.
-pub fn get_due_next_status(row: &DueStatusRow, now: DateTime<Utc>) -> Option<&'static str> {
-    let s = row.status.as_str();
-
-    if s == "draft" && is_due(row.registration_start.as_ref(), now) {
-        return Some("registration");
-    }
-
-    // checkin_start ODER registration_end als Auslöser (wie im Original).
+pub fn get_due_next_status(row: &DueStatusRow, now: DateTime<Utc>) -> Option<TournamentStatus> {
     let checkin_trigger = row.checkin_start.as_ref().or(row.registration_end.as_ref());
-    if s == "registration" && is_due(checkin_trigger, now) {
-        return Some("checkin");
+    let league = row.tournament_mode == TournamentMode::League;
+    match row.status {
+        TournamentStatus::Draft if is_due(row.registration_start.as_ref(), now) => {
+            Some(TournamentStatus::Registration)
+        }
+        TournamentStatus::Registration if is_due(checkin_trigger, now) => {
+            Some(TournamentStatus::Checkin)
+        }
+        TournamentStatus::GroupPhase if !league && is_due(row.bracket_start.as_ref(), now) => {
+            Some(TournamentStatus::Bracket)
+        }
+        _ => None,
     }
-
-    let league = row.tournament_mode.as_deref() == Some("league");
-    if s == "group_phase" && !league && is_due(row.bracket_start.as_ref(), now) {
-        return Some("bracket");
-    }
-
-    None
-}
-
-/// Übersetzt einen Status-String in das typsichere [`TournamentStatus`]-Enum.
-fn parse_status(value: &str) -> Option<TournamentStatus> {
-    serde_json::from_value(serde_json::Value::String(value.to_string())).ok()
 }
 
 /// Wechselt den Turnierstatus und führt notwendige Seiteneffekte aus.
@@ -103,20 +92,23 @@ pub async fn advance_tournament_status(
     matchmgr: &MatchManager,
     _notifier: &DiscordNotifier,
     tournament_id: i64,
-    current_status: &str,
-    next_status: &str,
+    current_status: TournamentStatus,
+    next_status: TournamentStatus,
     source: &str,
     actor_id: Option<&str>,
 ) -> SchedulerResult<serde_json::Value> {
     let mut tx = pool.begin().await?;
-    if next_status == "registration" || next_status == "group_phase" {
+    if matches!(
+        next_status,
+        TournamentStatus::Registration | TournamentStatus::GroupPhase
+    ) {
         acquire_tournament_schedule_lock(&mut tx).await?;
     }
     // Modus und Status bleiben während Prüfung und Generierung unverändert.
     let Some(locked) = turnier_engine::lock_tournament_row(&mut tx, tournament_id).await? else {
         return Err(SchedulerError::StatusConflict);
     };
-    let stored_status: String = locked.try_get("status")?;
+    let stored_status: TournamentStatus = locked.try_get("status")?;
     if stored_status != current_status {
         return Err(SchedulerError::StatusConflict);
     }
@@ -124,28 +116,23 @@ pub async fn advance_tournament_status(
     let mode: TournamentMode = locked
         .try_get("tournament_mode")
         .map_err(|_| SchedulerError::InvalidTransition("Unbekannter Turniermodus".to_string()))?;
-    // --- 1. Übergang validieren ---
-    let from = parse_status(current_status);
-    let to = parse_status(next_status);
-    let transition_ok =
-        matches!((from, to), (Some(f), Some(t)) if is_valid_transition_for_mode(f, t, mode));
-    if !transition_ok {
-        let allowed = from
-            .map(|f| {
-                valid_next_statuses_for_mode(f, mode)
-                    .iter()
-                    .map(status_as_str)
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            })
-            .filter(|s| !s.is_empty())
-            .unwrap_or_else(|| "keine".to_string());
+    if !is_valid_transition_for_mode(current_status, next_status, mode) {
+        let allowed = valid_next_statuses_for_mode(current_status, mode)
+            .iter()
+            .map(|status| status.as_str())
+            .collect::<Vec<_>>()
+            .join(", ");
+        let allowed = if allowed.is_empty() {
+            "keine".to_string()
+        } else {
+            allowed
+        };
         return Err(SchedulerError::InvalidTransition(format!(
             "Ungültiger Status-Übergang: {current_status} -> {next_status}. Erlaubt: {allowed}"
         )));
     }
 
-    if mode == TournamentMode::League && next_status == "completed" {
+    if mode == TournamentMode::League && next_status == TournamentStatus::Completed {
         ensure_league_is_finished(&mut tx, tournament_id).await?;
     }
 
@@ -158,7 +145,7 @@ pub async fn advance_tournament_status(
     });
 
     // --- 2.-5. Statuswechsel + Seiteneffekte + Audit + ggf. Punkte: EINE Transaktion ---
-    if next_status == "registration" {
+    if next_status == TournamentStatus::Registration {
         ensure_start_gap(&mut tx, tournament_id).await?;
     }
 
@@ -177,16 +164,16 @@ pub async fn advance_tournament_status(
         return Err(SchedulerError::StatusConflict);
     }
 
-    if next_status == "group_phase" && mode == TournamentMode::League {
+    if next_status == TournamentStatus::GroupPhase && mode == TournamentMode::League {
         let plan = generate_league_plan_in_tx(&mut tx, tournament_id, DEFAULT_SLOT_MINUTES).await?;
         metadata["groups_created"] = serde_json::json!(1);
         metadata["matches_created"] = serde_json::json!(plan.matches);
-    } else if next_status == "group_phase" {
+    } else if next_status == TournamentStatus::GroupPhase {
         let group_ids = generate_groups_in_tx(&mut tx, tournament_id, None).await?;
         let match_count: i64 = generate_group_matches_in_tx(&mut tx, tournament_id).await?;
         metadata["groups_created"] = serde_json::json!(group_ids.len());
         metadata["matches_created"] = serde_json::json!(match_count);
-    } else if next_status == "bracket" {
+    } else if next_status == TournamentStatus::Bracket {
         let match_count: i64 = generate_bracket_in_tx(&mut tx, tournament_id).await?;
         metadata["bracket_matches_created"] = serde_json::json!(match_count);
     }
@@ -208,7 +195,7 @@ pub async fn advance_tournament_status(
     .execute(&mut *tx)
     .await?;
 
-    if next_status == "completed" {
+    if next_status == TournamentStatus::Completed {
         let exclude: Option<(bool,)> = sqlx::query_as(
             "SELECT exclude_from_leaderboard FROM turnier.tournaments WHERE id = $1",
         )
@@ -243,8 +230,11 @@ async fn ensure_league_is_finished(
 
 pub const CHECKIN_EXIT_MESSAGE: &str = "Check-in bitte über „Check-in abschließen“ beenden";
 
-pub fn ensure_not_leaving_checkin(current_status: &str, next_status: &str) -> SchedulerResult<()> {
-    if current_status == "checkin" && next_status != "checkin" {
+pub fn ensure_not_leaving_checkin(
+    current_status: TournamentStatus,
+    next_status: TournamentStatus,
+) -> SchedulerResult<()> {
+    if current_status == TournamentStatus::Checkin && next_status != TournamentStatus::Checkin {
         return Err(SchedulerError::InvalidTransition(
             CHECKIN_EXIT_MESSAGE.to_string(),
         ));
@@ -257,35 +247,20 @@ pub fn ensure_not_leaving_checkin(current_status: &str, next_status: &str) -> Sc
 pub async fn schedule_lobbies_best_effort(
     matchmgr: &MatchManager,
     tournament_id: i64,
-    next_status: &str,
+    next_status: TournamentStatus,
 ) {
-    if next_status == "group_phase" || next_status == "bracket" {
+    if next_status.is_match_phase() {
         if let Err(err) = matchmgr
             .schedule_auto_lobbies_for_tournament(tournament_id)
             .await
         {
             tracing::error!(
                 tournament_id,
-                next_status,
+                next_status = %next_status,
                 error = %err,
                 "Auto-Lobby-Scheduling nach Statuswechsel fehlgeschlagen"
             );
         }
-    }
-}
-
-/// Der kleingeschriebene Wire-String eines [`TournamentStatus`] (für die
-/// „Erlaubt: …"-Fehlermeldung).
-fn status_as_str(s: &TournamentStatus) -> &'static str {
-    use TournamentStatus::*;
-    match s {
-        Draft => "draft",
-        Registration => "registration",
-        Checkin => "checkin",
-        GroupPhase => "group_phase",
-        Bracket => "bracket",
-        Completed => "completed",
-        Archived => "archived",
     }
 }
 
@@ -304,18 +279,26 @@ mod tests {
         utc("2026-06-14T12:00:00")
     }
 
-    fn row(status: &str) -> DueStatusRow {
+    fn row(status: TournamentStatus) -> DueStatusRow {
         DueStatusRow {
-            status: status.to_string(),
-            ..Default::default()
+            status,
+            tournament_mode: TournamentMode::GroupStage,
+            registration_start: None,
+            registration_end: None,
+            checkin_start: None,
+            group_phase_start: None,
+            bracket_start: None,
         }
     }
 
     #[test]
     fn draft_zu_registration_wenn_registration_start_faellig() {
-        let mut r = row("draft");
+        let mut r = row(TournamentStatus::Draft);
         r.registration_start = Some(utc("2026-06-14T11:00:00"));
-        assert_eq!(get_due_next_status(&r, now()), Some("registration"));
+        assert_eq!(
+            get_due_next_status(&r, now()),
+            Some(TournamentStatus::Registration)
+        );
         // Noch nicht fällig.
         r.registration_start = Some(utc("2026-06-14T13:00:00"));
         assert_eq!(get_due_next_status(&r, now()), None);
@@ -324,27 +307,32 @@ mod tests {
     #[test]
     fn registration_zu_checkin_trigger_prioritaet() {
         // checkin_start hat Vorrang vor registration_end.
-        let mut r = row("registration");
+        let mut r = row(TournamentStatus::Registration);
         r.checkin_start = Some(utc("2026-06-14T11:00:00"));
         r.registration_end = Some(utc("2026-06-14T13:00:00"));
-        assert_eq!(get_due_next_status(&r, now()), Some("checkin"));
+        assert_eq!(
+            get_due_next_status(&r, now()),
+            Some(TournamentStatus::Checkin)
+        );
 
         // Ohne checkin_start fällt es auf registration_end zurück.
-        let mut r2 = row("registration");
+        let mut r2 = row(TournamentStatus::Registration);
         r2.registration_end = Some(utc("2026-06-14T11:30:00"));
-        assert_eq!(get_due_next_status(&r2, now()), Some("checkin"));
+        assert_eq!(
+            get_due_next_status(&r2, now()),
+            Some(TournamentStatus::Checkin)
+        );
     }
 
     #[test]
     fn checkin_never_ends_by_time_in_any_mode() {
         for mode in [
-            None,
-            Some("group_stage"),
-            Some("bracket_only"),
-            Some("league"),
+            TournamentMode::GroupStage,
+            TournamentMode::BracketOnly,
+            TournamentMode::League,
         ] {
-            let mut r = row("checkin");
-            r.tournament_mode = mode.map(str::to_string);
+            let mut r = row(TournamentStatus::Checkin);
+            r.tournament_mode = mode;
             r.group_phase_start = Some(utc("2026-06-14T11:00:00"));
             r.bracket_start = Some(utc("2026-06-14T11:30:00"));
             assert_eq!(get_due_next_status(&r, now()), None);
@@ -353,21 +341,42 @@ mod tests {
 
     #[test]
     fn group_phase_zu_bracket() {
-        let mut r = row("group_phase");
+        let mut r = row(TournamentStatus::GroupPhase);
         r.bracket_start = Some(utc("2026-06-14T11:00:00"));
-        assert_eq!(get_due_next_status(&r, now()), Some("bracket"));
+        assert_eq!(
+            get_due_next_status(&r, now()),
+            Some(TournamentStatus::Bracket)
+        );
         r.bracket_start = Some(utc("2026-06-14T13:00:00"));
         assert_eq!(get_due_next_status(&r, now()), None);
     }
 
     #[test]
     fn kein_uebergang_ohne_zeitstempel() {
-        assert_eq!(get_due_next_status(&row("draft"), now()), None);
-        assert_eq!(get_due_next_status(&row("registration"), now()), None);
-        assert_eq!(get_due_next_status(&row("checkin"), now()), None);
-        assert_eq!(get_due_next_status(&row("group_phase"), now()), None);
+        assert_eq!(
+            get_due_next_status(&row(TournamentStatus::Draft), now()),
+            None
+        );
+        assert_eq!(
+            get_due_next_status(&row(TournamentStatus::Registration), now()),
+            None
+        );
+        assert_eq!(
+            get_due_next_status(&row(TournamentStatus::Checkin), now()),
+            None
+        );
+        assert_eq!(
+            get_due_next_status(&row(TournamentStatus::GroupPhase), now()),
+            None
+        );
         // Unbekannter/Endstatus → None.
-        assert_eq!(get_due_next_status(&row("bracket"), now()), None);
-        assert_eq!(get_due_next_status(&row("completed"), now()), None);
+        assert_eq!(
+            get_due_next_status(&row(TournamentStatus::Bracket), now()),
+            None
+        );
+        assert_eq!(
+            get_due_next_status(&row(TournamentStatus::Completed), now()),
+            None
+        );
     }
 }

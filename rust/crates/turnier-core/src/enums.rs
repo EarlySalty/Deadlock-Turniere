@@ -29,8 +29,53 @@ str_enum! {
 }
 
 impl TournamentStatus {
+    pub const ALL: [Self; 7] = [
+        Self::Draft,
+        Self::Registration,
+        Self::Checkin,
+        Self::GroupPhase,
+        Self::Bracket,
+        Self::Completed,
+        Self::Archived,
+    ];
+    pub const PLANNED: [Self; 5] = [
+        Self::Draft,
+        Self::Registration,
+        Self::Checkin,
+        Self::GroupPhase,
+        Self::Bracket,
+    ];
+    pub const PARTICIPATING: [Self; 4] = [
+        Self::Registration,
+        Self::Checkin,
+        Self::GroupPhase,
+        Self::Bracket,
+    ];
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Draft => "draft",
+            Self::Registration => "registration",
+            Self::Checkin => "checkin",
+            Self::GroupPhase => "group_phase",
+            Self::Bracket => "bracket",
+            Self::Completed => "completed",
+            Self::Archived => "archived",
+        }
+    }
+
     pub fn registration_window_open(self) -> bool {
         matches!(self, Self::Registration | Self::Checkin)
+    }
+
+    pub fn is_match_phase(self) -> bool {
+        matches!(self, Self::GroupPhase | Self::Bracket)
+    }
+}
+
+impl std::fmt::Display for TournamentStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
     }
 }
 
@@ -119,6 +164,16 @@ mod tests {
             serde_json::to_string(&TournamentGameMode::RandomHeroes).unwrap(),
             "\"random_heroes\""
         );
+    }
+
+    #[test]
+    fn status_as_str_matches_the_wire_name() {
+        for status in TournamentStatus::ALL {
+            assert_eq!(
+                serde_json::to_string(&status).unwrap(),
+                format!("\"{}\"", status.as_str())
+            );
+        }
     }
 
     #[test]

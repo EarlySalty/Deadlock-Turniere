@@ -9,7 +9,7 @@ use sha2_min::Sha256;
 use sqlx::{FromRow, Postgres, Row, Transaction};
 use turnier_core::{
     discord_id_to_string, now_utc, BracketFormat, InviteMode, RecruitmentStatus, TeamRole,
-    TournamentMode,
+    TournamentMode, TournamentStatus,
 };
 use turnier_steam::RankResolver;
 
@@ -216,9 +216,9 @@ pub async fn assign_random_teams(
     let Some(locked) = super::lock_tournament_row(&mut tx, tournament_id).await? else {
         return Err(TournamentError::Validation("Turnier nicht gefunden".into()));
     };
-    let status: String = locked.try_get("status")?;
+    let status: TournamentStatus = locked.try_get("status")?;
     let team_size: i64 = locked.try_get("team_size")?;
-    if status != "registration" {
+    if status != TournamentStatus::Registration {
         return Err(TournamentError::Validation(
             "Team-Zuweisung nur während der Anmeldung möglich".into(),
         ));
@@ -395,7 +395,7 @@ async fn captain_team_name(
 pub async fn build_checkin_snapshot_token(
     pool: &sqlx::Pool<Postgres>,
     tournament_id: i64,
-    tournament_status: &str,
+    tournament_status: TournamentStatus,
 ) -> TournamentResult<String> {
     let mut tx = pool.begin().await?;
     let token = snapshot_token_in_tx(&mut tx, tournament_id, tournament_status).await?;
@@ -428,7 +428,7 @@ struct SnapshotSignup {
 async fn snapshot_token_in_tx(
     tx: &mut Transaction<'_, Postgres>,
     tournament_id: i64,
-    tournament_status: &str,
+    tournament_status: TournamentStatus,
 ) -> TournamentResult<String> {
     let checkins: Vec<SnapshotCheckin> = sqlx::query_as(
         "SELECT discord_id, checked_in_at FROM turnier.tournament_checkins \
@@ -455,7 +455,7 @@ async fn snapshot_token_in_tx(
     .fetch_all(&mut **tx)
     .await?;
 
-    let settings: Option<(String, String, String, i64)> = sqlx::query_as(
+    let settings: Option<(InviteMode, BracketFormat, TournamentMode, i64)> = sqlx::query_as(
         "SELECT invite_mode, bracket_format, tournament_mode, team_size \
          FROM turnier.tournaments WHERE id = $1",
     )
@@ -508,7 +508,7 @@ pub struct FinalizeCheckinResult {
     pub matches_created: Option<i64>,
     pub advanced_to_group_phase: Option<bool>,
     pub advanced_to_bracket: Option<bool>,
-    pub entered_status: Option<&'static str>,
+    pub entered_status: Option<TournamentStatus>,
 }
 
 #[derive(Debug, Clone)]
@@ -552,7 +552,7 @@ fn formation_team_size(team_size: i64) -> TournamentResult<usize> {
 
 #[derive(sqlx::FromRow)]
 struct TournamentRow {
-    status: String,
+    status: TournamentStatus,
     team_size: i64,
     tournament_mode: TournamentMode,
     bracket_format: BracketFormat,
@@ -637,13 +637,13 @@ pub async fn finalize_checkin(
     let Some(tournament) = tournament else {
         return Err(TournamentError::validation("Turnier nicht gefunden"));
     };
-    if tournament.status != "checkin" {
+    if tournament.status != TournamentStatus::Checkin {
         return Err(TournamentError::validation(
             "Check-in kann nur in der Check-in-Phase abgeschlossen werden",
         ));
     }
 
-    let snapshot_token = snapshot_token_in_tx(&mut tx, tournament_id, &tournament.status).await?;
+    let snapshot_token = snapshot_token_in_tx(&mut tx, tournament_id, tournament.status).await?;
     if params.confirm {
         match params.expected_snapshot_token {
             None => {
@@ -905,7 +905,7 @@ pub async fn finalize_checkin(
     let mut groups_created = 0i64;
     let mut matches_created = 0i64;
     let mut advanced_to_bracket = false;
-    let mut entered_status: Option<&'static str> = None;
+    let mut entered_status: Option<TournamentStatus> = None;
 
     if params.confirm {
         // Entfernte Mitglieder löschen + Signup entkoppeln.
@@ -1044,7 +1044,7 @@ pub async fn finalize_checkin(
                 .await?;
                 groups_created = 1;
                 matches_created = plan.matches;
-                entered_status = Some("group_phase");
+                entered_status = Some(TournamentStatus::GroupPhase);
                 let res = sqlx::query(
                     "UPDATE turnier.tournaments SET status = 'group_phase', updated_at = $1 \
                      WHERE id = $2 AND status = 'checkin'",
@@ -1058,7 +1058,7 @@ pub async fn finalize_checkin(
                 let group_ids = generate_groups_in_tx(&mut tx, tournament_id, None).await?;
                 groups_created = group_ids.len() as i64;
                 matches_created = generate_group_matches_in_tx(&mut tx, tournament_id).await?;
-                entered_status = Some("group_phase");
+                entered_status = Some(TournamentStatus::GroupPhase);
                 let res = sqlx::query(
                     "UPDATE turnier.tournaments SET status = 'group_phase', updated_at = $1 \
                      WHERE id = $2 AND status = 'checkin'",
@@ -1100,7 +1100,7 @@ pub async fn finalize_checkin(
                 .await?;
                 status_changed = res.rows_affected();
                 advanced_to_bracket = true;
-                entered_status = Some("bracket");
+                entered_status = Some(TournamentStatus::Bracket);
             }
             if status_changed == 0 {
                 return Err(TournamentError::StatusConflict);

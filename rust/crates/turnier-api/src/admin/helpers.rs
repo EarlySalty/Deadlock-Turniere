@@ -7,14 +7,6 @@ use turnier_core::{LobbySettingsPreset, TournamentStatus};
 use crate::db;
 use crate::error::{WebError, WebResult};
 
-pub const ACTIVE_TOURNAMENT_STATUSES: [TournamentStatus; 5] = [
-    TournamentStatus::Draft,
-    TournamentStatus::Registration,
-    TournamentStatus::Checkin,
-    TournamentStatus::GroupPhase,
-    TournamentStatus::Bracket,
-];
-
 /// Default-Reminder-Offsets (Magic-Numbers aus dem Original als Konstante).
 const DEFAULT_REMINDER_OFFSETS: [i64; 3] = [1440, 120, 15];
 
@@ -106,7 +98,7 @@ where
 
 /// Erzwingt, dass Teilnehmerverwaltung nur in aktiven Turnierstatus erlaubt ist.
 pub fn ensure_participant_management_allowed(tournament_status: TournamentStatus) -> WebResult<()> {
-    if !ACTIVE_TOURNAMENT_STATUSES.contains(&tournament_status) {
+    if !TournamentStatus::PLANNED.contains(&tournament_status) {
         return Err(WebError::bad_request(
             "Teilnehmerverwaltung ist nur für aktive Turniere möglich",
         ));

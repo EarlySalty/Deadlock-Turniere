@@ -4,7 +4,9 @@
 use chrono::{DateTime, Duration, Utc};
 use serde_json::json;
 use sqlx::PgConnection;
-use turnier_core::{discord_id_to_string, json::wire_string_to_jsonb, parse_discord_id};
+use turnier_core::{
+    discord_id_to_string, json::wire_string_to_jsonb, parse_discord_id, TournamentStatus,
+};
 use turnier_db::Pool;
 
 use crate::{presets::Preset, AutomatikResult};
@@ -25,7 +27,7 @@ pub struct RoutineTournamentPlan {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EnsuredRoutineTournament {
     pub id: i64,
-    pub status: String,
+    pub status: TournamentStatus,
     pub created: bool,
 }
 
@@ -124,7 +126,7 @@ pub async fn ensure_routine_tournament(
         .execute(&mut *conn)
         .await?;
 
-    if let Some((id, status)) = sqlx::query_as::<_, (i64, String)>(
+    if let Some((id, status)) = sqlx::query_as::<_, (i64, TournamentStatus)>(
         "SELECT id, status FROM turnier.tournaments \
          WHERE source = 'routine' AND preset_id = $1 AND group_phase_start = $2 \
          ORDER BY id LIMIT 1",
@@ -134,7 +136,7 @@ pub async fn ensure_routine_tournament(
     .fetch_optional(&mut *conn)
     .await?
     {
-        if status == "draft" {
+        if status == TournamentStatus::Draft {
             sqlx::query(
                 "UPDATE turnier.tournaments SET \
                  name = $1, description = $2, team_size = $3, registration_start = $4, \
@@ -214,7 +216,7 @@ pub async fn ensure_routine_tournament(
     .await?;
     Ok(EnsuredRoutineTournament {
         id,
-        status: "draft".to_string(),
+        status: TournamentStatus::Draft,
         created: true,
     })
 }
