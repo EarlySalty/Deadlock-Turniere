@@ -145,7 +145,13 @@ fn pool_cache_limits_and_intervals_reject_out_of_range_values() {
         ("scheduler.observer_command_ttl_seconds", [0, 31]),
     ] {
         for value in values {
-            assert!(set(field, toml::Value::Integer(value)).is_err(), "{field}");
+            let err = match set(field, toml::Value::Integer(value)) {
+                Ok(_) => panic!("{field} akzeptierte {value}"),
+                Err(err) => err.to_string(),
+            };
+            if field.starts_with("limits.") {
+                assert!(err.contains(field), "{field}: {err}");
+            }
         }
     }
     for timeout in ["invite", "result", "create", "start", "control", "convars"] {

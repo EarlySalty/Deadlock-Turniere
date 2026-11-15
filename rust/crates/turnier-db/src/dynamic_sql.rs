@@ -28,7 +28,7 @@ pub const REMINDER_DEDUPE_TABLES: [&str; 3] = [
     "sent_tournament_reminders",
 ];
 
-/// Reminder-Dedupe-Tabellen, die als Identifier in SQL auftauchen duerfen.
+/// Reminder-Dedupe-Tabellen, die als Identifier in SQL auftauchen dürfen.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReminderDedupeTable {
     Match,

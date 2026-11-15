@@ -8,6 +8,7 @@ use axum::http::StatusCode;
 use crate::error::{WebError, WebResult};
 
 const HOUR: Duration = Duration::from_secs(60 * 60);
+pub const HOURLY_LOG_MAX_SOURCES: usize = 10_000;
 
 pub type HourlyLog = Mutex<HashMap<IpAddr, Vec<Instant>>>;
 
@@ -28,13 +29,29 @@ pub fn enforce_hourly_limit(
     limit: usize,
     message: impl FnOnce() -> String,
 ) -> WebResult<()> {
-    let now = Instant::now();
     let mut log = log.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-    log.retain(|_, times| {
-        times.retain(|at| now.duration_since(*at) < HOUR);
-        !times.is_empty()
-    });
-    let entries = log.entry(limiter_key(ip)).or_default();
+    record_hourly(&mut log, ip, limit, Instant::now(), message)
+}
+
+pub fn record_hourly(
+    log: &mut HashMap<IpAddr, Vec<Instant>>,
+    ip: IpAddr,
+    limit: usize,
+    now: Instant,
+    message: impl FnOnce() -> String,
+) -> WebResult<()> {
+    let key = limiter_key(ip);
+    if log.len() >= HOURLY_LOG_MAX_SOURCES && !log.contains_key(&key) {
+        log.retain(|_, times| {
+            times.retain(|at| now.duration_since(*at) < HOUR);
+            !times.is_empty()
+        });
+        if log.len() >= HOURLY_LOG_MAX_SOURCES {
+            return Err(WebError::new(StatusCode::TOO_MANY_REQUESTS, message()));
+        }
+    }
+    let entries = log.entry(key).or_default();
+    entries.retain(|at| now.duration_since(*at) < HOUR);
     if entries.len() >= limit {
         return Err(WebError::new(StatusCode::TOO_MANY_REQUESTS, message()));
     }

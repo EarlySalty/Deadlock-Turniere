@@ -277,15 +277,7 @@ impl DiscordNotifier {
             .title("Lobby wurde erstellt")
             .description("Die Steam-Lobby ist bereit.")
             .field("Lobby-Code", format!("`{party_code}`"), false)
-            .field(
-                "Teilnehmer",
-                if mention_line.is_empty() {
-                    "Keine Teilnehmer mit Discord-ID".to_string()
-                } else {
-                    mention_line.clone()
-                },
-                false,
-            );
+            .field("Teilnehmer", mentions_or_dash(participant_ids), false);
 
         let allowed = parse_all(participant_ids);
         let payload = json!({

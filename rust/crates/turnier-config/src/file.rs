@@ -599,26 +599,7 @@ impl Config {
         )?;
         self.observer_director
             .validate(self.scheduler.observer_evaluate_milliseconds)?;
-        let l = &self.limits;
-        if !(1..=30).contains(&l.session_lifetime_days)
-            || !(1..=16 * 1024 * 1024).contains(&l.avatar_bytes)
-            || !(1024..=32 * 1024 * 1024).contains(&l.request_body_bytes)
-            || l.avatar_bytes > l.request_body_bytes
-            || l.comp_body_bytes > l.request_body_bytes
-            || !(1024..=1024 * 1024).contains(&l.comp_body_bytes)
-            || !(1..=100000).contains(&l.comp_clients)
-            || !(1..=100000).contains(&l.comp_reads_per_minute)
-            || !(1..=100000).contains(&l.comp_writes_per_minute)
-            || !(1..=1000).contains(&l.comp_creations_per_hour)
-            || !(1..=1000).contains(&l.draft_creations_per_hour)
-            || !(1..=1000).contains(&l.guest_logins_per_hour)
-            || !(1..=3600).contains(&l.draft_viewer_ttl_seconds)
-            || !(1..=65536).contains(&l.observer_live_queue_rows)
-        {
-            return Err(ConfigError::Invalid(
-                "limits: außerhalb der dokumentierten Sicherheitsgrenzen",
-            ));
-        }
+        self.limits.validate()?;
         let n = &self.network;
         for value in [
             n.broker_request_seconds,
@@ -772,6 +753,32 @@ pub(crate) fn validate_id(value: &str, field: &'static str) -> Result<(), Config
         Err(ConfigError::Invalid(field))
     }
 }
+impl LimitsConfig {
+    fn validate(&self) -> Result<(), ConfigError> {
+        let size = |v: usize| v as u64;
+        let days = u64::try_from(self.session_lifetime_days).unwrap_or(0);
+        let checks: [(u64, u64, u64, &'static str); 13] = [
+            (days, 1, 30, "limits.session_lifetime_days: 1 bis 30"),
+            (size(self.avatar_bytes), 1, 16 * 1024 * 1024, "limits.avatar_bytes: 1 bis 16 MiB"),
+            (size(self.request_body_bytes), 1024, 32 * 1024 * 1024, "limits.request_body_bytes: 1 KiB bis 32 MiB"),
+            (size(self.comp_body_bytes), 1024, 1024 * 1024, "limits.comp_body_bytes: 1 KiB bis 1 MiB"),
+            (size(self.comp_clients), 1, 100000, "limits.comp_clients: 1 bis 100000"),
+            (u64::from(self.comp_reads_per_minute), 1, 100000, "limits.comp_reads_per_minute: 1 bis 100000"),
+            (u64::from(self.comp_writes_per_minute), 1, 100000, "limits.comp_writes_per_minute: 1 bis 100000"),
+            (size(self.comp_creations_per_hour), 1, 1000, "limits.comp_creations_per_hour: 1 bis 1000"),
+            (size(self.draft_creations_per_hour), 1, 1000, "limits.draft_creations_per_hour: 1 bis 1000"),
+            (size(self.guest_logins_per_hour), 1, 1000, "limits.guest_logins_per_hour: 1 bis 1000"),
+            (self.draft_viewer_ttl_seconds, 1, 3600, "limits.draft_viewer_ttl_seconds: 1 bis 3600"),
+            (size(self.observer_live_queue_rows), 1, 65536, "limits.observer_live_queue_rows: 1 bis 65536"),
+            (size(self.avatar_bytes.max(self.comp_body_bytes)), 1, size(self.request_body_bytes), "limits.avatar_bytes und limits.comp_body_bytes: höchstens limits.request_body_bytes"),
+        ];
+        for (value, min, max, field) in checks {
+            bounded(value, min, max, field)?;
+        }
+        Ok(())
+    }
+}
+
 fn bounded(value: u64, min: u64, max: u64, field: &'static str) -> Result<(), ConfigError> {
     if (min..=max).contains(&value) {
         Ok(())

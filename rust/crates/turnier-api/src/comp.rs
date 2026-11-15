@@ -242,7 +242,6 @@ struct Budget {
     minute: Instant,
     reads: u32,
     writes: u32,
-    creations: Vec<Instant>,
     last_seen: Instant,
 }
 
@@ -251,6 +250,7 @@ struct Budget {
 #[derive(Default)]
 pub struct RateLimiter {
     clients: HashMap<IpAddr, Budget>,
+    creations: HashMap<IpAddr, Vec<Instant>>,
     limits: turnier_config::LimitsConfig,
 }
 
@@ -258,11 +258,13 @@ impl RateLimiter {
     pub fn from_config(limits: &turnier_config::LimitsConfig) -> Self {
         Self {
             clients: HashMap::new(),
+            creations: HashMap::new(),
             limits: limits.clone(),
         }
     }
 
     fn check(&mut self, ip: IpAddr, access: Access, now: Instant) -> WebResult<()> {
+        let ip = crate::rate_limit::limiter_key(ip);
         self.clients
             .retain(|_, budget| now.duration_since(budget.last_seen) < Duration::from_secs(3600));
         if self.clients.len() >= self.limits.comp_clients && !self.clients.contains_key(&ip) {
@@ -275,7 +277,6 @@ impl RateLimiter {
             minute: now,
             reads: 0,
             writes: 0,
-            creations: Vec::new(),
             last_seen: now,
         });
         budget.last_seen = now;
@@ -284,9 +285,6 @@ impl RateLimiter {
             budget.reads = 0;
             budget.writes = 0;
         }
-        budget
-            .creations
-            .retain(|t| now.duration_since(*t) < Duration::from_secs(3600));
         let (count, limit) = match access {
             Access::Read => (&mut budget.reads, self.limits.comp_reads_per_minute),
             _ => (&mut budget.writes, self.limits.comp_writes_per_minute),
@@ -299,16 +297,10 @@ impl RateLimiter {
         }
         *count += 1;
         if matches!(access, Access::Create) {
-            if budget.creations.len() >= self.limits.comp_creations_per_hour {
-                return Err(WebError::new(
-                    StatusCode::TOO_MANY_REQUESTS,
-                    format!(
-                        "Du kannst höchstens {} Comp-Lobbys pro Stunde erstellen.",
-                        self.limits.comp_creations_per_hour
-                    ),
-                ));
-            }
-            budget.creations.push(now);
+            let limit = self.limits.comp_creations_per_hour;
+            crate::rate_limit::record_hourly(&mut self.creations, ip, limit, now, || {
+                format!("Du kannst höchstens {limit} Comp-Lobbys pro Stunde erstellen.")
+            })?;
         }
         Ok(())
     }

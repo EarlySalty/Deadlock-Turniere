@@ -123,6 +123,10 @@ comp_writes_per_minute = 120
 comp_creations_per_hour = 10
 # Draft-Lobbys und Gastanmeldungen zählen je Anschluss: IPv4-Adresse oder IPv6-/64-Netz.
 draft_creations_per_hour = 10
+# Gastanmeldungen je Anschluss und Stunde, erlaubt 1 bis 1000, ohne Eintrag 10.
+# Jede Gastanmeldung legt eine Sitzung an. 10 reicht für mehrere Gäste hinter
+# einem gemeinsamen Router; bei einem LAN-Turnier mit vielen Gästen im selben
+# Netz entsprechend höher setzen.
 guest_logins_per_hour = 10
 draft_viewer_ttl_seconds = 20
 observer_live_queue_rows = 512

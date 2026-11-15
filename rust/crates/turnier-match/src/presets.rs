@@ -135,7 +135,7 @@ fn event_presets() -> &'static [EventPreset] {
             EventPreset {
                 key: "duplicate_heroes",
                 label: "Duplicate Heroes",
-                description: "Alle Teams duerfen denselben Hero mehrfach spielen.",
+                description: "Alle Teams dürfen denselben Hero mehrfach spielen.",
                 requires_cheats: false,
                 convars: Box::leak(Box::new([("citadel_allow_duplicate_heroes", json!(1))])),
                 reset_convars: Box::leak(Box::new([("citadel_allow_duplicate_heroes", json!(0))])),
@@ -151,7 +151,7 @@ fn event_presets() -> &'static [EventPreset] {
             EventPreset {
                 key: "melee_mayhem",
                 label: "Melee Mayhem",
-                description: "Nahkampf wird deutlich staerker als gewohnt.",
+                description: "Nahkampf wird deutlich stärker als gewohnt.",
                 requires_cheats: true,
                 convars: Box::leak(Box::new([("citadel_melee_damage_scale", json!(2.5))])),
                 reset_convars: Box::leak(Box::new([("citadel_melee_damage_scale", json!(1))])),
