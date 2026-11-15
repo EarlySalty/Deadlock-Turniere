@@ -42,6 +42,7 @@ export interface Tournament {
   name: string
   status: TournamentStatus
   registration_open: boolean
+  replacements_open: boolean
   description: string | null
   team_size: number
   series_format: 1 | 3 | 5

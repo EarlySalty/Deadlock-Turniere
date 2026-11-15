@@ -16,7 +16,7 @@ import {
   useRenameAdminTeam,
   useSetAdminRecruitingStatus,
 } from '@/hooks/useTournament'
-import type { Team, TeamMember, TournamentSignup, TournamentStatus, RecruitmentStatus } from '@/types/tournament'
+import type { Team, TeamMember, TournamentSignup, RecruitmentStatus } from '@/types/tournament'
 import {
   AlertCircle,
   ArrowRightLeft,
@@ -43,7 +43,7 @@ function recruitingBadgeClass(status: RecruitmentStatus): string {
 
 interface ParticipantManagerProps {
   tournamentId: number
-  tournamentStatus: TournamentStatus
+  replacementsOpen: boolean
   teamSize: number
   teams: Team[]
   signups: TournamentSignup[]
@@ -57,7 +57,7 @@ function captainLabel(team: Team): string {
 
 export default function ParticipantManager({
   tournamentId,
-  tournamentStatus,
+  replacementsOpen,
   teamSize,
   teams,
   signups,
@@ -227,7 +227,6 @@ export default function ParticipantManager({
         <SoloBalancePanel
           key={tournamentId}
           tournamentId={tournamentId}
-          tournamentStatus={tournamentStatus}
           teamSize={teamSize}
           signupCount={signups.length}
           teams={teams}
@@ -241,7 +240,7 @@ export default function ParticipantManager({
         <p className="text-sm text-muted">
           Teams erstellen, Spieler verschieben, Captains setzen und offene Solo-Anmeldungen zuweisen.
         </p>
-        {canAddReplacementPlayers && ['group_phase', 'bracket'].includes(tournamentStatus) && (
+        {canAddReplacementPlayers && replacementsOpen && (
           <p className="text-sm text-muted">
             Ersatzspieler werden direkt über die jeweilige Teamkarte hinzugefügt.
           </p>
@@ -404,7 +403,7 @@ export default function ParticipantManager({
               </div>
               )}
 
-              {canAddReplacementPlayers && ['group_phase', 'bracket'].includes(tournamentStatus) && (
+              {canAddReplacementPlayers && replacementsOpen && (
                 <div>
                   <Button
                     variant="secondary"

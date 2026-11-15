@@ -66,7 +66,7 @@ import type {
   ObserverSessionDetail,
 } from '@/types/tournament'
 
-import type { BalancePreview, BalanceWaitlistEntry } from '@/types/soloBalance'
+import type { BalanceAvailability, BalancePreview, BalanceWaitlistEntry } from '@/types/soloBalance'
 
 const API_BASE = '/turnier/api'
 
@@ -165,6 +165,9 @@ export const applySoloBalance = (tournamentId: number, preview: BalancePreview) 
 
 export const fetchSoloBalanceWaitlist = (tournamentId: number) =>
   request<BalanceWaitlistEntry[]>(`/admin/tournaments/${tournamentId}/solo-balance/waitlist`)
+
+export const fetchSoloBalanceAvailability = (tournamentId: number) =>
+  request<BalanceAvailability>(`/admin/tournaments/${tournamentId}/solo-balance/availability`)
 
 export const assignRandomTeams = (id: number) =>
   request<{ teams_created: number }>(`/admin/tournaments/${id}/assign-random`, { method: 'POST' })

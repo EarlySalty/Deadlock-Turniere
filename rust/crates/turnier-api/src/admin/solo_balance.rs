@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use axum::extract::{Path, State};
+use axum::http::StatusCode;
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use chrono::{DateTime, Utc};
@@ -8,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sha2::{Digest, Sha256};
 use sqlx::{PgConnection, Postgres, Row, Transaction};
-use turnier_core::RankProfile;
+use turnier_core::{RankProfile, TournamentStatus};
 use turnier_engine::balance::{balance_players, BalancePlayer, BalancedPlayer};
 
 use crate::db;
@@ -33,6 +34,46 @@ pub fn router() -> Router<AppState> {
             "/api/admin/tournaments/{tournament_id}/solo-balance/waitlist",
             get(waitlist),
         )
+        .route(
+            "/api/admin/tournaments/{tournament_id}/solo-balance/availability",
+            get(availability),
+        )
+}
+
+#[derive(Serialize)]
+struct AvailabilityDto {
+    available: bool,
+    reason: Option<String>,
+}
+
+async fn availability(
+    State(state): State<AppState>,
+    _admin: AdminUser,
+    Path(tournament_id): Path<i64>,
+) -> WebResult<Json<AvailabilityDto>> {
+    let mut tx = state.pool.begin().await?;
+    sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY")
+        .execute(&mut *tx)
+        .await?;
+    let checked = load_inputs(&mut tx, tournament_id).await;
+    tx.rollback().await?;
+    availability_from(checked.map(|_| ())).map(Json)
+}
+
+fn availability_from(checked: WebResult<()>) -> WebResult<AvailabilityDto> {
+    match checked {
+        Ok(()) => Ok(AvailabilityDto {
+            available: true,
+            reason: None,
+        }),
+        Err(err) if matches!(err.status, StatusCode::BAD_REQUEST | StatusCode::CONFLICT) => {
+            Ok(AvailabilityDto {
+                available: false,
+                reason: Some(err.detail),
+            })
+        }
+        Err(err) => Err(err),
+    }
 }
 
 #[derive(Deserialize)]
@@ -139,7 +180,7 @@ async fn load_inputs(conn: &mut PgConnection, tournament_id: i64) -> WebResult<I
             .fetch_optional(&mut *conn)
             .await?
             .ok_or_else(|| WebError::not_found("Turnier nicht gefunden"))?;
-    if tournament.get::<String, _>("status") != "checkin" {
+    if tournament.try_get::<TournamentStatus, _>("status")? != TournamentStatus::Checkin {
         return Err(WebError::bad_request(
             "Teams können nur nach der Anmeldung während des Check-ins ausgeglichen werden.",
         ));

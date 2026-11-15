@@ -3,14 +3,13 @@ import { latestActionError } from '@/lib/latestError'
 import Card from '@/components/ui/Card'
 import Button from '@/components/ui/Button'
 import { useSoloBalance } from '@/hooks/useTournament'
-import type { Team, TournamentStatus } from '@/types/tournament'
+import type { Team } from '@/types/tournament'
 import type { BalancePlayer } from '@/types/soloBalance'
 import { pluralize } from '@/lib/countLabel'
 import { playerName } from '@/lib/playerName'
 
 interface SoloBalancePanelProps {
   tournamentId: number
-  tournamentStatus: TournamentStatus
   teamSize: number
   signupCount: number
   teams: Team[]
@@ -35,15 +34,15 @@ function PlayerList({ players }: { players: BalancePlayer[] }) {
   )
 }
 
-export default function SoloBalancePanel({ tournamentId, tournamentStatus, teamSize, signupCount, teams }: SoloBalancePanelProps) {
-  const { preview, apply, waitlist } = useSoloBalance(tournamentId)
+export default function SoloBalancePanel({ tournamentId, teamSize, signupCount, teams }: SoloBalancePanelProps) {
+  const { preview, apply, waitlist, availability } = useSoloBalance(tournamentId)
   const [teamCount, setTeamCount] = useState('')
   const maxTeams = Math.floor(signupCount / teamSize)
   const count = teamCount === '' ? maxTeams : Number(teamCount)
-  const canBalance = tournamentStatus === 'checkin' && teams.every((team) => team.members.length === 1)
+  const canBalance = availability.data?.available === true
   const busy = preview.isPending || apply.isPending
   const proposal = preview.data
-  const error = latestActionError([preview, apply]) ?? waitlist.error
+  const error = latestActionError([preview, apply]) ?? waitlist.error ?? availability.error
   const validCount = Number.isInteger(count) && count > 0 && count <= maxTeams
 
   return (
@@ -71,9 +70,7 @@ export default function SoloBalancePanel({ tournamentId, tournamentStatus, teamS
         </div>
       ) : (
         <p className="text-sm text-muted">
-          {tournamentStatus === 'registration' || tournamentStatus === 'draft'
-            ? 'Schließe zuerst die Anmeldung und öffne den Check-in.'
-            : 'Der Teamausgleich ist während des Check-ins ohne bestehende Mehrpersonen-Teams verfügbar.'}
+          {availability.data?.reason ?? 'Verfügbarkeit wird geprüft …'}
         </p>
       )}
       {error && <p role="alert" className="text-sm text-red-400">{error.message}</p>}

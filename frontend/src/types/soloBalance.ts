@@ -20,6 +20,11 @@ export interface BalancePreview {
   preview_token: string
 }
 
+export interface BalanceAvailability {
+  available: boolean
+  reason: string | null
+}
+
 export interface BalanceWaitlistEntry {
   signup_id: number
   discord_name: string | null

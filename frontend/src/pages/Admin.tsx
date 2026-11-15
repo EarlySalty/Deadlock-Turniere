@@ -323,7 +323,7 @@ export default function Admin() {
                     {activePhase === 'participants' && canManageParticipants && (
                       <ParticipantManager
                         tournamentId={liveDetail.id}
-                        tournamentStatus={liveDetail.status}
+                        replacementsOpen={liveDetail.replacements_open}
                         teamSize={liveDetail.team_size}
                         teams={liveDetail.teams}
                         signups={liveDetail.signups}
