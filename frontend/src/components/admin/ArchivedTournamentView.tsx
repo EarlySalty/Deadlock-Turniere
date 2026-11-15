@@ -10,6 +10,8 @@ import { bracketFormatLabel, effectiveBracketFormat } from '@/lib/bracketFormat'
 import TournamentCasterPanel from '@/components/admin/TournamentCasterPanel'
 import Button from '@/components/ui/Button'
 import { Archive, Copy, Trophy, Users2, ListChecks } from 'lucide-react'
+import { pluralize } from '@/lib/countLabel'
+import { playerName } from '@/lib/playerName'
 
 type ArchiveTab = 'overview' | 'bracket' | 'groups' | 'teams' | 'caster'
 
@@ -177,7 +179,7 @@ export default function ArchivedTournamentView({ tournament, onUseAsTemplate }: 
                 <div className="mb-2 flex items-center justify-between">
                   <h4 className="font-semibold text-foreground">{team.name}</h4>
                   <span className="text-xs text-muted">
-                    {team.members.length} Mitglied(er)
+                    {pluralize(team.members.length, 'Mitglied', 'Mitglieder')}
                   </span>
                 </div>
                 <ul className="space-y-1 text-sm">
@@ -190,7 +192,7 @@ export default function ArchivedTournamentView({ tournament, onUseAsTemplate }: 
                         {m.role === 'captain' && (
                           <span className="mr-1 text-amber-400">★</span>
                         )}
-                        {m.discord_name ?? m.discord_id}
+                        {playerName(m.discord_name)}
                       </span>
                       <span className="text-xs">{m.rank ?? '-'}</span>
                     </li>

@@ -8,6 +8,8 @@ import {
   useRemoveTournamentCaster,
 } from '@/hooks/useTournament'
 import { Mic2, Plus, X, AlertCircle } from 'lucide-react'
+import ActionError from '@/components/ui/ActionError'
+import { playerName } from '@/lib/playerName'
 
 interface TournamentCasterPanelProps {
   tournamentId: number
@@ -50,7 +52,7 @@ export default function TournamentCasterPanel({
       {poolError && (
         <div className="flex items-center gap-2 rounded-lg border border-red-500/20 bg-red-500/10 p-3 text-sm text-red-400">
           <AlertCircle size={16} />
-          <span>Caster-Pool konnte nicht geladen werden. Discord-Bot offline?</span>
+          <span>Caster-Pool konnte nicht geladen werden: {poolError.message}</span>
         </div>
       )}
 
@@ -76,7 +78,7 @@ export default function TournamentCasterPanel({
               </option>
               {remainingCasters.map((caster) => (
                 <option key={caster.discord_id} value={caster.discord_id}>
-                  {caster.display_name ?? caster.discord_id}
+                  {playerName(caster.display_name)}
                 </option>
               ))}
             </select>
@@ -98,6 +100,8 @@ export default function TournamentCasterPanel({
         </div>
       )}
 
+      <ActionError actions={[assignCaster, removeCaster]} />
+
       <div className="space-y-2">
         <p className="text-xs font-medium uppercase tracking-wider text-muted">
           Aktiv für dieses Turnier ({assignedCasters.length})
@@ -117,7 +121,7 @@ export default function TournamentCasterPanel({
                 className="flex items-center gap-2 rounded-full border border-border bg-background/40 px-3 py-1.5 text-xs text-foreground"
               >
                 <Mic2 size={12} className="text-primary" />
-                <span>{caster.display_name ?? caster.discord_id}</span>
+                <span>{playerName(caster.display_name)}</span>
                 {!readOnly && (
                   <button
                     type="button"
@@ -126,7 +130,7 @@ export default function TournamentCasterPanel({
                     onClick={() =>
                       removeCaster.mutate({ tournamentId, discordId: caster.discord_id })
                     }
-                    aria-label={`Caster ${caster.display_name ?? caster.discord_id} entfernen`}
+                    aria-label={`Caster ${playerName(caster.display_name)} entfernen`}
                   >
                     <X size={12} />
                   </button>

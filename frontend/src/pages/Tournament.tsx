@@ -44,6 +44,7 @@ import { ApiError } from '@/api/client'
 import { bracketFormatLabel, effectiveBracketFormat } from '@/lib/bracketFormat'
 import ReactMarkdown from 'react-markdown'
 import { playerName } from '@/lib/playerName'
+import { teamLabel, teamNameById } from '@/lib/teamName'
 
 type Tab = 'übersicht' | 'kodex' | 'gruppen' | 'bracket' | 'teams' | 'ergebnisse' | 'rangliste'
 
@@ -68,7 +69,7 @@ interface ResultEntry {
 
 function getTeamName(teamId: number | null, teams: TeamPublic[]): string {
   if (teamId === null) return 'Freilos'
-  return teams.find((team) => team.id === teamId)?.name ?? `Team #${teamId}`
+  return teamNameById(teams, teamId)
 }
 
 interface BracketRankEntry {
@@ -515,7 +516,7 @@ export default function Tournament() {
                 {myInvitations.map((invite) => (
                   <div key={invite.id} className="flex items-center justify-between gap-3 bg-white/5 p-3 rounded-lg border border-white/5">
                     <div>
-                      <p className="text-sm font-bold text-foreground uppercase tracking-wide">{invite.team_name ?? `Team #${invite.team_id}`}</p>
+                      <p className="text-sm font-bold text-foreground uppercase tracking-wide">{teamLabel(invite.team_name, invite.team_id)}</p>
                       {invite.expires_at && (
                         <p className="text-[10px] text-muted italic">
                           Ablauf: {new Date(invite.expires_at).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })}
@@ -908,7 +909,7 @@ export default function Tournament() {
 
                           <div className="flex flex-wrap gap-2">
                              {team.members.slice(0, 3).map((m, i) => (
-                               <div key={i} title={m.discord_name ?? ''} className="w-6 h-6 rounded-lg bg-white/5 border border-white/10 flex items-center justify-center overflow-hidden">
+                               <div key={i} title={playerName(m.discord_name)} className="w-6 h-6 rounded-lg bg-white/5 border border-white/10 flex items-center justify-center overflow-hidden">
                                   <User size={12} className="text-muted" />
                                </div>
                              ))}

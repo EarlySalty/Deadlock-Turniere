@@ -2,6 +2,7 @@ import { motion } from 'framer-motion'
 import { CheckCircle2, Circle, Loader2, Key } from 'lucide-react'
 import TeamRosterTooltip from '@/components/ui/TeamRosterTooltip'
 import type { BracketMatch as BracketMatchType, TeamPublic } from '@/types/tournament'
+import { teamLabel } from '@/lib/teamName'
 
 interface Props {
   match: BracketMatchType
@@ -15,7 +16,7 @@ function findTeam(teamId: number | null, teams: TeamPublic[]): TeamPublic | null
   return teams.find((team) => team.id === teamId) ?? null
 }
 
-function teamLabel(
+function slotLabel(
   team: TeamPublic | null,
   teamId: number | null,
   isCompleted: boolean,
@@ -25,7 +26,7 @@ function teamLabel(
     if (isCompleted) return 'Freilos'
     return placeholder ?? 'TBD'
   }
-  return team?.name ?? 'Unbekannt'
+  return teamLabel(team?.name, teamId)
 }
 
 export default function BracketMatch({ match, teams, placeholder1, placeholder2 }: Props) {
@@ -44,8 +45,8 @@ export default function BracketMatch({ match, teams, placeholder1, placeholder2 
 
   const team1 = findTeam(match.team1_id, teams)
   const team2 = findTeam(match.team2_id, teams)
-  const team1Name = teamLabel(team1, match.team1_id, isCompleted, placeholder1)
-  const team2Name = teamLabel(team2, match.team2_id, isCompleted, placeholder2)
+  const team1Name = slotLabel(team1, match.team1_id, isCompleted, placeholder1)
+  const team2Name = slotLabel(team2, match.team2_id, isCompleted, placeholder2)
   const team1IsBye = match.team1_id === null
   const team2IsBye = match.team2_id === null
   const team1IsPlaceholder = match.team1_id === null && !isCompleted && !!placeholder1

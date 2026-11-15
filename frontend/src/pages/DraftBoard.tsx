@@ -34,6 +34,7 @@ import {
 } from '@/hooks/useDraftLobby'
 import { heroCardImageUrl, heroImageUrl, loescheClaimToken, raumUrl } from '@/hooks/draftLobbyState'
 import type { DraftHero, DraftRaumZustand } from '@/types/draft'
+import { pluralWord } from '@/lib/countLabel'
 
 interface Uebergang {
   art: 'ban' | 'pick'
@@ -185,9 +186,7 @@ function Warteraum({
             <Eye size={13} />
             {zustand.spectators === 0
               ? 'Keine Zuschauer'
-              : zustand.spectators === 1
-                ? '1 schaut zu'
-                : `${zustand.spectators} schauen zu`}
+              : `${zustand.spectators} ${pluralWord(zustand.spectators, 'schaut', 'schauen')} zu`}
           </div>
           <motion.p
             initial={{ opacity: 0 }}

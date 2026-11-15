@@ -4,6 +4,7 @@ import Card from '@/components/ui/Card'
 import Button from '@/components/ui/Button'
 import { useReportMatchResult } from '@/hooks/useTournament'
 import type { BracketMatch, TeamPublic } from '@/types/tournament'
+import { teamNameById } from '@/lib/teamName'
 
 interface MyMatchReportProps {
   tournamentId: number
@@ -16,7 +17,7 @@ const TERMINAL = ['completed', 'forfeit', 'cancelled']
 
 function teamName(teamId: number | null, teams: TeamPublic[]): string {
   if (teamId === null) return 'TBD'
-  return teams.find((t) => t.id === teamId)?.name ?? `Team #${teamId}`
+  return teamNameById(teams, teamId)
 }
 
 function MatchReportRow({

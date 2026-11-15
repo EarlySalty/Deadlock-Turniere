@@ -10,6 +10,7 @@ import {
   Vote,
   XCircle,
 } from 'lucide-react'
+import ActionError from '@/components/ui/ActionError'
 import Button from '@/components/ui/Button'
 import Card from '@/components/ui/Card'
 import DateTimeInput from '@/components/ui/DateTimeInput'
@@ -178,6 +179,7 @@ export default function AutomatikPanel() {
               {AUTOMATIK_COPY.presetCreateButton}
             </Button>
           </div>
+          <ActionError actions={[setPresetActive, deletePreset]} className="mb-4" />
 
           {presetsLoading ? (
             <LoadingSpinner />
@@ -279,6 +281,7 @@ export default function AutomatikPanel() {
           <h3 className="mb-4 text-lg font-semibold text-foreground">
             {AUTOMATIK_COPY.manualHeading}
           </h3>
+          <ActionError actions={[createManualProposal]} className="mb-4" />
           <form onSubmit={handleManualSubmit} className="space-y-4">
             <label className="block space-y-1.5 text-sm text-foreground">
               <span>{AUTOMATIK_COPY.presetSelectLabel}</span>
@@ -392,6 +395,7 @@ export default function AutomatikPanel() {
           <LoadingSpinner />
         ) : (
           <div className="space-y-5">
+            <ActionError actions={[applyProposalEvent, recordFeedback, recordVote]} />
             <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
               <div>
                 <h3 className="flex items-center gap-2 text-lg font-semibold text-foreground">

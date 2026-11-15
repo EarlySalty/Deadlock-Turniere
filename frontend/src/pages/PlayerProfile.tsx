@@ -9,6 +9,7 @@ import {
   usePlayerProfile, useMyProfile, useUpdateMyProfile, useUploadProfileAvatar, useRevokeConsent,
 } from '@/hooks/useTournament'
 import { useAuth } from '@/hooks/useAuth'
+import ActionError from '@/components/ui/ActionError'
 import Card from '@/components/ui/Card'
 import Button from '@/components/ui/Button'
 import LoadingSpinner from '@/components/ui/LoadingSpinner'
@@ -124,6 +125,7 @@ export default function PlayerProfile() {
       animate={{ opacity: 1, y: 0 }}
       className="space-y-8 max-w-4xl mx-auto pb-20"
     >
+      <ActionError actions={[updateProfile, uploadAvatar, revokeConsent]} />
       {/* Dossier Header */}
       <Card className="p-0 overflow-hidden border-white/5 relative bg-white/[0.02]">
         <div className="absolute top-0 left-0 w-full h-1.5 bg-gradient-to-r from-transparent via-primary/40 to-transparent" />

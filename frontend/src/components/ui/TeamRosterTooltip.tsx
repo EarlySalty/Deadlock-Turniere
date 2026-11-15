@@ -1,6 +1,7 @@
 import { useState, useRef, useId, type ReactNode } from 'react'
 import { Crown, User } from 'lucide-react'
 import type { TeamMemberPublic } from '@/types/tournament'
+import { playerName } from '@/lib/playerName'
 
 interface TeamRosterTooltipProps {
   children: ReactNode
@@ -80,7 +81,7 @@ export default function TeamRosterTooltip({
               <li className="flex items-center gap-2">
                 <Crown size={12} className="text-amber-400 shrink-0" />
                 <span className="truncate font-medium text-foreground">
-                  {captain.discord_name ?? 'Unbekannter Captain'}
+                  {playerName(captain.discord_name)}
                 </span>
                 {captain.rank && (
                   <span className="ml-auto text-[10px] uppercase tracking-wide text-muted">
@@ -97,7 +98,7 @@ export default function TeamRosterTooltip({
               >
                 <User size={12} className="text-muted shrink-0" />
                 <span className="truncate text-foreground/90">
-                  {member.discord_name ?? '-'}
+                  {playerName(member.discord_name)}
                 </span>
                 {member.rank && (
                   <span className="ml-auto text-[10px] uppercase tracking-wide text-muted">

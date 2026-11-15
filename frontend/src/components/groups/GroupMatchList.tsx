@@ -4,6 +4,7 @@ import Card from '@/components/ui/Card'
 import { formatRoundTime, leagueRounds } from '@/lib/league'
 import type { Group, GroupMatch, TeamPublic } from '@/types/tournament'
 import { pluralize } from '@/lib/countLabel'
+import { teamNameById } from '@/lib/teamName'
 
 interface Props {
   groups: Group[]
@@ -19,8 +20,7 @@ interface RoundEntry {
 function getTeamName(teamId: number, teams: TeamPublic[], groupTeams: Group['teams']): string {
   const groupTeam = groupTeams.find((team) => team.team_id === teamId)
   if (groupTeam) return groupTeam.team_name
-  const team = teams.find((entry) => entry.id === teamId)
-  return team?.name ?? `Team #${teamId}`
+  return teamNameById(teams, teamId)
 }
 
 function getPairKey(teamA: number, teamB: number): string {

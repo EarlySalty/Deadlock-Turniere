@@ -4,6 +4,7 @@ import Card from '@/components/ui/Card'
 import TeamRosterTooltip from '@/components/ui/TeamRosterTooltip'
 import type { BracketMatch, BracketMiniGroup, TeamPublic } from '@/types/tournament'
 import { pluralize } from '@/lib/countLabel'
+import { teamLabel } from '@/lib/teamName'
 
 interface MiniGroupPanelProps {
   miniGroups: BracketMiniGroup[]
@@ -115,12 +116,12 @@ export default function MiniGroupPanel({ miniGroups, matches, teams }: MiniGroup
                     <span className="flex min-w-0 items-center gap-2">
                       <span className="w-4 text-[10px] text-muted">{position + 1}.</span>
                       <TeamRosterTooltip
-                        teamName={entry.team?.name ?? `Team ${entry.teamId}`}
+                        teamName={teamLabel(entry.team?.name, entry.teamId)}
                         members={entry.team?.members ?? []}
                         align="left"
                       >
                         <span className="cursor-help truncate underline-offset-2 hover:underline">
-                          {entry.team?.name ?? `Team ${entry.teamId}`}
+                          {teamLabel(entry.team?.name, entry.teamId)}
                         </span>
                       </TeamRosterTooltip>
                     </span>

@@ -24,6 +24,7 @@ import {
   RefreshCcw,
   Swords,
 } from 'lucide-react'
+import { teamNameById } from '@/lib/teamName'
 
 interface MatchAdminPanelProps {
   tournamentId: number
@@ -54,7 +55,7 @@ function formatDuration(seconds: number): string {
 
 function teamName(teamId: number | null, teams: Team[]): string {
   if (teamId === null) return 'TBD'
-  return teams.find((team) => team.id === teamId)?.name ?? `Team #${teamId}`
+  return teamNameById(teams, teamId)
 }
 
 function statusLabel(match: BracketMatch): string {
@@ -298,10 +299,10 @@ export default function MatchAdminPanel({
                     type="button"
                     disabled={streamFlagMutation.isPending}
                     onClick={() =>
-                      streamFlagMutation.mutate({
-                        matchId: match.id,
-                        onStream: !match.on_stream,
-                      })
+                      streamFlagMutation.mutate(
+                        { matchId: match.id, onStream: !match.on_stream },
+                        { onError: (err) => setMessage(match.id, 'error', err.message) },
+                      )
                     }
                     title="Stream-Marker umschalten"
                     className={`flex items-center gap-1 rounded-full px-2 py-0.5 transition-colors disabled:opacity-50 ${

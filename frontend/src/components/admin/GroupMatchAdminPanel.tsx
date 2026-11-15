@@ -25,6 +25,7 @@ import {
   Swords,
   Trophy,
 } from 'lucide-react'
+import { teamNameById } from '@/lib/teamName'
 
 interface GroupMatchAdminPanelProps {
   tournamentId: number
@@ -51,7 +52,7 @@ type ActiveAction = {
 function getTeamName(teamId: number, teams: Team[], group: Group): string {
   const groupedTeam = group.teams.find((team) => team.team_id === teamId)
   if (groupedTeam) return groupedTeam.team_name
-  return teams.find((team) => team.id === teamId)?.name ?? `Team #${teamId}`
+  return teamNameById(teams, teamId)
 }
 
 function getStatusLabel(status: string): string {

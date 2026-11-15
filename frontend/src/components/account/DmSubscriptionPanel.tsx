@@ -1,4 +1,5 @@
 import { Bell } from 'lucide-react'
+import ActionError from '@/components/ui/ActionError'
 import Card from '@/components/ui/Card'
 import LoadingSpinner from '@/components/ui/LoadingSpinner'
 import {
@@ -43,6 +44,8 @@ export default function DmSubscriptionPanel() {
           </p>
         </div>
       </header>
+
+      <ActionError actions={[setOptout, clearOptout]} />
 
       {isLoading ? (
         <div className="py-4">

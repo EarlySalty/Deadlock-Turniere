@@ -4,6 +4,7 @@ import {
   useAdminTournaments,
   useDeleteTournament,
 } from '@/hooks/useTournament'
+import ActionError from '@/components/ui/ActionError'
 import Card from '@/components/ui/Card'
 import Badge from '@/components/ui/Badge'
 import Button from '@/components/ui/Button'
@@ -498,6 +499,7 @@ export default function Admin() {
                 <Archive size={14} />
                 Archiv ({archivedTournaments.length})
               </h2>
+              <ActionError actions={[deleteMutation]} />
               {archivedTournaments.length === 0 ? (
                 <p className="rounded-lg border border-dashed border-border px-3 py-4 text-center text-xs text-muted">
                   Keine archivierten Turniere

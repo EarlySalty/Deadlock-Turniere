@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import ActionError from '@/components/ui/ActionError'
 import Card from '@/components/ui/Card'
 import Button from '@/components/ui/Button'
 import {
@@ -30,14 +31,13 @@ export default function DraftPanel({ matchId, team1Name, team2Name }: Props) {
   const bannedSet = new Set(draft?.bans ?? [])
   const pickedSet = new Set([...(draft?.picks_team1 ?? []), ...(draft?.picks_team2 ?? [])])
 
-  const handleStart = async () => {
-    const result = await startDraftMutation.mutateAsync(matchId)
-    setSessionId(result.id)
+  const handleStart = () => {
+    startDraftMutation.mutate(matchId, { onSuccess: (result) => setSessionId(result.id) })
   }
 
-  const handlePick = async (hero: string) => {
+  const handlePick = (hero: string) => {
     if (!sessionId) return
-    await submitAction.mutateAsync(hero)
+    submitAction.mutate(hero)
   }
 
   if (!sessionId) {
@@ -52,11 +52,12 @@ export default function DraftPanel({ matchId, team1Name, team2Name }: Props) {
             variant="secondary"
             size="sm"
             disabled={startDraftMutation.isPending}
-            onClick={() => void handleStart()}
+            onClick={handleStart}
           >
             Draft starten
           </Button>
         </div>
+        <ActionError actions={[startDraftMutation]} className="mt-3" />
       </Card>
     )
   }
@@ -86,6 +87,8 @@ export default function DraftPanel({ matchId, team1Name, team2Name }: Props) {
           {statusLabel}
         </span>
       </div>
+
+      <ActionError actions={[submitAction]} />
 
       <div className="grid grid-cols-2 gap-4 text-sm">
         <div>
@@ -127,7 +130,7 @@ export default function DraftPanel({ matchId, team1Name, team2Name }: Props) {
                   variant="secondary"
                   size="sm"
                   disabled={disabled}
-                  onClick={() => void handlePick(hero)}
+                  onClick={() => handlePick(hero)}
                   className={`px-2.5 py-1 text-xs ${
                     isBanned
                       ? 'border-red-500/30 bg-red-500/10 text-red-400 line-through hover:bg-red-500/10'

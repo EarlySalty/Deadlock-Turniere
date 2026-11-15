@@ -17,6 +17,7 @@ import {
   WandSparkles,
 } from 'lucide-react'
 import { pluralWord, pluralize } from '@/lib/countLabel'
+import { teamNameById } from '@/lib/teamName'
 
 interface MatchEventPanelProps {
   tournamentId: number
@@ -32,7 +33,7 @@ type PanelMessage = {
 
 function teamName(teamId: number | null, teams: Team[]): string {
   if (teamId === null) return 'TBD'
-  return teams.find((team) => team.id === teamId)?.name ?? `Team #${teamId}`
+  return teamNameById(teams, teamId)
 }
 
 function matchLabel(match: BracketMatch, teams: Team[]): string {
