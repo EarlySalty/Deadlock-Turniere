@@ -74,14 +74,10 @@ async fn complete(
     )
     .await?;
 
-    let session_max_age_seconds = state.config.limits.session_lifetime_days * 24 * 60 * 60;
-    let cookie = format!(
-        "{SESSION_COOKIE}={token}; HttpOnly; Secure; SameSite=Lax; Max-Age={session_max_age_seconds}; Path=/"
-    );
     Ok(redirect(
         StatusCode::FOUND,
         &state.config.frontend_url,
-        Some(cookie),
+        Some(session_cookie(&token, &state.config.limits)),
     ))
 }
 
@@ -93,12 +89,22 @@ async fn logout(State(state): State<AppState>, jar: CookieJar) -> WebResult<Resp
             let _ = turnier_auth::delete_session(&state.pool, &token).await;
         }
     }
-    let clear = format!("{SESSION_COOKIE}=; Max-Age=0; Path=/");
+    let clear = cookie_header("", 0);
     Ok(redirect(
         StatusCode::FOUND,
         &state.config.frontend_url,
         Some(clear),
     ))
+}
+
+fn session_cookie(token: &str, limits: &turnier_config::LimitsConfig) -> String {
+    cookie_header(token, limits.session_lifetime_days * 24 * 60 * 60)
+}
+
+fn cookie_header(value: &str, max_age_seconds: i64) -> String {
+    format!(
+        "{SESSION_COOKIE}={value}; HttpOnly; Secure; SameSite=Lax; Max-Age={max_age_seconds}; Path=/"
+    )
 }
 
 /// Baut eine Redirect-Response mit optionalem `Set-Cookie`-Header.
@@ -147,10 +153,9 @@ async fn guest_login(
         state.config.limits.session_lifetime_days,
     )
     .await?;
-    let max_age = state.config.limits.session_lifetime_days * 24 * 60 * 60;
     Response::builder()
         .status(StatusCode::CREATED)
-        .header(SET_COOKIE, format!("{SESSION_COOKIE}={token}; HttpOnly; Secure; SameSite=Lax; Max-Age={max_age}; Path=/"))
+        .header(SET_COOKIE, session_cookie(&token, &state.config.limits))
         .header(axum::http::header::CONTENT_TYPE, "application/json")
         .body(Body::from("{}"))
         .map_err(|_| WebError::internal("Gastanmeldung konnte nicht abgeschlossen werden"))

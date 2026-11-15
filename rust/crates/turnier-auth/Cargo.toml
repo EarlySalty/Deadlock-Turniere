@@ -13,6 +13,7 @@ license.workspace = true
 turnier-core = { path = "../turnier-core" }
 turnier-db = { path = "../turnier-db" }
 turnier-config = { path = "../turnier-config" }
+turnier-discord = { path = "../turnier-discord" }
 
 sqlx.workspace = true
 serde.workspace = true

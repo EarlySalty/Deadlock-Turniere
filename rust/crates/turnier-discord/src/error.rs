@@ -20,9 +20,9 @@ pub enum BrokerError {
     #[error("Discord-Broker nicht erreichbar: {0}")]
     Unreachable(#[source] reqwest::Error),
 
-    /// Der Broker antwortete mit einem Nicht-200-Status. `detail` ist exakt der
-    /// im Original ermittelte Text (JSON-`error`/`detail`, sonst Response-Body,
-    /// sonst Default).
+    /// Der Broker antwortete mit einem Nicht-200-Status. `detail` kommt aus
+    /// [`crate::broker::http_error_detail`]: JSON-`error`/`detail`, sonst
+    /// Response-Body, sonst Default mit `(HTTP n)`.
     #[error("{detail}")]
     Http { status: u16, detail: String },
 

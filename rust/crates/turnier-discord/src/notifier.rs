@@ -1,9 +1,10 @@
 //! Die öffentliche, fachliche Schicht: dieselben Operationen wie
 //! `discord_notifier.py` (Channel anlegen/löschen, Embeds posten, DMs,
-//! Voice/Rollen-Abfragen), 1:1 im Verhalten, mit `turnier-db`-Pool + [`BrokerClient`].
+//! Voice/Rollen-Abfragen) mit `turnier-db`-Pool + [`BrokerClient`].
 //!
-//! Alle Snowflake-IDs werden EINMAL beim Eintritt geparst; ungültige IDs landen
-//! deterministisch in der jeweiligen `failed`-Bucket statt zu panicken.
+//! Alle Snowflake-IDs werden EINMAL beim Eintritt geparst. Gast-IDs werden
+//! übersprungen und aufgelistet (`skipped` bzw. `skipped_guests`), ungültige IDs
+//! landen in der jeweiligen `failed`-Liste oder fallen bei Erwähnungen weg.
 
 use std::collections::HashSet;
 
@@ -890,7 +891,8 @@ fn routine_announcement_payload(tournament_id: i64, channel_id: i64, content: &s
     })
 }
 
-/// Wie [`mentions`], aber leere Liste → `"keine"` (für die Team-Felder).
+/// Erwähnungen plus Gästezahl (`"<@1> + 2 Gäste"`, `"1 Gast"`); ohne beides
+/// `"keine"`.
 fn mentions_or_dash(ids: &[String]) -> String {
     let mentioned = mentions(ids);
     match (mentioned.is_empty(), guest_count_label(ids)) {

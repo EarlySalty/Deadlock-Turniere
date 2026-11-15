@@ -219,10 +219,12 @@ Punkte-Recompute committen wieder gemeinsam oder gar nicht.
 `is_within_window` prüft `reminder_at <= now <= reminder_at + 5min`. Nach einem
 längeren Ausfall verpasste Fenster werden nicht nachgeholt. 1:1 erhalten.
 
-### KI-SC05 [erhalten]: `bracket_only`-Logikfalle
-Bei `tournament_mode == "bracket_only"` und Status `checkin` wird nur nach
-`bracket` gewechselt, wenn `bracket_start` fällig ist; sonst bleibt das Turnier in
-`checkin` hängen, auch wenn `group_phase_start` längst vorbei ist. 1:1 erhalten.
+### KI-SC05 [gefixt]: Check-in endet nur manuell
+Der Scheduler beendet den Check-in in keinem Modus mehr (`get_due_next_status` in
+`transition.rs`), und `advance_tournament_status` lehnt jeden Übergang aus
+`checkin` ab. Das Orga-Team schließt den Check-in über `finalize-checkin` ab, das
+danach die Lobby-Planung startet. Die frühere `bracket_only`-Logikfalle entfällt
+damit.
 
 ### KI-SC06 [erhalten]: Dedupe-Insert nach dem Versand
 Reminder werden versendet, dann erst per `INSERT OR IGNORE` markiert (Crash
@@ -254,19 +256,22 @@ gepostete `consent_version` zurück, auch wenn diese unter der geforderten Versi
 liegt. 1:1 erhalten.
 
 ### KI-W03 [erhalten]: Asymmetrische Registration-Gates (public)
-`routes.py`: `accept`-Routen (Einladung/Bewerbung) haben ein
-`_ensure_registration_open`-Gate, die `reject`-Pendants und
-`get_team_applications` nicht. Ebenso erlauben create/join/solo
-`registration+checkin`, cancel/kick/leave aber nur `registration`. 1:1 erhalten.
+`accept`-Routen (Einladung/Bewerbung) prüfen `ensure_registration_open`, die
+`reject`-Pendants und `get_team_applications` nicht; reject ändert nur noch
+offene Einträge. create/join/solo/accept und das Austragen erlauben
+`registration` und `checkin`; kick/leave/invite (`ensure_team_roster_open`)
+nur `registration`.
 
 ### KI-W04 [erhalten]: Direkt-Add umgeht Zustimmung & invite_mode
 `routes.py` `invite_to_team`: fügt den Spieler sofort ohne Zustimmung und ohne
 `team_invitations`-Eintrag ein, umgeht `invite_mode`/-window. Abweichend von
 „invite-by-signup". 1:1 erhalten.
 
-### KI-W05 [erhalten]: Solo-Signup-Auto-Team race-anfällig
-`routes.py` `solo_signup` (team_size==1): Auto-Team-Name per Such-Schleife +
-Signup-ohne-team_id-dann-UPDATE statt `ON CONFLICT`. 1:1 erhalten.
+### KI-W05 [gefixt]: Solo-Signup-Auto-Team
+`solo_signup` (team_size==1) läuft unter der Turnier-Zeilensperre
+(`lock_tournament_or_404`), parallele Anmeldungen desselben Turniers werden also
+nacheinander ausgeführt. Der Auto-Team-Name nutzt `turnier_engine::name_key` und
+kürzt den Basisnamen für das Suffix auf 32 Zeichen.
 
 ### KI-W06 [erhalten]: Group-Standings nicht idempotent
 `admin_routes.py:2236`: Der Group-Ergebnis-Pfad inkrementiert wins/losses/points

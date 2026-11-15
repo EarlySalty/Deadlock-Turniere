@@ -1,3 +1,5 @@
+pub const OAUTH_INITIATE: &str = "/internal/v1/discord/initiate";
+pub const OAUTH_CONSUME_RESULT: &str = "/internal/v1/discord/consume-result";
 pub const CREATE_CHANNEL: &str = "/internal/master/v1/discord/create-channel";
 pub const SEND_RICH_MESSAGE: &str = "/internal/master/v1/discord/send-rich-message";
 pub const SEND_MESSAGE: &str = "/internal/master/v1/discord/send-message";

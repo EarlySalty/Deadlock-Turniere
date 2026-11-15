@@ -1,6 +1,6 @@
 //! Broker-Transport: HTTP-POST und -GET an die internen Master-Broker-Endpunkte
-//! mit `X-Internal-Token`, plus die Fehlerübersetzung; jeder Fehlerzweig wird
-//! mit Methode und Pfad geloggt.
+//! mit `X-Internal-Token`, plus die Fehlerübersetzung; fehlende Konfiguration
+//! und jeder Transport-, Status- und Formatfehler werden geloggt.
 
 use serde::de::DeserializeOwned;
 use serde::Serialize;
@@ -61,6 +61,7 @@ impl BrokerClient {
     /// Die effektive Basis-URL oder ein [`BrokerError::Unconfigured`].
     fn base_url(&self) -> BrokerResult<&str> {
         if self.base_url.is_empty() {
+            tracing::warn!("Discord-Master-Broker ohne Basis-URL aufgerufen");
             return Err(BrokerError::Unconfigured(
                 "Discord-Master-Broker ist nicht konfiguriert",
             ));
@@ -71,6 +72,7 @@ impl BrokerClient {
     /// Das Auth-Token oder ein [`BrokerError::Unconfigured`].
     fn token(&self) -> BrokerResult<&str> {
         if self.token.is_empty() {
+            tracing::warn!("Discord-Master-Broker ohne Token aufgerufen");
             return Err(BrokerError::Unconfigured(
                 "Discord-Master-Broker ist nicht authentifiziert",
             ));
@@ -80,11 +82,9 @@ impl BrokerClient {
 
     /// POST `payload` an `path` und deserialisiert die Antwort nach `T`.
     ///
-    /// Repliziert die Fehlerübersetzung von `_post_internal_api` EXAKT:
+    /// Fehlerübersetzung:
     /// - Transportfehler → [`BrokerError::Unreachable`].
-    /// - Non-200: `detail` = JSON-`error` ∨ JSON-`detail` (getrimmt, falls
-    ///   nicht leer), sonst getrimmter Response-Body, sonst `"Discord-Broker
-    ///   Fehler"`.
+    /// - Non-200: `detail` aus [`http_error_detail`].
     /// - 200 ohne (Objekt-)JSON → [`BrokerError::BadJson`].
     pub async fn post_internal<T, P>(&self, path: &str, payload: &P) -> BrokerResult<T>
     where
@@ -136,7 +136,7 @@ where
     })?;
 
     if status.as_u16() != 200 {
-        let detail = with_status(error_detail(&body_text), status.as_u16());
+        let detail = http_error_detail(&body_text, DEFAULT_DETAIL, status.as_u16());
         tracing::warn!(
             method,
             path,
@@ -168,44 +168,23 @@ where
 
 const DEFAULT_DETAIL: &str = "Discord-Broker Fehler";
 
-fn with_status(detail: String, status: u16) -> String {
-    if detail == DEFAULT_DETAIL {
-        format!("{DEFAULT_DETAIL} (HTTP {status})")
-    } else {
-        detail
-    }
+pub fn http_error_detail(body_text: &str, default: &str, status: u16) -> String {
+    detail_from_body(body_text).unwrap_or_else(|| format!("{default} (HTTP {status})"))
 }
 
-/// Ermittelt die Fehler-`detail`-Meldung aus dem Non-200-Body, exakt nach der
-/// Reihenfolge im Python-Original.
-fn error_detail(body_text: &str) -> String {
-    const DEFAULT: &str = DEFAULT_DETAIL;
-
+fn detail_from_body(body_text: &str) -> Option<String> {
     if let Ok(serde_json::Value::Object(map)) = serde_json::from_str::<serde_json::Value>(body_text)
     {
-        let from_field = map
-            .get("error")
-            .and_then(|v| v.as_str())
-            .filter(|s| !s.trim().is_empty())
-            .or_else(|| {
-                map.get("detail")
-                    .and_then(|v| v.as_str())
-                    .filter(|s| !s.trim().is_empty())
-            });
-        if let Some(err) = from_field {
-            return err.trim().to_string();
-        }
-        // JSON-Objekt vorhanden, aber kein nutzbares error/detail → Default
-        // (das Original fällt NICHT auf response.text zurück, wenn body ein dict ist).
-        return DEFAULT.to_string();
+        return ["error", "detail"]
+            .iter()
+            .filter_map(|key| map.get(*key).and_then(|v| v.as_str()))
+            .map(str::trim)
+            .find(|s| !s.is_empty())
+            .map(str::to_string);
     }
-
-    let trimmed = body_text.trim();
-    if trimmed.is_empty() {
-        DEFAULT.to_string()
-    } else {
-        trimmed.to_string()
-    }
+    Some(body_text.trim())
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
 }
 
 impl std::fmt::Debug for BrokerClient {
@@ -233,31 +212,34 @@ mod tests {
     }
 
     #[test]
-    fn error_detail_aus_json_error_feld() {
-        assert_eq!(error_detail(r#"{"error":"  kaputt  "}"#), "kaputt");
+    fn http_error_detail_liest_error_vor_detail() {
+        assert_eq!(
+            http_error_detail(r#"{"error":"  kaputt  "}"#, DEFAULT_DETAIL, 500),
+            "kaputt"
+        );
+        assert_eq!(
+            http_error_detail(r#"{"detail":"nope"}"#, DEFAULT_DETAIL, 500),
+            "nope"
+        );
+        assert_eq!(
+            http_error_detail(r#"{"error":" ","detail":"b"}"#, DEFAULT_DETAIL, 500),
+            "b"
+        );
     }
 
     #[test]
-    fn error_detail_aus_json_detail_feld() {
-        assert_eq!(error_detail(r#"{"detail":"nope"}"#), "nope");
-    }
-
-    #[test]
-    fn error_detail_json_ohne_felder_gibt_default() {
-        // dict ohne error/detail → Default (kein Fallback auf body-text).
-        assert_eq!(error_detail(r#"{"other":1}"#), "Discord-Broker Fehler");
-        // leeres error → Default.
-        assert_eq!(error_detail(r#"{"error":"   "}"#), "Discord-Broker Fehler");
-    }
-
-    #[test]
-    fn error_detail_aus_plaintext() {
-        assert_eq!(error_detail("  Bad Gateway  "), "Bad Gateway");
-    }
-
-    #[test]
-    fn error_detail_leer_gibt_default() {
-        assert_eq!(error_detail("   "), "Discord-Broker Fehler");
-        assert_eq!(error_detail(""), "Discord-Broker Fehler");
+    fn http_error_detail_faellt_mit_status_auf_default() {
+        assert_eq!(
+            http_error_detail(r#"{"other":1}"#, DEFAULT_DETAIL, 502),
+            "Discord-Broker Fehler (HTTP 502)"
+        );
+        assert_eq!(
+            http_error_detail("   ", DEFAULT_DETAIL, 404),
+            "Discord-Broker Fehler (HTTP 404)"
+        );
+        assert_eq!(
+            http_error_detail("  Bad Gateway  ", DEFAULT_DETAIL, 502),
+            "Bad Gateway"
+        );
     }
 }

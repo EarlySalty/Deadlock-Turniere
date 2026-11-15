@@ -24,8 +24,6 @@ use turnier_config::Config;
 use crate::error::{AuthError, AuthResult};
 
 const INTERNAL_TOKEN_HEADER: &str = "X-Internal-Token";
-const INITIATE_PATH: &str = "/internal/v1/discord/initiate";
-const CONSUME_RESULT_PATH: &str = "/internal/v1/discord/consume-result";
 
 const OAUTH_SCOPE: &str = "identify guilds.members.read";
 const REQUESTING_SERVICE: &str = "turnier";
@@ -126,6 +124,7 @@ impl OAuthClient {
     fn base_url(&self) -> AuthResult<&str> {
         let base = self.base_url.trim_end_matches('/');
         if base.is_empty() {
+            tracing::warn!("OAuth-Service ohne Basis-URL aufgerufen");
             return Err(AuthError::ServiceUnavailable(
                 "Deadlock-Bots OAuth-Service ist nicht konfiguriert",
             ));
@@ -137,6 +136,7 @@ impl OAuthClient {
     fn token(&self) -> AuthResult<&str> {
         let token = self.token.trim();
         if token.is_empty() {
+            tracing::warn!("OAuth-Service ohne Token aufgerufen");
             return Err(AuthError::ServiceUnavailable(
                 "Deadlock-Bots OAuth-Service ist nicht authentifiziert",
             ));
@@ -146,11 +146,11 @@ impl OAuthClient {
 
     /// Sendet einen POST an den Broker und gibt den geparsten Antwort-Typ zurück.
     ///
-    /// Fehler-Mapping 1:1 zum Original (`_post_internal_api`):
+    /// Fehler-Mapping (jeder Zweig wird geloggt):
     ///   - Netzwerk/HTTP-Fehler                          → 502
     ///   - Non-200 mit JSON-`error`/`detail`             → 502 mit dieser Meldung
     ///   - Non-200 mit Plaintext-Body                    → 502 mit diesem Text
-    ///   - Non-200 ohne verwertbaren Body                → 502 „Fehler"
+    ///   - Non-200 ohne verwertbaren Body                → 502 „Fehler (HTTP n)"
     ///   - 200, aber kein JSON                           → 502 „lieferte kein JSON"
     ///   - 200, aber kein JSON-Objekt                    → 502 „ungültiges Payload"
     async fn post<B, R>(&self, path: &str, body: &B) -> AuthResult<R>
@@ -169,6 +169,7 @@ impl OAuthClient {
             .send()
             .await
             .map_err(|exc| {
+                tracing::warn!(path, error = %exc, "OAuth-Service nicht erreichbar");
                 AuthError::BadGateway(format!(
                     "Deadlock-Bots OAuth-Service nicht erreichbar: {}",
                     reqwest_error_kind(&exc)
@@ -177,6 +178,7 @@ impl OAuthClient {
 
         let status = response.status();
         let text = response.text().await.map_err(|exc| {
+            tracing::warn!(path, status = status.as_u16(), error = %exc, "OAuth-Service-Antwort nicht lesbar");
             AuthError::BadGateway(format!(
                 "Deadlock-Bots OAuth-Service nicht erreichbar: {}",
                 reqwest_error_kind(&exc)
@@ -184,29 +186,35 @@ impl OAuthClient {
         })?;
 
         if !status.is_success() {
-            let detail = error_detail_from_body(&text);
+            let detail = turnier_discord::broker::http_error_detail(
+                &text,
+                OAUTH_DEFAULT_DETAIL,
+                status.as_u16(),
+            );
             tracing::warn!(path, status = status.as_u16(), detail = %detail, "OAuth-Service antwortete mit Fehler");
-            let detail = if detail == OAUTH_DEFAULT_DETAIL {
-                format!("{OAUTH_DEFAULT_DETAIL} (HTTP {})", status.as_u16())
-            } else {
-                detail
-            };
             return Err(AuthError::BadGateway(detail));
         }
 
         // Erst auf JSON-Objekt prüfen (Original: `isinstance(data, dict)`).
         match serde_json::from_str::<serde_json::Value>(&text) {
-            Ok(value) if value.is_object() => serde_json::from_value::<R>(value).map_err(|_| {
+            Ok(value) if value.is_object() => serde_json::from_value::<R>(value).map_err(|err| {
+                tracing::warn!(path, error = %err, "OAuth-Service-Payload passt nicht zum erwarteten Format");
                 AuthError::BadGateway(
                     "Deadlock-Bots OAuth-Service lieferte ein ungültiges Payload".to_string(),
                 )
             }),
-            Ok(_) => Err(AuthError::BadGateway(
-                "Deadlock-Bots OAuth-Service lieferte ein ungültiges Payload".to_string(),
-            )),
-            Err(_) => Err(AuthError::BadGateway(
-                "Deadlock-Bots OAuth-Service lieferte kein JSON".to_string(),
-            )),
+            Ok(_) => {
+                tracing::warn!(path, "OAuth-Service lieferte kein JSON-Objekt");
+                Err(AuthError::BadGateway(
+                    "Deadlock-Bots OAuth-Service lieferte ein ungültiges Payload".to_string(),
+                ))
+            }
+            Err(_) => {
+                tracing::warn!(path, "OAuth-Service lieferte kein JSON");
+                Err(AuthError::BadGateway(
+                    "Deadlock-Bots OAuth-Service lieferte kein JSON".to_string(),
+                ))
+            }
         }
     }
 
@@ -230,10 +238,13 @@ impl OAuthClient {
             },
         };
 
-        let data: InitiateResponse = self.post(INITIATE_PATH, &request).await?;
+        let data: InitiateResponse = self
+            .post(turnier_discord::paths::OAUTH_INITIATE, &request)
+            .await?;
         let authorize_url = data.authorize_url.unwrap_or_default();
         let authorize_url = authorize_url.trim();
         if authorize_url.is_empty() {
+            tracing::warn!("OAuth-Service lieferte keine Authorize-URL");
             return Err(AuthError::BadGateway(
                 "Deadlock-Bots OAuth-Service lieferte keine Authorize-URL".to_string(),
             ));
@@ -255,11 +266,14 @@ impl OAuthClient {
         let request = ConsumeRequest {
             state_id: state_id.to_string(),
         };
-        let data: ConsumeResponse = self.post(CONSUME_RESULT_PATH, &request).await?;
+        let data: ConsumeResponse = self
+            .post(turnier_discord::paths::OAUTH_CONSUME_RESULT, &request)
+            .await?;
 
         let discord_id = data.discord_id.unwrap_or_default();
         let discord_id = discord_id.trim();
         if discord_id.is_empty() {
+            tracing::warn!("OAuth-Service lieferte keine Discord-ID");
             return Err(AuthError::BadGateway(
                 "Deadlock-Bots OAuth-Service lieferte keine Discord-ID".to_string(),
             ));
@@ -294,36 +308,7 @@ fn normalize_roles(raw: &[serde_json::Value]) -> Vec<String> {
         .collect()
 }
 
-/// Extrahiert die Fehler-Detail-Meldung aus einem Non-200-Body, 1:1 zur
-/// Original-Logik: JSON-`error`/`detail` (gestripped, falls non-empty), sonst
-/// gestrippter Plaintext, sonst Default.
 const OAUTH_DEFAULT_DETAIL: &str = "Deadlock-Bots OAuth-Service Fehler";
-
-fn error_detail_from_body(text: &str) -> String {
-    const DEFAULT: &str = OAUTH_DEFAULT_DETAIL;
-    if let Ok(serde_json::Value::Object(map)) = serde_json::from_str::<serde_json::Value>(text) {
-        let error = map
-            .get("error")
-            .and_then(|v| v.as_str())
-            .filter(|s| !s.trim().is_empty())
-            .or_else(|| {
-                map.get("detail")
-                    .and_then(|v| v.as_str())
-                    .filter(|s| !s.trim().is_empty())
-            });
-        if let Some(error) = error {
-            return error.trim().to_string();
-        }
-        // JSON-Objekt ohne verwertbares Feld → Default (Original geht NICHT in
-        // den Plaintext-Zweig, wenn der Body bereits ein dict war).
-        return DEFAULT.to_string();
-    }
-    let trimmed = text.trim();
-    if !trimmed.is_empty() {
-        return trimmed.to_string();
-    }
-    DEFAULT.to_string()
-}
 
 /// Kurzer, stabiler Bezeichner der reqwest-Fehlerklasse (für die Detail-Meldung,
 /// analog zu `exc.__class__.__name__` im Original; nie der volle Fehlertext, um
@@ -345,57 +330,6 @@ fn reqwest_error_kind(exc: &reqwest::Error) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn fehler_detail_aus_json_error_feld() {
-        assert_eq!(error_detail_from_body(r#"{"error": "kaputt"}"#), "kaputt");
-    }
-
-    #[test]
-    fn fehler_detail_aus_json_detail_feld() {
-        assert_eq!(
-            error_detail_from_body(r#"{"detail": "auch kaputt"}"#),
-            "auch kaputt"
-        );
-    }
-
-    #[test]
-    fn fehler_detail_error_hat_vorrang_vor_detail() {
-        assert_eq!(
-            error_detail_from_body(r#"{"error": "a", "detail": "b"}"#),
-            "a"
-        );
-    }
-
-    #[test]
-    fn fehler_detail_json_objekt_ohne_feld_ist_default() {
-        // Body ist dict, aber ohne brauchbares Feld → Default, NICHT der Roh-Body.
-        assert_eq!(
-            error_detail_from_body(r#"{"foo": "bar"}"#),
-            "Deadlock-Bots OAuth-Service Fehler"
-        );
-    }
-
-    #[test]
-    fn fehler_detail_leeres_error_feld_faellt_auf_default() {
-        assert_eq!(
-            error_detail_from_body(r#"{"error": "  "}"#),
-            "Deadlock-Bots OAuth-Service Fehler"
-        );
-    }
-
-    #[test]
-    fn fehler_detail_plaintext() {
-        assert_eq!(error_detail_from_body("  reiner text  "), "reiner text");
-    }
-
-    #[test]
-    fn fehler_detail_leer_ist_default() {
-        assert_eq!(
-            error_detail_from_body("   "),
-            "Deadlock-Bots OAuth-Service Fehler"
-        );
-    }
 
     #[test]
     fn rollen_normalisieren_mischtypen() {

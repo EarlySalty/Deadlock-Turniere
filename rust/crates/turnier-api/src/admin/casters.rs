@@ -86,13 +86,13 @@ async fn load_caster_role_members(
     let members = match state.notifier.get_role_members(guild_id, role_id).await {
         Ok(members) => members,
         Err(err) => {
+            tracing::error!(error = %err, strict, "Caster-Rollenmitglieder konnten nicht geladen werden");
             if strict {
                 return Err(WebError::new(
                     StatusCode::SERVICE_UNAVAILABLE,
                     "Caster-Rollenmitglieder konnten nicht geladen werden",
                 ));
             }
-            tracing::error!(error = %err, "Caster-Rollenmitglieder konnten nicht geladen werden");
             return Ok(HashMap::new());
         }
     };
