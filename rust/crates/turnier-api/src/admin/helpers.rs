@@ -238,18 +238,19 @@ pub async fn upsert_signup_from_member(
         return Ok(());
     }
 
-    sqlx::query(
-        r#"INSERT INTO turnier."tournament_signups"
-         (tournament_id, discord_id, discord_name, steam_id, rank, rank_score, team_id, signed_up_at)
-         VALUES ($1, $2, $3, $4, $5, $6, NULL, now())"#,
+    let rank = crate::public::helpers::RankInput {
+        steam_id: member.steam_id.clone(),
+        rank: member.rank.clone(),
+        rank_score: member.rank_score,
+    };
+    crate::public::helpers::insert_signup(
+        tx,
+        tournament_id,
+        discord_id,
+        member.discord_name.as_deref(),
+        &rank,
+        None,
     )
-    .bind(tournament_id)
-    .bind(discord_id)
-    .bind(&member.discord_name)
-    .bind(&member.steam_id)
-    .bind(&member.rank)
-    .bind(member.rank_score)
-    .execute(&mut **tx)
     .await?;
     Ok(())
 }
@@ -293,19 +294,19 @@ pub async fn upsert_signup_for_team(
         return Ok(());
     }
 
-    sqlx::query(
-        r#"INSERT INTO turnier."tournament_signups"
-         (tournament_id, discord_id, discord_name, steam_id, rank, rank_score, team_id, signed_up_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, now())"#,
+    let rank = crate::public::helpers::RankInput {
+        steam_id: steam_id.map(str::to_string),
+        rank: rank.map(str::to_string),
+        rank_score,
+    };
+    crate::public::helpers::insert_signup(
+        tx,
+        tournament_id,
+        discord_id_i64,
+        discord_name,
+        &rank,
+        Some(team_id),
     )
-    .bind(tournament_id)
-    .bind(discord_id_i64)
-    .bind(discord_name)
-    .bind(steam_id)
-    .bind(rank)
-    .bind(rank_score)
-    .bind(team_id)
-    .execute(&mut **tx)
     .await?;
     Ok(())
 }

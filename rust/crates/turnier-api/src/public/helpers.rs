@@ -15,7 +15,7 @@ use sqlx::{Postgres, Row};
 
 use turnier_core::{
     BracketMatch, BracketMiniGroup, Group, GroupMatch, GroupTeam, InviteMode, RankProfile,
-    RecruitmentStatus, Team, TeamMember, TeamMemberPublic, TeamPublic, Tournament,
+    RecruitmentStatus, Team, TeamMember, TeamMemberPublic, TeamPublic, TeamRole, Tournament,
     TournamentDetailPublic, TournamentSignup, TournamentSignupPublic, UserSession,
 };
 use turnier_db::Pool;
@@ -1003,9 +1003,7 @@ pub async fn lock_tournament_row(
     tx: &mut sqlx::Transaction<'_, Postgres>,
     tournament_id: i64,
 ) -> WebResult<sqlx::postgres::PgRow> {
-    sqlx::query(r#"SELECT * FROM turnier."tournaments" WHERE id = $1 FOR UPDATE"#)
-        .bind(tournament_id)
-        .fetch_optional(&mut **tx)
+    turnier_engine::lock_tournament_row(tx, tournament_id)
         .await?
         .ok_or_else(|| WebError::not_found("Turnier nicht gefunden"))
 }
@@ -1042,7 +1040,7 @@ pub struct TeamGuard {
     pub tournament_id: i64,
     pub name: String,
     pub captain_discord_id: String,
-    pub recruitment_status: String,
+    pub recruitment_status: RecruitmentStatus,
 }
 
 /// Lädt ein Team oder liefert 404. Entspricht `_load_team_or_404` (routes.py:427).
@@ -1454,7 +1452,7 @@ where
 // Signup-Synchronisation
 // ---------------------------------------------------------------------------
 
-/// Rangdaten für einen Signup-/Member-Eintrag.
+#[derive(Default)]
 pub struct RankInput {
     pub steam_id: Option<String>,
     pub rank: Option<String>,
@@ -1595,21 +1593,7 @@ pub async fn upsert_signup(
         .execute(&mut **tx)
         .await?;
     } else {
-        sqlx::query(
-            r#"INSERT INTO turnier."tournament_signups"
-             (tournament_id, discord_id, discord_name, steam_id, rank, rank_score, team_id, signed_up_at)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, now())"#,
-        )
-        .bind(tournament_id)
-        .bind(discord_id)
-        .bind(discord_name)
-        .bind(&rank.steam_id)
-        .bind(&rank.rank)
-        .bind(rank.rank_score)
-        .bind(team_id)
-        .execute(&mut **tx)
-        .await
-        .map_err(|err| map_unique_conflict(err, "Du bist bereits für dieses Turnier angemeldet"))?;
+        insert_signup(tx, tournament_id, discord_id, discord_name, rank, team_id).await?;
     }
     Ok(())
 }
@@ -1627,20 +1611,15 @@ pub async fn add_user_to_team(
     let discord_id_i64 = db::parse_participant_id(discord_id)?;
     let resolved_name = resolve_discord_name_in(tx, discord_id, discord_name).await?;
     ensure_guest_name_free(tx, tournament_id, discord_id_i64, Some(&resolved_name)).await?;
-    sqlx::query(
-        r#"INSERT INTO turnier."team_members"
-         (team_id, discord_id, discord_name, steam_id, rank, rank_score, role, joined_at)
-         VALUES ($1, $2, $3, $4, $5, $6, 'member', now())"#,
+    insert_team_member(
+        tx,
+        team_id,
+        discord_id_i64,
+        Some(&resolved_name),
+        rank,
+        TeamRole::Member,
     )
-    .bind(team_id)
-    .bind(discord_id_i64)
-    .bind(&resolved_name)
-    .bind(&rank.steam_id)
-    .bind(&rank.rank)
-    .bind(rank.rank_score)
-    .execute(&mut **tx)
-    .await
-    .map_err(|err| map_unique_conflict(err, "Spieler ist bereits Mitglied in diesem Team"))?;
+    .await?;
     upsert_signup(
         tx,
         tournament_id,
@@ -1651,6 +1630,77 @@ pub async fn add_user_to_team(
     )
     .await?;
     Ok(())
+}
+
+pub async fn insert_signup(
+    tx: &mut sqlx::Transaction<'_, Postgres>,
+    tournament_id: i64,
+    discord_id: i64,
+    discord_name: Option<&str>,
+    rank: &RankInput,
+    team_id: Option<i64>,
+) -> WebResult<(i64, DateTime<Utc>)> {
+    turnier_engine::insert_signup(
+        tx,
+        &turnier_engine::NewSignup {
+            tournament_id,
+            discord_id,
+            discord_name,
+            steam_id: rank.steam_id.as_deref(),
+            rank: rank.rank.as_deref(),
+            rank_score: rank.rank_score,
+            team_id,
+        },
+    )
+    .await
+    .map_err(|err| map_unique_conflict(err, "Du bist bereits für dieses Turnier angemeldet"))
+}
+
+pub async fn insert_team_member(
+    tx: &mut sqlx::Transaction<'_, Postgres>,
+    team_id: i64,
+    discord_id: i64,
+    discord_name: Option<&str>,
+    rank: &RankInput,
+    role: TeamRole,
+) -> WebResult<i64> {
+    turnier_engine::insert_team_member(
+        tx,
+        &turnier_engine::NewTeamMember {
+            team_id,
+            discord_id,
+            discord_name,
+            steam_id: rank.steam_id.as_deref(),
+            rank: rank.rank.as_deref(),
+            rank_score: rank.rank_score,
+            role,
+        },
+    )
+    .await
+    .map_err(|err| map_unique_conflict(err, "Spieler ist bereits Mitglied in diesem Team"))
+}
+
+pub async fn insert_team(
+    tx: &mut sqlx::Transaction<'_, Postgres>,
+    tournament_id: i64,
+    name: &str,
+    captain_discord_id: i64,
+    recruitment_status: RecruitmentStatus,
+) -> WebResult<i64> {
+    turnier_engine::insert_team(
+        tx,
+        tournament_id,
+        name,
+        captain_discord_id,
+        recruitment_status,
+    )
+    .await
+    .map_err(|err| map_unique_conflict(err, "Ein Team mit diesem Namen existiert bereits"))
+}
+
+pub fn parse_recruitment_status(raw: &str) -> WebResult<RecruitmentStatus> {
+    serde_json::from_value(serde_json::Value::String(raw.to_string()))
+        .map_err(|_| WebError::bad_request("Ungültiger Recruiting-Status"))
 }
 
 #[cfg(test)]

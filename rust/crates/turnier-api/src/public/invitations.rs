@@ -446,7 +446,7 @@ async fn apply_to_team(
     helpers::ensure_player_teams_allowed(&t)?;
     helpers::ensure_registration_open(&t.status)?;
     let team = helpers::load_team_or_404(&mut *tx, tournament_id, team_id).await?;
-    if team.recruitment_status != "application" {
+    if team.recruitment_status != turnier_core::RecruitmentStatus::Application {
         return Err(WebError::forbidden(
             "Dieses Team nimmt aktuell keine Bewerbungen an",
         ));

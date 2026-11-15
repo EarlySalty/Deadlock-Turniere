@@ -11,7 +11,9 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use sqlx::{Postgres, Row, Transaction};
 
-use turnier_core::{ApplicationStatus, RecruitmentStatus, Team, TeamApplication, TournamentSignup};
+use turnier_core::{
+    ApplicationStatus, RecruitmentStatus, Team, TeamApplication, TeamRole, TournamentSignup,
+};
 
 use crate::db;
 use crate::error::{map_unique_conflict, WebError, WebResult};
@@ -96,11 +98,11 @@ fn validate_team_name(raw: Option<&str>) -> WebResult<String> {
 
 /// Bestimmt die Rolle eines neuen Mitglieds (`captain`, wenn Team leer oder ohne
 /// Captain). Portiert die 4× duplizierte Heuristik.
-fn member_role(member_count: i64, captain_discord_id: i64) -> &'static str {
+fn member_role(member_count: i64, captain_discord_id: i64) -> TeamRole {
     if member_count == 0 || captain_discord_id == 0 {
-        "captain"
+        TeamRole::Captain
     } else {
-        "member"
+        TeamRole::Member
     }
 }
 
@@ -131,17 +133,14 @@ async fn create_team(
         ));
     }
 
-    let team_id: i64 = sqlx::query(
-        r#"INSERT INTO turnier."teams" (tournament_id, name, name_key, captain_discord_id, created_at, recruitment_status)
-           VALUES ($1, $2, $3, 0, now(), 'open') RETURNING id"#,
+    let team_id = crate::public::helpers::insert_team(
+        &mut tx,
+        tournament_id,
+        &name,
+        0,
+        RecruitmentStatus::Open,
     )
-    .bind(tournament_id)
-    .bind(&name)
-    .bind(&name_key)
-    .fetch_one(&mut *tx)
-    .await
-    .map_err(|err| map_unique_conflict(err, "Ein Team mit diesem Namen existiert bereits"))?
-    .get("id");
+    .await?;
 
     audit(
         &mut *tx,
@@ -222,13 +221,7 @@ async fn update_recruiting(
         .recruitment_status
         .as_deref()
         .ok_or_else(|| WebError::bad_request("recruitment_status ist erforderlich"))?;
-    let status: RecruitmentStatus = serde_json::from_value(json!(raw))
-        .map_err(|_| WebError::bad_request("Ungültiger recruitment_status"))?;
-    let status_str = match status {
-        RecruitmentStatus::Open => "open",
-        RecruitmentStatus::Application => "application",
-        RecruitmentStatus::Closed => "closed",
-    };
+    let status = crate::public::helpers::parse_recruitment_status(raw)?;
 
     let mut tx = state.pool.begin().await?;
     let tournament = crate::public::helpers::lock_tournament_row(&mut tx, tournament_id).await?;
@@ -236,7 +229,7 @@ async fn update_recruiting(
     load_team_or_404(&mut *tx, tournament_id, team_id).await?;
 
     sqlx::query(r#"UPDATE turnier."teams" SET recruitment_status = $1 WHERE id = $2"#)
-        .bind(status_str)
+        .bind(status)
         .bind(team_id)
         .execute(&mut *tx)
         .await?;
@@ -244,13 +237,13 @@ async fn update_recruiting(
         &mut *tx,
         "team_recruitment_status_admin",
         &user.discord_id,
-        json!({ "tournament_id": tournament_id, "team_id": team_id, "recruitment_status": status_str }),
+        json!({ "tournament_id": tournament_id, "team_id": team_id, "recruitment_status": status }),
     )
     .await?;
     tx.commit().await?;
 
     Ok(Json(
-        json!({ "status": "ok", "team_id": team_id, "recruitment_status": status_str }),
+        json!({ "status": "ok", "team_id": team_id, "recruitment_status": status }),
     ))
 }
 
@@ -393,7 +386,7 @@ async fn accept_application(
         team_id,
     )
     .await?;
-    if role == "captain" {
+    if role == TeamRole::Captain {
         set_captain(&mut tx, team_id, &app_discord_id).await?;
     }
     sqlx::query(r#"UPDATE turnier."team_applications" SET status = $1 WHERE id = $2"#)
@@ -725,7 +718,7 @@ async fn move_member(
         .bind(discord_id_i64)
         .execute(&mut *tx)
         .await?;
-    if new_role == "captain" {
+    if new_role == TeamRole::Captain {
         set_captain(&mut tx, team_id, &discord_id).await?;
     }
     let source_captain: i64 = source_team.get("captain_discord_id");
@@ -830,7 +823,7 @@ async fn assign_signup(
         .bind(signup_id)
         .execute(&mut *tx)
         .await?;
-    if role == "captain" {
+    if role == TeamRole::Captain {
         set_captain(&mut tx, team_id, &s_discord_id).await?;
     }
 
@@ -966,7 +959,7 @@ async fn add_member(
         team_id,
     )
     .await?;
-    if role == "captain" {
+    if role == TeamRole::Captain {
         set_captain(&mut tx, team_id, &discord_id).await?;
     }
 
@@ -1073,16 +1066,14 @@ async fn add_signup_by_name(
     )
     .await?;
     let participant_id = crate::public::helpers::allocate_guest_participant_id(&mut *tx).await?;
-    let row = sqlx::query(
-        r#"INSERT INTO turnier."tournament_signups"
-         (tournament_id, discord_id, discord_name, rank_score, signed_up_at)
-         VALUES ($1, $2, $3, 0, now())
-         RETURNING id, signed_up_at"#,
+    let (signup_id, signed_up_at) = crate::public::helpers::insert_signup(
+        &mut tx,
+        tournament_id,
+        participant_id,
+        Some(&name),
+        &crate::public::helpers::RankInput::default(),
+        None,
     )
-    .bind(tournament_id)
-    .bind(participant_id)
-    .bind(&name)
-    .fetch_one(&mut *tx)
     .await?;
     let checked_in = status == "checkin";
     if checked_in {
@@ -1095,7 +1086,7 @@ async fn add_signup_by_name(
         &user.discord_id,
         json!({
             "tournament_id": tournament_id,
-            "signup_id": row.get::<i64, _>("id"),
+            "signup_id": signup_id,
             "discord_id": discord_id,
             "name": name,
             "checked_in": checked_in,
@@ -1107,7 +1098,7 @@ async fn add_signup_by_name(
     Ok((
         StatusCode::CREATED,
         Json(TournamentSignup {
-            id: row.get("id"),
+            id: signup_id,
             tournament_id,
             discord_id,
             discord_name: Some(name),
@@ -1115,7 +1106,7 @@ async fn add_signup_by_name(
             rank: None,
             rank_score: 0,
             team_id: None,
-            signed_up_at: db::ts_to_string(row.get::<DateTime<Utc>, _>("signed_up_at")),
+            signed_up_at: db::ts_to_string(signed_up_at),
         }),
     ))
 }
@@ -1132,23 +1123,22 @@ pub(super) async fn insert_member(
     steam_id: Option<&str>,
     rank: Option<&str>,
     rank_score: i64,
-    role: &str,
+    role: TeamRole,
 ) -> WebResult<()> {
-    let discord_id = db::parse_participant_id(discord_id)?;
-    sqlx::query(
-        r#"INSERT INTO turnier."team_members" (team_id, discord_id, discord_name, steam_id, rank, rank_score, role, joined_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, now())"#,
+    let rank = crate::public::helpers::RankInput {
+        steam_id: steam_id.map(str::to_string),
+        rank: rank.map(str::to_string),
+        rank_score,
+    };
+    crate::public::helpers::insert_team_member(
+        tx,
+        team_id,
+        db::parse_participant_id(discord_id)?,
+        discord_name,
+        &rank,
+        role,
     )
-    .bind(team_id)
-    .bind(discord_id)
-    .bind(discord_name)
-    .bind(steam_id)
-    .bind(rank)
-    .bind(rank_score)
-    .bind(role)
-    .execute(&mut **tx)
-    .await
-    .map_err(|err| map_unique_conflict(err, "Spieler ist bereits Mitglied in diesem Team"))?;
+    .await?;
     Ok(())
 }
 

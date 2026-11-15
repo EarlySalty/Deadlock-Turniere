@@ -6,7 +6,7 @@ use axum::{Json, Router};
 use serde_json::{json, Value};
 
 use crate::db;
-use crate::error::{map_unique_conflict, WebError, WebResult};
+use crate::error::{WebError, WebResult};
 use crate::extract::AuthUser;
 use crate::state::AppState;
 
@@ -84,20 +84,15 @@ async fn solo_signup(
     )
     .await?;
 
-    sqlx::query(
-        r#"INSERT INTO turnier."tournament_signups"
-         (tournament_id, discord_id, discord_name, steam_id, rank, rank_score, signed_up_at)
-         VALUES ($1, $2, $3, $4, $5, $6, now())"#,
+    helpers::insert_signup(
+        &mut tx,
+        tournament_id,
+        user_discord_id,
+        user.discord_name.as_deref(),
+        &rank,
+        None,
     )
-    .bind(tournament_id)
-    .bind(user_discord_id)
-    .bind(user.discord_name.as_deref())
-    .bind(&rank.steam_id)
-    .bind(&rank.rank)
-    .bind(rank.rank_score)
-    .execute(&mut *tx)
-    .await
-    .map_err(|err| map_unique_conflict(err, "Du bist bereits für dieses Turnier angemeldet"))?;
+    .await?;
 
     if creates_solo_team {
         let resolved_name =
@@ -110,32 +105,22 @@ async fn solo_signup(
                 .fetch_all(&mut *tx)
                 .await?;
         let team_name = turnier_engine::TeamNamePool::new(existing_keys).reserve(&resolved_name);
-        let name_key = turnier_engine::name_key(&team_name);
-
-        let team_id: i64 = sqlx::query_scalar(
-            r#"INSERT INTO turnier."teams"
-             (tournament_id, name, name_key, captain_discord_id, created_at, recruitment_status)
-             VALUES ($1, $2, $3, $4, now(), 'open') RETURNING id"#,
+        let team_id = helpers::insert_team(
+            &mut tx,
+            tournament_id,
+            &team_name,
+            user_discord_id,
+            turnier_core::RecruitmentStatus::Open,
         )
-        .bind(tournament_id)
-        .bind(&team_name)
-        .bind(&name_key)
-        .bind(user_discord_id)
-        .fetch_one(&mut *tx)
         .await?;
-
-        sqlx::query(
-            r#"INSERT INTO turnier."team_members"
-             (team_id, discord_id, discord_name, steam_id, rank, rank_score, role, joined_at)
-             VALUES ($1, $2, $3, $4, $5, $6, 'captain', now())"#,
+        helpers::insert_team_member(
+            &mut tx,
+            team_id,
+            user_discord_id,
+            Some(&resolved_name),
+            &rank,
+            turnier_core::TeamRole::Captain,
         )
-        .bind(team_id)
-        .bind(user_discord_id)
-        .bind(&resolved_name)
-        .bind(&rank.steam_id)
-        .bind(&rank.rank)
-        .bind(rank.rank_score)
-        .execute(&mut *tx)
         .await?;
 
         sqlx::query(

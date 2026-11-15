@@ -10,11 +10,11 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use sqlx::Postgres;
 
-use turnier_core::{Team, TeamMember};
+use turnier_core::{RecruitmentStatus, Team, TeamMember, TeamRole};
 use turnier_discord::NotificationEvent;
 
 use crate::db;
-use crate::error::{map_unique_conflict, WebError, WebResult};
+use crate::error::{WebError, WebResult};
 use crate::extract::AuthUser;
 use crate::state::AppState;
 
@@ -112,31 +112,22 @@ async fn create_team(
         user.discord_name.as_deref(),
     )
     .await?;
-    let team_id: i64 = sqlx::query_scalar(
-        r#"INSERT INTO turnier."teams"
-         (tournament_id, name, name_key, captain_discord_id, created_at, recruitment_status)
-         VALUES ($1, $2, $3, $4, now(), 'open') RETURNING id"#,
+    let team_id = helpers::insert_team(
+        &mut tx,
+        tournament_id,
+        &name,
+        user_discord_id,
+        RecruitmentStatus::Open,
     )
-    .bind(tournament_id)
-    .bind(&name)
-    .bind(&name_key)
-    .bind(user_discord_id)
-    .fetch_one(&mut *tx)
-    .await
-    .map_err(|err| map_unique_conflict(err, "Ein Team mit diesem Namen existiert bereits"))?;
-
-    sqlx::query(
-        r#"INSERT INTO turnier."team_members"
-         (team_id, discord_id, discord_name, steam_id, rank, rank_score, role, joined_at)
-         VALUES ($1, $2, $3, $4, $5, $6, 'captain', now())"#,
+    .await?;
+    helpers::insert_team_member(
+        &mut tx,
+        team_id,
+        user_discord_id,
+        user.discord_name.as_deref(),
+        &rank,
+        TeamRole::Captain,
     )
-    .bind(team_id)
-    .bind(user_discord_id)
-    .bind(user.discord_name.as_deref())
-    .bind(&rank.steam_id)
-    .bind(&rank.rank)
-    .bind(rank.rank_score)
-    .execute(&mut *tx)
     .await?;
 
     helpers::upsert_signup(
@@ -277,18 +268,14 @@ async fn join_team(
     }
 
     // Mitglied hinzufügen (Insert direkt, danach lastrowid).
-    let member_id: i64 = sqlx::query_scalar(
-        r#"INSERT INTO turnier."team_members"
-         (team_id, discord_id, discord_name, steam_id, rank, rank_score, role, joined_at)
-         VALUES ($1, $2, $3, $4, $5, $6, 'member', now()) RETURNING id"#,
+    let member_id = helpers::insert_team_member(
+        &mut tx,
+        team_id,
+        user_discord_id,
+        user.discord_name.as_deref(),
+        &rank,
+        TeamRole::Member,
     )
-    .bind(team_id)
-    .bind(user_discord_id)
-    .bind(user.discord_name.as_deref())
-    .bind(&rank.steam_id)
-    .bind(&rank.rank)
-    .bind(rank.rank_score)
-    .fetch_one(&mut *tx)
     .await?;
 
     helpers::upsert_signup(
@@ -309,7 +296,7 @@ async fn join_team(
 }
 
 fn ensure_team_open_for_join(team: &helpers::TeamGuard) -> WebResult<()> {
-    if team.recruitment_status != "open" {
+    if team.recruitment_status != RecruitmentStatus::Open {
         return Err(WebError::forbidden(
             "Dieses Team nimmt aktuell keine direkten Beitritte an",
         ));
@@ -332,10 +319,7 @@ async fn update_team_recruiting(
     Path((tournament_id, team_id)): Path<(i64, i64)>,
     Json(body): Json<RecruitingBody>,
 ) -> WebResult<Json<Team>> {
-    let raw = body.recruitment_status.unwrap_or_default();
-    if !matches!(raw.as_str(), "open" | "application" | "closed") {
-        return Err(WebError::bad_request("Ungültiger Recruiting-Status"));
-    }
+    let status = helpers::parse_recruitment_status(&body.recruitment_status.unwrap_or_default())?;
 
     let pool = &state.pool;
     let mut tx = pool.begin().await?;
@@ -346,7 +330,7 @@ async fn update_team_recruiting(
     helpers::ensure_registration_open(&t.status)?;
 
     sqlx::query(r#"UPDATE turnier."teams" SET recruitment_status = $1 WHERE id = $2"#)
-        .bind(&raw)
+        .bind(status)
         .bind(team_id)
         .execute(&mut *tx)
         .await?;
@@ -461,38 +445,8 @@ async fn leave_team(
             .bind(team_id)
             .execute(&mut *tx)
             .await?;
-        let has_signup: Option<(i64,)> = sqlx::query_as(
-            r#"SELECT id FROM turnier."tournament_signups"
-             WHERE tournament_id = $1 AND discord_id = $2"#,
-        )
-        .bind(tournament_id)
-        .bind(user_discord_id)
-        .fetch_optional(&mut *tx)
-        .await?;
-        if has_signup.is_some() {
-            sqlx::query(
-                r#"UPDATE turnier."tournament_signups" SET team_id = NULL
-                 WHERE tournament_id = $1 AND discord_id = $2"#,
-            )
-            .bind(tournament_id)
-            .bind(user_discord_id)
-            .execute(&mut *tx)
+        reset_or_create_solo_signup(&mut tx, tournament_id, &user.discord_id, Some(&member))
             .await?;
-        } else {
-            sqlx::query(
-                r#"INSERT INTO turnier."tournament_signups"
-                 (tournament_id, discord_id, discord_name, steam_id, rank, rank_score, team_id, signed_up_at)
-                 VALUES ($1, $2, $3, $4, $5, $6, NULL, now())"#,
-            )
-            .bind(tournament_id)
-            .bind(user_discord_id)
-            .bind(user.discord_name.as_deref())
-            .bind(&member.steam_id)
-            .bind(&member.rank)
-            .bind(member.rank_score)
-            .execute(&mut *tx)
-            .await?;
-        }
         tx.commit().await?;
         return Ok(Json(
             json!({ "status": "team_aufgeloest", "team_id": team_id }),
@@ -578,25 +532,20 @@ async fn invite_to_team(
     // Team-Größe prüfen (innerhalb der Tx).
     helpers::ensure_team_has_capacity(&mut *tx, team_id, t.team_size).await?;
 
-    sqlx::query(
-        r#"INSERT INTO turnier."team_members"
-         (team_id, discord_id, discord_name, steam_id, rank, rank_score, role, joined_at)
-         VALUES ($1, $2, $3, $4, $5, $6, 'member', now())"#,
-    )
-    .bind(team_id)
-    .bind(target_discord_id_i64)
-    .bind(&discord_name)
-    .bind(&solo.steam_id)
-    .bind(&solo.rank)
-    .bind(solo.rank_score)
-    .execute(&mut *tx)
-    .await?;
-
     let rank = RankInput {
         steam_id: solo.steam_id.clone(),
         rank: solo.rank.clone(),
         rank_score: solo.rank_score.unwrap_or(0),
     };
+    helpers::insert_team_member(
+        &mut tx,
+        team_id,
+        target_discord_id_i64,
+        Some(&discord_name),
+        &rank,
+        TeamRole::Member,
+    )
+    .await?;
     helpers::upsert_signup(
         &mut tx,
         tournament_id,
@@ -680,18 +629,19 @@ async fn reset_or_create_solo_signup(
         .execute(&mut **tx)
         .await?;
     } else if let Some(member) = member {
-        sqlx::query(
-            r#"INSERT INTO turnier."tournament_signups"
-             (tournament_id, discord_id, discord_name, steam_id, rank, rank_score, team_id, signed_up_at)
-             VALUES ($1, $2, $3, $4, $5, $6, NULL, now())"#,
+        let rank = RankInput {
+            steam_id: member.steam_id.clone(),
+            rank: member.rank.clone(),
+            rank_score: member.rank_score.unwrap_or(0),
+        };
+        helpers::insert_signup(
+            tx,
+            tournament_id,
+            discord_id_i64,
+            member.discord_name.as_deref(),
+            &rank,
+            None,
         )
-        .bind(tournament_id)
-        .bind(discord_id_i64)
-        .bind(&member.discord_name)
-        .bind(&member.steam_id)
-        .bind(&member.rank)
-        .bind(member.rank_score)
-        .execute(&mut **tx)
         .await?;
     }
     Ok(())

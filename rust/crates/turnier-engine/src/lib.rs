@@ -58,3 +58,7 @@ pub use persist::{
     FinalizeCheckinParams, FinalizeCheckinResult, LeaguePlanSummary, NoShuffle, RemovedPlayer,
     RngShuffler, SoloPlayer, SoloShuffler, TeamWarning,
 };
+#[cfg(feature = "persist")]
+pub use persist::{
+    insert_signup, insert_team, insert_team_member, lock_tournament_row, NewSignup, NewTeamMember,
+};

@@ -361,10 +361,20 @@ async fn create_balanced_team(
     tournament_id: i64,
     team: &TeamDto,
 ) -> WebResult<()> {
-    let team_id: i64 = sqlx::query_scalar("INSERT INTO turnier.teams (tournament_id, name, name_key, captain_discord_id, created_at, recruitment_status) VALUES ($1, $2, $3, 0, now(), 'closed') RETURNING id")
-        .bind(tournament_id).bind(&team.name).bind(turnier_engine::name_key(&team.name)).fetch_one(&mut **tx).await?;
+    let team_id = crate::public::helpers::insert_team(
+        tx,
+        tournament_id,
+        &team.name,
+        0,
+        turnier_core::RecruitmentStatus::Closed,
+    )
+    .await?;
     for (index, player) in team.players.iter().enumerate() {
-        let role = if index == 0 { "captain" } else { "member" };
+        let role = if index == 0 {
+            turnier_core::TeamRole::Captain
+        } else {
+            turnier_core::TeamRole::Member
+        };
         insert_member(
             tx,
             team_id,

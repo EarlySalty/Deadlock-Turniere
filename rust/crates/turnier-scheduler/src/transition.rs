@@ -7,7 +7,7 @@
 //! Lock, auditet, berechnet bei `completed` die Punkte neu und plant Auto-Lobbys.
 
 use chrono::{DateTime, Utc};
-use sqlx::{Postgres, Transaction};
+use sqlx::{Postgres, Row, Transaction};
 
 use turnier_core::{now_utc, parse_discord_id, TournamentMode, TournamentStatus};
 use turnier_db::Pool;
@@ -113,20 +113,16 @@ pub async fn advance_tournament_status(
         acquire_tournament_schedule_lock(&mut tx).await?;
     }
     // Modus und Status bleiben während Prüfung und Generierung unverändert.
-    let existing: Option<(String, String)> = sqlx::query_as(
-        "SELECT status, tournament_mode FROM turnier.tournaments WHERE id = $1 FOR UPDATE",
-    )
-    .bind(tournament_id)
-    .fetch_optional(&mut *tx)
-    .await?;
-    let Some((stored_status, stored_mode)) = existing else {
+    let Some(locked) = turnier_engine::lock_tournament_row(&mut tx, tournament_id).await? else {
         return Err(SchedulerError::StatusConflict);
     };
+    let stored_status: String = locked.try_get("status")?;
     if stored_status != current_status {
         return Err(SchedulerError::StatusConflict);
     }
     ensure_not_leaving_checkin(current_status, next_status)?;
-    let mode: TournamentMode = serde_json::from_value(serde_json::Value::String(stored_mode))
+    let mode: TournamentMode = locked
+        .try_get("tournament_mode")
         .map_err(|_| SchedulerError::InvalidTransition("Unbekannter Turniermodus".to_string()))?;
     // --- 1. Übergang validieren ---
     let from = parse_status(current_status);
