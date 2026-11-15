@@ -971,7 +971,7 @@ async fn create_test_tournament(
          )
          VALUES ($1, 'checkin', $2, $3, $4, $5, $6, $7, $8, 'single_elimination', $9,
                  $10, $11, false, true, true, $12, $13, now(), now(), $14, 1,
-                 'match_win', 10, 'test_mode')
+                 'auto', 10, 'test_mode')
          RETURNING id"#,
     )
     .bind(&body.name)

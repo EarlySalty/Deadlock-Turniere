@@ -3,7 +3,7 @@ import type { BracketFormat } from '@/types/tournament'
 import Field from './Field'
 import ReminderOffsetsInput from '../ReminderOffsetsInput'
 import { SubHeading } from './SettingsSection'
-import { INPUT_CLASS } from './options'
+import { BRACKET_FORMAT_OPTIONS, INPUT_CLASS, SERIES_FORMAT_OPTIONS } from './options'
 import type { SeriesFormat } from './createFormValues'
 
 export interface BasicsValue {
@@ -100,8 +100,9 @@ export function MatchFormatFields({ idPrefix, value, onChange, league }: FieldGr
               onChange={(event) => onChange({ bracketFormat: event.target.value as BracketFormat })}
               className={INPUT_CLASS}
             >
-              <option value="single_elimination">Single Elimination</option>
-              <option value="double_elimination">Double Elimination</option>
+              {BRACKET_FORMAT_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>{option.label}</option>
+              ))}
             </select>
           </Field>
           <Field id={`${idPrefix}-series-format`} label="Serienformat" hint="Spiele pro Begegnung.">
@@ -111,9 +112,9 @@ export function MatchFormatFields({ idPrefix, value, onChange, league }: FieldGr
               onChange={(event) => onChange({ seriesFormat: Number(event.target.value) as SeriesFormat })}
               className={INPUT_CLASS}
             >
-              <option value={1}>Bo1</option>
-              <option value={3}>Bo3</option>
-              <option value={5}>Bo5</option>
+              {SERIES_FORMAT_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>{option.label}</option>
+              ))}
             </select>
           </Field>
           <Field id={`${idPrefix}-final-series-format`} label="Finale-Format" hint="Nur für das Finale.">
@@ -127,9 +128,9 @@ export function MatchFormatFields({ idPrefix, value, onChange, league }: FieldGr
               className={INPUT_CLASS}
             >
               <option value="same">Wie Serienformat</option>
-              <option value={1}>Bo1</option>
-              <option value={3}>Bo3</option>
-              <option value={5}>Bo5</option>
+              {SERIES_FORMAT_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>{option.label}</option>
+              ))}
             </select>
           </Field>
         </>

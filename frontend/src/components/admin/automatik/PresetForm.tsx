@@ -15,7 +15,14 @@ import type {
   TournamentMode,
 } from '@/types/tournament'
 import { AUTOMATIK_COPY } from './copy'
-import { INVITE_MODE_OPTIONS } from '@/components/admin/settings/options'
+import {
+  BRACKET_FORMAT_OPTIONS,
+  GAME_MODE_OPTIONS,
+  INVITE_MODE_OPTIONS,
+  MODE_OPTIONS,
+  SERIES_FORMAT_OPTIONS,
+  matchObjectiveChoices,
+} from '@/components/admin/settings/options'
 
 interface PresetFormProps {
   preset?: Preset | null
@@ -172,8 +179,9 @@ export default function PresetForm({ preset, onDone }: PresetFormProps) {
               }
               className={fieldClass}
             >
-              <option value="single_elimination">{AUTOMATIK_COPY.bracketSingle}</option>
-              <option value="double_elimination">{AUTOMATIK_COPY.bracketDouble}</option>
+              {BRACKET_FORMAT_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>{option.label}</option>
+              ))}
             </select>
           </label>
 
@@ -184,9 +192,9 @@ export default function PresetForm({ preset, onDone }: PresetFormProps) {
               onChange={(event) => setSeriesFormat(event.target.value)}
               className={fieldClass}
             >
-              <option value="1">{AUTOMATIK_COPY.seriesBo1}</option>
-              <option value="3">{AUTOMATIK_COPY.seriesBo3}</option>
-              <option value="5">{AUTOMATIK_COPY.seriesBo5}</option>
+              {SERIES_FORMAT_OPTIONS.map((option) => (
+                <option key={option.value} value={String(option.value)}>{option.label}</option>
+              ))}
             </select>
           </label>
 
@@ -198,9 +206,9 @@ export default function PresetForm({ preset, onDone }: PresetFormProps) {
               className={fieldClass}
             >
               <option value="">{AUTOMATIK_COPY.finalSeriesSame}</option>
-              <option value="1">{AUTOMATIK_COPY.seriesBo1}</option>
-              <option value="3">{AUTOMATIK_COPY.seriesBo3}</option>
-              <option value="5">{AUTOMATIK_COPY.seriesBo5}</option>
+              {SERIES_FORMAT_OPTIONS.map((option) => (
+                <option key={option.value} value={String(option.value)}>{option.label}</option>
+              ))}
             </select>
           </label>
 
@@ -213,8 +221,9 @@ export default function PresetForm({ preset, onDone }: PresetFormProps) {
               }
               className={fieldClass}
             >
-              <option value="group_stage">{AUTOMATIK_COPY.tournamentModeGroupStage}</option>
-              <option value="bracket_only">{AUTOMATIK_COPY.tournamentModeBracketOnly}</option>
+              {MODE_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>{option.label}</option>
+              ))}
             </select>
           </label>
 
@@ -227,21 +236,23 @@ export default function PresetForm({ preset, onDone }: PresetFormProps) {
               }
               className={fieldClass}
             >
-              <option value="standard">{AUTOMATIK_COPY.gameModeStandard}</option>
-              <option value="mirror">{AUTOMATIK_COPY.gameModeMirror}</option>
-              <option value="all_same">{AUTOMATIK_COPY.gameModeAllSame}</option>
-              <option value="random_heroes">{AUTOMATIK_COPY.gameModeRandomHeroes}</option>
-              <option value="single_lane">{AUTOMATIK_COPY.gameModeSingleLane}</option>
+              {GAME_MODE_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>{option.label}</option>
+              ))}
             </select>
           </label>
 
           <label className="space-y-1.5 text-sm text-foreground">
             <span>{AUTOMATIK_COPY.matchObjectiveLabel}</span>
-            <input
+            <select
               value={matchObjective}
               onChange={(event) => setMatchObjective(event.target.value)}
               className={fieldClass}
-            />
+            >
+              {matchObjectiveChoices(matchObjective).map((option) => (
+                <option key={option.value} value={option.value}>{option.label}</option>
+              ))}
+            </select>
           </label>
 
           <label className="space-y-1.5 text-sm text-foreground">

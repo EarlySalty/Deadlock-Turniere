@@ -1,5 +1,7 @@
 import { LEAGUE_LABEL } from '@/lib/league'
+import type { SeriesFormat } from './createFormValues'
 import type {
+  BracketFormat,
   InviteMode,
   LobbySettingsPreset,
   TournamentGameMode,
@@ -94,6 +96,24 @@ export const INVITE_MODE_OPTIONS: Choice<InviteMode>[] = [
     description: 'Spieler melden sich nur einzeln an. Teams gründen, beitreten, bewerben und einladen ist aus. Das Orga-Team baut die Teams im Team-Builder, und beim Check-in-Abschluss entstehen keine automatischen Teams. Das Turnier startet erst, wenn ihr den Check-in abschließt.',
   },
 ]
+
+export const BRACKET_FORMAT_OPTIONS: { value: BracketFormat; label: string }[] = [
+  { value: 'single_elimination', label: 'Single Elimination' },
+  { value: 'double_elimination', label: 'Double Elimination' },
+]
+
+export const SERIES_FORMAT_OPTIONS: { value: SeriesFormat; label: string }[] = [
+  { value: 1, label: 'Bo1' },
+  { value: 3, label: 'Bo3' },
+  { value: 5, label: 'Bo5' },
+]
+
+export function matchObjectiveChoices(current: string): { value: string; label: string }[] {
+  if (!current || MATCH_OBJECTIVE_OPTIONS.some((option) => option.value === current)) {
+    return MATCH_OBJECTIVE_OPTIONS
+  }
+  return [...MATCH_OBJECTIVE_OPTIONS, { value: current, label: current }]
+}
 
 export const MATCH_OBJECTIVE_OPTIONS: { value: string; label: string }[] = [
   { value: 'auto', label: 'Automatisch (nach Teamgröße)' },

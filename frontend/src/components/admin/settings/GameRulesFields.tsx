@@ -5,7 +5,7 @@ import {
   CONVAR_SLIDERS,
   GAME_MODE_OPTIONS,
   INPUT_CLASS,
-  MATCH_OBJECTIVE_OPTIONS,
+  matchObjectiveChoices,
   PRESET_LABELS,
   optionDescription,
   type ConvarSliderConfig,
@@ -70,7 +70,7 @@ export default function GameRulesFields({
             onChange={(event) => update({ matchObjective: event.target.value })}
             className={INPUT_CLASS}
           >
-            {MATCH_OBJECTIVE_OPTIONS.map((option) => (
+            {matchObjectiveChoices(value.matchObjective).map((option) => (
               <option key={option.value} value={option.value}>{option.label}</option>
             ))}
           </select>
