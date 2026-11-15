@@ -27,21 +27,26 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use axum::extract::{Path, State};
-use axum::routing::{delete, post};
+use axum::routing::{delete, get, post};
 use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sqlx::{Postgres, QueryBuilder};
 
 use turnier_config::Config;
-use turnier_core::{InviteMode, TournamentGameMode};
-use turnier_engine::FinalizeCheckinParams;
+use turnier_core::tournament::{check_team_size, TEAM_SIZE_MAX};
+use turnier_core::{
+    InviteMode, RecruitmentStatus, TeamRole, TournamentGameMode, TournamentMode, TournamentStatus,
+};
+use turnier_engine::engine::double_elim::MIN_BRACKET_ENTRANTS;
+use turnier_engine::{FinalizeCheckinParams, TeamNamePool};
 use turnier_match::league::{current_round_match_ids, tournament_is_league};
 use turnier_match::{ApplyBracketParams, ApplyGroupParams};
 
 use crate::db;
 use crate::error::{WebError, WebResult};
 use crate::extract::ModUser;
+use crate::public::helpers;
 use crate::state::AppState;
 
 /// Aktive Turnierstatus, in denen Test-User nicht gelöscht werden dürfen
@@ -75,6 +80,10 @@ pub fn router(config: &Config) -> Router<AppState> {
                 .delete(delete_test_users),
         )
         .route("/api/admin/test/tournaments", post(create_test_tournament))
+        .route(
+            "/api/admin/test/tournaments/options",
+            get(test_tournament_options),
+        )
         .route(
             "/api/admin/test/tournaments/{tournament_id}/simulate-round",
             post(simulate_test_tournament_round),
@@ -119,11 +128,11 @@ struct TestTournamentCreateRequest {
     name: String,
     team_size: i64,
     num_teams: i64,
-    mode: String,
+    mode: TournamentMode,
     #[serde(default = "default_game_mode")]
     tournament_game_mode: TournamentGameMode,
     #[serde(default = "default_advance_to")]
-    advance_to: String,
+    advance_to: TestAdvance,
     #[serde(default)]
     solo_signups: bool,
 }
@@ -131,8 +140,93 @@ struct TestTournamentCreateRequest {
 fn default_game_mode() -> TournamentGameMode {
     TournamentGameMode::Standard
 }
-fn default_advance_to() -> String {
-    "bracket".to_string()
+fn default_advance_to() -> TestAdvance {
+    TestAdvance::Bracket
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum TestAdvance {
+    Checkin,
+    GroupPhase,
+    Bracket,
+}
+
+const TEST_ADVANCE_TARGETS: [TestAdvance; 3] = [
+    TestAdvance::Checkin,
+    TestAdvance::GroupPhase,
+    TestAdvance::Bracket,
+];
+const TEST_MODES: [TournamentMode; 3] = [
+    TournamentMode::BracketOnly,
+    TournamentMode::GroupStage,
+    TournamentMode::League,
+];
+const TEST_NUM_TEAMS_MIN: i64 = MIN_BRACKET_ENTRANTS as i64;
+const TEST_NUM_TEAMS_MAX: i64 = 128;
+const TEST_USER_COUNT_MAX: i64 = 100;
+const SIMULATABLE_STATUSES: [TournamentStatus; 2] =
+    [TournamentStatus::GroupPhase, TournamentStatus::Bracket];
+
+fn check_test_advance(
+    mode: TournamentMode,
+    solo_signups: bool,
+    advance_to: TestAdvance,
+) -> Result<(), &'static str> {
+    match (advance_to, solo_signups, mode) {
+        (TestAdvance::Checkin, _, _) => Ok(()),
+        (_, true, _) => {
+            Err("Ein PUG-Test bleibt im Check-in, damit die Teams im Team-Builder gebaut werden")
+        }
+        (TestAdvance::GroupPhase, false, TournamentMode::BracketOnly) => {
+            Err("Das Format Nur Bracket hat keine Gruppenphase")
+        }
+        (TestAdvance::Bracket, false, TournamentMode::League) => {
+            Err("Das Format Jeder gegen jeden hat kein Bracket")
+        }
+        _ => Ok(()),
+    }
+}
+
+#[derive(Debug, Serialize)]
+struct TestAdvanceRule {
+    mode: TournamentMode,
+    solo_signups: bool,
+    advance_to: Vec<TestAdvance>,
+}
+
+#[derive(Debug, Serialize)]
+struct TestTournamentOptions {
+    user_count_max: i64,
+    team_size_max: i64,
+    num_teams_min: i64,
+    num_teams_max: i64,
+    advance_rules: Vec<TestAdvanceRule>,
+    simulatable_statuses: [TournamentStatus; 2],
+}
+
+fn test_tournament_options_value() -> TestTournamentOptions {
+    let advance_rules = TEST_MODES
+        .iter()
+        .flat_map(|&mode| {
+            [false, true].map(|solo_signups| TestAdvanceRule {
+                mode,
+                solo_signups,
+                advance_to: TEST_ADVANCE_TARGETS
+                    .into_iter()
+                    .filter(|&target| check_test_advance(mode, solo_signups, target).is_ok())
+                    .collect(),
+            })
+        })
+        .collect();
+    TestTournamentOptions {
+        user_count_max: TEST_USER_COUNT_MAX,
+        team_size_max: TEAM_SIZE_MAX,
+        num_teams_min: TEST_NUM_TEAMS_MIN,
+        num_teams_max: TEST_NUM_TEAMS_MAX,
+        advance_rules,
+        simulatable_statuses: SIMULATABLE_STATUSES,
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -482,7 +576,7 @@ where
 /// Status + `is_test` eines Turniers.
 #[derive(Debug, sqlx::FromRow)]
 struct TournamentFlags {
-    status: String,
+    status: TournamentStatus,
     is_test: bool,
 }
 
@@ -742,7 +836,7 @@ async fn create_test_users(
     ModUser(user): ModUser,
     Json(body): Json<TestUsersCreateRequest>,
 ) -> WebResult<Json<TestUsersCreateResponse>> {
-    validate_range(body.count, 1, 100, "count")?;
+    validate_range(body.count, 1, TEST_USER_COUNT_MAX, "count")?;
     ensure_test_schema(&state.pool).await?;
 
     let mut rng = Rng::new();
@@ -807,6 +901,10 @@ async fn delete_test_users(
 // Endpunkt: Test-Turnier anlegen
 // ---------------------------------------------------------------------------
 
+async fn test_tournament_options(_user: ModUser) -> Json<TestTournamentOptions> {
+    Json(test_tournament_options_value())
+}
+
 /// `POST /api/admin/test/tournaments`: vollständiges Test-Turnier generieren
 /// und optional bis group_phase/bracket vorrücken (require_mod).
 async fn create_test_tournament(
@@ -815,35 +913,15 @@ async fn create_test_tournament(
     Json(body): Json<TestTournamentCreateRequest>,
 ) -> WebResult<Json<TestTournamentCreateResponse>> {
     ensure_test_schema(&state.pool).await?;
-    validate_range(body.team_size, 1, 12, "team_size")?;
-    validate_range(body.num_teams, 2, 128, "num_teams")?;
-    if body.mode != "bracket_only" && body.mode != "group_then_bracket" && body.mode != "league" {
-        return Err(WebError::unprocessable("mode ist ungültig"));
-    }
-    if body.advance_to != "bracket"
-        && body.advance_to != "group_phase"
-        && body.advance_to != "checkin"
-    {
-        return Err(WebError::unprocessable("advance_to ist ungültig"));
-    }
-
-    if body.mode == "bracket_only" && body.advance_to == "group_phase" {
-        return Err(WebError::bad_request(
-            "group_phase ist für bracket_only nicht verfügbar",
-        ));
-    }
-
-    if body.solo_signups && body.advance_to != "checkin" {
-        return Err(WebError::bad_request(
-            "Ein PUG-Test bleibt im Check-in, damit die Teams im Team-Builder gebaut werden",
-        ));
-    }
-
-    if body.mode == "league" && body.advance_to == "bracket" {
-        return Err(WebError::bad_request(
-            "Das Format Jeder gegen jeden hat kein Bracket",
-        ));
-    }
+    check_team_size(body.team_size).map_err(WebError::unprocessable)?;
+    validate_range(
+        body.num_teams,
+        TEST_NUM_TEAMS_MIN,
+        TEST_NUM_TEAMS_MAX,
+        "num_teams",
+    )?;
+    check_test_advance(body.mode, body.solo_signups, body.advance_to)
+        .map_err(WebError::bad_request)?;
 
     let required_users = body.team_size * body.num_teams;
     let registration_start = chrono::Utc::now();
@@ -905,7 +983,7 @@ async fn create_test_tournament(
     .bind(registration_start)
     .bind(registration_start)
     .bind(db::parse_actor_id(&user.discord_id)?)
-    .bind(normalize_test_mode(&body.mode))
+    .bind(body.mode)
     .bind(body.tournament_game_mode)
     // bug-preserved (safe): reminder_offsets wird hart als Default gesetzt
     // (identisch zum Schema-Default), exakt wie im Original.
@@ -923,73 +1001,50 @@ async fn create_test_tournament(
         insert_solo_test_signups(&mut tx, tournament_id, &user_rows).await?;
     }
 
-    let mut existing_keys: HashSet<String> = HashSet::new();
+    let mut team_names = TeamNamePool::default();
     let team_count = if body.solo_signups { 0 } else { body.num_teams };
     for team_index in 0..team_count {
         let start = (team_index * body.team_size) as usize;
         let end = ((team_index + 1) * body.team_size) as usize;
         let members = &user_rows[start..end];
         let captain = &members[0];
-        let captain_base = captain
-            .display_name
-            .clone()
-            .unwrap_or_else(|| db::discord_id_to_string(captain.discord_id));
-        let (team_name, name_key) = team_name(&captain_base, &mut existing_keys);
-
-        let team_id: i64 = sqlx::query_scalar(
-            r#"INSERT INTO turnier."teams"
-             (tournament_id, name, name_key, captain_discord_id, created_at, recruitment_status)
-             VALUES ($1, $2, $3, $4, now(), 'open') RETURNING id"#,
+        let team_name = team_names.from_captain(captain.display_name.as_deref());
+        let team_id = helpers::insert_team(
+            &mut tx,
+            tournament_id,
+            &team_name,
+            captain.discord_id,
+            RecruitmentStatus::Open,
         )
-        .bind(tournament_id)
-        .bind(&team_name)
-        .bind(&name_key)
-        .bind(captain.discord_id)
-        .fetch_one(&mut *tx)
         .await?;
 
         for (member_index, member) in members.iter().enumerate() {
             let role = if member_index == 0 {
-                "captain"
+                TeamRole::Captain
             } else {
-                "member"
+                TeamRole::Member
             };
-            let display_name = member
-                .display_name
-                .clone()
-                .unwrap_or_else(|| db::discord_id_to_string(member.discord_id));
-            let rank_score = member.rank_score.unwrap_or(0);
-
-            sqlx::query(
-                r#"INSERT INTO turnier."team_members"
-                 (team_id, discord_id, discord_name, steam_id, rank, rank_score, role, joined_at)
-                 VALUES ($1, $2, $3, NULL, $4, $5, $6, now())"#,
+            let display_name = pool_user_name(member);
+            let rank = pool_user_rank(member);
+            helpers::insert_team_member(
+                &mut tx,
+                team_id,
+                member.discord_id,
+                Some(&display_name),
+                &rank,
+                role,
             )
-            .bind(team_id)
-            .bind(member.discord_id)
-            .bind(&display_name)
-            .bind(&member.rank)
-            .bind(rank_score)
-            .bind(role)
-            .execute(&mut *tx)
             .await?;
-
-            sqlx::query(
-                r#"INSERT INTO turnier."tournament_signups"
-                 (tournament_id, discord_id, discord_name, steam_id, rank, rank_score, team_id, signed_up_at)
-                 VALUES ($1, $2, $3, NULL, $4, $5, $6, now())"#,
+            helpers::insert_signup(
+                &mut tx,
+                tournament_id,
+                member.discord_id,
+                Some(&display_name),
+                &rank,
+                Some(team_id),
             )
-            .bind(tournament_id)
-            .bind(member.discord_id)
-            .bind(&display_name)
-            .bind(&member.rank)
-            .bind(rank_score)
-            .bind(team_id)
-            .execute(&mut *tx)
             .await?;
-
-            crate::public::helpers::insert_checkin(&mut tx, tournament_id, member.discord_id)
-                .await?;
+            helpers::insert_checkin(&mut tx, tournament_id, member.discord_id).await?;
         }
     }
 
@@ -1033,25 +1088,33 @@ async fn insert_solo_test_signups(
     users: &[PoolUserRow],
 ) -> WebResult<()> {
     for member in users {
-        let display_name = member
-            .display_name
-            .clone()
-            .unwrap_or_else(|| db::discord_id_to_string(member.discord_id));
-        sqlx::query(
-            r#"INSERT INTO turnier."tournament_signups"
-             (tournament_id, discord_id, discord_name, steam_id, rank, rank_score, signed_up_at)
-             VALUES ($1, $2, $3, NULL, $4, $5, now())"#,
+        let display_name = pool_user_name(member);
+        helpers::insert_signup(
+            tx,
+            tournament_id,
+            member.discord_id,
+            Some(&display_name),
+            &pool_user_rank(member),
+            None,
         )
-        .bind(tournament_id)
-        .bind(member.discord_id)
-        .bind(&display_name)
-        .bind(&member.rank)
-        .bind(member.rank_score.unwrap_or(0))
-        .execute(&mut **tx)
         .await?;
-        crate::public::helpers::insert_checkin(tx, tournament_id, member.discord_id).await?;
+        helpers::insert_checkin(tx, tournament_id, member.discord_id).await?;
     }
     Ok(())
+}
+
+fn pool_user_name(user: &PoolUserRow) -> String {
+    user.display_name
+        .clone()
+        .unwrap_or_else(|| db::discord_id_to_string(user.discord_id))
+}
+
+fn pool_user_rank(user: &PoolUserRow) -> helpers::RankInput {
+    helpers::RankInput {
+        steam_id: None,
+        rank: user.rank.clone(),
+        rank_score: user.rank_score.unwrap_or(0),
+    }
 }
 
 /// Rückt ein frisch erzeugtes Test-Turnier je nach `advance_to` vor. Nutzt die
@@ -1063,7 +1126,7 @@ async fn advance_test_tournament(
     tournament_id: i64,
     actor_id: &str,
 ) -> WebResult<()> {
-    if body.advance_to == "group_phase" || body.advance_to == "bracket" {
+    if body.advance_to != TestAdvance::Checkin {
         // Dry-Run für den Snapshot-Token, dann bestätigtes Vorrücken.
         let preview = turnier_engine::finalize_checkin(
             &state.pool,
@@ -1088,9 +1151,9 @@ async fn advance_test_tournament(
         .await?;
     }
 
-    if body.advance_to == "bracket" {
+    if body.advance_to == TestAdvance::Bracket {
         let flags = ensure_test_tournament(&state.pool, tournament_id).await?;
-        if flags.status == "group_phase" {
+        if flags.status == TournamentStatus::GroupPhase {
             turnier_scheduler::advance_tournament_status(
                 &state.pool,
                 &state.match_manager,
@@ -1139,6 +1202,11 @@ async fn simulate_test_tournament_round(
 ) -> WebResult<Json<SimulateRoundResponse>> {
     ensure_test_schema(&state.pool).await?;
     let flags = ensure_test_tournament(&state.pool, tournament_id).await?;
+    if !SIMULATABLE_STATUSES.contains(&flags.status) {
+        return Err(WebError::bad_request(
+            "Runden lassen sich nur in der Gruppenphase oder im Bracket simulieren",
+        ));
+    }
 
     let finished_statuses: Vec<&str> = FINISHED_MATCH_STATUSES.to_vec();
     let bracket_rows: Vec<OpenBracketMatch> = sqlx::query_as(
@@ -1175,7 +1243,7 @@ async fn simulate_test_tournament_round(
     let mut rng = Rng::new();
     let mut simulated_matches: i64 = 0;
 
-    if !group_rows.is_empty() && flags.status == "group_phase" {
+    if !group_rows.is_empty() && flags.status == TournamentStatus::GroupPhase {
         for row in &group_rows {
             let (Some(t1), Some(t2)) = (row.team1_id, row.team2_id) else {
                 continue;
@@ -1291,33 +1359,36 @@ fn validate_range(value: i64, lo: i64, hi: i64, field: &str) -> WebResult<()> {
     Ok(())
 }
 
-/// Übersetzt den Request-`mode` in den DB-`tournament_mode` (1:1 zu
-/// `_normalize_test_mode`).
-fn normalize_test_mode(mode: &str) -> &'static str {
-    if mode == "group_then_bracket" {
-        "group_stage"
-    } else if mode == "league" {
-        "league"
-    } else {
-        "bracket_only"
-    }
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-/// Erzeugt einen eindeutigen Teamnamen aus dem Captain-Basisnamen
-/// (case-insensitive, mit `(n)`-Suffix bei Kollision). Portiert `_team_name`.
-fn team_name(base_name: &str, existing_keys: &mut HashSet<String>) -> (String, String) {
-    let mut candidate = format!("{base_name} Team");
-    candidate = candidate.trim().to_string();
-    if candidate.is_empty() {
-        candidate = "Test Team".to_string();
+    fn targets(mode: TournamentMode, solo_signups: bool) -> Vec<TestAdvance> {
+        test_tournament_options_value()
+            .advance_rules
+            .into_iter()
+            .find(|rule| rule.mode == mode && rule.solo_signups == solo_signups)
+            .map(|rule| rule.advance_to)
+            .unwrap_or_default()
     }
-    let mut team_name = candidate.clone();
-    let mut suffix = 1;
-    while existing_keys.contains(&turnier_engine::name_key(&team_name)) {
-        suffix += 1;
-        team_name = format!("{candidate} ({suffix})");
+
+    #[test]
+    fn served_advance_rules_match_the_create_check() {
+        use TestAdvance::{Bracket, Checkin, GroupPhase};
+        assert_eq!(
+            targets(TournamentMode::BracketOnly, false),
+            [Checkin, Bracket]
+        );
+        assert_eq!(
+            targets(TournamentMode::GroupStage, false),
+            [Checkin, GroupPhase, Bracket]
+        );
+        assert_eq!(
+            targets(TournamentMode::League, false),
+            [Checkin, GroupPhase]
+        );
+        for mode in TEST_MODES {
+            assert_eq!(targets(mode, true), [Checkin]);
+        }
     }
-    let name_key = turnier_engine::name_key(&team_name);
-    existing_keys.insert(name_key.clone());
-    (team_name, name_key)
 }

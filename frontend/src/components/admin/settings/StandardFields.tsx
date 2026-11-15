@@ -86,7 +86,6 @@ export function MatchFormatFields({ idPrefix, value, onChange, league }: FieldGr
           id={`${idPrefix}-team-size`}
           type="number"
           min={1}
-          max={20}
           value={value.teamSize}
           onChange={(event) => onChange({ teamSize: Number(event.target.value) })}
           className={INPUT_CLASS}

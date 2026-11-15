@@ -36,6 +36,7 @@ import type {
   LeaderboardEntry,
   PlayerProfile,
   BracketMiniGroup,
+  TestTournamentOptions,
   TestUser,
   CreateTestTournamentRequest,
   CreateTestTournamentResult,
@@ -347,6 +348,9 @@ export const createTestUsers = (count: number) =>
 
 export const wipeTestUsers = () =>
   request<{ deleted: number }>('/admin/test/users', { method: 'DELETE' })
+
+export const getTestTournamentOptions = () =>
+  request<TestTournamentOptions>('/admin/test/tournaments/options')
 
 export const createTestTournament = (data: CreateTestTournamentRequest) =>
   request<CreateTestTournamentResult>('/admin/test/tournaments', {

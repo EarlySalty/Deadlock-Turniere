@@ -704,10 +704,27 @@ export interface CreateTestTournamentRequest {
   name: string
   team_size: number
   num_teams: number
-  mode: 'bracket_only' | 'group_then_bracket' | 'league'
+  mode: TournamentMode
   tournament_game_mode?: TournamentGameMode
-  advance_to?: 'checkin' | 'group_phase' | 'bracket'
+  advance_to?: TestAdvance
   solo_signups?: boolean
+}
+
+export type TestAdvance = 'checkin' | 'group_phase' | 'bracket'
+
+export interface TestAdvanceRule {
+  mode: TournamentMode
+  solo_signups: boolean
+  advance_to: TestAdvance[]
+}
+
+export interface TestTournamentOptions {
+  user_count_max: number
+  team_size_max: number
+  num_teams_min: number
+  num_teams_max: number
+  advance_rules: TestAdvanceRule[]
+  simulatable_statuses: TournamentStatus[]
 }
 
 export interface CreateTestTournamentResult {

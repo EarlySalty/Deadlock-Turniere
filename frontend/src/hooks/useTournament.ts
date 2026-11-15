@@ -15,7 +15,7 @@ import {
   fetchAvailableCasters,
   fetchTournamentCasters, assignTournamentCaster, removeTournamentCaster,
   fetchTestUsers, createTestUsers, wipeTestUsers,
-  createTestTournament, simulateTestRound, wipeTestData,
+  createTestTournament, simulateTestRound, wipeTestData, getTestTournamentOptions,
   fetchMatchEventPresets, applyMatchConvars, applyMatchEventPreset,
   createAdminTeam, renameAdminTeam, deleteAdminTeam,
   changeAdminCaptain, removeAdminTeamMember, moveAdminTeamMember,
@@ -520,6 +520,14 @@ export function useTestUsers(enabled = true) {
     queryKey: ['admin', 'test', 'users'],
     queryFn: fetchTestUsers,
     enabled,
+  })
+}
+
+export function useTestTournamentOptions() {
+  return useQuery({
+    queryKey: ['admin', 'test', 'tournament-options'],
+    queryFn: getTestTournamentOptions,
+    staleTime: Infinity,
   })
 }
 

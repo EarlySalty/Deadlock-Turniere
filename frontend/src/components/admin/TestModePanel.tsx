@@ -9,11 +9,16 @@ import {
   useSimulateTestRound,
   useWipeTestData,
   useAdminTournaments,
+  useTestTournamentOptions,
 } from '@/hooks/useTournament'
 import type {
   CreateTestTournamentRequest,
+  TestAdvance,
+  TestTournamentOptions,
   TournamentGameMode,
+  TournamentMode,
 } from '@/types/tournament'
+import { GAME_MODE_OPTIONS, MODE_OPTIONS } from '@/components/admin/settings/options'
 import {
   AlertTriangle,
   CheckCircle2,
@@ -25,36 +30,33 @@ import {
 } from 'lucide-react'
 import { pluralize } from '@/lib/countLabel'
 
-const GAME_MODES: { value: TournamentGameMode; label: string }[] = [
-  { value: 'standard', label: 'Standard' },
-  { value: 'mirror', label: 'Mirror Match' },
-  { value: 'all_same', label: 'All Same Hero' },
-  { value: 'random_heroes', label: 'Random Heroes' },
-  { value: 'single_lane', label: 'Single Lane Battle' },
-]
-
 type StatusMsg = { kind: 'success' | 'error'; text: string }
-type AdvanceTo = CreateTestTournamentRequest['advance_to']
-type TestMode = CreateTestTournamentRequest['mode']
 
-const SIMULATABLE_STATUSES = new Set(['group_phase', 'bracket'])
-
-function advanceOptions(mode: TestMode, soloSignups: boolean): { value: AdvanceTo; label: string }[] {
-  const options: { value: AdvanceTo; label: string }[] = [{ value: 'checkin', label: 'Check-in' }]
-  if (soloSignups) return options
-  if (mode === 'group_then_bracket') options.push({ value: 'group_phase', label: 'Gruppenphase' })
-  if (mode === 'league') options.push({ value: 'group_phase', label: 'Spielplan' })
-  if (mode !== 'league') options.push({ value: 'bracket', label: 'Bracket' })
-  return options
+function advanceLabel(target: TestAdvance, mode: TournamentMode): string {
+  if (target === 'checkin') return 'Check-in'
+  if (target === 'bracket') return 'Bracket'
+  return mode === 'league' ? 'Spielplan' : 'Gruppenphase'
 }
 
-function allowedAdvanceTo(mode: TestMode, soloSignups: boolean, current: AdvanceTo): AdvanceTo {
-  return advanceOptions(mode, soloSignups).some((option) => option.value === current) ? current : 'checkin'
+function allowedTargets(
+  options: TestTournamentOptions | undefined,
+  mode: TournamentMode,
+  soloSignups: boolean,
+): TestAdvance[] {
+  return (
+    options?.advance_rules.find((rule) => rule.mode === mode && rule.solo_signups === soloSignups)
+      ?.advance_to ?? ['checkin']
+  )
+}
+
+function keepAllowed(targets: TestAdvance[], current: TestAdvance | undefined): TestAdvance {
+  return current && targets.includes(current) ? current : 'checkin'
 }
 
 export default function TestModePanel() {
   const { data: testUsers = [], isLoading: loadingUsers } = useTestUsers()
   const { data: allTournaments = [] } = useAdminTournaments()
+  const { data: options } = useTestTournamentOptions()
   const createUsers = useCreateTestUsers()
   const wipeUsers = useWipeTestUsers()
   const createTournament = useCreateTestTournament()
@@ -209,7 +211,7 @@ export default function TestModePanel() {
                 id="test-user-count"
                 type="number"
                 min={1}
-                max={100}
+                max={options?.user_count_max}
                 value={userCount}
                 onChange={(e) => setUserCount(Math.max(1, Number(e.target.value) || 1))}
                 className="w-24 rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
@@ -287,7 +289,7 @@ export default function TestModePanel() {
                 }
                 className="rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
               >
-                {GAME_MODES.map((m) => (
+                {GAME_MODE_OPTIONS.map((m) => (
                   <option key={m.value} value={m.value}>
                     {m.label}
                   </option>
@@ -299,12 +301,12 @@ export default function TestModePanel() {
               <input
                 type="number"
                 min={1}
-                max={12}
+                max={options?.team_size_max}
                 value={tournamentForm.team_size}
                 onChange={(e) =>
                   setTournamentForm({
                     ...tournamentForm,
-                    team_size: Math.max(1, Number(e.target.value) || 1),
+                    team_size: Number(e.target.value) || 0,
                   })
                 }
                 className="rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
@@ -318,13 +320,13 @@ export default function TestModePanel() {
               </label>
               <input
                 type="number"
-                min={2}
-                max={128}
+                min={options?.num_teams_min}
+                max={options?.num_teams_max}
                 value={tournamentForm.num_teams}
                 onChange={(e) =>
                   setTournamentForm({
                     ...tournamentForm,
-                    num_teams: Math.max(2, Number(e.target.value) || 2),
+                    num_teams: Number(e.target.value) || 0,
                   })
                 }
                 className="rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
@@ -337,19 +339,20 @@ export default function TestModePanel() {
                 onChange={(e) =>
                   setTournamentForm({
                     ...tournamentForm,
-                    mode: e.target.value as TestMode,
-                    advance_to: allowedAdvanceTo(
-                      e.target.value as TestMode,
-                      tournamentForm.solo_signups ?? false,
+                    mode: e.target.value as TournamentMode,
+                    advance_to: keepAllowed(
+                      allowedTargets(options, e.target.value as TournamentMode, tournamentForm.solo_signups ?? false),
                       tournamentForm.advance_to,
                     ),
                   })
                 }
                 className="rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
               >
-                <option value="bracket_only">Nur Bracket</option>
-                <option value="group_then_bracket">Gruppen + Bracket</option>
-                <option value="league">Jeder gegen jeden</option>
+                {MODE_OPTIONS.map((m) => (
+                  <option key={m.value} value={m.value}>
+                    {m.label}
+                  </option>
+                ))}
               </select>
             </div>
             <div className="flex flex-col gap-1">
@@ -360,14 +363,14 @@ export default function TestModePanel() {
                 onChange={(e) =>
                   setTournamentForm({
                     ...tournamentForm,
-                    advance_to: e.target.value as AdvanceTo,
+                    advance_to: e.target.value as TestAdvance,
                   })
                 }
                 className="rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
               >
-                {advanceOptions(tournamentForm.mode, tournamentForm.solo_signups ?? false).map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
+                {allowedTargets(options, tournamentForm.mode, tournamentForm.solo_signups ?? false).map((target) => (
+                  <option key={target} value={target}>
+                    {advanceLabel(target, tournamentForm.mode)}
                   </option>
                 ))}
               </select>
@@ -380,7 +383,10 @@ export default function TestModePanel() {
                   setTournamentForm({
                     ...tournamentForm,
                     solo_signups: e.target.checked,
-                    advance_to: allowedAdvanceTo(tournamentForm.mode, e.target.checked, tournamentForm.advance_to),
+                    advance_to: keepAllowed(
+                      allowedTargets(options, tournamentForm.mode, e.target.checked),
+                      tournamentForm.advance_to,
+                    ),
                   })
                 }
                 className="mt-1"
@@ -428,7 +434,7 @@ export default function TestModePanel() {
                       Status: {t.status} · Game-Mode: {t.tournament_game_mode}
                     </span>
                   </div>
-                  {SIMULATABLE_STATUSES.has(t.status) && (
+                  {options?.simulatable_statuses.includes(t.status) && (
                     <Button
                       variant="secondary"
                       size="sm"
