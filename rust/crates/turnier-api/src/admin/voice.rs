@@ -1,5 +1,5 @@
 //! Discord-Voice-Steuerung (Admin): Teams in VC1/VC2 verschieben, alle in den
-//! Sammelpunkt, einzelne User verschieben, Channel-Mitglieder abfragen.
+//! Sammelpunkt, einzelne User verschieben.
 
 use axum::extract::{Path, Query, State};
 use axum::routing::post;
@@ -132,7 +132,6 @@ impl VoiceTarget {
     }
 }
 
-/// Body von `move-user` (`discord_id` + `target`).
 #[derive(Debug, Deserialize)]
 struct VoiceMoveBody {
     discord_id: String,

@@ -9,6 +9,8 @@ import {
 } from '@/api/client'
 import type { CaptainWish, SaveStep } from '@/lib/teamBuilder'
 import type { Team } from '@/types/tournament'
+import { teamNameOr } from '@/lib/teamName'
+import { playerName } from '@/lib/playerName'
 
 export interface SaveContext {
   tournamentId: number
@@ -21,7 +23,7 @@ export class SaveStepError extends Error {}
 
 function teamIdOf(ctx: SaveContext, key: string): number {
   const id = ctx.teamIds.get(key)
-  if (id === undefined) throw new SaveStepError(`Team „${ctx.teamNames.get(key) ?? key}“ wurde nicht angelegt.`)
+  if (id === undefined) throw new SaveStepError(`Team „${teamNameOr(ctx.teamNames.get(key), key)}“ wurde nicht angelegt.`)
   return id
 }
 
@@ -33,10 +35,10 @@ async function resolveSignupId(ctx: SaveContext, discordId: string): Promise<num
 }
 
 export function describeStep(ctx: SaveContext, step: SaveStep): string {
-  const team = ctx.teamNames.get(step.teamKey) ?? 'Team'
+  const team = teamNameOr(ctx.teamNames.get(step.teamKey), 'Team')
   if (step.kind === 'create') return `Team „${step.name}“ anlegen`
   if (step.kind === 'rename') return `Team in „${step.name}“ umbenennen`
-  const player = ctx.playerNames.get(step.discordId) ?? 'Spieler'
+  const player = playerName(ctx.playerNames.get(step.discordId), 'Spieler')
   if (step.kind === 'remove') return `${player} aus „${team}“ entfernen`
   return `${player} in „${team}“ eintragen`
 }
@@ -68,11 +70,11 @@ async function runStep(ctx: SaveContext, step: SaveStep): Promise<void> {
 }
 
 function captainTarget(ctx: SaveContext, teams: Team[], wish: CaptainWish): Team {
-  const teamName = ctx.teamNames.get(wish.teamKey) ?? 'Team'
+  const teamName = teamNameOr(ctx.teamNames.get(wish.teamKey), 'Team')
   const team = teams.find((t) => t.id === ctx.teamIds.get(wish.teamKey))
   if (!team) throw new SaveStepError(`„${teamName}“ wurde nicht gefunden.`)
   if (!team.members.some((m) => m.discord_id === wish.discordId)) {
-    const player = ctx.playerNames.get(wish.discordId) ?? 'Der Spieler'
+    const player = playerName(ctx.playerNames.get(wish.discordId), 'Der Spieler')
     throw new SaveStepError(`${player} ist nicht mehr in „${teamName}“.`)
   }
   return team

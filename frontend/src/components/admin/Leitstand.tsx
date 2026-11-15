@@ -8,6 +8,7 @@ import {
 } from '@/hooks/useTournament'
 import { latestActionError } from '@/lib/latestError'
 import type { ActionItem } from '@/types/tournament'
+import { teamNameOr } from '@/lib/teamName'
 
 interface LeitstandProps {
   tournamentId: number
@@ -25,7 +26,7 @@ function ActionRow({
   const busy = confirm.isPending || reject.isPending
   const actionError = latestActionError([confirm, reject])
 
-  const matchup = `${item.team1_name ?? 'Team 1'} vs ${item.team2_name ?? 'Team 2'}`
+  const matchup = `${teamNameOr(item.team1_name, 'Team 1')} vs ${teamNameOr(item.team2_name, 'Team 2')}`
 
   return (
     <div className="rounded-lg border border-border bg-card-hover/40 p-3">
@@ -56,7 +57,7 @@ function ActionRow({
                 className={item.grace_expired ? 'text-red-400' : 'text-warning'}
               />
               <span className={item.grace_expired ? 'text-red-300' : 'text-warning'}>
-                No-Show gemeldet: {item.no_show_name ?? 'Team'} nicht erschienen
+                No-Show gemeldet: {teamNameOr(item.no_show_name, 'Team')} nicht erschienen
                 {item.grace_expired
                   ? '. Frist abgelaufen'
                   : `. Frist läuft (${item.grace_minutes} min)`}
@@ -66,7 +67,7 @@ function ActionRow({
             <div className="mt-1.5 text-xs text-foreground/80">
               Ergebnis gemeldet:{' '}
               <span className="font-medium text-foreground">
-                {item.winner_name ?? 'Sieger'}
+                {teamNameOr(item.winner_name, 'Sieger')}
               </span>{' '}
               gewinnt
               {item.deadlock_match_id ? (

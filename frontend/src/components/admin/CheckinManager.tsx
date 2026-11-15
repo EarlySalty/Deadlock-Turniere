@@ -14,6 +14,7 @@ import type {
 } from '@/types/tournament'
 import { AlertCircle, CheckCircle2, ClipboardCheck, TriangleAlert, UserCheck, X } from 'lucide-react'
 import { playerName } from '@/lib/playerName'
+import { teamNameOr } from '@/lib/teamName'
 
 interface CheckinManagerProps {
   tournamentId: number
@@ -62,7 +63,7 @@ export default function CheckinManager({
         discord_id: signup.discord_id,
         discord_name: signup.discord_name,
         team_id: signup.team_id,
-        team_name: team?.name ?? 'Solo',
+        team_name: teamNameOr(team?.name, 'Solo'),
         signup_id: signup.team_id === null ? signup.id : null,
       })
     }

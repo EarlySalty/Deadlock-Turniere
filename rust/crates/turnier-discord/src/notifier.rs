@@ -803,16 +803,6 @@ impl DiscordNotifier {
         results
     }
 
-    /// Liest die aktuellen Voice-Channel-Mitglieder über den Broker. Fehlendes
-    /// oder nicht-Listen-`members` → leere Liste (wie im Original).
-    pub async fn get_voice_channel_members(&self, channel_id: i64) -> BrokerResult<Vec<Value>> {
-        let result: Value = self
-            .broker
-            .post_internal(path::VOICE_MEMBERS, &json!({ "channel_id": channel_id }))
-            .await?;
-        Ok(members_list(&result))
-    }
-
     /// Liest Guild-Mitglieder einer Rolle über den Broker.
     pub async fn get_role_members(&self, guild_id: i64, role_id: i64) -> BrokerResult<Vec<Value>> {
         let result: Value = self

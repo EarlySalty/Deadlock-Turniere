@@ -7,6 +7,7 @@ import { CompApiError, useCompRoom, useCreateComp, useJoinComp, useLeaveComp, us
 import { compShareUrl, compositionText, nextPriority, normalizeCompCode, preferenceList, preferenceMap, priorityLabel } from '@/hooks/compState'
 import type { CompComposition, CompMember, CompPriority, CompRoom } from '@/types/comp'
 import type { DraftHero } from '@/types/draft'
+import { playerName } from '@/lib/playerName'
 import '@/comp.css'
 import { pluralize } from '@/lib/countLabel'
 
@@ -206,7 +207,7 @@ function CompositionCard({ room, composition, rank, heroes }: { room: CompRoom; 
 
 function Results({ room, heroes }: { room: CompRoom; heroes: DraftHero[] }) {
   const { results } = room
-  const names = (indices: number[]) => indices.map(i => room.members[i]?.name ?? 'Spieler').join(', ')
+  const names = (indices: number[]) => indices.map(i => playerName(room.members[i]?.name, 'Spieler')).join(', ')
   return <section aria-label="Passende Aufstellungen">
     <div className="mb-4 flex items-center gap-2"><Sparkles size={20} className="text-primary" /><h2 className="text-xl font-bold">Eure Aufstellungen</h2></div>
     <p className="mb-4 text-xs leading-relaxed text-muted">Summe der zugewiesenen Prioritäten. Bei Gleichstand zählen mehr höchste Prioritäten, danach eine stabile Heldenreihenfolge. Keine Meta- oder Synergie-Wertung.</p>

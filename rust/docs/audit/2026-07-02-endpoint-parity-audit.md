@@ -168,7 +168,7 @@ Effektiver Prefix Python/Rust: `/api/admin`.
 | 53 | `POST /api/admin/tournaments/{tournament_id}/voice/move-teams` | `backend/tournament/admin_routes.py:3238` | `rust/crates/turnier-api/src/admin/voice.rs:42` | admin | OK; Query-Rejection siehe F-001 |
 | 54 | `POST /api/admin/tournaments/{tournament_id}/voice/move-sammelpunkt` | `backend/tournament/admin_routes.py:3282` | `rust/crates/turnier-api/src/admin/voice.rs:90` | admin | OK |
 | 55 | `POST /api/admin/voice/move-user` | `backend/tournament/admin_routes.py:3310` | `rust/crates/turnier-api/src/admin/voice.rs:129` | admin | OK; Validation-Rejection siehe F-001 |
-| 56 | `GET /api/admin/voice/channel-members/{channel_id}` | `backend/tournament/admin_routes.py:3322` | `rust/crates/turnier-api/src/admin/voice.rs:143` | admin | OK |
+| 56 | `GET /api/admin/voice/channel-members/{channel_id}` | `backend/tournament/admin_routes.py:3322` | entfernt 2026-11-15 (fix/pug-chaos-20261114, Commit 7d58e07): kein Client-Aufrufer mehr | admin | entfernt |
 
 Hinweis: Die Matrix enthaelt alle 56 Admin-Routen aus `admin_routes.py`; zusammen mit 23 Public-Routen wurden 79 konkrete Route-Decoratoren/Methoden geprueft.
 

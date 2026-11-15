@@ -100,11 +100,6 @@ async fn app_state_uses_the_validated_snapshot_for_oauth_broker_heroes_and_roles
             assert_eq!(body["metadata"]["guild_id"], "701");
             assert_eq!(body["redirect_after"], "https://tournament.example/events/auth/discord/complete");
             Json(json!({"authorize_url": "https://login.example/authorize"}))
-        }))
-        .route("/internal/master/v1/discord/voice-channel/members", post(|headers: axum::http::HeaderMap, Json(body): Json<Value>| async move {
-            assert!(headers.contains_key("x-internal-token"));
-            assert_eq!(body["channel_id"], 705);
-            Json(json!({"channel_id": 705, "members": [{"user_id": 706}]}))
         }))).await;
     let config = Arc::new(configured(&server.base));
     let state = state(config.clone()).await;
@@ -116,10 +111,6 @@ async fn app_state_uses_the_validated_snapshot_for_oauth_broker_heroes_and_roles
     assert_eq!(
         state.oauth.initiate_login().await.unwrap(),
         "https://login.example/authorize"
-    );
-    assert_eq!(
-        state.notifier.get_voice_channel_members(705).await.unwrap(),
-        vec![json!({"user_id": 706})]
     );
     let heroes = state.heroes.heroes().await;
     assert_eq!(heroes.len(), 1);

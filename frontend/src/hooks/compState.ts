@@ -1,4 +1,5 @@
 import type { CompComposition, CompPreference, CompPriority, CompRoom } from '../types/comp.ts'
+import { playerName } from '../lib/playerName.ts'
 
 export function normalizeCompCode(input: string): string | null {
   const value = input.trim().toUpperCase()
@@ -41,7 +42,7 @@ export function preferenceList(preferences: Record<string, CompPriority>): CompP
 export function compositionText(room: CompRoom, composition: CompComposition, rank: number): string {
   return [
     `Comp ${rank}: ${composition.score}/${room.results.max_score} Wunschpunkte`,
-    ...composition.assignments.map(a => `${room.members[a.player_index]?.name ?? 'Spieler'}: ${a.hero_name} (${a.priority} P.)`),
+    ...composition.assignments.map(a => `${playerName(room.members[a.player_index]?.name, 'Spieler')}: ${a.hero_name} (${a.priority} P.)`),
     'Bewertet Heldenwünsche, keine Meta- oder Synergie-Bewertung.',
   ].join('\n')
 }

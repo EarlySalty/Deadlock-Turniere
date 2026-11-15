@@ -111,7 +111,7 @@ Automatisierte Methode/Pfad-Gegenprobe: 109 Python-Routen und 109 Rust-Routen; k
 | `POST /api/admin/tournaments/{tournament_id}/voice/move-teams` `voice_move_teams` @ `backend/tournament/admin_routes.py:3239` | `move_teams` @ `rust/crates/turnier-api/src/admin/voice.rs:19` | vorhanden | `require_admin`; Match-Teams in VC1/VC2 verschieben. |
 | `POST /api/admin/tournaments/{tournament_id}/voice/move-sammelpunkt` `voice_move_sammelpunkt` @ `backend/tournament/admin_routes.py:3283` | `move_sammelpunkt` @ `rust/crates/turnier-api/src/admin/voice.rs:20` | vorhanden | `require_admin`; Teilnehmer in Sammelpunkt verschieben. |
 | `POST /api/admin/voice/move-user` `voice_move_user` @ `backend/tournament/admin_routes.py:3311` | `move_user` @ `rust/crates/turnier-api/src/admin/voice.rs:21` | vorhanden | `require_admin`; einzelnen User verschieben. |
-| `GET /api/admin/voice/channel-members/{channel_id}` `voice_get_channel_members` @ `backend/tournament/admin_routes.py:3323` | `channel_members` @ `rust/crates/turnier-api/src/admin/voice.rs:22` | vorhanden | `require_admin`; Voice-Channel-Mitglieder lesen. |
+| `GET /api/admin/voice/channel-members/{channel_id}` `voice_get_channel_members` @ `backend/tournament/admin_routes.py:3323` | entfernt 2026-11-15 (fix/pug-chaos-20261114, Commit 7d58e07) | entfernt | Kein Client-Aufrufer mehr; Voice-Moves lösen Kanäle serverseitig auf. |
 
 ## HTTP-Routen: Operations
 
