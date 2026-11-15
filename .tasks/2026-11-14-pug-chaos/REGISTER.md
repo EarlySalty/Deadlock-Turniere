@@ -66,6 +66,45 @@ Evidence sources: `turnier.audit_log` (tournament 16), Caddy access logs `ddc.ac
 
 P3b solo-only built (`auto_team_formation` off, player team actions answer 403 with a German hint, public page hides "Team gründen", invitation accept and the recruiting badge, the admin hides the recruiting toggle, `InviteMode::SoloOnly` decoded as in GATE-R1-TRIAGE K3, team size 1 creates no team in solo_only). Rest of wave 2 in TODO.md.
 
+## I. Gate round 3 pre-review
+
+Round 3 on 58ad385 was lost to the reviewer's 5 h usage limit after about two hours (no verdict, not counted). Its five BLOCK reasons were treated as a pre-review, ledger lines appended (classes a to g), every class fixed with its twins:
+
+- a, client reads fields the server never sends: auto lobby renders the server's `scheduled`/`skipped` report ("Keine Lobby erstellt" with the reason), voice move sends `target` (sammelpunkt, team1, team2) and the server maps it to the configured channel, so no 19-digit snowflake passes through `parseInt` (7d58e07).
+- b, mutations without rendered rejection: every `useMutation` caller renders its error through `latestActionError` (24cca4a).
+- c, snowflakes and guessed failure texts: Discord ids stay strings end to end; channel and guild ids are validated > 0 at config load (`turnier-config/src/file.rs:438-473`); the voice panel shows the server reason (7d58e07).
+- d, client copies of server rules and option lists: bracket, series, mode, game mode and match objective options come from `components/admin/settings/options.ts`; the match objective is a select that keeps an unknown stored code (57710d3); registration window, solo balance and replacement players come from the server (`registration_open`, `replacements_open`, `GET .../solo-balance/availability` with the server's own refusal text) (cfc941a and the status commit).
+- e, locks and row writers per crate: one tournament row lock and one writer per team, member and signup row in the lowest shared crate (0872f5e); one team name rule in the engine, solo teams named "Name (2)" on collision (0201953).
+- f, two decoders and enum columns as strings: `tournament_from_row` is the one decoder; `bracket_format`, `played_bracket_format` and the tournament status decode into their enums (cfc941a). The status commit types `TournamentStatus` and `TournamentMode` through scheduler, engine, automatik, match and api: `DueStatusRow`, `advance_tournament_status`, `ensure_not_leaving_checkin`, `schedule_lobbies_best_effort`, `entered_status`, start gap, reminders, snapshot token settings, admin update, open/revert check-in, advance, league plan, consent and test-mode status lists (`TournamentStatus::PLANNED`, `PARTICIPATING`), local `status_str`/`mode_str`/`parse_status` copies removed.
+- g, test mode with own rule copies: test mode calls the production rules and writers and serves its limits (2d1c7aa).
+
+Narrowed claims, rest in `claude-config/orchestrierung/OFFENE-URSACHEN.md` with file:line: tournament status SQL text literals (fix belongs at the column as a CHECK constraint, new migration), and match, lobby, application and recruitment statuses still held as `String`.
+
+Behaviour changes to know:
+
+- Solo teams with a taken name get "Name (2)" instead of failing.
+- Row timestamps come from the database `now()`.
+- Test mode accepts `mode` `group_stage`, `bracket_only`, `league` (the old `group_then_bracket` is refused; no client sent it) and `advance_to` as enums; a wrong value gets axum's JSON rejection like every other route instead of a German 422 text. Simulate is refused outside group phase and bracket.
+- The match objective in PresetForm is a select.
+- `GET /api/admin/voice/channel-members/{channel_id}` is removed (no client caller since 7d58e07), the unused `DiscordNotifier::get_voice_channel_members` and its test are gone, both audit tables mark the route removed.
+- The solo balance panel shows the server's refusal text ("Teams können nur nach der Anmeldung während des Check-ins ausgeglichen werden.", "Es existieren bereits Teams. ...") instead of a client guess.
+- Name fallbacks go through `teamNameOr`/`teamLabel` and `playerName`.
+
+Suite count 633 to 623 explained (test-round5.log against suite-r3.log): 12 OAuth and broker error detail tests collapsed into 2 `http_error_detail` tests (1ad2be7), `as_str_round_trips_through_parse` went with the InviteMode rework (dea04fb), `bracket_only_checkin_...` and `paralleler_group_phase_uebergang...` replaced by `checkin_endet_nur_ueber_finalize` and `paralleler_check_in_abschluss...` (a719ae7), one harness test renamed (dea04fb), `duplicate_name_ids_trim_unicode...` added.
+
+Sichtprüfung cause layer: this repo has no visual check target in `claude-config/tools/sichtpruefung/ziele.json`, so the bridge only adds a note and nobody saw the UI bugs before tournament 16. `ziele.json` left unchanged; next package in OFFENE-URSACHEN, based on the Moli fixture of this branch (test-only API binary with every external URL on 127.0.0.1:9, vite proxy to it, Moli driver creating is_test tournaments).
+
+Browser proofs on a55d848 (Moli, test-only API binary on the ionos throwaway DB, production bundle via `vite preview` and the dev server, is_test tournaments only; screenshots in `~/.claude/sichtpruefung/pug-chaos/r3b-*-1440.png`, `r3c-voice-1440.png`):
+
+- Auto lobby: "Keine Lobby erstellt: Auto-Lobby ist für dieses Turnier aus oder es ist ein Testturnier." rendered under the button (1440 and 390).
+- Voice move: request body `{"discord_id":"1300000000000000001","target":"sammelpunkt"}`, the 19-digit id comes back unchanged in the response, the panel renders "0 Spieler verschoben, 1 fehlgeschlagen: Discord-Master-Broker ist nicht authentifiziert" (1440 and 390).
+- Draft: start and first pick work, "Test User 398307 Team bannt" shown (1440 and 390).
+- PresetForm: team size 25 gets 400 `Teamgröße muss zwischen 1 und 20 liegen`, rendered above "Speichern" (1440 and 390); the selects carry the server option lists.
+- Add-player form: hidden in bracket ("Spieler ersetzen" shown instead), shown in check-in (1440 and 390); the solo balance panel shows the server refusal text in both phases.
+- 1440: scrollWidth equals the viewport on every page. 390: text and DOM proofs only. Moli stalls in layout on the admin tournament detail at 390 px (the CDP capture, `getBoundingClientRect` and `scrollIntoView` never return, the render thread spins, a debugger pause gets no answer); the 379b35e bundle stalls the same way (5 of 5), so it is not caused by this branch. Host load was 40 to 55 during the runs. A 390 px screenshot pass in a real browser stays open and needs the user's browser approval.
+
+Gate tool causes, recorded in OFFENE-URSACHEN without gate code changes: `review_gate.py:4885-4887` shows stderr first, so the CLI sign-in warning hid "Kontingent erschöpft"; a late reviewer failure loses the whole run and the window is not checked before start.
+
 ## Tournament 16 and 17
 
 - 16 (not modified): the five teams should match the Discord picks in message 1571211196634243204. Correction left to the organisers.
@@ -75,6 +114,7 @@ P3b solo-only built (`auto_team_formation` off, player team actions answer 403 w
 
 - The broker contract between Turniere and Deadlock-Bots has no shared test or startup probe (outside this repo, `OFFENE-URSACHEN.md`).
 - Live admin browser pass on the production host after deploy.
+- 390 px screenshots of the admin tournament detail: Moli cannot lay the page out at that width (section I); needs a real browser with the user's approval.
 
 ## Commits
 
@@ -93,7 +133,17 @@ P3b solo-only built (`auto_team_formation` off, player team actions answer 403 w
 | Gate round 2 broker and OAuth | 1ad2be7 | one cookie helper, `broker::http_error_detail`, every OAuth failure branch logs |
 | Gate round 2 mode and format | dea04fb | typed `InviteMode`, `MIN_BRACKET_ENTRANTS`, `check_team_size` as the one team size rule |
 | Gate round 2 frontend | 379b35e | server name marks, draft presence with heartbeat and stale removal, `latestActionError`, count labels, `playerName` |
-| Gate round 2 lock twin and records | (this commit) | league `reschedule_plan` locks through `lock_tournament_row`; register, triage and README after round 2 |
+| Gate round 2 lock twin and records | 58ad385 | league `reschedule_plan` locks through `lock_tournament_row`; register, triage and README after round 2 |
+| Round 3 a, c | 7d58e07 | auto lobby renders the server report, voice move sends `target` and the server resolves the channel |
+| Round 3 b | 24cca4a | every mutation renders its error, counts and names through the shared helpers |
+| Round 3 e | 0201953 | one team name rule in the engine, "Name (2)" on collision |
+| Round 3 e | 0872f5e | one tournament row lock and one writer per team, member and signup row |
+| Round 3 g | 2d1c7aa | test mode calls the production rules and serves its limits |
+| Round 3 d | 57710d3 | option lists from `settings/options.ts`, match objective select |
+| Round 3 d, f | cfc941a | `tournament_from_row` as the one decoder, `registration_open` from the server |
+| Round 3 f | a1cee3e | `TournamentStatus` and `TournamentMode` typed through scheduler, engine, automatik, match and api |
+| Round 3 d | aff4188 | solo balance availability route and `replacements_open` from the server |
+| Round 3 a, d | a55d848 | dead voice members route removed, name fallbacks through `teamNameOr` and `playerName` |
 
 ## Test evidence
 
@@ -101,4 +151,5 @@ P3b solo-only built (`auto_team_formation` off, player team actions answer 403 w
 - `test-db-run dlcentral_test_turniere -- cargo-slot test --workspace --features testing --no-fail-fast` on ionos after the K1 to K13 fixes and again on the final tree (3a9021a plus records): 633 passed, 0 failed; the PUG contract test now also covers the played format and the snapshot token.
 - After the gate round 2 commits: the full ionos suite at dea04fb 622 passed and at 379b35e 623 passed, 0 failed; clippy clean with the turnier-api and turnier-scheduler testing features.
 - Frontend: `npm run lint` 0, `npm test` 31/31, `npx tsc -b` 0, `npm run build` 0.
+- Before gate round 3, on a55d848: full ionos suite 627 passed, 0 failed, 2 ignored (cfc941a had 626); workspace check with tests, clippy with and without `turnier-scheduler/testing`, rustfmt `--check`, `npx tsc -b`, `npm run lint`, `npm test` 31/31 and `npm run build` all clean.
 Commit messages of 1dcf35d, f7e7899, 5a84931 and 43e71e8 were reworded (layer 4 named Twins, claims matched to HEAD), and the K1 to K13 message was corrected on the add-by-name window; every rewritten commit has the tree of its original (checked per commit, plus git range-diff).
