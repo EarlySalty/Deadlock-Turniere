@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react'
 import { EMPTY_EDITS, type BuilderEdits, type TemporaryRename } from '@/lib/teamBuilder'
 
 export interface TeamBuilderDraft {
@@ -22,7 +23,9 @@ interface SharedPending {
 
 const EMPTY_DRAFT: TeamBuilderDraft = { edits: EMPTY_EDITS, renames: [] }
 const PREFIX = 'turniere.teamBuilderDraft.'
-const MAX_AGE_MS = 6 * 60 * 60 * 1000
+const HEARTBEAT_MS = 20_000
+const BACKGROUND_TIMER_FLOOR_MS = 60_000
+const STALE_AFTER_MS = 3 * BACKGROUND_TIMER_FLOOR_MS
 const tabId = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`
 const drafts = new Map<number, DraftEntry>()
 
@@ -49,15 +52,24 @@ function isEmpty(draft: TeamBuilderDraft): boolean {
   )
 }
 
-function freshPending(raw: string | null): number {
-  if (!raw) return 0
+function freshPending(raw: string | null): number | null {
+  if (!raw) return null
   try {
     const value = JSON.parse(raw) as Partial<SharedPending>
-    if (typeof value.pending !== 'number' || typeof value.savedAt !== 'number') return 0
-    return Date.now() - value.savedAt < MAX_AGE_MS ? Math.max(0, value.pending) : 0
+    if (typeof value.pending !== 'number' || typeof value.savedAt !== 'number') return null
+    return Date.now() - value.savedAt < STALE_AFTER_MS ? Math.max(0, value.pending) : null
   } catch {
-    return 0
+    return null
   }
+}
+
+function publish(tournamentId: number, pending: number) {
+  const shared: SharedPending = { pending, savedAt: Date.now() }
+  withStorage((storage) => storage.setItem(sharedKey(tournamentId), JSON.stringify(shared)))
+}
+
+function publishAll() {
+  for (const [tournamentId, entry] of drafts) publish(tournamentId, entry.pending)
 }
 
 function forgetSharedEntries() {
@@ -66,7 +78,11 @@ function forgetSharedEntries() {
   })
 }
 
-if (typeof window !== 'undefined') window.addEventListener('pagehide', forgetSharedEntries)
+if (typeof window !== 'undefined') {
+  window.addEventListener('pagehide', forgetSharedEntries)
+  window.addEventListener('pageshow', publishAll)
+  window.setInterval(publishAll, HEARTBEAT_MS)
+}
 
 export function readDraft(tournamentId: number): TeamBuilderDraft {
   return drafts.get(tournamentId)?.draft ?? EMPTY_DRAFT
@@ -80,20 +96,39 @@ export function writeDraft(tournamentId: number, draft: TeamBuilderDraft, change
     return
   }
   drafts.set(tournamentId, { draft, pending: changeCount })
-  const shared: SharedPending = { pending: changeCount, savedAt: Date.now() }
-  withStorage((storage) => storage.setItem(key, JSON.stringify(shared)))
+  publish(tournamentId, changeCount)
 }
 
-export function pendingDraftChanges(tournamentId: number): PendingDraftChanges {
+function pendingDraftChanges(tournamentId: number): PendingDraftChanges {
   const here = drafts.get(tournamentId)?.pending ?? 0
   let otherTabs = 0
   withStorage((storage) => {
     const prefix = `${PREFIX}${tournamentId}.`
     const own = sharedKey(tournamentId)
+    const stale: string[] = []
     for (let index = 0; index < storage.length; index += 1) {
       const key = storage.key(index)
-      if (key && key.startsWith(prefix) && key !== own) otherTabs += freshPending(storage.getItem(key))
+      if (!key || !key.startsWith(prefix) || key === own) continue
+      const pending = freshPending(storage.getItem(key))
+      if (pending === null) stale.unshift(key)
+      else otherTabs += pending
     }
+    for (const key of stale) storage.removeItem(key)
   })
   return { here, otherTabs }
+}
+
+export function usePendingDraftChanges(tournamentId: number, active: boolean): PendingDraftChanges {
+  const [, setTick] = useState(0)
+  useEffect(() => {
+    if (!active) return
+    const refresh = () => setTick((tick) => tick + 1)
+    window.addEventListener('storage', refresh)
+    const timer = window.setInterval(refresh, HEARTBEAT_MS)
+    return () => {
+      window.removeEventListener('storage', refresh)
+      window.clearInterval(timer)
+    }
+  }, [active])
+  return active ? pendingDraftChanges(tournamentId) : { here: 0, otherTabs: 0 }
 }

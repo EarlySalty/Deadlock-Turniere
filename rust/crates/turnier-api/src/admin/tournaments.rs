@@ -110,6 +110,8 @@ async fn get_tournament(
     let bracket_matches = load_bracket_matches(&state.pool, tournament_id).await?;
     let mini_groups = load_mini_groups_for_tournament(&state.pool, tournament_id).await?;
     let signups = load_signups_for_tournament(&state, tournament_id).await?;
+    let names = crate::public::helpers::participant_names(&state.pool, tournament_id).await?;
+    let guest_ids = guest_participant_ids(&teams, &signups);
     Ok(Json(TournamentDetail {
         tournament,
         teams,
@@ -117,7 +119,24 @@ async fn get_tournament(
         bracket_matches,
         mini_groups,
         signups,
+        guest_ids,
+        duplicate_name_ids: crate::public::helpers::duplicate_name_ids(&names),
     }))
+}
+
+fn guest_participant_ids(
+    teams: &[turnier_core::Team],
+    signups: &[turnier_core::TournamentSignup],
+) -> Vec<String> {
+    let mut ids: Vec<String> = teams
+        .iter()
+        .flat_map(|team| team.members.iter().map(|member| member.discord_id.clone()))
+        .chain(signups.iter().map(|signup| signup.discord_id.clone()))
+        .filter(|id| turnier_core::ids::is_guest_participant_id(id))
+        .collect();
+    ids.sort_unstable();
+    ids.dedup();
+    ids
 }
 
 async fn get_mini_groups(

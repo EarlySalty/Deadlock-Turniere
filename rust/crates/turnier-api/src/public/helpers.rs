@@ -919,8 +919,8 @@ impl TournamentRowData {
 /// Liest alle Turniere (DTO-Form) gemäß einer Filterbedingung.
 pub async fn list_tournament_dtos(pool: &Pool, where_order: &str) -> WebResult<Vec<Tournament>> {
     let rows = sqlx::query(&format!("{} {where_order}", tournament_select()))
-    .fetch_all(pool)
-    .await?;
+        .fetch_all(pool)
+        .await?;
     let mut out = Vec::with_capacity(rows.len());
     for row in rows {
         out.push(TournamentRowData::from_row(&row)?.into_tournament());
@@ -1102,6 +1102,48 @@ pub async fn lock_tournament_status(
     Ok(lock_tournament_or_404(tx, tournament_id).await?.status)
 }
 
+pub fn participant_name_key(name: &str) -> String {
+    turnier_engine::name_key(name.trim())
+}
+
+pub async fn participant_names<'e, E>(
+    executor: E,
+    tournament_id: i64,
+) -> WebResult<Vec<(i64, String)>>
+where
+    E: sqlx::Executor<'e, Database = Postgres>,
+{
+    Ok(sqlx::query_as(
+        r#"SELECT discord_id, discord_name FROM turnier."tournament_signups"
+         WHERE tournament_id = $1 AND discord_name IS NOT NULL
+         UNION
+         SELECT tm.discord_id, tm.discord_name FROM turnier."team_members" tm
+         JOIN turnier."teams" t ON t.id = tm.team_id
+         WHERE t.tournament_id = $1 AND tm.discord_name IS NOT NULL"#,
+    )
+    .bind(tournament_id)
+    .fetch_all(executor)
+    .await?)
+}
+
+pub fn duplicate_name_ids(names: &[(i64, String)]) -> Vec<String> {
+    let mut by_key: HashMap<String, std::collections::BTreeSet<i64>> = HashMap::new();
+    for (discord_id, name) in names {
+        let key = participant_name_key(name);
+        if !key.is_empty() {
+            by_key.entry(key).or_default().insert(*discord_id);
+        }
+    }
+    let mut ids: Vec<i64> = by_key
+        .into_values()
+        .filter(|ids| ids.len() > 1)
+        .flatten()
+        .collect();
+    ids.sort_unstable();
+    ids.dedup();
+    ids.into_iter().map(db::discord_id_to_string).collect()
+}
+
 pub async fn ensure_participant_name_free(
     tx: &mut sqlx::Transaction<'_, Postgres>,
     tournament_id: i64,
@@ -1109,22 +1151,12 @@ pub async fn ensure_participant_name_free(
     own_id: i64,
     taken_message: &str,
 ) -> WebResult<()> {
-    let taken: Option<i64> = sqlx::query_scalar(
-        r#"SELECT 1::BIGINT FROM turnier."tournament_signups"
-         WHERE tournament_id = $1 AND discord_id <> $3
-           AND lower(btrim(discord_name)) = lower(btrim($2))
-         UNION ALL
-         SELECT 1::BIGINT FROM turnier."team_members" tm JOIN turnier."teams" t ON t.id = tm.team_id
-         WHERE t.tournament_id = $1 AND tm.discord_id <> $3
-           AND lower(btrim(tm.discord_name)) = lower(btrim($2))
-         LIMIT 1"#,
-    )
-    .bind(tournament_id)
-    .bind(name)
-    .bind(own_id)
-    .fetch_optional(&mut **tx)
-    .await?;
-    if taken.is_some() {
+    let key = participant_name_key(name);
+    let names = participant_names(&mut **tx, tournament_id).await?;
+    let taken = names
+        .iter()
+        .any(|(discord_id, other)| *discord_id != own_id && participant_name_key(other) == key);
+    if taken {
         return Err(WebError::conflict(taken_message));
     }
     Ok(())
@@ -1619,4 +1651,23 @@ pub async fn add_user_to_team(
     )
     .await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::duplicate_name_ids;
+
+    #[test]
+    fn duplicate_name_ids_trim_unicode_space_and_fold_case() {
+        let names = vec![
+            (1, "Alex\u{00A0}".to_string()),
+            (-5, "alex".to_string()),
+            (2, "Bob".to_string()),
+            (3, "Straße".to_string()),
+            (-6, "STRASSE ".to_string()),
+            (4, "  ".to_string()),
+            (-7, "\t".to_string()),
+        ];
+        assert_eq!(duplicate_name_ids(&names), vec!["-6", "-5", "1", "3"]);
+    }
 }

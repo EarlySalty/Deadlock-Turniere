@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
 import SoloBalancePanel from '@/components/admin/SoloBalancePanel'
+import { latestActionError } from '@/lib/latestError'
 import Card from '@/components/ui/Card'
 import Button from '@/components/ui/Button'
 import { useAuth } from '@/hooks/useAuth'
@@ -26,6 +27,7 @@ import {
   UserPlus,
   Users,
 } from 'lucide-react'
+import { playerName } from '@/lib/playerName'
 
 const RECRUITING_OPTIONS: { value: RecruitmentStatus; label: string }[] = [
   { value: 'open', label: 'Offen' },
@@ -45,19 +47,12 @@ interface ParticipantManagerProps {
   teamSize: number
   teams: Team[]
   signups: TournamentSignup[]
-}
-
-function playerLabel(member: Pick<TeamMember, 'discord_id' | 'discord_name'>): string {
-  return member.discord_name?.trim() || 'Unbekannt'
+  soloOnly: boolean
 }
 
 function captainLabel(team: Team): string {
   const captain = team.members.find((member) => member.discord_id === team.captain_discord_id)
-  return captain ? playerLabel(captain) : 'noch keiner gesetzt'
-}
-
-function signupName(signup: TournamentSignup): string {
-  return signup.discord_name?.trim() || 'Unbekannt'
+  return captain ? playerName(captain.discord_name) : 'noch keiner gesetzt'
 }
 
 export default function ParticipantManager({
@@ -66,6 +61,7 @@ export default function ParticipantManager({
   teamSize,
   teams,
   signups,
+  soloOnly,
 }: ParticipantManagerProps) {
   const { user } = useAuth()
   const addMemberMutation = useAddMember(tournamentId)
@@ -95,17 +91,18 @@ export default function ParticipantManager({
   const canAddReplacementPlayers = user?.is_admin === true
   const showDiscordIds = user?.is_admin === true
 
-  const error =
-    addMemberMutation.error ||
-    createTeamMutation.error ||
-    renameTeamMutation.error ||
-    deleteTeamMutation.error ||
-    changeCaptainMutation.error ||
-    removeMemberMutation.error ||
-    moveMemberMutation.error ||
-    assignSignupMutation.error ||
-    deleteSignupMutation.error ||
-    recruitingMutation.error
+  const error = latestActionError([
+    addMemberMutation,
+    createTeamMutation,
+    renameTeamMutation,
+    deleteTeamMutation,
+    changeCaptainMutation,
+    removeMemberMutation,
+    moveMemberMutation,
+    assignSignupMutation,
+    deleteSignupMutation,
+    recruitingMutation,
+  ])
 
   const isBusy =
     addMemberMutation.isPending ||
@@ -157,7 +154,7 @@ export default function ParticipantManager({
   }
 
   const handleRemoveMember = (teamId: number, member: TeamMember) => {
-    if (!window.confirm(`${playerLabel(member)} aus dem Team entfernen?`)) return
+    if (!window.confirm(`${playerName(member.discord_name)} aus dem Team entfernen?`)) return
     removeMemberMutation.mutate(
       { tournamentId, teamId, discordId: member.discord_id },
       { onSuccess: () => setFeedback('Spieler wurde aus dem Team entfernt.') }
@@ -294,7 +291,7 @@ export default function ParticipantManager({
               <div key={signup.id} className="rounded-xl border border-border bg-background/60 p-4">
                 <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
                   <div className="space-y-1">
-                    <div className="font-medium text-foreground">{signupName(signup)}</div>
+                    <div className="font-medium text-foreground">{playerName(signup.discord_name)}</div>
                     {showDiscordIds && <div className="text-xs text-muted">{signup.discord_id}</div>}
                     <div className="text-xs text-muted">
                       {signup.rank ? `${signup.rank} · Score ${signup.rank_score}` : `Score ${signup.rank_score}`}
@@ -329,7 +326,7 @@ export default function ParticipantManager({
                       variant="ghost"
                       size="sm"
                       disabled={isBusy}
-                      onClick={() => handleDeleteSignup(signup.id, signupName(signup))}
+                      onClick={() => handleDeleteSignup(signup.id, playerName(signup.discord_name))}
                     >
                       <Trash2 size={14} />
                       Entfernen
@@ -377,9 +374,11 @@ export default function ParticipantManager({
               <div className="flex flex-wrap items-center gap-3 text-sm text-muted">
                 <span>{team.members.length}/{teamSize} Mitglieder</span>
                 <span>Captain: {captainLabel(team)}</span>
-                <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${recruitingBadgeClass(team.recruitment_status as RecruitmentStatus)}`}>
-                  {RECRUITING_OPTIONS.find((o) => o.value === team.recruitment_status)?.label ?? team.recruitment_status}
-                </span>
+                {!soloOnly && (
+                  <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${recruitingBadgeClass(team.recruitment_status as RecruitmentStatus)}`}>
+                    {RECRUITING_OPTIONS.find((o) => o.value === team.recruitment_status)?.label ?? team.recruitment_status}
+                  </span>
+                )}
                 {team.has_pending_applications && (
                   <span className="text-xs px-2 py-0.5 rounded-full border border-amber-500/30 bg-amber-500/10 text-amber-400 font-medium">
                     Bewerbungen offen
@@ -387,6 +386,7 @@ export default function ParticipantManager({
                 )}
               </div>
 
+              {!soloOnly && (
               <div className="flex flex-col gap-1 sm:flex-row sm:items-center">
                 <span className="text-xs text-muted">Recruiting:</span>
                 <select
@@ -402,6 +402,7 @@ export default function ParticipantManager({
                   ))}
                 </select>
               </div>
+              )}
 
               {canAddReplacementPlayers && ['group_phase', 'bracket'].includes(tournamentStatus) && (
                 <div>
@@ -430,7 +431,7 @@ export default function ParticipantManager({
                   >
                     {team.members.map((member) => (
                       <option key={member.discord_id} value={member.discord_id}>
-                        {playerLabel(member)}
+                        {playerName(member.discord_name)}
                       </option>
                     ))}
                   </select>
@@ -453,7 +454,7 @@ export default function ParticipantManager({
                       <div className="flex flex-col gap-3">
                         <div className="flex items-start justify-between gap-3">
                           <div>
-                            <div className="font-medium text-foreground">{playerLabel(member)}</div>
+                            <div className="font-medium text-foreground">{playerName(member.discord_name)}</div>
                             {showDiscordIds && <div className="text-xs text-muted">{member.discord_id}</div>}
                             <div className="text-xs text-muted">
                               {member.role === 'captain' ? 'Captain' : 'Mitglied'}

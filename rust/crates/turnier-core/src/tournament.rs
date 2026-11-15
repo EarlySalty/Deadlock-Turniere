@@ -328,6 +328,8 @@ pub struct TournamentDetail {
     pub bracket_matches: Vec<BracketMatch>,
     pub mini_groups: Vec<BracketMiniGroup>,
     pub signups: Vec<TournamentSignup>,
+    pub guest_ids: Vec<String>,
+    pub duplicate_name_ids: Vec<String>,
 }
 
 /// Öffentliche Detail-Sicht (Teams/Anmeldungen anonymisiert).

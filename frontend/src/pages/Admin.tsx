@@ -12,6 +12,7 @@ import CreateTournamentForm from '@/components/admin/CreateTournamentForm'
 import TournamentManager from '@/components/admin/TournamentManager'
 import ParticipantManager from '@/components/admin/ParticipantManager'
 import TeamBuilderPanel from '@/components/admin/TeamBuilderPanel'
+import { ParticipantMarksContext } from '@/components/admin/participantMarksContext'
 import { isRegistrationWindowOpen } from '@/lib/tournamentStatus'
 import {
   CollapsedTournamentRow,
@@ -117,6 +118,13 @@ export default function Admin() {
     adminMode === 'archive' && archiveSelectedId ? archiveSelectedId : 0,
   )
 
+  const participantMarks = useMemo(
+    () => ({
+      guestIds: new Set(liveDetail?.guest_ids ?? []),
+      duplicateNameIds: new Set(liveDetail?.duplicate_name_ids ?? []),
+    }),
+    [liveDetail?.guest_ids, liveDetail?.duplicate_name_ids],
+  )
   const hasGroups = Boolean(liveDetail?.groups.some((g) => g.matches.length > 0))
   const hasBracket = Boolean(liveDetail?.bracket_matches.length)
   const liveLeague = isLeague(liveDetail?.tournament_mode)
@@ -300,14 +308,16 @@ export default function Admin() {
                     )}
 
                     {activePhase === 'participants' && canManageParticipants && liveDetail.team_size > 1 && (
-                      <TeamBuilderPanel
-                        key={liveDetail.id}
-                        tournamentId={liveDetail.id}
-                        teamSize={liveDetail.team_size}
-                        teams={liveDetail.teams}
-                        signups={liveDetail.signups}
-                        canAddPlayers={isRegistrationWindowOpen(liveDetail.status)}
-                      />
+                      <ParticipantMarksContext.Provider value={participantMarks}>
+                        <TeamBuilderPanel
+                          key={liveDetail.id}
+                          tournamentId={liveDetail.id}
+                          teamSize={liveDetail.team_size}
+                          teams={liveDetail.teams}
+                          signups={liveDetail.signups}
+                          canAddPlayers={isRegistrationWindowOpen(liveDetail.status)}
+                        />
+                      </ParticipantMarksContext.Provider>
                     )}
 
                     {activePhase === 'participants' && canManageParticipants && (
@@ -317,17 +327,20 @@ export default function Admin() {
                         teamSize={liveDetail.team_size}
                         teams={liveDetail.teams}
                         signups={liveDetail.signups}
+                        soloOnly={liveDetail.invite_mode === 'solo_only'}
                       />
                     )}
 
                     {activePhase === 'checkin' && liveDetail.status === 'checkin' && (
-                      <CheckinManager
-                        tournamentId={liveDetail.id}
-                        teamSize={liveDetail.team_size}
-                        teams={liveDetail.teams}
-                        signups={liveDetail.signups}
-                        league={liveLeague}
-                      />
+                      <ParticipantMarksContext.Provider value={participantMarks}>
+                        <CheckinManager
+                          tournamentId={liveDetail.id}
+                          teamSize={liveDetail.team_size}
+                          teams={liveDetail.teams}
+                          signups={liveDetail.signups}
+                          league={liveLeague}
+                        />
+                      </ParticipantMarksContext.Provider>
                     )}
 
                     {activePhase === 'group_phase' && hasGroups && liveLeague && (

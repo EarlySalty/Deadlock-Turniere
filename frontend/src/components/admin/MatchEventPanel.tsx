@@ -16,6 +16,7 @@ import {
   Swords,
   WandSparkles,
 } from 'lucide-react'
+import { pluralWord, pluralize } from '@/lib/countLabel'
 
 interface MatchEventPanelProps {
   tournamentId: number
@@ -142,7 +143,7 @@ export default function MatchEventPanel({
       })
       setMessage({
         kind: 'success',
-        text: `${Object.keys(result.applied_convars).length} ConVar(s) wurden angewendet.`,
+        text: `${pluralize(Object.keys(result.applied_convars).length, 'ConVar', 'ConVars')} ${pluralWord(Object.keys(result.applied_convars).length, 'wurde', 'wurden')} angewendet.`,
       })
       onRefresh?.()
     } catch (error) {

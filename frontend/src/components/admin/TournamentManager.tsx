@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { latestActionError } from '@/lib/latestError'
 import Card from '@/components/ui/Card'
 import Badge from '@/components/ui/Badge'
 import Button from '@/components/ui/Button'
@@ -116,15 +117,16 @@ export default function TournamentManager({
     generateGroupsMutation.isPending ||
     generateBracketMutation.isPending
 
-  const error =
-    detailsUpdateMutation.error ||
-    advanceMutation.error ||
-    openCheckinMutation.error ||
-    revertCheckinMutation.error ||
-    assignMutation.error ||
-    deleteMutation.error ||
-    generateGroupsMutation.error ||
-    generateBracketMutation.error
+  const error = latestActionError([
+    detailsUpdateMutation,
+    advanceMutation,
+    openCheckinMutation,
+    revertCheckinMutation,
+    assignMutation,
+    deleteMutation,
+    generateGroupsMutation,
+    generateBracketMutation,
+  ])
 
   const update = (patch: Partial<EditForm>) => setForm((current) => ({ ...current, ...patch }))
 

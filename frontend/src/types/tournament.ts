@@ -122,6 +122,8 @@ export interface TournamentDetail extends Tournament {
   bracket_matches: BracketMatch[]
   mini_groups: BracketMiniGroup[]
   signups: TournamentSignup[]
+  guest_ids: string[]
+  duplicate_name_ids: string[]
 }
 
 export interface BracketMiniGroup {

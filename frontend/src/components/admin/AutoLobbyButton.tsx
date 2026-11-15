@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Sparkles, AlertCircle, CheckCircle2 } from 'lucide-react'
 import Button from '@/components/ui/Button'
 import { useTriggerAutoLobby } from '@/hooks/useTournament'
+import { pluralize } from '@/lib/countLabel'
 
 interface AutoLobbyButtonProps {
   tournamentId: number
@@ -18,7 +19,7 @@ export default function AutoLobbyButton({ tournamentId, enabled }: AutoLobbyButt
     triggerMutation.mutate(tournamentId, {
       onSuccess: (data) => {
         setFeedback(
-          `${data.created} Lobby${data.created === 1 ? '' : 's'} erstellt` +
+          `${pluralize(data.created, 'Lobby', 'Lobbys')} erstellt` +
             (data.failed > 0 ? ` · ${data.failed} fehlgeschlagen` : '') +
             (data.skipped > 0 ? ` · ${data.skipped} übersprungen` : ''),
         )

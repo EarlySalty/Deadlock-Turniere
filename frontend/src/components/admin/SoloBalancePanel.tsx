@@ -1,10 +1,12 @@
 import { useState } from 'react'
+import { latestActionError } from '@/lib/latestError'
 import Card from '@/components/ui/Card'
 import Button from '@/components/ui/Button'
 import { useSoloBalance } from '@/hooks/useTournament'
 import type { Team, TournamentStatus } from '@/types/tournament'
 import type { BalancePlayer } from '@/types/soloBalance'
 import { pluralize } from '@/lib/countLabel'
+import { playerName } from '@/lib/playerName'
 
 interface SoloBalancePanelProps {
   tournamentId: number
@@ -22,7 +24,7 @@ function PlayerList({ players }: { players: BalancePlayer[] }) {
       {players.map((player) => (
         <li key={player.signup_id} className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 py-2 text-sm">
           <div className="min-w-0">
-            <span className="break-words text-foreground">{player.discord_name || 'Unbekannt'}</span>
+            <span className="break-words text-foreground">{playerName(player.discord_name)}</span>
             {player.priority && <span className="ml-2 text-xs text-primary">Vorrang</span>}
             <p className="text-xs text-muted">{player.used_median ? 'Ohne Rang: Median' : player.rank || 'Mit Rang'}</p>
           </div>
@@ -41,7 +43,7 @@ export default function SoloBalancePanel({ tournamentId, tournamentStatus, teamS
   const canBalance = tournamentStatus === 'checkin' && teams.every((team) => team.members.length === 1)
   const busy = preview.isPending || apply.isPending
   const proposal = preview.data
-  const error = preview.error || apply.error || waitlist.error
+  const error = latestActionError([preview, apply]) ?? waitlist.error
   const validCount = Number.isInteger(count) && count > 0 && count <= maxTeams
 
   return (
@@ -118,7 +120,7 @@ export default function SoloBalancePanel({ tournamentId, tournamentStatus, teamS
           <h3 className="font-semibold text-foreground">Warteliste ({waitlist.data?.length})</h3>
           <p className="text-sm text-muted">Diese Spieler erhalten beim nächsten Solo-Teamausgleich Vorrang, wenn sie sich erneut anmelden.</p>
           <ol className="space-y-2 text-sm text-foreground">
-            {waitlist.data?.map((player) => <li key={player.signup_id}>{player.position}. {player.discord_name || 'Unbekannt'}</li>)}
+            {waitlist.data?.map((player) => <li key={player.signup_id}>{player.position}. {playerName(player.discord_name)}</li>)}
           </ol>
         </section>
       )}

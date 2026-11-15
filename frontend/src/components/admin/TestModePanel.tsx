@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import Card from '@/components/ui/Card'
 import Button from '@/components/ui/Button'
 import {
@@ -34,6 +34,23 @@ const GAME_MODES: { value: TournamentGameMode; label: string }[] = [
 ]
 
 type StatusMsg = { kind: 'success' | 'error'; text: string }
+type AdvanceTo = CreateTestTournamentRequest['advance_to']
+type TestMode = CreateTestTournamentRequest['mode']
+
+const SIMULATABLE_STATUSES = new Set(['group_phase', 'bracket'])
+
+function advanceOptions(mode: TestMode, soloSignups: boolean): { value: AdvanceTo; label: string }[] {
+  const options: { value: AdvanceTo; label: string }[] = [{ value: 'checkin', label: 'Check-in' }]
+  if (soloSignups) return options
+  if (mode === 'group_then_bracket') options.push({ value: 'group_phase', label: 'Gruppenphase' })
+  if (mode === 'league') options.push({ value: 'group_phase', label: 'Spielplan' })
+  if (mode !== 'league') options.push({ value: 'bracket', label: 'Bracket' })
+  return options
+}
+
+function allowedAdvanceTo(mode: TestMode, soloSignups: boolean, current: AdvanceTo): AdvanceTo {
+  return advanceOptions(mode, soloSignups).some((option) => option.value === current) ? current : 'checkin'
+}
 
 export default function TestModePanel() {
   const { data: testUsers = [], isLoading: loadingUsers } = useTestUsers()
@@ -54,6 +71,13 @@ export default function TestModePanel() {
     advance_to: 'bracket',
   })
   const [status, setStatus] = useState<StatusMsg | null>(null)
+  const statusTimer = useRef<number | null>(null)
+  useEffect(
+    () => () => {
+      if (statusTimer.current !== null) window.clearTimeout(statusTimer.current)
+    },
+    [],
+  )
 
   const testTournaments = allTournaments.filter((t) => t.is_test)
   const isBusy =
@@ -65,7 +89,8 @@ export default function TestModePanel() {
 
   const showStatus = (msg: StatusMsg) => {
     setStatus(msg)
-    window.setTimeout(() => setStatus(null), 6000)
+    if (statusTimer.current !== null) window.clearTimeout(statusTimer.current)
+    statusTimer.current = window.setTimeout(() => setStatus(null), 6000)
   }
 
   const handleCreateUsers = async () => {
@@ -109,6 +134,10 @@ export default function TestModePanel() {
   const handleSimulateRound = async (tournamentId: number) => {
     try {
       const result = await simulateRound.mutateAsync(tournamentId)
+      if (result.simulated_matches === 0) {
+        showStatus({ kind: 'error', text: 'Keine offenen Matches mit zwei Teams gefunden, es wurde nichts gewürfelt.' })
+        return
+      }
       showStatus({
         kind: 'success',
         text: `${pluralize(result.simulated_matches, 'Match', 'Matches')} gewürfelt. Lade Detail erneut, um Folge-Runden zu sehen`,
@@ -282,7 +311,11 @@ export default function TestModePanel() {
               />
             </div>
             <div className="flex flex-col gap-1">
-              <label className="text-xs text-muted">Anzahl Teams</label>
+              <label className="text-xs text-muted">
+                {tournamentForm.solo_signups
+                  ? `Anzahl Teams (ergibt ${pluralize(tournamentForm.team_size * tournamentForm.num_teams, 'Solo-Spieler', 'Solo-Spieler')})`
+                  : 'Anzahl Teams'}
+              </label>
               <input
                 type="number"
                 min={2}
@@ -304,11 +337,12 @@ export default function TestModePanel() {
                 onChange={(e) =>
                   setTournamentForm({
                     ...tournamentForm,
-                    mode: e.target.value as CreateTestTournamentRequest['mode'],
-                    advance_to:
-                      e.target.value === 'league' && tournamentForm.advance_to === 'bracket'
-                        ? 'group_phase'
-                        : tournamentForm.advance_to,
+                    mode: e.target.value as TestMode,
+                    advance_to: allowedAdvanceTo(
+                      e.target.value as TestMode,
+                      tournamentForm.solo_signups ?? false,
+                      tournamentForm.advance_to,
+                    ),
                   })
                 }
                 className="rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
@@ -326,19 +360,16 @@ export default function TestModePanel() {
                 onChange={(e) =>
                   setTournamentForm({
                     ...tournamentForm,
-                    advance_to: e.target.value as 'checkin' | 'group_phase' | 'bracket',
+                    advance_to: e.target.value as AdvanceTo,
                   })
                 }
                 className="rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
               >
-                <option value="checkin">Check-in</option>
-                {tournamentForm.mode === 'group_then_bracket' && (
-                  <option value="group_phase">Gruppenphase</option>
-                )}
-                {tournamentForm.mode === 'league' && (
-                  <option value="group_phase">Spielplan</option>
-                )}
-                {tournamentForm.mode !== 'league' && !tournamentForm.solo_signups && <option value="bracket">Bracket</option>}
+                {advanceOptions(tournamentForm.mode, tournamentForm.solo_signups ?? false).map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
               </select>
             </div>
             <label className="flex items-start gap-2 text-sm text-foreground sm:col-span-2">
@@ -349,14 +380,14 @@ export default function TestModePanel() {
                   setTournamentForm({
                     ...tournamentForm,
                     solo_signups: e.target.checked,
-                    advance_to: e.target.checked ? 'checkin' : tournamentForm.advance_to,
+                    advance_to: allowedAdvanceTo(tournamentForm.mode, e.target.checked, tournamentForm.advance_to),
                   })
                 }
                 className="mt-1"
               />
               <span>
-                PUG-Probe: alle Spieler nur solo angemeldet und eingecheckt, ohne Teams. Das Turnier bleibt im
-                Check-in und erscheint unter „Live“ mit dem Hinweis „Test“.
+                PUG-Probe: Team-Größe mal Anzahl Teams Spieler, alle nur solo angemeldet und eingecheckt, ohne Teams.
+                Das Turnier bleibt im Check-in und erscheint unter „Live“ mit dem Hinweis „Test“.
               </span>
             </label>
           </div>
@@ -397,15 +428,17 @@ export default function TestModePanel() {
                       Status: {t.status} · Game-Mode: {t.tournament_game_mode}
                     </span>
                   </div>
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    disabled={isBusy}
-                    onClick={() => void handleSimulateRound(t.id)}
-                  >
-                    <Play size={14} />
-                    Runde simulieren
-                  </Button>
+                  {SIMULATABLE_STATUSES.has(t.status) && (
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      disabled={isBusy}
+                      onClick={() => void handleSimulateRound(t.id)}
+                    >
+                      <Play size={14} />
+                      Runde simulieren
+                    </Button>
+                  )}
                 </div>
               ))}
             </div>

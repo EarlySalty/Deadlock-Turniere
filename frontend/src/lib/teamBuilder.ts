@@ -1,4 +1,5 @@
 import type { Team, TournamentSignup } from '@/types/tournament'
+import { playerName } from './playerName.ts'
 
 export interface BuilderPlayer {
   discordId: string
@@ -45,10 +46,6 @@ export const EMPTY_EDITS: BuilderEdits = { newTeams: [], names: {}, placements: 
 
 export function serverTeamKey(teamId: number): string {
   return `s${teamId}`
-}
-
-export function playerName(name: string | null): string {
-  return name?.trim() || 'Unbekannt'
 }
 
 function playersFromServer(teams: Team[], signups: TournamentSignup[]): Map<string, BuilderPlayer> {

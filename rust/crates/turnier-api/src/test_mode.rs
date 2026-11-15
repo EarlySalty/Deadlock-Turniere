@@ -1313,11 +1313,11 @@ fn team_name(base_name: &str, existing_keys: &mut HashSet<String>) -> (String, S
     }
     let mut team_name = candidate.clone();
     let mut suffix = 1;
-    while existing_keys.contains(&team_name.to_lowercase()) {
+    while existing_keys.contains(&turnier_engine::name_key(&team_name)) {
         suffix += 1;
         team_name = format!("{candidate} ({suffix})");
     }
-    let name_key = team_name.to_lowercase();
+    let name_key = turnier_engine::name_key(&team_name);
     existing_keys.insert(name_key.clone());
     (team_name, name_key)
 }

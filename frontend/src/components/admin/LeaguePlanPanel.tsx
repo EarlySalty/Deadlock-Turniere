@@ -192,7 +192,7 @@ function FinishCard({ tournamentId, openMatches, countsForLeaderboard }: FinishC
           <h3 className="text-base font-semibold text-foreground">Turnier abschließen</h3>
           <p className="mt-1 text-sm text-muted">
             {openMatches > 0
-              ? `Noch ${openMatches} ${openMatches === 1 ? 'Spiel' : 'Spiele'} offen. Abschließen geht, sobald alle gewertet sind.`
+              ? `Noch ${pluralize(openMatches, 'Spiel', 'Spiele')} offen. Abschließen geht, sobald alle gewertet sind.`
               : 'Alle Spiele sind gewertet. Die Tabelle wird zur Endplatzierung.'}
           </p>
         </div>

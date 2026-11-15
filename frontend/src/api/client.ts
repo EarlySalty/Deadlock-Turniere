@@ -516,12 +516,6 @@ export const leaveTeam = (tournamentId: number, teamId: number) =>
   request<void>(`/tournaments/${tournamentId}/teams/${teamId}/leave`, { method: 'DELETE' })
 
 // Recruiting Status
-export const setRecruitingStatus = (tournamentId: number, teamId: number, recruitmentStatus: string) =>
-  request<void>(`/tournaments/${tournamentId}/teams/${teamId}/recruiting`, {
-    method: 'PATCH',
-    body: JSON.stringify({ recruitment_status: recruitmentStatus }),
-  })
-
 export const setAdminRecruitingStatus = (tournamentId: number, teamId: number, recruitmentStatus: string) =>
   request<void>(`/admin/tournaments/${tournamentId}/teams/${teamId}/recruiting`, {
     method: 'PATCH',

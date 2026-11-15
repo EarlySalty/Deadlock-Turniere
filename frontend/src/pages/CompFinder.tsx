@@ -8,6 +8,7 @@ import { compShareUrl, compositionText, nextPriority, normalizeCompCode, prefere
 import type { CompComposition, CompMember, CompPriority, CompRoom } from '@/types/comp'
 import type { DraftHero } from '@/types/draft'
 import '@/comp.css'
+import { pluralize } from '@/lib/countLabel'
 
 function ErrorNote({ error }: { error: unknown }) {
   if (!error) return null
@@ -111,7 +112,7 @@ function Members({ room }: { room: CompRoom }) {
             <span className="min-w-0 flex-1 truncate font-semibold" title={member.name}>{member.name}</span>
             {room.you === room.host_member_id && member.id !== room.you && <button type="button" disabled={remove.isPending} className="rounded p-1 text-muted hover:text-red-300" aria-label={`${member.name} aus Lobby entfernen`} onClick={() => { if (window.confirm(`${member.name} aus dieser Lobby entfernen?`)) remove.mutate(member.id) }}><X size={14} /></button>}
           </div>
-          <span className="text-xs text-muted">{member.id === room.you ? 'Du · ' : ''}{member.preferences.length ? `${member.preferences.length} Helden` : 'Wählt noch'}</span>
+          <span className="text-xs text-muted">{member.id === room.you ? 'Du · ' : ''}{member.preferences.length ? pluralize(member.preferences.length, 'Held', 'Helden') : 'Wählt noch'}</span>
         </div>
       })}
     </div>
@@ -164,7 +165,7 @@ function Editor({ room, member, heroes }: { room: CompRoom; member: CompMember; 
       <div className="comp-hero-grid" aria-label="Helden und Prioritäten">
         {visible.map(hero => {
           const priority = draft.preferences[hero.name]
-          return <button key={hero.name} type="button" disabled={save.isPending} className={`comp-hero ${priority === undefined ? '' : `comp-hero-${priority}`}`} aria-pressed={priority !== undefined} aria-label={`${hero.name}: ${priorityLabel(priority)}${priority === undefined ? '' : `, ${priority} Punkte`}. Klicken für nächste Stufe.`} title={`${hero.name} · ${priorityLabel(priority)}`} onClick={() => cycle(hero.name)}>
+          return <button key={hero.name} type="button" disabled={save.isPending} className={`comp-hero ${priority === undefined ? '' : `comp-hero-${priority}`}`} aria-pressed={priority !== undefined} aria-label={`${hero.name}: ${priorityLabel(priority)}${priority === undefined ? '' : `, ${pluralize(priority, 'Punkt', 'Punkte')}`}. Klicken für nächste Stufe.`} title={`${hero.name} · ${priorityLabel(priority)}`} onClick={() => cycle(hero.name)}>
             <Portrait hero={hero} name={hero.name} />
             <span className="comp-hero-name">{hero.name}</span>
             <span className="comp-hero-value">{priority === undefined ? '-' : `${priority} P.`}</span>
@@ -210,7 +211,7 @@ function Results({ room, heroes }: { room: CompRoom; heroes: DraftHero[] }) {
     <div className="mb-4 flex items-center gap-2"><Sparkles size={20} className="text-primary" /><h2 className="text-xl font-bold">Eure Aufstellungen</h2></div>
     <p className="mb-4 text-xs leading-relaxed text-muted">Summe der zugewiesenen Prioritäten. Bei Gleichstand zählen mehr höchste Prioritäten, danach eine stabile Heldenreihenfolge. Keine Meta- oder Synergie-Wertung.</p>
     {room.members.length < 6 && <p className="mb-4 rounded-lg border border-border bg-card p-3 text-xs text-muted">Vorschau für {room.members.length} Spieler. Weitere Mitspieler können jederzeit beitreten. Die Aufstellungen werden dann neu berechnet.</p>}
-    {results.waiting_for.length > 0 ? <div className="comp-panel p-6"><Users size={28} className="mb-3 text-primary" /><h3 className="font-bold">Es fehlen noch Heldenwünsche</h3><p className="mt-2 text-sm leading-relaxed text-muted">{names(results.waiting_for)}: Bitte mindestens einen verfügbaren Helden auswählen und speichern.</p></div> : results.conflict ? <div className="comp-panel border-amber-400/40 p-6"><AlertCircle size={28} className="mb-3 text-amber-200" /><h3 className="font-bold">Noch keine gültige Aufstellung</h3><p className="mt-2 text-sm leading-relaxed text-muted">{names(results.conflict.player_indices)} teilen sich nur {results.conflict.available_heroes.length} unterschiedliche Helden: {results.conflict.available_heroes.join(', ')}. Für diese {results.conflict.player_indices.length} Spieler reichen die freien Helden nicht.</p><p className="mt-3 text-sm text-amber-200">Mindestens einer von ihnen muss weitere spielbare Helden ergänzen. Ein weiterer Held ist ein Anfang; die neue Auswahl wird erneut geprüft.</p></div> : results.compositions.length > 0 ? <div className="space-y-3">
+    {results.waiting_for.length > 0 ? <div className="comp-panel p-6"><Users size={28} className="mb-3 text-primary" /><h3 className="font-bold">Es fehlen noch Heldenwünsche</h3><p className="mt-2 text-sm leading-relaxed text-muted">{names(results.waiting_for)}: Bitte mindestens einen verfügbaren Helden auswählen und speichern.</p></div> : results.conflict ? <div className="comp-panel border-amber-400/40 p-6"><AlertCircle size={28} className="mb-3 text-amber-200" /><h3 className="font-bold">Noch keine gültige Aufstellung</h3><p className="mt-2 text-sm leading-relaxed text-muted">{names(results.conflict.player_indices)} teilen sich nur {pluralize(results.conflict.available_heroes.length, 'Helden', 'unterschiedliche Helden')}: {results.conflict.available_heroes.join(', ')}. Für diese {results.conflict.player_indices.length} Spieler reichen die freien Helden nicht.</p><p className="mt-3 text-sm text-amber-200">Mindestens einer von ihnen muss weitere spielbare Helden ergänzen. Ein weiterer Held ist ein Anfang; die neue Auswahl wird erneut geprüft.</p></div> : results.compositions.length > 0 ? <div className="space-y-3">
       {results.compositions.map((composition, i) => i === 0 ? <div key="best" className="comp-panel comp-best"><CompositionCard room={room} composition={composition} rank={1} heroes={heroes} /></div> : <details key={composition.assignments.map(a => a.hero_name).sort().join('|')} className="comp-panel"><summary className="cursor-pointer px-5 py-4 text-sm font-semibold">Alternative {i + 1}<span className="float-right text-primary">{composition.score}/{results.max_score} P.</span></summary><CompositionCard room={room} composition={composition} rank={i + 1} heroes={heroes} /></details>)}
       <p className="text-xs text-muted">{results.compositions.length} unterschiedliche Helden-Teams{results.compositions.length === 10 ? ' · die besten 10' : ''}. Identische Helden-Sets erscheinen nur einmal mit ihrer besten Spielerzuordnung.</p>
     </div> : <p className="comp-panel p-6 text-sm text-muted">Noch keine Aufstellungen vorhanden.</p>}

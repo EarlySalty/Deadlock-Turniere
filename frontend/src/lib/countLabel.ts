@@ -1,5 +1,9 @@
+export function pluralWord(count: number, singular: string, plural: string): string {
+  return count === 1 ? singular : plural
+}
+
 export function pluralize(count: number, singular: string, plural: string): string {
-  return `${count} ${count === 1 ? singular : plural}`
+  return `${count} ${pluralWord(count, singular, plural)}`
 }
 
 export function registrationSummary(teamCount: number, soloCount: number): string {

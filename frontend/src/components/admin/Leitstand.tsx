@@ -6,6 +6,7 @@ import {
   useConfirmResultReport,
   useRejectResultReport,
 } from '@/hooks/useTournament'
+import { latestActionError } from '@/lib/latestError'
 import type { ActionItem } from '@/types/tournament'
 
 interface LeitstandProps {
@@ -22,6 +23,7 @@ function ActionRow({
   const confirm = useConfirmResultReport(tournamentId)
   const reject = useRejectResultReport(tournamentId)
   const busy = confirm.isPending || reject.isPending
+  const actionError = latestActionError([confirm, reject])
 
   const matchup = `${item.team1_name ?? 'Team 1'} vs ${item.team2_name ?? 'Team 2'}`
 
@@ -97,11 +99,9 @@ function ActionRow({
           </Button>
         </div>
       </div>
-      {(confirm.isError || reject.isError) && (
+      {actionError && (
         <p className="mt-2 text-xs text-red-400">
-          {(confirm.error as Error)?.message ||
-            (reject.error as Error)?.message ||
-            'Aktion fehlgeschlagen'}
+          {actionError instanceof Error && actionError.message ? actionError.message : 'Aktion fehlgeschlagen'}
         </p>
       )}
     </div>
@@ -109,10 +109,24 @@ function ActionRow({
 }
 
 export default function Leitstand({ tournamentId }: LeitstandProps) {
-  const { data, isLoading } = useActionItems(tournamentId)
+  const { data, isLoading, error } = useActionItems(tournamentId)
   const items = data?.pending_reports ?? []
 
-  if (isLoading) return null
+  if (isLoading || (data === undefined && !error)) return null
+
+  if (data === undefined) {
+    return (
+      <Card className="space-y-2 p-4">
+        <div className="flex items-center gap-2">
+          <AlertTriangle size={16} className="text-red-400" />
+          <h2 className="text-sm font-semibold uppercase tracking-wider text-foreground">Gemeldete Ergebnisse</h2>
+        </div>
+        <p role="alert" className="text-xs text-red-400">
+          Gemeldete Ergebnisse konnten nicht geladen werden{error instanceof Error && error.message ? `: ${error.message}` : '.'}
+        </p>
+      </Card>
+    )
+  }
 
   return (
     <Card className="space-y-3 p-4">
@@ -131,6 +145,12 @@ export default function Leitstand({ tournamentId }: LeitstandProps) {
           </span>
         )}
       </div>
+
+      {error && (
+        <p role="alert" className="text-xs text-red-400">
+          Aktualisierung fehlgeschlagen, die Liste zeigt den letzten geladenen Stand.
+        </p>
+      )}
 
       {items.length === 0 ? (
         <p className="text-xs text-muted">

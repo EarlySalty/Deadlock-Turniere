@@ -1,19 +1,17 @@
 import { useContext } from 'react'
-import { DuplicateNamesContext } from '@/components/admin/duplicateNamesContext'
-import { isGuestParticipant, participantNameKey } from '@/lib/participantName'
+import { ParticipantMarksContext } from '@/components/admin/participantMarksContext'
 
 interface ParticipantMarksProps {
   discordId: string
-  name: string | null
 }
 
-export default function ParticipantMarks({ discordId, name }: ParticipantMarksProps) {
-  const duplicates = useContext(DuplicateNamesContext)
-  const guest = isGuestParticipant(discordId)
-  const duplicate = duplicates.has(participantNameKey(name))
+export default function ParticipantMarks({ discordId }: ParticipantMarksProps) {
+  const marks = useContext(ParticipantMarksContext)
+  const guest = marks.guestIds.has(discordId)
+  const duplicate = marks.duplicateNameIds.has(discordId)
   if (!guest && !duplicate) return null
   return (
-    <span className="ml-1.5 inline-flex flex-wrap gap-1 align-middle">
+    <span className="ml-1.5 inline-flex shrink-0 flex-wrap gap-1 align-middle">
       {guest && (
         <span className="whitespace-nowrap rounded-full border border-border px-1.5 py-px text-[10px] font-medium text-muted">Gast</span>
       )}

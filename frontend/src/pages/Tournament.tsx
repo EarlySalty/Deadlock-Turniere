@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { registrationSummary } from '@/lib/countLabel'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { loginGuest, fetchMe } from '@/api/client'
+import { loginGuest } from '@/api/client'
 import type { FormEvent } from 'react'
 import { useParams } from 'react-router-dom'
 import { motion } from 'framer-motion'
@@ -12,6 +12,7 @@ import {
   useConsent,
 } from '@/hooks/useTournament'
 import { useAuth } from '@/hooks/useAuth'
+import { latestActionError } from '@/lib/latestError'
 import Card from '@/components/ui/Card'
 import Badge from '@/components/ui/Badge'
 import Button from '@/components/ui/Button'
@@ -25,7 +26,6 @@ import BracketView from '@/components/bracket/BracketView'
 import MiniGroupPanel from '@/components/bracket/MiniGroupPanel'
 import MyMatchReport from '@/components/MyMatchReport'
 import LoginButton from '@/components/auth/LoginButton'
-import { PARTICIPANT_NAME_MAX_LENGTH } from '@/lib/participantName'
 import { isRegistrationWindowOpen } from '@/lib/tournamentStatus'
 import {
   Trophy, Users, LayoutGrid, GitBranch, Shield, X, Info, Book,
@@ -43,6 +43,7 @@ const GAME_MODE_LABEL: Record<TournamentGameMode, string> = {
 import { ApiError } from '@/api/client'
 import { bracketFormatLabel, effectiveBracketFormat } from '@/lib/bracketFormat'
 import ReactMarkdown from 'react-markdown'
+import { playerName } from '@/lib/playerName'
 
 type Tab = 'übersicht' | 'kodex' | 'gruppen' | 'bracket' | 'teams' | 'ergebnisse' | 'rangliste'
 
@@ -63,11 +64,6 @@ interface ResultEntry {
   loserName: string
   playedAt: string | null
   sortTime: number
-}
-
-function safePublicName(name: string | null | undefined): string {
-  const trimmed = name?.trim()
-  return trimmed ? trimmed : 'Unbekannt'
 }
 
 function getTeamName(teamId: number | null, teams: TeamPublic[]): string {
@@ -203,8 +199,11 @@ export default function Tournament() {
   const [guestName, setGuestName] = useState('')
   const guestLogin = useMutation({
     mutationFn: loginGuest,
+    onError: (error) => {
+      if (error instanceof ApiError && error.status === 409) void queryClient.invalidateQueries({ queryKey: ['auth', 'me'] })
+    },
     onSuccess: async () => {
-      queryClient.setQueryData(['auth', 'me'], await fetchMe())
+      await queryClient.invalidateQueries({ queryKey: ['auth', 'me'] })
       await queryClient.invalidateQueries({ queryKey: ['consent'] })
       setPendingAction(() => () => signupSoloMutation.mutate(tournamentId, {
         onSuccess: () => setSuccessMsg('Du bist jetzt als Solo-Spieler eingetragen!'),
@@ -303,7 +302,7 @@ export default function Tournament() {
     rejectInviteMutation.isPending ||
     applyMutation.isPending
 
-  const latestAction = [
+  const latestError = latestActionError([
     createTeamMutation,
     joinTeamMutation,
     signupSoloMutation,
@@ -313,8 +312,7 @@ export default function Tournament() {
     acceptInviteMutation,
     rejectInviteMutation,
     applyMutation,
-  ].reduce((latest, mutation) => (mutation.submittedAt > latest.submittedAt ? mutation : latest))
-  const latestError = latestAction.error
+  ])
   const actionErrors =
     latestError instanceof Error && latestError.message !== 'CONSENT_REQUIRED' ? [latestError.message] : []
 
@@ -523,18 +521,25 @@ export default function Tournament() {
                           Ablauf: {new Date(invite.expires_at).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })}
                         </p>
                       )}
+                      {soloOnly && (
+                        <p className="text-[10px] text-muted">In diesem Turnier gibt es nur Solo-Anmeldungen, Einladungen können nicht angenommen werden.</p>
+                      )}
                     </div>
                     <div className="flex gap-2">
-                      <Button
-                        variant="primary"
-                        size="sm"
-                        disabled={isMutating}
-                        onClick={() => acceptInviteMutation.mutate(invite.id, { onSuccess: () => setSuccessMsg('Team beigetreten!') })}
-                      >
-                        Annehmen
-                      </Button>
+                      {!soloOnly && (
+                        <Button
+                          variant="primary"
+                          size="sm"
+                          disabled={isMutating}
+                          onClick={() => acceptInviteMutation.mutate(invite.id, { onSuccess: () => setSuccessMsg('Team beigetreten!') })}
+                        >
+                          Annehmen
+                        </Button>
+                      )}
                       <button
-                        className="p-2 text-muted hover:text-danger transition-colors"
+                        className="p-2 text-muted hover:text-danger transition-colors disabled:opacity-50"
+                        disabled={isMutating}
+                        aria-label="Einladung ablehnen"
                         onClick={() => rejectInviteMutation.mutate(invite.id)}
                       >
                         <X size={16} />
@@ -630,7 +635,7 @@ export default function Tournament() {
                            }}>
                              <p className="text-sm text-muted">Kein Discord? Melde dich mit deinem Namen an.</p>
                              <label htmlFor="guest-name" className="block text-sm text-foreground">Dein Spielername</label>
-                             <input id="guest-name" name="guest-name" type="text" required maxLength={PARTICIPANT_NAME_MAX_LENGTH}
+                             <input id="guest-name" name="guest-name" type="text" required
                                autoComplete="nickname" value={guestName} disabled={guestLogin.isPending}
                                onChange={(event) => setGuestName(event.target.value)}
                                className="w-full rounded-lg border border-border bg-background p-3 text-foreground" />
@@ -811,7 +816,7 @@ export default function Tournament() {
                       <div className="space-y-3">
                         {userTeam.members.map((m, i) => (
                           <div key={i} className="flex items-center justify-between text-xs border-b border-white/5 pb-2 last:border-0">
-                            <span className="font-bold text-foreground uppercase tracking-wide">{safePublicName(m.discord_name)}</span>
+                            <span className="font-bold text-foreground uppercase tracking-wide">{playerName(m.discord_name)}</span>
                             {m.role === 'captain' && <span className="text-[10px] text-primary font-bold uppercase">Captain</span>}
                           </div>
                         ))}
@@ -855,7 +860,7 @@ export default function Tournament() {
                           >
                             <User size={13} className="text-muted shrink-0" />
                             <span className="text-sm text-foreground font-medium truncate flex-1">
-                              {safePublicName(signup.discord_name)}
+                              {playerName(signup.discord_name)}
                             </span>
                             {teamName ? (
                               <span className="text-[10px] font-bold text-primary uppercase tracking-wide shrink-0">
@@ -894,9 +899,11 @@ export default function Tournament() {
                                 {team.members.length} / {tournament.team_size} Mitglieder
                               </p>
                             </div>
-                            <span className={`text-[10px] px-2 py-0.5 rounded-lg border font-bold uppercase tracking-widest ${recruiting.color}`}>
-                              {recruiting.text}
-                            </span>
+                            {!soloOnly && (
+                              <span className={`text-[10px] px-2 py-0.5 rounded-lg border font-bold uppercase tracking-widest ${recruiting.color}`}>
+                                {recruiting.text}
+                              </span>
+                            )}
                           </div>
 
                           <div className="flex flex-wrap gap-2">
@@ -915,11 +922,11 @@ export default function Tournament() {
                           {!isMyTeam && isSignupOpen && !soloOnly && (
                             <div className="pt-2">
                                {team.recruitment_status === 'open' ? (
-                                 <Button variant="secondary" size="sm" className="w-full" onClick={() => handleJoinTeam(team)}>
+                                 <Button variant="secondary" size="sm" className="w-full" disabled={isMutating} onClick={() => handleJoinTeam(team)}>
                                    Beitreten
                                  </Button>
                                ) : team.recruitment_status === 'application' ? (
-                                 <Button variant="outline" size="sm" className="w-full border-amber-500/30 text-amber-500 hover:bg-amber-500/10" onClick={() => handleApply(team.id)}>
+                                 <Button variant="outline" size="sm" className="w-full border-amber-500/30 text-amber-500 hover:bg-amber-500/10" disabled={isMutating} onClick={() => handleApply(team.id)}>
                                    Bewerben
                                  </Button>
                                ) : null}

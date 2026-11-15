@@ -3,6 +3,7 @@ import { CheckCircle2, Clock, KeyRound, Radio, Swords } from 'lucide-react'
 import Card from '@/components/ui/Card'
 import { formatRoundTime, leagueRounds } from '@/lib/league'
 import type { Group, GroupMatch, TeamPublic } from '@/types/tournament'
+import { pluralize } from '@/lib/countLabel'
 
 interface Props {
   groups: Group[]
@@ -175,7 +176,7 @@ export default function GroupMatchList({ groups, teams, league = false }: Props)
                         <div className="text-sm font-medium text-foreground">
                           {league
                             ? formatRoundTime(roundEntry.scheduledAt)
-                            : `${roundEntry.matches.length} Match${roundEntry.matches.length === 1 ? '' : 'es'}`}
+                            : pluralize(roundEntry.matches.length, 'Match', 'Matches')}
                         </div>
                       </div>
                     </div>

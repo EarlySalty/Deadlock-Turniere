@@ -25,10 +25,9 @@ import {
 import { saveTeamBuilder, type SaveContext } from '@/components/admin/teamBuilderSave'
 import { readDraft, writeDraft } from '@/components/admin/teamBuilderDrafts'
 import { useAddAdminSignupByName, useDeleteAdminSignup } from '@/hooks/useTournament'
-import { PARTICIPANT_NAME_MAX_LENGTH, duplicateNameKeys } from '@/lib/participantName'
 import ParticipantMarks from '@/components/admin/ParticipantMarks'
-import { DuplicateNamesContext } from '@/components/admin/duplicateNamesContext'
 import type { Team, TournamentSignup } from '@/types/tournament'
+import { pluralWord, pluralize } from '@/lib/countLabel'
 
 interface TeamBuilderPanelProps {
   tournamentId: number
@@ -137,9 +136,9 @@ function PlayerChip({ player, selected, onSelect, compact = false }: PlayerChipP
       }`}
     >
       <span className="min-w-0">
-        <span className="block truncate font-medium text-foreground">
-          {player.name}
-          <ParticipantMarks discordId={player.discordId} name={player.name} />
+        <span className="flex min-w-0 items-center">
+          <span className="truncate font-medium text-foreground">{player.name}</span>
+          <ParticipantMarks discordId={player.discordId} />
         </span>
         <span className="block truncate text-xs text-muted">
           {player.rank ?? 'Ohne Rang'}
@@ -300,7 +299,7 @@ function TeamCard(props: TeamCardProps) {
     <div {...handlers} className="space-y-3 rounded-xl border border-border bg-card/60 p-3">
       <TeamHeader {...props} />
       <p className="text-xs text-muted">
-        {team.members.length}/{teamSize} {teamSize === 1 ? 'Platz' : 'Plätze'} belegt
+        {team.members.length}/{teamSize} Plätze belegt
       </p>
       <ul className="space-y-1.5">
         {team.members.map((player) => (
@@ -338,7 +337,6 @@ function TeamCard(props: TeamCardProps) {
 interface PoolProps {
   pool: BuilderPlayer[]
   selectedId: string | null
-  removableIds: Set<string>
   removing: boolean
   canAddPlayers: boolean
   onSelect: (discordId: string) => void
@@ -365,7 +363,6 @@ function AddPlayerForm({ onAdd }: { onAdd: (name: string) => Promise<boolean> })
       <div className="flex flex-wrap gap-2">
         <input
           value={name}
-          maxLength={PARTICIPANT_NAME_MAX_LENGTH}
           onChange={(event) => setName(event.target.value)}
           onKeyDown={(event) => event.key === 'Enter' && void submit()}
           placeholder="Spieler ohne Anmeldung"
@@ -384,7 +381,7 @@ function AddPlayerForm({ onAdd }: { onAdd: (name: string) => Promise<boolean> })
   )
 }
 
-function PoolColumn({ pool, selectedId, removableIds, removing, canAddPlayers, onSelect, onPlace, onRemove, onAdd }: PoolProps) {
+function PoolColumn({ pool, selectedId, removing, canAddPlayers, onSelect, onPlace, onRemove, onAdd }: PoolProps) {
   const [filter, setFilter] = useState('')
   const visible = pool.filter((player) => matchesFilter(player, filter))
   const selectedInTeam = selectedId !== null && !pool.some((p) => p.discordId === selectedId)
@@ -422,7 +419,7 @@ function PoolColumn({ pool, selectedId, removableIds, removing, canAddPlayers, o
               <div className="min-w-0 flex-1">
                 <PlayerChip player={player} selected={selectedId === player.discordId} onSelect={onSelect} />
               </div>
-              {removableIds.has(player.discordId) && (
+              {player.signupId !== null && (
                 <button
                   type="button"
                   onClick={() => onRemove(player)}
@@ -504,10 +501,6 @@ export default function TeamBuilderPanel({ tournamentId, teamSize, teams, signup
 
   const snapshot = useMemo(() => snapshotOf(teams, signups), [teams, signups])
   const view = useMemo(() => buildView(teams, signups, edits), [teams, signups, edits])
-  const duplicateNames = useMemo(
-    () => duplicateNameKeys([...view.pool, ...view.teams.flatMap((t) => t.members)].map((p) => p.name)),
-    [view],
-  )
   const steps = useMemo(() => planSave(snapshot, edits, teamSize), [snapshot, edits, teamSize])
   const captains = useMemo(() => captainChanges(view, snapshot, edits, steps), [view, snapshot, edits, steps])
   const changeCount = steps.length + captains.length
@@ -520,10 +513,6 @@ export default function TeamBuilderPanel({ tournamentId, teamSize, teams, signup
 
   const deleteSignup = useDeleteAdminSignup()
   const addSignup = useAddAdminSignupByName(tournamentId)
-  const removableIds = useMemo(
-    () => new Set(signups.filter((signup) => signup.team_id === null).map((signup) => signup.discord_id)),
-    [signups],
-  )
 
   const removePlayer = (player: BuilderPlayer) => {
     if (saving || deleteSignup.isPending || player.signupId === null) return
@@ -646,7 +635,7 @@ export default function TeamBuilderPanel({ tournamentId, teamSize, teams, signup
         <div role="status" className="flex flex-wrap items-center gap-3 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-200">
           <AlertCircle size={16} className="shrink-0" />
           <span className="min-w-0 flex-1">
-            {changeCount === 1 ? '1 Änderung ist noch nicht gespeichert.' : `${changeCount} Änderungen sind noch nicht gespeichert.`}{' '}
+            {`${pluralize(changeCount, 'Änderung', 'Änderungen')} ${pluralWord(changeCount, 'ist', 'sind')} noch nicht gespeichert.`}{' '}
             Die öffentliche Seite und der Check-in-Abschluss sehen nur gespeicherte Teams.
           </span>
           <Button variant="primary" size="sm" onClick={() => void save()}>
@@ -656,7 +645,6 @@ export default function TeamBuilderPanel({ tournamentId, teamSize, teams, signup
         </div>
       )}
 
-      <DuplicateNamesContext.Provider value={duplicateNames}>
       <fieldset disabled={saving} className="min-w-0 space-y-4">
         <NewTeamForm teams={view.teams} onCreate={createTeam} />
 
@@ -664,7 +652,6 @@ export default function TeamBuilderPanel({ tournamentId, teamSize, teams, signup
           <PoolColumn
             pool={view.pool}
             selectedId={selectedId}
-            removableIds={removableIds}
             removing={deleteSignup.isPending}
             canAddPlayers={canAddPlayers}
             onSelect={select}
@@ -696,7 +683,6 @@ export default function TeamBuilderPanel({ tournamentId, teamSize, teams, signup
           )}
         </div>
       </fieldset>
-      </DuplicateNamesContext.Provider>
 
       {notice && (
         <div
@@ -720,7 +706,7 @@ export default function TeamBuilderPanel({ tournamentId, teamSize, teams, signup
         )}
         {!progress && changeCount > 0 && (
           <span className="mr-auto text-sm text-muted">
-            {changeCount === 1 ? '1 Änderung offen' : `${changeCount} Änderungen offen`}
+            {`${pluralize(changeCount, 'Änderung', 'Änderungen')} offen`}
           </span>
         )}
         <Button variant="ghost" size="sm" disabled={saving || changeCount === 0} onClick={reset}>
