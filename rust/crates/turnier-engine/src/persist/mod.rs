@@ -10,6 +10,7 @@
 
 mod advance;
 mod bracket;
+pub use bracket::PLAYED_BRACKET_FORMAT_SQL;
 mod checkin;
 mod double_elim;
 mod groups;

@@ -423,6 +423,7 @@ async fn ensure_checked_routine_tournament(
 fn approved_preset(mut preset: presets::Preset, config: &Value) -> WebResult<presets::Preset> {
     preset.name = config_field(config, "name")?;
     preset.team_size = config_field(config, "team_size")?;
+    turnier_core::tournament::check_team_size(preset.team_size).map_err(WebError::bad_request)?;
     preset.bracket_format = config_field(config, "bracket_format")?;
     preset.series_format = config_field(config, "series_format")?;
     preset.final_series_format = config_field(config, "final_series_format")?;

@@ -43,7 +43,7 @@ SQLite-Tooling-Meta und wird nicht nach PG uebernommen.
 | Automatik | `turnier."tournament_presets"`, `turnier."tournament_proposals"`, `turnier."tournament_proposal_votes"`, `turnier."tournament_proposal_feedback"`, `turnier."tournament_signals"`, `turnier."tournament_dm_optout"` |
 | Integration | `turnier."discord_tasks"` |
 
-Der aktuelle zentrale Vertrag enthaelt 37 fachliche `turnier`-Tabellen.
+Die Liste zeigt die fachlichen Kern-Tabellen, nicht das ganze Schema. `turnier-db/tests/migration.rs` prüft, dass jede im Rust-Quelltext genannte `turnier`-Tabelle im migrierten Schema existiert.
 
 ## Typkonventionen
 

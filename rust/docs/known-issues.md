@@ -138,10 +138,10 @@ wirkungslos (toter Legacy-Pfad). 1:1 erhalten.
 
 ## Draft (`turnier-draft`)
 
-### KI-DR01 [erhalten]: `taken_by` nicht an die Auth-Identität gebunden
-`routes.py:51/61`: `take_action` übernimmt `taken_by` aus dem Argument, ohne zu
-erzwingen, dass es der eingeloggte Admin ist. Die Signatur erlaubt turnier-api, hier
-`user.discord_id` durchzureichen (Empfehlung), das Default-Verhalten bleibt offen.
+### KI-DR01 [gefixt]: `taken_by` an die Auth-Identität gebunden
+`POST /api/draft/sessions/{id}/action` nimmt `taken_by` nicht mehr aus dem Body,
+sondern aus der Admin-Sitzung. Vorher schickte das Admin-Panel immer `"admin"`,
+das `parse_discord_id` ablehnte, sodass jede Admin-Aktion scheiterte.
 
 ### KI-DR02 [erhalten]: Doppel-Pick nur applikativ geprüft (kein UNIQUE-Index)
 `(session_id, hero_name)` hat keinen partiellen UNIQUE-Index; die Prüfung läuft

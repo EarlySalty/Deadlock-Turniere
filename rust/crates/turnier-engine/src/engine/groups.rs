@@ -10,10 +10,15 @@ pub const QUALIFIERS_PER_GROUP: usize = 2;
 /// (16,20,24,32) ganzzahlig bzw. eindeutig ist; wir runden kaufmännisch
 /// (`.round()` auf f64), was für alle nicht-.5-Fälle identisch ist.
 ///
-/// HINWEIS (bug-preserved): Das zweite Clamping auf `team_count/2` passiert
-/// bewusst weiterhin in `generate_groups` (`actual_groups`), nicht hier, exakt
-/// wie im Original, wo `_auto_num_groups` und `_generate_groups_in_db` getrennt
-/// klemmen.
+/// Die tatsächliche Gruppenzahl samt Klemmung auf `team_count/2` liefert
+/// [`group_count`], das Gruppenerzeugung und Bracket-Vorschau gemeinsam nutzen.
+pub fn group_count(requested: Option<usize>, team_count: usize) -> usize {
+    requested
+        .unwrap_or_else(|| auto_num_groups(team_count))
+        .min(team_count / 2)
+        .max(2)
+}
+
 pub fn auto_num_groups(team_count: usize) -> usize {
     if team_count < 8 {
         return 2;

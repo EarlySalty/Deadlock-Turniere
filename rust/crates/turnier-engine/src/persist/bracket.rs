@@ -9,7 +9,10 @@ use std::future::Future;
 use std::pin::Pin;
 
 use sqlx::{Pool, Postgres, Transaction};
+use turnier_core::BracketFormat;
 
+use crate::engine::double_elim::MIN_BRACKET_ENTRANTS;
+use crate::engine::groups::QUALIFIERS_PER_GROUP;
 use crate::engine::seeding::{
     distribute_entries_across_slots, is_power_of_two, seed_slot_order, slot_sizes_for_round,
 };
@@ -51,14 +54,14 @@ pub async fn generate_bracket_in_tx(
 ) -> TournamentResult<i64> {
     clear_bracket_tree(tx, tournament_id).await?;
 
-    let format_row: Option<(String,)> =
+    let format_row: Option<(BracketFormat,)> =
         sqlx::query_as("SELECT bracket_format FROM turnier.tournaments WHERE id = $1")
             .bind(tournament_id)
             .fetch_optional(&mut **tx)
             .await?;
     let bracket_format = format_row
         .map(|r| r.0)
-        .unwrap_or_else(|| "single_elimination".to_string());
+        .unwrap_or(BracketFormat::SingleElimination);
 
     // Gruppen (nach seeding_order) und je Gruppe die Top-2-Standings.
     let group_ids: Vec<(i64,)> = sqlx::query_as(
@@ -123,15 +126,11 @@ pub async fn generate_bracket_in_tx(
             .collect();
     }
 
-    if qualified.len() < 2 {
-        return Err(TournamentError::validation(
-            "Mindestens 2 Teams für Bracket benötigt",
-        ));
-    }
+    ensure_bracket_entrants(qualified.len())?;
 
     let cross_seed_pairs = build_group_cross_seed_pairs(&grouped_qualifiers);
 
-    let match_count = if bracket_format == "double_elimination" {
+    let match_count = if bracket_format == BracketFormat::DoubleElimination {
         let pairs_or_entries = match cross_seed_pairs {
             Some(pairs) => DoubleElimInput::Pairs(pairs),
             None => {
@@ -168,6 +167,21 @@ pub(crate) enum DoubleElimInput {
     Entries(Vec<BracketSlot>),
 }
 
+pub(crate) fn ensure_bracket_entrants(count: usize) -> TournamentResult<()> {
+    if count < MIN_BRACKET_ENTRANTS {
+        return Err(TournamentError::validation(format!(
+            "Mindestens {MIN_BRACKET_ENTRANTS} Teams für Bracket benötigt"
+        )));
+    }
+    Ok(())
+}
+
+pub const PLAYED_BRACKET_FORMAT_SQL: &str = r#"(SELECT CASE
+        WHEN count(*) = 0 THEN NULL
+        WHEN bool_or(bm.bracket_type IN ('losers', 'grand_final')) THEN 'double_elimination'
+        ELSE 'single_elimination' END
+    FROM turnier.bracket_matches bm WHERE bm.tournament_id = turnier."tournaments".id)"#;
+
 /// Cross-Seed-Paare aus den Gruppen-Qualifikanten: Sieger Gruppe i vs Zweiter
 /// Gruppe i+1 (zyklisch). Nur wenn jede Gruppe >= 2 Qualifikanten hat UND die
 /// Gesamtzahl eine Zweierpotenz ist. Portiert `_build_group_cross_seed_pairs`.
@@ -177,10 +191,10 @@ fn build_group_cross_seed_pairs(
     if grouped.is_empty() {
         return None;
     }
-    if grouped.iter().any(|g| g.len() < 2) {
+    if grouped.iter().any(|g| g.len() < QUALIFIERS_PER_GROUP) {
         return None;
     }
-    let qualifier_count = grouped.len() * 2;
+    let qualifier_count = grouped.len() * QUALIFIERS_PER_GROUP;
     if !is_power_of_two(qualifier_count) {
         return None;
     }
@@ -190,7 +204,7 @@ fn build_group_cross_seed_pairs(
         let next_group = &grouped[(index + 1) % group_count];
         pairs.push((
             BracketSlot::Team(group[0].team_id),
-            BracketSlot::Team(next_group[1].team_id),
+            BracketSlot::Team(next_group[QUALIFIERS_PER_GROUP - 1].team_id),
         ));
     }
     Some(pairs)
@@ -203,11 +217,7 @@ pub(crate) async fn build_seeded_bracket(
     tournament_id: i64,
     entries: Vec<BracketSlot>,
 ) -> TournamentResult<i64> {
-    if entries.len() < 2 {
-        return Err(TournamentError::validation(
-            "Mindestens 2 Teams für Bracket benötigt",
-        ));
-    }
+    ensure_bracket_entrants(entries.len())?;
     build_bracket_round(tx, tournament_id, entries, 1).await
 }
 
@@ -220,11 +230,7 @@ async fn build_paired_bracket(
     current_round: i64,
     bracket_type: &str,
 ) -> TournamentResult<i64> {
-    if pairs.is_empty() {
-        return Err(TournamentError::validation(
-            "Mindestens 2 Teams für Bracket benötigt",
-        ));
-    }
+    ensure_bracket_entrants(pairs.len() * 2)?;
     let mut next_entries: Vec<BracketSlot> = Vec::new();
     let mut match_count = 0i64;
     for (position, (left, right)) in pairs.into_iter().enumerate() {
@@ -261,11 +267,7 @@ fn build_bracket_round<'a>(
     current_round: i64,
 ) -> Pin<Box<dyn Future<Output = TournamentResult<i64>> + Send + 'a>> {
     Box::pin(async move {
-        if entries.len() < 2 {
-            return Err(TournamentError::validation(
-                "Mindestens 2 Teams für Bracket benötigt",
-            ));
-        }
+        ensure_bracket_entrants(entries.len())?;
 
         if is_power_of_two(entries.len()) {
             let order = seed_slot_order(entries.len());

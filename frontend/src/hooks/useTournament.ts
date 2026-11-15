@@ -1032,8 +1032,7 @@ export function useStartDraft() {
 export function useSubmitDraftAction(sessionId: number) {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: ({ heroName, takenBy }: { heroName: string; takenBy: string }) =>
-      submitDraftAction(sessionId, heroName, takenBy),
+    mutationFn: (heroName: string) => submitDraftAction(sessionId, heroName),
     onSuccess: (data) => {
       qc.setQueryData(['draft', 'session', sessionId], data)
     },

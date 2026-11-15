@@ -18,7 +18,7 @@ use rand::seq::IteratorRandom;
 use rand::{Rng, SeedableRng};
 use sqlx::types::Json;
 use sqlx::{Postgres, QueryBuilder, Transaction};
-use turnier_core::{discord_id_to_string, now_utc, parse_participant_id};
+use turnier_core::{discord_id_to_string, now_utc, parse_discord_id};
 use turnier_db::{bearer, Pool};
 
 use crate::error::{DraftError, DraftResult};
@@ -1138,7 +1138,7 @@ async fn load_state(
 }
 
 fn parse_numeric_id(value: &str) -> DraftResult<i64> {
-    parse_participant_id(value).map_err(|_| DraftError::InvalidDiscordId(value.to_string()))
+    parse_discord_id(value).map_err(|_| DraftError::InvalidDiscordId(value.to_string()))
 }
 
 fn effective_sequence(stored: Option<Json<Vec<SequenceStep>>>) -> Vec<SequenceStep> {

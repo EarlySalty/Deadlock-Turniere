@@ -104,7 +104,7 @@ export default function CheckinManager({
   const pendingDrafts = preview ? pendingDraftChanges(tournamentId) : { here: 0, otherTabs: 0 }
   const pendingBuilderChanges = pendingDrafts.here + pendingDrafts.otherTabs
   const bracketFallback = preview !== null && preview.effective_bracket_format !== preview.bracket_format
-  const bracketTooSmall = preview !== null && preview.bracket_entrants !== null && preview.bracket_entrants < 2
+  const bracketTooSmall = preview !== null && !preview.bracket_startable
 
   const removeParticipant = (row: ParticipantRow) => {
     if (row.signup_id === null) return
@@ -329,7 +329,7 @@ export default function CheckinManager({
 
             {bracketTooSmall && (
               <div role="alert" className="mt-4 rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-300">
-                Für das Bracket fehlen Teams. Nötig sind mindestens 2, gerade {preview.bracket_entrants === 1 ? 'ist es 1' : `sind es ${preview.bracket_entrants}`}.
+                Für das Bracket fehlen Teams. Nötig sind mindestens {preview.min_bracket_entrants}, gerade {preview.bracket_entrants === 1 ? 'ist es 1' : `sind es ${preview.bracket_entrants ?? 0}`}.
                 Stell die Teams unter „Teilnehmer“ zusammen und prüfe danach erneut.
               </div>
             )}

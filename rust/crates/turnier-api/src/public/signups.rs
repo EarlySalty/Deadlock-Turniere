@@ -73,11 +73,8 @@ async fn solo_signup(
         ));
     }
 
-    let creates_solo_team = t.team_size == 1
-        && !t
-            .invite_mode
-            .as_deref()
-            .is_some_and(turnier_core::InviteMode::is_solo_only);
+    let creates_solo_team =
+        t.team_size == 1 && t.invite_mode != Some(turnier_core::InviteMode::SoloOnly);
 
     helpers::ensure_guest_name_free(
         &mut tx,

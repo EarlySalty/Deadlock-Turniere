@@ -631,10 +631,10 @@ export const startDraft = (matchId: number) =>
 export const fetchDraftSession = (sessionId: number) =>
   request<DraftState>(`/draft/sessions/${sessionId}`)
 
-export const submitDraftAction = (sessionId: number, heroName: string, takenBy: string) =>
+export const submitDraftAction = (sessionId: number, heroName: string) =>
   request<DraftState>(`/draft/sessions/${sessionId}/action`, {
     method: 'POST',
-    body: JSON.stringify({ hero_name: heroName, taken_by: takenBy, force: true }),
+    body: JSON.stringify({ hero_name: heroName, force: true }),
   })
 
 // --- Ergebnis-Meldung, Leitstand & Stream-Marker ---

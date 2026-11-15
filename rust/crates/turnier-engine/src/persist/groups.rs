@@ -4,7 +4,7 @@
 
 use sqlx::{Pool, Postgres, Transaction};
 
-use crate::engine::groups::auto_num_groups;
+use crate::engine::groups::group_count;
 use crate::engine::seeding::snake_draft_group_index;
 use crate::error::{TournamentError, TournamentResult};
 
@@ -47,8 +47,6 @@ pub async fn generate_groups_in_tx(
         return Err(TournamentError::validation("Mindestens 2 Teams benötigt"));
     }
 
-    let target_groups = num_groups.unwrap_or_else(|| auto_num_groups(teams.len()));
-
     // Durchschnitts-Rank-Score je Team (ein Query je Team wie im Original; die
     // Reihenfolge bleibt die DB-Reihenfolge, danach STABILE Sortierung).
     let mut team_scores: Vec<(i64, f64)> = Vec::with_capacity(teams.len());
@@ -67,7 +65,7 @@ pub async fn generate_groups_in_tx(
     // stabil; bei Score-Gleichstand bleibt die DB-Reihenfolge erhalten).
     team_scores.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
 
-    let actual_groups = target_groups.min(team_scores.len() / 2).max(2);
+    let actual_groups = group_count(num_groups, team_scores.len());
 
     // Bestehende Gruppen + Matches/Teams löschen.
     let old_groups: Vec<(i64,)> =

@@ -150,6 +150,7 @@ impl TournamentCreate {
     /// Gibt eine Fehlermeldung zurück, wenn `series_format`/`final_series_format`
     /// nicht in `{1, 3, 5}` liegt.
     pub fn validated(mut self) -> Result<Self, String> {
+        check_team_size(self.team_size)?;
         check_series_format(self.series_format)?;
         if let Some(f) = self.final_series_format {
             check_final_series_format(f)?;
@@ -225,6 +226,9 @@ pub struct TournamentUpdate {
 impl TournamentUpdate {
     /// Validiert die gesetzten Felder und bereinigt vorhandene Offset-Listen.
     pub fn validated(mut self) -> Result<Self, String> {
+        if let Some(v) = self.team_size {
+            check_team_size(v)?;
+        }
         if let Some(v) = self.series_format {
             check_series_format(v)?;
         }
@@ -359,6 +363,18 @@ pub struct TournamentDetailPublic {
     pub bracket_matches: Vec<BracketMatch>,
     pub mini_groups: Vec<BracketMiniGroup>,
     pub signups: Vec<TournamentSignupPublic>,
+}
+
+pub const TEAM_SIZE_MAX: i64 = 20;
+
+pub fn check_team_size(v: i64) -> Result<(), String> {
+    if (1..=TEAM_SIZE_MAX).contains(&v) {
+        Ok(())
+    } else {
+        Err(format!(
+            "Teamgröße muss zwischen 1 und {TEAM_SIZE_MAX} liegen"
+        ))
+    }
 }
 
 fn check_series_format(v: i64) -> Result<(), String> {

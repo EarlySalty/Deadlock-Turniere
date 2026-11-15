@@ -6,37 +6,40 @@
 //! abgesichert. 1:1 portiert aus `engine.py`
 //! (`_double_elimination_losers_round_size` und die zwei Loser-Drop-Schleifen).
 
+use turnier_core::{BracketFormat, TournamentMode};
+
 pub const DOUBLE_ELIMINATION_RULE: &str =
     "mindestens 4 Teams, und die Zahl muss eine Zweierpotenz sein (4, 8, 16, 32 …)";
+
+pub const MIN_BRACKET_ENTRANTS: usize = 2;
+
+pub fn bracket_startable(entrants: Option<usize>) -> bool {
+    entrants.is_none_or(|n| n >= MIN_BRACKET_ENTRANTS)
+}
 
 pub fn supports_double_elimination(entrants: usize) -> bool {
     entrants >= 4 && crate::engine::seeding::is_power_of_two(entrants)
 }
 
-pub fn expected_bracket_entrants(tournament_mode: &str, team_count: usize) -> Option<usize> {
-    match tournament_mode {
-        "league" => None,
-        "group_stage" => {
-            let groups = crate::engine::groups::auto_num_groups(team_count);
+pub fn expected_bracket_entrants(mode: TournamentMode, team_count: usize) -> Option<usize> {
+    match mode {
+        TournamentMode::League => None,
+        TournamentMode::GroupStage => {
+            let groups = crate::engine::groups::group_count(None, team_count);
             Some((groups * crate::engine::groups::QUALIFIERS_PER_GROUP).min(team_count))
         }
-        _ => Some(team_count),
+        TournamentMode::BracketOnly => Some(team_count),
     }
 }
 
-pub const PLAYED_BRACKET_FORMAT_SQL: &str = r#"(SELECT CASE
-        WHEN count(*) = 0 THEN NULL
-        WHEN bool_or(bm.bracket_type IN ('losers', 'grand_final')) THEN 'double_elimination'
-        ELSE 'single_elimination' END
-    FROM turnier.bracket_matches bm WHERE bm.tournament_id = turnier."tournaments".id)"#;
-
-pub fn effective_bracket_format(stored_format: &str, entrants: Option<usize>) -> &'static str {
-    match (stored_format, entrants) {
-        ("double_elimination", Some(n)) if n >= 2 && !supports_double_elimination(n) => {
-            "single_elimination"
+pub fn effective_bracket_format(stored: BracketFormat, entrants: Option<usize>) -> BracketFormat {
+    match (stored, entrants) {
+        (BracketFormat::DoubleElimination, Some(n))
+            if n >= MIN_BRACKET_ENTRANTS && !supports_double_elimination(n) =>
+        {
+            BracketFormat::SingleElimination
         }
-        ("double_elimination", _) => "double_elimination",
-        _ => "single_elimination",
+        (format, _) => format,
     }
 }
 
@@ -98,26 +101,30 @@ mod tests {
         assert!(!supports_double_elimination(5));
         assert!(!supports_double_elimination(2));
         assert!(supports_double_elimination(8));
+        let double = BracketFormat::DoubleElimination;
+        let single = BracketFormat::SingleElimination;
+        assert_eq!(effective_bracket_format(double, Some(5)), single);
+        assert_eq!(effective_bracket_format(double, Some(4)), double);
+        assert_eq!(effective_bracket_format(double, Some(1)), double);
+        assert_eq!(effective_bracket_format(double, Some(0)), double);
+        assert_eq!(effective_bracket_format(single, Some(8)), single);
         assert_eq!(
-            effective_bracket_format("double_elimination", Some(5)),
-            "single_elimination"
+            expected_bracket_entrants(TournamentMode::BracketOnly, 5),
+            Some(5)
         );
         assert_eq!(
-            effective_bracket_format("double_elimination", Some(4)),
-            "double_elimination"
+            expected_bracket_entrants(TournamentMode::GroupStage, 4),
+            Some(4)
         );
         assert_eq!(
-            effective_bracket_format("double_elimination", Some(1)),
-            "double_elimination"
+            expected_bracket_entrants(TournamentMode::GroupStage, 12),
+            Some(6)
         );
         assert_eq!(
-            effective_bracket_format("double_elimination", Some(0)),
-            "double_elimination"
+            expected_bracket_entrants(TournamentMode::GroupStage, 5),
+            Some(4)
         );
-        assert_eq!(expected_bracket_entrants("bracket_only", 5), Some(5));
-        assert_eq!(expected_bracket_entrants("group_stage", 4), Some(4));
-        assert_eq!(expected_bracket_entrants("group_stage", 12), Some(6));
-        assert_eq!(expected_bracket_entrants("league", 6), None);
+        assert_eq!(expected_bracket_entrants(TournamentMode::League, 6), None);
     }
 
     use super::*;

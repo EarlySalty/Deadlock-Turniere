@@ -8,8 +8,8 @@
 //! - `GET  /api/draft/sessions/{session_id}`: Zustand lesen (Admin).
 //! - `POST /api/draft/sessions/{session_id}/action`: Aktion ausführen (Admin).
 //!
-//! `taken_by` wird wie im Original aus dem Request-Body übernommen (nicht aus der
-//! Session, Parität, siehe `docs/known-issues.md` KI-DR01).
+//! `taken_by` der Admin-Aktion ist die Discord-ID des angemeldeten Admins
+//! (`docs/known-issues.md` KI-DR01).
 
 use std::net::SocketAddr;
 use std::time::{Duration, Instant};
@@ -531,7 +531,6 @@ async fn get_session(
 #[derive(Debug, Deserialize)]
 struct DraftActionRequest {
     hero_name: String,
-    taken_by: String,
     #[serde(default)]
     force: bool,
 }
@@ -542,7 +541,7 @@ struct DraftActionRequest {
 /// (`{**state, **result}` im Original).
 async fn submit_action(
     State(state): State<AppState>,
-    _admin: AdminUser,
+    AdminUser(admin): AdminUser,
     Path(session_id): Path<i64>,
     Json(body): Json<DraftActionRequest>,
 ) -> WebResult<Json<Value>> {
@@ -550,7 +549,7 @@ async fn submit_action(
         &state.pool,
         session_id,
         &body.hero_name,
-        &body.taken_by,
+        &admin.discord_id,
         body.force,
         &state.heroes,
     )

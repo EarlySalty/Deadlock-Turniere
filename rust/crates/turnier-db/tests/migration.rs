@@ -21,32 +21,60 @@ async fn turnier_table_names(pool: &turnier_db::Pool) -> Vec<String> {
     .collect()
 }
 
+fn source_files(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+    for entry in std::fs::read_dir(dir).unwrap() {
+        let path = entry.unwrap().path();
+        if path.is_dir() {
+            source_files(&path, out);
+        } else if path.extension().is_some_and(|ext| ext == "rs") {
+            out.push(path);
+        }
+    }
+}
+
+fn referenced_turnier_tables() -> std::collections::BTreeSet<String> {
+    let crates = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+    let mut files = Vec::new();
+    for entry in std::fs::read_dir(&crates).unwrap() {
+        let src = entry.unwrap().path().join("src");
+        if src.is_dir() {
+            source_files(&src, &mut files);
+        }
+    }
+    let mut tables = std::collections::BTreeSet::new();
+    for file in files {
+        let text = std::fs::read_to_string(&file).unwrap();
+        for (at, _) in text.match_indices("turnier.") {
+            let rest = text[at + "turnier.".len()..].trim_start_matches(['"', '\\']);
+            let name: String = rest
+                .chars()
+                .take_while(|c| c.is_ascii_lowercase() || *c == '_')
+                .collect();
+            let after = rest[name.len()..].trim_start_matches(['"', '\\']);
+            if !name.is_empty() && !after.starts_with('(') {
+                tables.insert(name);
+            }
+        }
+    }
+    tables
+}
+
 #[tokio::test]
-async fn zentrale_test_harness_enthaelt_turnier_schema() {
+async fn zentrale_test_harness_enthaelt_jede_genutzte_turnier_tabelle() {
     let db = test_pool().await.expect("central test pool");
     let pool = db.pool();
 
     let tables = turnier_table_names(pool).await;
-    assert_eq!(
-        tables.len(),
-        41,
-        "erwarte 41 turnier-Tabellen, bekam {}",
-        tables.len()
+    let referenced = referenced_turnier_tables();
+    assert!(
+        referenced.len() > 30,
+        "Quelltext-Scan fand nur {referenced:?}"
     );
-    for must in [
-        "comp_lobbies",
-        "comp_members",
-        "tournaments",
-        "teams",
-        "bracket_matches",
-        "tournament_dm_optout",
-        "draft_sessions",
-        "match_result_reports",
-        "solo_balance_runs",
-        "solo_balance_waitlist",
-    ] {
-        assert!(tables.contains(&must.to_string()), "Tabelle {must} fehlt");
-    }
+    let missing: Vec<&String> = referenced
+        .iter()
+        .filter(|name| !tables.contains(name))
+        .collect();
+    assert!(missing.is_empty(), "Tabellen fehlen im Schema: {missing:?}");
 }
 
 #[tokio::test]

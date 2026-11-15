@@ -912,9 +912,9 @@ async fn create_test_tournament(
     .bind(json!([1440, 120, 15]))
     .bind(json!([120, 15]))
     .bind(if body.solo_signups {
-        InviteMode::SoloOnly.as_str()
+        InviteMode::SoloOnly
     } else {
-        InviteMode::Always.as_str()
+        InviteMode::Always
     })
     .fetch_one(&mut *tx)
     .await?;

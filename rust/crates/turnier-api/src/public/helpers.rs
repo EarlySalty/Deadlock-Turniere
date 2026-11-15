@@ -788,8 +788,16 @@ pub async fn load_mini_groups_for_tournament(
 // Turnier-Rohzeile → DTOs
 // ---------------------------------------------------------------------------
 
+pub fn tournament_select() -> String {
+    format!(
+        r#"SELECT *, {} AS played_bracket_format FROM turnier."tournaments""#,
+        turnier_engine::PLAYED_BRACKET_FORMAT_SQL
+    )
+}
+
 /// Die für die Turnier-DTOs relevanten Spalten der `tournaments`-Tabelle.
-/// Wird per `SELECT *` befüllt, daher als manuelles Row-Mapping über `Row`.
+/// Wird über [`tournament_select`] befüllt, das die berechnete Spalte
+/// `played_bracket_format` mitliefert.
 pub struct TournamentRowData {
     pub id: i64,
     pub name: String,
@@ -910,10 +918,7 @@ impl TournamentRowData {
 
 /// Liest alle Turniere (DTO-Form) gemäß einer Filterbedingung.
 pub async fn list_tournament_dtos(pool: &Pool, where_order: &str) -> WebResult<Vec<Tournament>> {
-    let rows = sqlx::query(&format!(
-        r#"SELECT *, {} AS played_bracket_format FROM turnier."tournaments" {where_order}"#,
-        turnier_engine::PLAYED_BRACKET_FORMAT_SQL
-    ))
+    let rows = sqlx::query(&format!("{} {where_order}", tournament_select()))
     .fetch_all(pool)
     .await?;
     let mut out = Vec::with_capacity(rows.len());
@@ -978,7 +983,7 @@ pub struct TournamentGuard {
     pub name: String,
     pub status: String,
     pub team_size: i64,
-    pub invite_mode: Option<String>,
+    pub invite_mode: Option<InviteMode>,
     pub invite_window_start: Option<String>,
     pub invite_window_end: Option<String>,
     pub is_test: bool,
@@ -1269,10 +1274,7 @@ pub fn ensure_captain_or_mod(user: &UserSession, captain_discord_id: &str) -> We
 }
 
 pub fn ensure_player_teams_allowed(t: &TournamentGuard) -> WebResult<()> {
-    if t.invite_mode
-        .as_deref()
-        .is_some_and(InviteMode::is_solo_only)
-    {
+    if t.invite_mode == Some(InviteMode::SoloOnly) {
         return Err(WebError::forbidden(
             "In diesem Turnier stellt das Orga-Team die Teams zusammen. Melde dich bitte solo an.",
         ));
@@ -1281,22 +1283,17 @@ pub fn ensure_player_teams_allowed(t: &TournamentGuard) -> WebResult<()> {
 }
 
 /// Prüft, ob Einladungen erlaubt sind, und liefert ggf. das Ablaufdatum
-/// (Window-Ende). 403 bei `never` oder außerhalb des Fensters.
-/// Entspricht `_ensure_invites_enabled` (routes.py:470).
+/// (Window-Ende). 403 bei `never`, `solo_only` oder außerhalb des Fensters;
+/// NULL gilt als `always`.
 pub fn ensure_invites_enabled(t: &TournamentGuard) -> WebResult<Option<String>> {
-    // Vergleich auf den rohen DB-String wie im Original (`mode == InviteMode.x.value`);
-    // leerer/NULL-Wert defaultet auf "always".
-    let mode = t
-        .invite_mode
-        .clone()
-        .filter(|m| !m.is_empty())
-        .unwrap_or_else(|| "always".to_string());
-    if mode == "never" {
+    ensure_player_teams_allowed(t)?;
+    let mode = t.invite_mode.unwrap_or(InviteMode::Always);
+    if mode == InviteMode::Never {
         return Err(WebError::forbidden(
             "Einladungen sind für dieses Turnier deaktiviert",
         ));
     }
-    if mode == "window" {
+    if mode == InviteMode::Window {
         let now = Utc::now();
         let start = parse_timestamp(t.invite_window_start.as_deref());
         let end = parse_timestamp(t.invite_window_end.as_deref());

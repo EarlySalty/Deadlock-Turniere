@@ -28,11 +28,12 @@ pub mod status;
 
 #[cfg(feature = "persist")]
 mod persist;
+#[cfg(feature = "persist")]
+pub use persist::PLAYED_BRACKET_FORMAT_SQL;
 
 pub use error::{TournamentError, TournamentResult};
 
 // Reine API (DB-frei).
-pub use engine::double_elim::PLAYED_BRACKET_FORMAT_SQL;
 pub use engine::groups::auto_num_groups;
 pub use engine::naming::name_key;
 pub use engine::slots::BracketSlot;

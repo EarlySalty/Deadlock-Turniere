@@ -130,8 +130,9 @@ struct PresetConfigBody {
 }
 
 impl PresetConfigBody {
-    fn into_config(self) -> PresetConfig {
-        PresetConfig {
+    fn into_config(self) -> WebResult<PresetConfig> {
+        turnier_core::tournament::check_team_size(self.team_size).map_err(WebError::bad_request)?;
+        Ok(PresetConfig {
             team_size: self.team_size,
             bracket_format: self.bracket_format,
             series_format: self.series_format,
@@ -144,7 +145,7 @@ impl PresetConfigBody {
             start_reminder_offsets: self.start_reminder_offsets,
             rules: self.rules,
             description_template: self.description_template,
-        }
+        })
     }
 }
 
@@ -370,7 +371,7 @@ async fn create_preset(
         &NewPreset {
             name: body.name,
             category: body.category,
-            config: body.config.into_config(),
+            config: body.config.into_config()?,
             active: body.active,
             created_by: user.discord_id.clone(),
         },
@@ -406,7 +407,7 @@ async fn update_preset(
         &PresetUpdate {
             name: body.name,
             category: body.category,
-            config: body.config.into_config(),
+            config: body.config.into_config()?,
         },
     )
     .await?

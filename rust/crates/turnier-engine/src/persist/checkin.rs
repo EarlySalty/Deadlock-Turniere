@@ -7,7 +7,7 @@ use std::collections::{HashMap, HashSet};
 use chrono::{DateTime, Utc};
 use sha2_min::Sha256;
 use sqlx::{Postgres, Transaction};
-use turnier_core::{discord_id_to_string, now_utc};
+use turnier_core::{discord_id_to_string, now_utc, BracketFormat, InviteMode, TournamentMode};
 use turnier_steam::RankResolver;
 
 use crate::engine::naming::{name_key, TeamNamePool};
@@ -258,7 +258,7 @@ pub async fn assign_random_teams(
     let mut pool_names = TeamNamePool::new(existing_keys.into_iter().map(|(k,)| k));
 
     let mut teams_created = 0i64;
-    let size = team_size.max(1) as usize;
+    let size = formation_team_size(team_size)?;
     for chunk in signups.chunks(size) {
         let captain_discord_id = chunk[0].discord_id;
         let captain_name = captain_team_name(&mut tx, tournament_id, captain_discord_id).await?;
@@ -505,8 +505,8 @@ pub struct FinalizeCheckinResult {
     pub deleted_team_ids: Vec<i64>,
     pub remaining_solo_players: Vec<SoloPlayer>,
     pub auto_team_formation: bool,
-    pub bracket_format: String,
-    pub effective_bracket_format: &'static str,
+    pub bracket_format: BracketFormat,
+    pub effective_bracket_format: BracketFormat,
     pub bracket_entrants: Option<usize>,
     pub dry_run: bool,
     pub snapshot_token: String,
@@ -551,13 +551,18 @@ pub struct SoloPlayer {
     pub discord_name: Option<String>,
 }
 
+fn formation_team_size(team_size: i64) -> TournamentResult<usize> {
+    turnier_core::tournament::check_team_size(team_size).map_err(TournamentError::validation)?;
+    usize::try_from(team_size).map_err(|_| TournamentError::validation("Teamgröße ungültig"))
+}
+
 #[derive(sqlx::FromRow)]
 struct TournamentRow {
     status: String,
     team_size: i64,
-    tournament_mode: String,
-    bracket_format: String,
-    invite_mode: String,
+    tournament_mode: TournamentMode,
+    bracket_format: BracketFormat,
+    invite_mode: InviteMode,
 }
 
 /// Mitglieds-Sicht im Check-in-Algorithmus. Es werden nur `discord_id` (für die
@@ -664,6 +669,7 @@ pub async fn finalize_checkin(
     }
 
     let team_size = tournament.team_size;
+    formation_team_size(team_size)?;
 
     // Check-ins (Reihenfolge merken).
     let checkin_rows: Vec<(i64,)> = sqlx::query_as(
@@ -808,7 +814,7 @@ pub async fn finalize_checkin(
     let mut added_players: Vec<AddedPlayer> = Vec::new();
     let mut created_teams: Vec<CreatedTeamPlan> = Vec::new();
     let mut affected_team_ids: HashSet<i64> = HashSet::new();
-    let auto_team_formation = !turnier_core::InviteMode::is_solo_only(&tournament.invite_mode);
+    let auto_team_formation = tournament.invite_mode != InviteMode::SoloOnly;
 
     // Unvollständige bestehende Teams aus dem Pool auffüllen.
     for team_id in &team_order {
@@ -840,7 +846,7 @@ pub async fn finalize_checkin(
             .fetch_all(&mut *tx)
             .await?;
     let mut name_pool = TeamNamePool::new(existing_keys.into_iter().map(|(k,)| k));
-    while auto_team_formation && team_size > 0 && pool.len() >= team_size as usize {
+    while auto_team_formation && pool.len() >= team_size as usize {
         let chunk: Vec<SignupData> = (0..team_size).map(|_| pool.pop_front().unwrap()).collect();
         let captain_name = captain_team_name(&mut tx, tournament_id, chunk[0].discord_id).await?;
         let team_name = name_pool.from_captain(captain_name.as_deref());
@@ -885,11 +891,11 @@ pub async fn finalize_checkin(
     let final_team_count =
         team_order.len().saturating_sub(deleted_team_ids.len()) + created_teams.len();
     let bracket_entrants = crate::engine::double_elim::expected_bracket_entrants(
-        &tournament.tournament_mode,
+        tournament.tournament_mode,
         final_team_count,
     );
     let effective_bracket_format = crate::engine::double_elim::effective_bracket_format(
-        &tournament.bracket_format,
+        tournament.bracket_format,
         bracket_entrants,
     );
 
@@ -1045,7 +1051,7 @@ pub async fn finalize_checkin(
         // Optionales Vorrücken.
         if params.advance_to_group_phase {
             let status_changed: u64;
-            if tournament.tournament_mode == "league" {
+            if tournament.tournament_mode == TournamentMode::League {
                 let plan = super::league::generate_league_plan_in_tx(
                     &mut tx,
                     tournament_id,
@@ -1064,7 +1070,7 @@ pub async fn finalize_checkin(
                 .execute(&mut *tx)
                 .await?;
                 status_changed = res.rows_affected();
-            } else if tournament.tournament_mode == "group_stage" {
+            } else if tournament.tournament_mode == TournamentMode::GroupStage {
                 let group_ids = generate_groups_in_tx(&mut tx, tournament_id, None).await?;
                 groups_created = group_ids.len() as i64;
                 matches_created = generate_group_matches_in_tx(&mut tx, tournament_id).await?;
@@ -1090,7 +1096,7 @@ pub async fn finalize_checkin(
                     .into_iter()
                     .map(|(id,)| crate::engine::slots::BracketSlot::Team(id))
                     .collect();
-                if tournament.bracket_format == "double_elimination" {
+                if tournament.bracket_format == BracketFormat::DoubleElimination {
                     matches_created = build_double_elimination_bracket(
                         &mut tx,
                         tournament_id,
@@ -1168,7 +1174,7 @@ pub async fn finalize_checkin(
             })
             .collect(),
         auto_team_formation,
-        bracket_format: tournament.bracket_format.clone(),
+        bracket_format: tournament.bracket_format,
         effective_bracket_format,
         bracket_entrants,
         dry_run: !params.confirm,

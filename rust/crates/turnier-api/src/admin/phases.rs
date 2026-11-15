@@ -212,6 +212,8 @@ async fn finalize_checkin_route(
         "effective_bracket_format": result.effective_bracket_format,
         "double_elimination_rule": turnier_engine::engine::double_elim::DOUBLE_ELIMINATION_RULE,
         "bracket_entrants": result.bracket_entrants,
+        "bracket_startable": turnier_engine::engine::double_elim::bracket_startable(result.bracket_entrants),
+        "min_bracket_entrants": turnier_engine::engine::double_elim::MIN_BRACKET_ENTRANTS,
         "deleted_team_ids": result.deleted_team_ids,
         "remaining_solo_players": result.remaining_solo_players.iter().map(|p| json!({
             "discord_id": p.discord_id,

@@ -223,6 +223,8 @@ export interface FinalizeCheckinResult {
   effective_bracket_format: BracketFormat
   double_elimination_rule: string
   bracket_entrants: number | null
+  bracket_startable: boolean
+  min_bracket_entrants: number
   deleted_team_ids: number[]
   remaining_solo_players: {
     discord_id: string

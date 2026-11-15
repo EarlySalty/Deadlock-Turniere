@@ -37,7 +37,7 @@ export default function DraftPanel({ matchId, team1Name, team2Name }: Props) {
 
   const handlePick = async (hero: string) => {
     if (!sessionId) return
-    await submitAction.mutateAsync({ heroName: hero, takenBy: 'admin' })
+    await submitAction.mutateAsync(hero)
   }
 
   if (!sessionId) {

@@ -100,6 +100,7 @@ impl DeadlockLiveClient {
         while let Some(chunk) = stream.next().await {
             let chunk = chunk?;
             buffer.push_str(&String::from_utf8_lossy(&chunk));
+            ensure_event_size(buffer.len() + data.len())?;
             while let Some(newline) = buffer.find('\n') {
                 let mut line = buffer[..newline].to_string();
                 buffer.drain(..=newline);
@@ -143,11 +144,23 @@ impl DeadlockLiveClient {
                         data.push('\n');
                     }
                     data.push_str(value.trim_start());
+                    ensure_event_size(buffer.len() + data.len())?;
                 }
             }
         }
         Ok(())
     }
+}
+
+const MAX_LIVE_EVENT_BYTES: usize = 4 * 1024 * 1024;
+
+fn ensure_event_size(pending: usize) -> Result<(), LiveError> {
+    if pending > MAX_LIVE_EVENT_BYTES {
+        return Err(LiveError::Sse(format!(
+            "Live-Ereignis größer als {MAX_LIVE_EVENT_BYTES} Bytes ohne Abschluss"
+        )));
+    }
+    Ok(())
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

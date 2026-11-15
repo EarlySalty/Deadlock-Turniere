@@ -14,7 +14,7 @@ use crate::engine::double_elim::{
 };
 use crate::engine::seeding::seed_slot_order;
 use crate::engine::slots::BracketSlot;
-use crate::error::{TournamentError, TournamentResult};
+use crate::error::TournamentResult;
 
 use super::bracket::{build_seeded_bracket, DoubleElimInput};
 use super::insert_bracket_match;
@@ -48,20 +48,12 @@ pub(crate) async fn build_double_elimination_bracket(
         Vec<BracketSlot>,
     ) = match input {
         DoubleElimInput::Pairs(pairs) => {
-            if pairs.is_empty() {
-                return Err(TournamentError::validation(
-                    "Mindestens 2 Teams für Bracket benötigt",
-                ));
-            }
+            super::bracket::ensure_bracket_entrants(pairs.len() * 2)?;
             let flat: Vec<BracketSlot> = pairs.iter().flat_map(|(l, r)| [*l, *r]).collect();
             (pairs, flat)
         }
         DoubleElimInput::Entries(entries) => {
-            if entries.is_empty() {
-                return Err(TournamentError::validation(
-                    "Mindestens 2 Teams für Bracket benötigt",
-                ));
-            }
+            super::bracket::ensure_bracket_entrants(entries.len())?;
             (Vec::new(), entries)
         }
     };
