@@ -28,7 +28,15 @@ Es gibt daher **keine Grundlage**, Rangliste und Turnierliste pauschal mit zusä
 
 - Die bestehenden Team-Roster-Optimierungen laden öffentliche Mitglieder/Bewerbungen gebündelt.
 - **Spielerprofil:** Identität, Avatar, User-Profil, Rank-Cache und Punkte werden nun über einen einzelnen parametrisierten SQL-Join abgefragt. Die Turnierhistorie folgt in einem zweiten SQL-Request. Damit **2 statt 6 Roundtrips pro Profil**, ohne Änderung an JSON-Struktur, anonymen Zugriffen oder gespeicherten Rangdaten.
-- Der Profil-Integrationstest prüft weiterhin Rank, Punkte und Historie und wurde um einen Nutzer ohne Profil/Punkte sowie um 404-Semantik ergänzt. `cargo check --tests` garantiert die Kompilierung; zur tatsächlichen Ausführung ist eine **Wegwerf-PostgreSQL-Testdatenbank** erforderlich.
+- Der Profil-Integrationstest prüft weiterhin Rank, Punkte und Historie und wurde um einen Nutzer ohne Profil/Punkte sowie um 404-Semantik ergänzt. Der Test ist **mit zentralen Migrationen auf einer isolierten, temporären PostgreSQL-16-Datenbank erfolgreich ausgeführt (1/1)**. Für die Migrationen war eine fehlende, nur in dieser Wegwerf-Instanz angelegte NOLOGIN-Rolle `deadlock` nötig.
+
+### Weitere Integrationssuite: offener Befund
+
+Die komplette `central_routes`-Testdatei wurde mit derselben Wegwerf-DB ausgeführt: **13 von 15 Tests bestanden, 2 fehlgeschlagen**. Diese beiden Fehler müssen vor einem Merge untersucht werden:
+- `solo_balance_preview_apply_rollback_and_next_tournament_priority`: HTTP 500. Temporäres Test-Logging identifizierte den konkreten PostgreSQL-Fehler `42P01: relation "turnier.solo_balance_runs" does not exist`. Der Solo-Balance-Read nutzt die Tabelle, die in der zugrunde liegenden zentralen Testmigration nicht existiert. **Wahrscheinlich Migrationslücke oder getrennte Schemaquelle**, vor einem neuen Migrationsskript mit zentralem DB-Verantwortlichen abgleichen.
+- `test_mode_seed_simulate_and_wipe_only_touch_test_data`: HTTP 500 beim Erstellen des Testturniers. Die Ursache ist noch nicht hinreichend isoliert; **nicht** als durch die Profiloptimierung verursacht ausgeben.
+
+Das Debug-Logging wurde nach der Fehlersuche **vollständig zurückgenommen**. Weder Produktionsschema noch Produktionsdienste wurden verändert. **Kein Merge** bei weiterhin roten Integrationstests.
 - Der globale `Server-Timing`-Layer loggt statt konkreter URL-Segmente das Axum-Routenmuster (`MatchedPath`). Für Requests über 100 ms werden bei aktiviertem Debug-Logging die SQLx-Poolgröße und die Zahl freier Verbindungen erfasst; über 300 ms mit Warnstufe. Die öffentliche Antwort erhält weiterhin nur `rust;dur=…`, **keine Pool-internen Informationen**.
 
 ### Live-Verhalten
