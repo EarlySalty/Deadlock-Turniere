@@ -11,7 +11,6 @@ import TeamSpalte from '@/components/draft/TeamSpalte'
 import HeroLeiste from '@/components/draft/HeroLeiste'
 import BanStempel from '@/components/draft/BanStempel'
 import PickAnsage from '@/components/draft/PickAnsage'
-import Konfetti from '@/components/draft/Konfetti'
 import Endkarten from '@/components/draft/Endkarten'
 import LobbyBox from '@/components/draft/LobbyBox'
 import KopierKnopf from '@/components/draft/KopierKnopf'
@@ -54,7 +53,7 @@ function Kopf({ zustand }: { zustand: DraftRaumZustand }) {
   return (
     <div
       key={abgelaufen ? 'abgelaufen' : 'laeuft'}
-      className={`relative z-20 flex flex-col items-center ${abgelaufen ? 'draft-shake' : ''}`}
+      className={`draft-arena-heading relative z-20 flex flex-col items-center ${abgelaufen ? 'draft-shake' : ''}`}
     >
       <AnimatePresence mode="wait">
         <motion.div
@@ -116,7 +115,7 @@ function Warteraum({
   const beideBereit = zustand.team1.ready && zustand.team2.ready
 
   return (
-    <div className="relative min-h-[calc(100vh-5rem)] overflow-hidden">
+    <div className="draft-waiting-screen relative -my-8 min-h-[calc(100vh-5rem)] overflow-hidden">
       <DraftHintergrund />
       <div className="relative z-10 mx-auto flex min-h-[calc(100vh-5rem)] max-w-3xl flex-col items-center justify-center gap-6 px-4 py-10">
         <div className="fade-in-up flex items-center gap-2 rounded-full border border-white/[0.08] bg-white/[0.03] px-4 py-1.5">
@@ -255,7 +254,7 @@ function DraftTisch({
   const aktiverSlot2 = !istBanZug && aktivesTeam === 2 ? picks2.length : null
 
   return (
-    <div className="relative min-h-[calc(100vh-5rem)] overflow-hidden bg-[#090e16]">
+    <div className="draft-arena-screen relative -my-8 min-h-[calc(100vh-5rem)] overflow-hidden">
       <DraftHintergrund mitte />
       <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
         <span className="select-none text-center font-display text-4xl font-black uppercase tracking-tight text-white/[0.05] md:text-6xl">
@@ -289,7 +288,7 @@ function DraftTisch({
       </div>
 
       <div
-        className="relative z-20 mx-auto mt-5 flex max-w-[1580px] gap-1 overflow-x-auto px-4 pb-2 lg:px-8"
+        className="draft-sequence-strip relative z-20 mx-auto mt-5 flex max-w-[1580px] gap-1 overflow-x-auto px-4 pb-2 lg:px-8"
         role="list"
         aria-label="Draft-Reihenfolge"
       >
@@ -311,7 +310,7 @@ function DraftTisch({
         })}
       </div>
 
-      <div className="relative z-20 mx-auto mt-5 grid w-full max-w-[1580px] grid-cols-2 items-start gap-3 px-4 pb-12 lg:grid-cols-[minmax(180px,230px)_minmax(0,1fr)_minmax(180px,230px)] lg:gap-6 lg:px-8">
+      <div className="draft-arena-layout relative z-20 mx-auto mt-5 grid w-full max-w-[1580px] grid-cols-2 items-start gap-3 px-4 pb-12 lg:grid-cols-[minmax(180px,230px)_minmax(0,1fr)_minmax(180px,230px)] lg:gap-6 lg:px-8">
         <div className="order-2 lg:order-1">
           <TeamSpalte team={1} name={zustand.team1.name} picks={picks1} aktiverSlot={aktiverSlot1} portraits={portraits} />
         </div>
@@ -401,9 +400,8 @@ function Endbild({
   const picks2 = zustand.actions.filter((a) => a.action_type === 'pick' && a.team_slot === 2)
 
   return (
-    <div className="relative min-h-[calc(100vh-5rem)] overflow-hidden">
+    <div className="draft-arena-screen relative -my-8 min-h-[calc(100vh-5rem)] overflow-hidden">
       <DraftHintergrund />
-      <Konfetti />
       <div className="relative z-10 mx-auto flex max-w-6xl flex-col items-center gap-6 px-4 py-10">
         <motion.div
           initial={{ letterSpacing: '1em', opacity: 0 }}

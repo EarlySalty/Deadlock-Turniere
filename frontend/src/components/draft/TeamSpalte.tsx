@@ -19,7 +19,7 @@ export default function TeamSpalte({
   const vonLinks = team === 1
 
   return (
-    <div className="flex w-full min-w-0 flex-col gap-2">
+    <div className="draft-team-column flex w-full min-w-0 flex-col gap-2">
       <div
         className="border-b pb-2 font-display text-sm font-black uppercase tracking-[0.15em] md:text-base"
         style={{ color: farbe, borderColor: `${farbe}66` }}
@@ -33,7 +33,7 @@ export default function TeamSpalte({
         return (
           <div
             key={i}
-            className={`relative flex h-14 items-center gap-2 overflow-hidden rounded-md border px-2 transition-all duration-300 lg:h-16 ${
+            className={`draft-team-slot relative flex h-14 items-center gap-2 overflow-hidden border px-2 transition-all duration-300 lg:h-16 ${
               aktiv ? 'draft-slot-pulse' : ''
             }`}
             style={{

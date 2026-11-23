@@ -1,0 +1,95 @@
+/* Public and admin team roster: readable tabletop, not a stack of generic cards. */
+.dl-roster {
+  --roster-cream: #efe3c7;
+  --roster-gold: #d1a96c;
+  --roster-dark: #182124;
+}
+.dl-roster__masthead {
+  position: relative;
+  overflow: hidden;
+  padding: clamp(20px,3.6vw,42px) clamp(22px,4.2vw,52px);
+  background: linear-gradient(110deg,#233a3c,#162527 72%);
+  border-top: 3px solid #b99c70;
+  border-bottom: 3px double #b99c70;
+  color: var(--roster-cream);
+}
+.dl-roster__masthead:before {
+  content:'✦';
+  position:absolute;
+  font: bold clamp(120px,14vw,220px) Georgia,serif;
+  color:rgba(230,199,149,.065);
+  right:8%;top:-20%;
+  pointer-events:none;
+}
+.dl-roster__masthead>span {
+  font: 800 11px/1.2 ui-monospace,monospace;
+  color:#d5be96;
+  letter-spacing:.2em;
+}
+.dl-roster__masthead h2{
+  position:relative;
+  font: 900 clamp(42px,6vw,83px)/.96 Impact,"Arial Narrow",sans-serif;
+  letter-spacing:-.025em;
+  margin-top:9px;
+  text-transform:uppercase;
+}
+.dl-roster__masthead h2 em{font:italic 700 .7em Georgia,serif;color:#cfa36c;}
+.dl-roster__masthead p{position:relative;font:italic 500 17px Georgia,serif;color:#d6ccbc;margin-top:15px;}
+.dl-roster__pool,.dl-roster__team{
+  border: 1px solid rgba(203,168,109,.47)!important;
+  border-radius:0!important;
+  background:
+    linear-gradient(140deg,rgba(208,176,112,.07),transparent 38%),
+    #1b2526!important;
+  box-shadow: 3px 4px 0 #0e1213!important;
+}
+.dl-roster__pool {border-top:4px solid #b98b50!important;}
+.dl-roster__team {
+  position:relative;
+  border-top:4px solid #659b9b!important;
+}
+.dl-roster__team:before{
+  position:absolute;
+  right:12px;
+  top:11px;
+  content:'✦';
+  font:30px Georgia,serif;
+  color:rgba(192,177,141,.2);
+  pointer-events:none;
+}
+.dl-roster__team-name{
+  font:900 clamp(20px,2.5vw,29px)/1.1 Impact,"Arial Narrow",sans-serif;
+  letter-spacing:.04em;
+  text-transform:uppercase;
+  color:var(--roster-cream);
+  text-wrap:balance;
+}
+.dl-roster__count{
+  color:#f2e2bd;
+  font:900 26px/1 Impact,"Arial Narrow",sans-serif;
+  padding:8px 12px;
+  background:#253e3c;
+  border:1px solid rgba(219,184,127,.42);
+}
+.dl-roster__team-members {
+  background:rgba(9,16,19,.5);
+  border-top:1px solid rgba(222,196,141,.35);
+  border-bottom:1px solid rgba(222,196,141,.35);
+  border-radius:0;
+}
+.dl-roster__team-members li{
+  border-radius:0;
+  background:rgba(232,213,174,.038);
+  border-left:2px solid rgba(217,181,118,.35);
+}
+.dl-roster__team button{
+  border-radius:0;
+  font-weight:700;
+}
+.dl-roster__team p,.dl-roster__team .text-muted{color:#b9c0b6;}
+.dl-roster__teams >div >h3{font:800 24px/1.1 Impact,"Arial Narrow",sans-serif;color:#e9d8b7;}
+@media(max-width:640px){
+ .dl-roster__masthead{padding:24px;}
+ .dl-roster__masthead h2{font-size:45px;}
+ .dl-roster__masthead p{font-size:15px;}
+}

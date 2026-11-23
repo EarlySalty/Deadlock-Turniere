@@ -27,7 +27,7 @@ test('öffentliche Turnierseite stellt Solo-Spieler und alle Teammitglieder nebe
   assert.ok(tournament.includes('aria-label="Solo-Spieler"'))
   assert.ok(tournament.includes('aria-label="Gemeldete Teams"'))
   assert.ok(tournament.includes('tournament.signups.filter((signup) => signup.team_id === null)'))
-  assert.ok(tournament.includes('team.members.map((member)'))
+  assert.ok(tournament.includes('team.members.map((member, position)'))
   assert.ok(tournament.includes('Team-Kader'))
   assert.ok(!tournament.includes('team.members.slice(0, 3)'))
 })

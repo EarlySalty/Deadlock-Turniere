@@ -2,6 +2,8 @@
 @import "tailwindcss";
 @import "./brand-tokens.css";
 @import "./draft.css";
+@import "./draft-pulp.css";
+@import "./roster-pulp.css";
 @plugin "@tailwindcss/typography";
 
 /* Turnierplattform, DDC-Marke: Patch-Schwarz + Gold
