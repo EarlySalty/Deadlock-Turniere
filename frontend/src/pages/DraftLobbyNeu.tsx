@@ -121,7 +121,7 @@ export default function DraftLobbyNeu() {
           <span className="text-[10px] font-bold uppercase tracking-[0.35em]">Draft</span>
         </div>
         <h1
-          className="fade-in-up mt-3 text-center font-display text-5xl font-black uppercase tracking-tight text-white md:text-7xl"
+          className="ddc-occult-title fade-in-up mt-3 text-center text-5xl font-black uppercase tracking-tight text-white md:text-7xl"
           style={{ animationDelay: '0.1s' }}
         >
           Deadlock <span className="text-[#c8a86b] drop-shadow-[0_0_30px_rgba(200,168,107,0.45)]">Draft</span>

@@ -685,10 +685,10 @@ export default function Tournament() {
         )}
 
         {activeTab === 'teams' && (
-          <div className="space-y-8">
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-              {/* Sidebar: Your Team / Create Team */}
-              <div className="space-y-6">
+          <div className="space-y-6">
+            <div className="grid min-w-0 grid-cols-1 gap-5">
+              {/* Persönliche Aktionen bleiben sichtbar, ohne den Team-Pool zu verengen. */}
+              <div className="grid gap-4 lg:grid-cols-2">
                  {isSignupOpen && isLoggedIn && !userTeam && !userHasSoloSignup && (
                     <Card className="p-6 space-y-6 border-primary/10">
                       <h3 className="text-sm font-bold uppercase tracking-widest text-foreground">Team gründen</h3>
@@ -758,60 +758,46 @@ export default function Tournament() {
                  )}
               </div>
 
-              {/* Team List */}
-              <div className="lg:col-span-2 space-y-6">
-                {/* Registered players overview */}
-                {tournament.signups.length > 0 && (
-                  <div className="space-y-3">
-                    <div className="flex items-center justify-between">
-                      <h3 className="text-sm font-bold uppercase tracking-widest text-muted">Eingetragene Spieler</h3>
-                      <span className="text-xs font-bold text-foreground bg-white/5 px-2 py-1 rounded-lg border border-white/5">
-                        {tournament.signups.length}
-                      </span>
+              {/* Spielerpool und Teams bilden eine gemeinsame Arbeitsfläche. */}
+              <div className="grid min-w-0 grid-cols-1 items-start gap-5 xl:grid-cols-[minmax(250px,320px)_minmax(0,1fr)]">
+                <section className="ddc-occult-panel min-w-0 space-y-3 p-4 xl:sticky xl:top-20" aria-label="Solo-Spieler">
+                  <div className="flex items-center justify-between gap-3 border-b border-primary/25 pb-3">
+                    <div>
+                      <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-primary">Spielerpool</p>
+                      <h3 className="ddc-occult-title mt-1 text-lg text-foreground">Solo-Spieler</h3>
                     </div>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                      {tournament.signups.map((signup) => {
-                        const teamName = signup.team_id != null
-                          ? tournament.teams.find((t) => t.id === signup.team_id)?.name
-                          : null
-                        return (
-                          <div
-                            key={signup.id}
-                            className="flex items-center gap-3 p-2.5 rounded-lg bg-white/5 border border-white/5"
-                          >
-                            <User size={13} className="text-muted shrink-0" />
-                            <span className="text-sm text-foreground font-medium truncate flex-1">
-                              {safePublicName(signup.discord_name)}
-                            </span>
-                            {teamName ? (
-                              <span className="text-[10px] font-bold text-primary uppercase tracking-wide shrink-0">
-                                {teamName}
-                              </span>
-                            ) : (
-                              <span className="text-[10px] font-bold text-muted uppercase tracking-wide shrink-0">
-                                Solo
-                              </span>
-                            )}
-                          </div>
-                        )
-                      })}
-                    </div>
+                    <span className="rounded border border-primary/40 bg-primary/10 px-3 py-1 font-mono text-lg font-bold text-primary">
+                      {tournament.signups.filter((signup) => signup.team_id === null).length}
+                    </span>
                   </div>
-                )}
+                  {tournament.signups.filter((signup) => signup.team_id === null).length === 0 && (
+                    <p className="text-sm text-muted">Aktuell keine Solo-Anmeldungen.</p>
+                  )}
+                  <div className="grid gap-2">
+                    {tournament.signups.filter((signup) => signup.team_id === null).map((signup) => (
+                      <div key={signup.id} className="flex min-w-0 items-center gap-2 rounded border border-primary/15 bg-white/[0.025] px-3 py-2.5">
+                        <User size={14} aria-hidden="true" className="shrink-0 text-primary/70" />
+                        <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">{safePublicName(signup.discord_name)}</span>
+                        <span className="text-[10px] font-semibold uppercase tracking-wider text-muted">Solo</span>
+                      </div>
+                    ))}
+                  </div>
+                </section>
 
-                <div className="flex items-center justify-between">
+                <section className="min-w-0 space-y-4" aria-label="Gemeldete Teams">
+                <div className="flex items-center justify-between border-b border-primary/25 pb-3">
                   <h3 className="text-sm font-bold uppercase tracking-widest text-muted">Gemeldete Teams</h3>
                   <span className="text-xs font-bold text-foreground bg-white/5 px-2 py-1 rounded-lg border border-white/5">
                     {tournament.teams.length}
                   </span>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="grid min-w-0 grid-cols-1 gap-4 2xl:grid-cols-2">
                   {tournament.teams.map((team) => {
                     const recruiting = recruitingLabel(team.recruitment_status)
                     const isMyTeam = userTeam?.id === team.id
                     return (
-                      <Card key={team.id} className={`p-5 transition-all group ${isMyTeam ? 'border-primary/50' : 'hover:border-white/20'}`}>
+                      <Card key={team.id} className={`ddc-occult-panel min-w-0 p-5 transition-all group ${isMyTeam ? 'border-primary/50' : 'hover:border-primary/40'}`}>
                         <div className="space-y-4">
                           <div className="flex items-start justify-between gap-3">
                             <div>
@@ -825,17 +811,27 @@ export default function Tournament() {
                             </span>
                           </div>
 
-                          <div className="flex flex-wrap gap-2">
-                             {team.members.slice(0, 3).map((m, i) => (
-                               <div key={i} title={m.discord_name ?? ''} className="w-6 h-6 rounded-lg bg-white/5 border border-white/10 flex items-center justify-center overflow-hidden">
-                                  <User size={12} className="text-muted" />
-                               </div>
-                             ))}
-                             {team.members.length > 3 && (
-                               <div className="w-6 h-6 rounded-lg bg-white/5 border border-white/10 flex items-center justify-center text-[10px] font-bold text-muted">
-                                 +{team.members.length - 3}
-                               </div>
-                             )}
+                          <div className="rounded border border-primary/20 bg-black/20 p-3">
+                            <div className="mb-2 flex items-center justify-between gap-3">
+                              <span className="text-[11px] font-bold uppercase tracking-[0.15em] text-primary">Team-Kader</span>
+                              <span className="text-[11px] text-muted">{Math.max(0, tournament.team_size - team.members.length)} Plätze frei</span>
+                            </div>
+                            <ul className="grid gap-2 sm:grid-cols-2">
+                              {team.members.map((member) => (
+                                <li key={member.discord_id} className="flex min-w-0 items-center gap-2 rounded border border-white/10 px-2.5 py-2">
+                                  <User size={13} aria-hidden="true" className="shrink-0 text-primary/70" />
+                                  <span className="min-w-0 flex-1 truncate text-sm text-foreground" title={safePublicName(member.discord_name)}>
+                                    {safePublicName(member.discord_name)}
+                                  </span>
+                                  {member.role === 'captain' && (
+                                    <span className="shrink-0 text-[10px] font-bold uppercase tracking-wide text-primary">C</span>
+                                  )}
+                                </li>
+                              ))}
+                              {team.members.length === 0 && (
+                                <li className="text-sm text-muted">Noch keine Mitglieder.</li>
+                              )}
+                            </ul>
                           </div>
 
                           {!isMyTeam && isSignupOpen && (
@@ -856,6 +852,7 @@ export default function Tournament() {
                     )
                   })}
                 </div>
+                </section>
               </div>
             </div>
           </div>

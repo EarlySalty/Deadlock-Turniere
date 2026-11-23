@@ -1,20 +1,32 @@
+import { lazy, Suspense } from 'react'
 import { Routes, Route } from 'react-router-dom'
 import Layout from '@/components/layout/Layout'
 import Home from '@/pages/Home'
-import Tournament from '@/pages/Tournament'
-import Login from '@/pages/Login'
-import Admin from '@/pages/Admin'
-import Hilfe from '@/pages/Hilfe'
-import Leaderboard from '@/pages/Leaderboard'
-import PlayerProfile from '@/pages/PlayerProfile'
 import DraftLobbyNeu from '@/pages/DraftLobbyNeu'
-import DraftBoard from '@/pages/DraftBoard'
-import CompFinder from '@/pages/CompFinder'
 import ProtectedRoute from '@/components/auth/ProtectedRoute'
 
+// Nur die tatsächlich geöffnete Ansicht laden. Das reduziert den initialen
+// JS-Download insbesondere für Draft-Räume und mobile Verbindungen.
+const Tournament = lazy(() => import('@/pages/Tournament'))
+const Login = lazy(() => import('@/pages/Login'))
+const Admin = lazy(() => import('@/pages/Admin'))
+const Hilfe = lazy(() => import('@/pages/Hilfe'))
+const Leaderboard = lazy(() => import('@/pages/Leaderboard'))
+const PlayerProfile = lazy(() => import('@/pages/PlayerProfile'))
+const DraftBoard = lazy(() => import('@/pages/DraftBoard'))
+const CompFinder = lazy(() => import('@/pages/CompFinder'))
+
 export default function App() {
+  const isPreview = import.meta.env.BASE_URL.includes('/_preview/')
   return (
-    <Routes>
+    <>
+      {isPreview && (
+        <div role="status" className="sticky top-0 z-[100] border-b border-[#c8a86b]/50 bg-[#191812] px-4 py-2 text-center text-xs font-semibold tracking-wide text-[#f3ddb3]">
+          DDC-UI-VORSCHAU · Draft-Demo ohne echte Matches · Turnierdaten nur lesbar · Kein Produktiv-Deploy
+        </div>
+      )}
+      <Suspense fallback={<div role="status" className="mx-auto max-w-7xl px-6 py-12 text-sm text-muted">Ansicht wird geladen …</div>}>
+        <Routes>
       <Route element={<Layout />}>
         <Route index element={<Home />} />
         {/* Vor der :id-Route: sonst liest der Router "draft" als Turnier-ID und
@@ -40,6 +52,8 @@ export default function App() {
           </ProtectedRoute>
         } />
       </Route>
-    </Routes>
+        </Routes>
+      </Suspense>
+    </>
   )
 }

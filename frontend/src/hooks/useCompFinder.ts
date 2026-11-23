@@ -2,7 +2,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type { CompPreference, CompRoom } from '@/types/comp'
 import { compTokenKey, newestRoom } from './compState'
 
-const API = `${import.meta.env.BASE_URL}api/comp/lobbies`
+// API-Routing bleibt auch in der statischen HashRouter-Vorschau am Rust-Backend.
+const API = '/turnier/api/comp/lobbies'
 const roomKey = (code: string) => ['comp', code] as const
 
 export class CompApiError extends Error {
@@ -35,6 +36,9 @@ function ensureToken(code: string): string {
 }
 
 async function request<T>(path: string, options: { method?: string; body?: unknown; token?: string | null; signal?: AbortSignal } = {}): Promise<T> {
+  if (import.meta.env.BASE_URL.includes('/_preview/') && (options.method ?? 'GET') !== 'GET') {
+    throw new CompApiError(403, 'Vorschau ist schreibgeschützt.')
+  }
   const response = await fetch(`${API}${path}`, {
     method: options.method ?? 'GET',
     cache: 'no-store',
