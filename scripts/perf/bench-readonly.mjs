@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Bounded, read-only production benchmark for the DDC tournament API.
 // Only fixed first-party GET endpoints; no arbitrary URLs, writes or stress spikes.
-// Usage: node scripts/perf/bench-readonly.mjs [local|public|both]
+// Usage: node scripts/perf/bench-readonly.mjs [local|public|staging|both]
 // Measure total response duration on warmed keep-alive connections; cold TLS is separate.
 import http from 'node:http'
 import https from 'node:https'
@@ -9,6 +9,7 @@ import { performance } from 'node:perf_hooks'
 
 const targets = {
   local: 'http://127.0.0.1:8900',
+  staging: 'http://127.0.0.1:8901',
   public: 'https://deutsche-deadlock-community.de/turnier',
 }
 const routes = [
@@ -22,8 +23,8 @@ const stages = [
   { concurrency: 8, requests: 96 },
 ]
 const choice = process.argv[2] || 'both'
-if (!['both', 'local', 'public'].includes(choice)) {
-  console.error('Usage: node scripts/perf/bench-readonly.mjs [local|public|both]')
+if (!['both', 'local', 'public', 'staging'].includes(choice)) {
+  console.error('Usage: node scripts/perf/bench-readonly.mjs [local|public|staging|both]')
   process.exit(2)
 }
 const chosen = choice === 'both' ? ['local', 'public'] : [choice]
@@ -110,8 +111,8 @@ for (const target of chosen) {
       const summary = summarize(target, name, stage, samples, performance.now() - started)
       results.push(summary)
       console.log(JSON.stringify(summary))
-      if (summary.errors) {
-        console.error('Stopping for errors: ' + target + ' ' + name)
+      if (summary.errors || (summary.p95 !== null && summary.p95 > 300)) {
+        console.error('Stopping for errors: or p95 >300 ms: ' + target + ' ' + name)
         agent.destroy()
         process.exit(1)
       }
