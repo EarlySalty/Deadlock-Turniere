@@ -64,11 +64,15 @@ async fn get_tournament(
     }
 
     let t = helpers::TournamentRowData::from_row(&row)?;
-    let teams = helpers::load_teams_public(pool, tournament_id).await?;
-    let groups = helpers::load_groups_for_tournament(pool, tournament_id).await?;
-    let bracket_matches = helpers::load_bracket_matches(pool, tournament_id).await?;
-    let mini_groups = helpers::load_mini_groups_for_tournament(pool, tournament_id).await?;
-    let signups = helpers::load_signups_public(pool, tournament_id).await?;
+    // Independent read models must not serialize their database latency.
+    // Team members and pending applications are fetched in batches.
+    let (teams, groups, bracket_matches, mini_groups, signups) = tokio::try_join!(
+        helpers::load_teams_public(pool, tournament_id),
+        helpers::load_groups_for_tournament(pool, tournament_id),
+        helpers::load_bracket_matches(pool, tournament_id),
+        helpers::load_mini_groups_for_tournament(pool, tournament_id),
+        helpers::load_signups_public(pool, tournament_id),
+    )?;
 
     Ok(Json(helpers::build_detail_public(
         t,
@@ -90,32 +94,31 @@ async fn get_my_tournament_status(
     let pool = &state.pool;
 
     let user_discord_id = db::parse_discord_id(&user.discord_id)?;
-    let member: Option<(i64, i64)> = sqlx::query_as(
-        r#"SELECT tm.team_id, t.captain_discord_id FROM turnier."team_members" tm
-         JOIN turnier."teams" t ON tm.team_id = t.id
-         WHERE t.tournament_id = $1 AND tm.discord_id = $2"#,
-    )
-    .bind(tournament_id)
-    .bind(user_discord_id)
-    .fetch_optional(pool)
-    .await?;
-
-    let signup: Option<(i64,)> = sqlx::query_as(
-        r#"SELECT id FROM turnier."tournament_signups"
-         WHERE tournament_id = $1 AND discord_id = $2 AND team_id IS NULL"#,
-    )
-    .bind(tournament_id)
-    .bind(user_discord_id)
-    .fetch_optional(pool)
-    .await?;
-
-    let checkin: Option<(i64,)> = sqlx::query_as(
-        r#"SELECT id FROM turnier."tournament_checkins" WHERE tournament_id = $1 AND discord_id = $2"#,
-    )
-    .bind(tournament_id)
-    .bind(user_discord_id)
-    .fetch_optional(pool)
-    .await?;
+    // These independent lookups can execute together on the shared pool.
+    let (member, signup, checkin): (Option<(i64, i64)>, Option<(i64,)>, Option<(i64,)>) = tokio::try_join!(
+        sqlx::query_as(
+            r#"SELECT tm.team_id, t.captain_discord_id FROM turnier."team_members" tm
+             JOIN turnier."teams" t ON tm.team_id = t.id
+             WHERE t.tournament_id = $1 AND tm.discord_id = $2"#,
+        )
+        .bind(tournament_id)
+        .bind(user_discord_id)
+        .fetch_optional(pool),
+        sqlx::query_as(
+            r#"SELECT id FROM turnier."tournament_signups"
+             WHERE tournament_id = $1 AND discord_id = $2 AND team_id IS NULL"#,
+        )
+        .bind(tournament_id)
+        .bind(user_discord_id)
+        .fetch_optional(pool),
+        sqlx::query_as(
+            r#"SELECT id FROM turnier."tournament_checkins"
+               WHERE tournament_id = $1 AND discord_id = $2"#,
+        )
+        .bind(tournament_id)
+        .bind(user_discord_id)
+        .fetch_optional(pool),
+    )?;
 
     let team_id = member.as_ref().map(|(tid, _)| *tid);
     let is_captain = member

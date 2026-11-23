@@ -77,6 +77,11 @@ export class ApiError extends Error {
 }
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
+  // Statische Preview verwendet produktive Lesedaten, niemals Schreiboperationen.
+  if (import.meta.env.BASE_URL.includes('/_preview/') &&
+      !['GET', 'HEAD'].includes((options?.method ?? 'GET').toUpperCase())) {
+    throw new ApiError(403, 'Vorschau ist schreibgeschützt.')
+  }
   const res = await fetch(`${API_BASE}${path}`, {
     credentials: 'include',
     headers: { 'Content-Type': 'application/json', ...options?.headers },
@@ -550,6 +555,9 @@ export const clearMyDmOptout = (scope: DmScope) =>
   })
 
 export const uploadProfileAvatar = async (file: File): Promise<UserProfile> => {
+  if (import.meta.env.BASE_URL.includes('/_preview/')) {
+    throw new ApiError(403, 'Vorschau ist schreibgeschützt.')
+  }
   const formData = new FormData()
   formData.append('avatar', file)
   const res = await fetch(`${API_BASE}/profile/avatar`, {
@@ -675,6 +683,10 @@ export const submitSeriesGameResult = (
 // fachliche Antworten ("kein Captain", "anderes Team ist am Zug"), die will
 // der Spieler wortwoertlich sehen.
 async function lobbyRequest<T>(path: string, options?: RequestInit): Promise<T> {
+  if (import.meta.env.BASE_URL.includes('/_preview/') &&
+      !['GET', 'HEAD'].includes((options?.method ?? 'GET').toUpperCase())) {
+    throw new ApiError(403, 'Vorschau ist schreibgeschützt.')
+  }
   const res = await fetch(`${API_BASE}${path}`, {
     headers: { 'Content-Type': 'application/json', ...options?.headers },
     ...options,

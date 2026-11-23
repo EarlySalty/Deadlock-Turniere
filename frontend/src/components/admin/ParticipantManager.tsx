@@ -278,13 +278,19 @@ export default function ParticipantManager({
         )}
       </Card>
 
-      <Card className="p-6 space-y-4">
-        <div className="flex items-center justify-between gap-3">
-          <div>
-            <h3 className="text-base font-semibold text-foreground">Offene Solo-Anmeldungen</h3>
-            <p className="text-sm text-muted">{pendingSignups.length} wartend auf Team-Zuweisung</p>
-          </div>
-        </div>
+      <div className="dl-roster grid min-w-0 items-start gap-5 xl:grid-cols-[minmax(300px,0.9fr)_minmax(0,2.1fr)]" data-testid="teilnehmer-arbeitsflaeche">
+        <section className="min-w-0 xl:sticky xl:top-20" aria-label="Solo-Spieler">
+          <Card className="dl-roster__pool space-y-4 p-4 sm:p-5">
+            <div className="flex items-center justify-between gap-3 border-b border-primary/25 pb-3">
+              <div>
+                <div className="text-[11px] font-bold uppercase tracking-[0.22em] text-primary">Spielerpool</div>
+                <h3 className="ddc-occult-title mt-1 text-lg text-foreground">Solo-Spieler</h3>
+                <p className="mt-1 text-xs text-muted">{pendingSignups.length} ohne Team</p>
+              </div>
+              <span className="rounded border border-primary/40 bg-primary/10 px-3 py-1 font-mono text-xl font-bold text-primary" aria-label={`${pendingSignups.length} Solo-Spieler`}>
+                {pendingSignups.length}
+              </span>
+            </div>
 
         {pendingSignups.length === 0 ? (
           <p className="text-sm text-muted">Keine offenen Solo-Anmeldungen vorhanden.</p>
@@ -340,11 +346,21 @@ export default function ParticipantManager({
             ))}
           </div>
         )}
-      </Card>
+          </Card>
+        </section>
 
-      <div className="grid grid-cols-1 gap-4">
-        {teams.map((team) => (
-          <Card key={team.id} className="p-5 space-y-4">
+        <section className="min-w-0 space-y-3" aria-label="Teams und Mitglieder">
+          <div className="flex flex-wrap items-end justify-between gap-2 border-b border-primary/25 pb-3">
+            <div>
+              <div className="text-[11px] font-bold uppercase tracking-[0.22em] text-primary">Aufstellung</div>
+              <h3 className="ddc-occult-title mt-1 text-lg text-foreground">Teams und Kader</h3>
+            </div>
+            <span className="text-sm text-muted">{teams.length} Teams · {teams.reduce((sum, team) => sum + team.members.length, 0)} Spieler</span>
+          </div>
+          {teams.length === 0 && <p className="rounded border border-dashed border-primary/30 p-5 text-sm text-muted">Noch keine Teams angelegt.</p>}
+          <div className="grid min-w-0 gap-4 2xl:grid-cols-2">
+            {teams.map((team) => (
+              <Card key={team.id} className="dl-roster__team min-w-0 space-y-4 p-4 sm:p-5">
             <div className="flex flex-col gap-3">
               <div className="flex flex-col gap-2 sm:flex-row">
                 <input
@@ -375,7 +391,7 @@ export default function ParticipantManager({
               </div>
 
               <div className="flex flex-wrap items-center gap-3 text-sm text-muted">
-                <span>{team.members.length}/{teamSize} Mitglieder</span>
+                <span className="font-mono font-bold text-primary">{team.members.length}/{teamSize} Mitglieder</span>
                 <span>Captain: {captainLabel(team)}</span>
                 <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${recruitingBadgeClass(team.recruitment_status as RecruitmentStatus)}`}>
                   {RECRUITING_OPTIONS.find((o) => o.value === team.recruitment_status)?.label ?? team.recruitment_status}
@@ -385,6 +401,25 @@ export default function ParticipantManager({
                     Bewerbungen offen
                   </span>
                 )}
+              </div>
+
+              <div className="rounded-md border border-primary/25 bg-background/60 p-3">
+                <div className="mb-2 flex items-center justify-between">
+                  <span className="text-[11px] font-bold uppercase tracking-[0.18em] text-primary">Kader auf einen Blick</span>
+                  <span className="text-xs text-muted">{Math.max(0, teamSize - team.members.length)} frei</span>
+                </div>
+                <ul className="grid gap-1.5 sm:grid-cols-2">
+                  {team.members.map((member) => (
+                    <li key={member.discord_id} className="flex min-w-0 items-center gap-2 rounded border border-white/10 bg-white/[0.025] px-2.5 py-2">
+                      {member.discord_id === team.captain_discord_id
+                        ? <Crown size={13} aria-label="Captain" className="shrink-0 text-primary" />
+                        : <Users size={13} aria-hidden="true" className="shrink-0 text-muted" />}
+                      <span className="min-w-0 flex-1 truncate text-sm text-foreground" title={playerLabel(member)}>{playerLabel(member)}</span>
+                      <span className="max-w-[7rem] shrink-0 truncate text-[11px] text-muted" title={member.rank || 'Kein Rang'}>{member.rank || '—'}</span>
+                    </li>
+                  ))}
+                  {team.members.length === 0 && <li className="text-sm text-muted">Noch keine Mitglieder.</li>}
+                </ul>
               </div>
 
               <div className="flex flex-col gap-1 sm:flex-row sm:items-center">
@@ -506,8 +541,10 @@ export default function ParticipantManager({
                 })}
               </div>
             )}
-          </Card>
-        ))}
+              </Card>
+            ))}
+          </div>
+        </section>
       </div>
 
       {replacementTeam && (

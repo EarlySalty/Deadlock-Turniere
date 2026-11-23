@@ -60,5 +60,8 @@ export function loescheClaimToken(code: string) {
 }
 
 export function raumUrl(code: string): string {
+  if (import.meta.env.BASE_URL.includes('/_preview/')) {
+    return `${window.location.origin}${import.meta.env.BASE_URL}index.html#/draft/${code}`
+  }
   return `${window.location.origin}${import.meta.env.BASE_URL}draft/${code}`
 }

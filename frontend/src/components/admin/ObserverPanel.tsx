@@ -60,19 +60,30 @@ export default function ObserverPanel() {
   const sessionsQuery = useQuery({
     queryKey: ['observer', 'sessions'],
     queryFn: fetchObserverSessions,
-    refetchInterval: 2000,
+    refetchInterval: query =>
+      (query.state.data?.sessions ?? []).some(session => !session.finished_at)
+        ? 2_000
+        : 10_000,
+    refetchIntervalInBackground: false,
   })
   const leaseQuery = useQuery({
     queryKey: ['observer', 'bot2', 'lease'],
     queryFn: fetchObserverBot2Lease,
-    refetchInterval: 3000,
+    refetchInterval: query =>
+      query.state.data?.reserved ? 3_000 : 15_000,
+    refetchIntervalInBackground: false,
     retry: false,
   })
   const detailQuery = useQuery({
     queryKey: ['observer', 'session', selectedId],
     queryFn: () => fetchObserverSession(selectedId!),
     enabled: selectedId !== null,
-    refetchInterval: 1000,
+    refetchInterval: query => {
+      const session = query.state.data?.session
+      if (session?.finished_at || session?.state === 'finished') return false
+      return session?.state === 'live' ? 1_000 : 5_000
+    },
+    refetchIntervalInBackground: false,
   })
   const heroesQuery = useDraftHeroList()
 

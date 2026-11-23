@@ -1,7 +1,9 @@
-@import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Sora:wght@400;600;700;800&display=swap');
+/* Webfonts are loaded once from index.html with preconnect, not twice via CSS. */
 @import "tailwindcss";
 @import "./brand-tokens.css";
 @import "./draft.css";
+@import "./draft-pulp.css";
+@import "./roster-pulp.css";
 @plugin "@tailwindcss/typography";
 
 /* Turnierplattform, DDC-Marke: Patch-Schwarz + Gold
@@ -116,6 +118,30 @@ h1, h2, h3, h4, .font-display {
 ::selection {
   background: color-mix(in srgb, var(--color-primary) 45%, transparent);
   color: var(--color-bg);
+}
+
+/* Lokale Turnier-/Draft-Atmosphäre nach Deadlocks okkultem New-York-Look.
+   Nur gezielte Panels: Das globale DDC-Markensystem bleibt unverändert. */
+.ddc-occult-panel {
+  border: 1px solid rgba(199, 169, 108, .3);
+  border-radius: .65rem;
+  background-color: #101312;
+  background-image:
+    linear-gradient(135deg, rgba(198, 156, 88, .085), transparent 33%),
+    linear-gradient(175deg, rgba(27, 32, 37, .85), rgba(15, 17, 17, .98));
+  box-shadow: inset 0 1px rgba(255, 241, 205, .075), 0 10px 32px rgba(0, 0, 0, .28);
+}
+.ddc-occult-title {
+  font-family: Georgia, "Times New Roman", serif;
+  font-weight: 700;
+  letter-spacing: .045em;
+  text-transform: uppercase;
+}
+.ddc-occult-rule {
+  background-image: repeating-linear-gradient(
+    90deg, rgba(199, 169, 108, .55) 0 18px, transparent 18px 25px
+  );
+  height: 2px;
 }
 
 /* ── Kachel ───────────────────────────────────────────────────────────────

@@ -20,6 +20,7 @@ turnier-config = { path = "../turnier-config" }
 sqlx = { workspace = true, features = ["sqlite"] }
 tokio.workspace = true
 async-trait.workspace = true
+futures.workspace = true
 reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true

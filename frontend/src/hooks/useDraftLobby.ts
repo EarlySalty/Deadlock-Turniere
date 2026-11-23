@@ -28,7 +28,7 @@ import {
   mockZustand,
 } from '@/mocks/draftFixtures'
 
-const MOCK_AKTIV = import.meta.env.DEV && import.meta.env.VITE_DRAFT_MOCK === '1'
+const MOCK_AKTIV = import.meta.env.VITE_DRAFT_MOCK === '1' && (import.meta.env.DEV || import.meta.env.BASE_URL.includes('/_preview/'))
 const API_BASE = '/turnier/api'
 const VIEWER_SPEICHER = 'draft-viewer'
 
@@ -147,7 +147,9 @@ export function useScrimLobby(code: string | undefined) {
         { claim: leseClaimToken(code!) },
       ),
     enabled: !!code,
-    refetchIntervalInBackground: true,
+    // Hidden tabs must not issue a room GET every second; React Query
+    // refreshes on focus when the participant returns.
+    refetchIntervalInBackground: false,
     refetchInterval: (query) => {
       const s = query.state.data
       if (

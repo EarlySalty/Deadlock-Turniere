@@ -66,7 +66,12 @@ const MODE_TABS: { key: AdminMode; label: string; icon: typeof Trophy }[] = [
 ]
 
 export default function Admin() {
-  const { data: tournaments, isLoading } = useAdminTournaments()
+  const {
+    data: tournaments,
+    isLoading,
+    isError: tournamentsFailed,
+    refetch: refetchTournaments,
+  } = useAdminTournaments()
   const [adminMode, setAdminMode] = useState<AdminMode>('live')
   const [selectedLiveId, setSelectedLiveId] = useState<number | null>(null)
   const [selectedArchiveId, setSelectedArchiveId] = useState<number | null>(null)
@@ -137,7 +142,26 @@ export default function Admin() {
     })
   }, [liveDetail, hasGroups, hasBracket])
 
-  if (isLoading) return <LoadingSpinner />
+  if (isLoading) {
+    return <section role="status" className="mx-auto max-w-3xl space-y-4 py-10" aria-label="Turnierverwaltung lädt">
+      <div className="h-10 w-72 animate-pulse bg-white/10" />
+      <div className="h-14 animate-pulse bg-white/5" />
+      <div className="grid gap-4 md:grid-cols-3">
+        <div className="h-48 animate-pulse bg-white/5" />
+        <div className="h-48 animate-pulse bg-white/5" />
+        <div className="h-48 animate-pulse bg-white/5" />
+      </div>
+      <p className="text-sm text-muted">Turnierübersicht wird geladen …</p>
+    </section>
+  }
+  if (tournamentsFailed && !tournaments) {
+    return <section role="alert" className="rounded border border-red-400/40 p-6">
+      <h2 className="text-lg font-bold">Turnierübersicht nicht erreichbar</h2>
+      <p className="mt-2 text-sm text-muted">Die API hat nicht rechtzeitig oder mit einem Fehler geantwortet.</p>
+      <button type="button" onClick={() => void refetchTournaments()}
+        className="mt-4 border border-primary px-5 py-2 text-sm font-bold text-primary">Erneut laden</button>
+    </section>
+  }
 
   const teamCount = liveDetail?.teams.length ?? 0
   const playerCount =
@@ -191,8 +215,8 @@ export default function Admin() {
 
   return (
     <div className="space-y-6">
-      <header className="flex flex-col gap-2">
-        <h1 className="text-2xl font-bold text-foreground">Turnier-Verwaltung</h1>
+      <header className="flex flex-col gap-2 border-b border-primary/30 pb-4">
+        <h1 className="font-display text-3xl font-black uppercase tracking-wide text-foreground">Turnier-Verwaltung</h1>
         <p className="text-sm text-muted">
           Live-Turniere steuern, Archiv einsehen oder im Test-Modus trockene Probeläufe
           fahren.
@@ -238,7 +262,7 @@ export default function Admin() {
       </div>
 
       {adminMode === 'live' && (
-        <div className="grid gap-6 lg:grid-cols-[280px_1fr]">
+        <div className="grid min-w-0 gap-6 lg:grid-cols-[260px_minmax(0,1fr)]">
           <aside className="lg:sticky lg:top-4 lg:self-start lg:max-h-[calc(100vh-2rem)] lg:overflow-y-auto">
             <TournamentSidebar
               tournaments={liveTournaments}
@@ -268,11 +292,34 @@ export default function Admin() {
                 <CreateTournamentForm key={createFormKey} template={createTemplate ?? undefined} />
               </section>
             ) : loadingLiveDetail && liveSelectedId ? (
-              <LoadingSpinner />
+              <section role="status" className="min-w-0 space-y-5" aria-label="Turnierdetails laden">
+                {selectedSummary && <TournamentSummaryCard tournament={selectedSummary} />}
+                <div className="grid gap-5 lg:grid-cols-[185px_minmax(0,1fr)]">
+                  <div className="space-y-3">
+                    <div className="h-12 animate-pulse bg-white/5" />
+                    <div className="h-12 animate-pulse bg-white/5" />
+                    <div className="h-12 animate-pulse bg-white/5" />
+                  </div>
+                  <div className="space-y-4">
+                    <div className="h-20 animate-pulse bg-white/5" />
+                    <div className="h-48 animate-pulse bg-white/5" />
+                  </div>
+                </div>
+                <p className="text-sm text-muted">Turnierdetails werden geladen …</p>
+              </section>
+            ) : liveDetailError ? (
+              <section role="alert" className="border border-red-400/40 bg-red-400/5 p-6">
+                <h2 className="font-display text-xl font-bold uppercase text-foreground">Turnierdetails nicht geladen</h2>
+                <p className="mt-2 text-sm text-muted">Die Turnier-API antwortet nicht wie erwartet. Du kannst die Anfrage erneut ausführen.</p>
+                <button type="button" onClick={() => void refetchLiveDetail()}
+                  className="mt-4 border border-primary px-4 py-2 font-semibold text-primary hover:bg-primary/10">
+                  Erneut laden
+                </button>
+              </section>
             ) : liveDetail && activePhase ? (
               <>
                 {selectedSummary && <TournamentSummaryCard tournament={selectedSummary} />}
-                <div className="grid gap-5 lg:grid-cols-[170px_1fr]">
+                <div className="grid min-w-0 gap-5 xl:grid-cols-[190px_minmax(0,1fr)]">
                   <AdminPhaseNav
                     status={liveDetail.status}
                     hasGroups={hasGroups}
@@ -452,12 +499,6 @@ export default function Admin() {
                   </section>
                 )}
               </>
-            ) : liveDetailError && !liveDetail ? (
-              <Card className="p-8 text-center">
-                <p className="text-sm text-red-300">
-                  Turnier konnte nicht geladen werden: {liveDetailError.message}
-                </p>
-              </Card>
             ) : liveTournaments.length === 0 ? (
               <Card className="p-8 text-center">
                 <Trophy size={32} className="mx-auto mb-3 text-muted" />
