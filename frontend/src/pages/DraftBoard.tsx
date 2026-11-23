@@ -9,7 +9,6 @@ import TeamKarte from '@/components/draft/TeamKarte'
 import BanLeiste from '@/components/draft/BanLeiste'
 import TeamSpalte from '@/components/draft/TeamSpalte'
 import HeroLeiste from '@/components/draft/HeroLeiste'
-import SplashBuehne from '@/components/draft/SplashBuehne'
 import BanStempel from '@/components/draft/BanStempel'
 import PickAnsage from '@/components/draft/PickAnsage'
 import Konfetti from '@/components/draft/Konfetti'
@@ -66,11 +65,11 @@ function Kopf({ zustand }: { zustand: DraftRaumZustand }) {
           transition={{ duration: 0.2 }}
           className="flex flex-col items-center"
         >
-          <div className="text-[10px] uppercase tracking-[0.3em] text-white/50">
+          <div className="text-xs font-semibold uppercase tracking-[0.22em] text-white/65">
             {zug?.label ?? ''}{' '}
             <span className="text-white/25">{zug?.anteil ?? ''}</span>
           </div>
-          <div className="mt-1 text-sm font-bold uppercase tracking-wide" style={{ color: farbe }}>
+          <div className="mt-2 text-center font-display text-xl font-black uppercase tracking-wide md:text-2xl" style={{ color: farbe }}>
             {zug ? `${teamName} · ${zug.action === 'ban' ? 'Bannen' : 'Pickt'}` : ''}
           </div>
         </motion.div>
@@ -79,14 +78,14 @@ function Kopf({ zustand }: { zustand: DraftRaumZustand }) {
         <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
-          className="mt-1 text-[10px] font-bold uppercase tracking-[0.2em] text-[#10b981]"
+          className="mt-2 rounded border border-emerald-500/40 bg-emerald-500/10 px-3 py-1 text-xs font-bold uppercase tracking-[0.14em] text-emerald-300"
         >
           Du bist dran
         </motion.div>
       )}
       {rest !== null && (
         <div
-          className={`mt-1 font-mono text-lg tabular-nums ${rot ? 'text-[#ef4444]' : 'text-white/80'}`}
+          className={`mt-2 font-mono text-3xl font-bold tabular-nums md:text-5xl ${rot ? 'text-[#ef4444]' : 'text-[#f1e9da]'}`}
         >
           <span key={rest} className={`inline-block ${rot ? 'draft-shake' : ''}`}>
             {text}
@@ -256,7 +255,7 @@ function DraftTisch({
   const aktiverSlot2 = !istBanZug && aktivesTeam === 2 ? picks2.length : null
 
   return (
-    <div className="relative min-h-[calc(100vh-5rem)] overflow-hidden">
+    <div className="relative min-h-[calc(100vh-5rem)] overflow-hidden bg-[#090e16]">
       <DraftHintergrund mitte />
       <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
         <span className="select-none text-center font-display text-4xl font-black uppercase tracking-tight text-white/[0.05] md:text-6xl">
@@ -289,33 +288,81 @@ function DraftTisch({
         )}
       </div>
 
-      {ausgewaehlt && zug && !uebergang && (
-        <SplashBuehne
-          held={ausgewaehlt}
-          team={zug.team}
-          teamName={zug.team === 1 ? zustand.team1.name : zustand.team2.name}
-          istBan={istBanZug}
-          kannBestaetigen={amZug}
-          beschaeftigt={bestaetigtLaeuft}
-          onBestaetigen={onBestaetigen}
-        />
-      )}
-
-      <div className="relative z-10 mt-6 grid grid-cols-1 gap-4 px-4 pb-56 md:px-6 lg:grid-cols-[220px_1fr_220px] lg:pb-32">
-        <TeamSpalte team={1} name={zustand.team1.name} picks={picks1} aktiverSlot={aktiverSlot1} portraits={portraits} />
-        <div className="hidden lg:block" />
-        <TeamSpalte team={2} name={zustand.team2.name} picks={picks2} aktiverSlot={aktiverSlot2} portraits={portraits} />
+      <div
+        className="relative z-20 mx-auto mt-5 flex max-w-[1580px] gap-1 overflow-x-auto px-4 pb-2 lg:px-8"
+        role="list"
+        aria-label="Draft-Reihenfolge"
+      >
+        {zustand.sequence.map((schritt) => {
+          const fertig = schritt.index < zustand.current_action_index
+          const aktuell = schritt.index === zustand.current_action_index
+          return (
+            <div
+              key={schritt.index}
+              role="listitem"
+              title={`Schritt ${schritt.index + 1}: Team ${schritt.team} ${schritt.action === 'ban' ? 'bannt' : 'pickt'}`}
+              aria-current={aktuell ? 'step' : undefined}
+              className={`min-w-[30px] flex-1 rounded-sm border py-1.5 text-center text-[11px] font-bold ${aktuell ? 'border-[#d5b573] bg-[#d5b573]/15 text-[#f1d6a1]' : fertig ? 'border-white/15 bg-white/5 text-white/50' : 'border-white/10 text-white/30'}`}
+            >
+              {schritt.action === 'ban' ? 'B' : 'P'}
+              <span className="ml-1 text-[9px]">{schritt.team}</span>
+            </div>
+          )
+        })}
       </div>
 
-      <HeroLeiste
-        helden={helden}
-        vergeben={vergeben}
-        modus={istBanZug ? 'ban' : 'pick'}
-        amZug={amZug}
-        auswahl={auswahl}
-        farbe={farbe}
-        onAuswahl={(name) => onAuswahl(auswahl === name ? null : name)}
-      />
+      <div className="relative z-20 mx-auto mt-5 grid w-full max-w-[1580px] grid-cols-2 items-start gap-3 px-4 pb-12 lg:grid-cols-[minmax(180px,230px)_minmax(0,1fr)_minmax(180px,230px)] lg:gap-6 lg:px-8">
+        <div className="order-2 lg:order-1">
+          <TeamSpalte team={1} name={zustand.team1.name} picks={picks1} aktiverSlot={aktiverSlot1} portraits={portraits} />
+        </div>
+
+        <div className="order-1 col-span-2 min-w-0 lg:order-2 lg:col-span-1">
+          {ausgewaehlt && zug && !uebergang && (
+            <div
+              className="sticky top-3 z-30 mb-3 flex flex-wrap items-center gap-3 rounded-lg border border-[#c8a86b]/50 bg-[#181c24]/95 p-3 shadow-xl backdrop-blur-md"
+              role="status"
+            >
+              {heroImageUrl(ausgewaehlt.image_url) && (
+                <img src={heroImageUrl(ausgewaehlt.image_url)!} alt="" className="h-14 w-12 rounded object-cover object-top" />
+              )}
+              <div className="min-w-0 flex-1">
+                <div className="text-xs uppercase tracking-[0.16em] text-white/55">
+                  {istBanZug ? 'Ban vorbereiten' : 'Pick vorbereiten'}
+                </div>
+                <div className="truncate text-lg font-bold text-white">{ausgewaehlt.name}</div>
+              </div>
+              <button
+                type="button"
+                onClick={() => onAuswahl(null)}
+                className="rounded border border-white/20 px-3 py-2 text-sm text-white/75 hover:border-white/50"
+              >
+                Abbrechen
+              </button>
+              <button
+                type="button"
+                onClick={onBestaetigen}
+                disabled={!amZug || bestaetigtLaeuft}
+                className="rounded border border-[#c8a86b] bg-[#c8a86b] px-4 py-2 text-sm font-bold text-[#17140c] hover:brightness-110 disabled:opacity-50"
+              >
+                {bestaetigtLaeuft ? 'Wird bestätigt…' : istBanZug ? 'Ban bestätigen' : 'Pick bestätigen'}
+              </button>
+            </div>
+          )}
+          <HeroLeiste
+            helden={helden}
+            vergeben={vergeben}
+            modus={istBanZug ? 'ban' : 'pick'}
+            amZug={amZug}
+            auswahl={auswahl}
+            farbe={farbe}
+            onAuswahl={(name) => onAuswahl(auswahl === name ? null : name)}
+          />
+        </div>
+
+        <div className="order-3 lg:order-3">
+          <TeamSpalte team={2} name={zustand.team2.name} picks={picks2} aktiverSlot={aktiverSlot2} portraits={portraits} />
+        </div>
+      </div>
 
       <AnimatePresence>
         {uebergang && zug && (
@@ -453,7 +500,7 @@ export default function DraftBoard() {
   const wiederholung = useLobbyRetry(code)
   const [auswahl, setAuswahl] = useState<string | null>(null)
   const [uebergang, setUebergang] = useState<Uebergang | null>(null)
-  const bekanntRef = useRef<number | null>(null)
+  const bekanntRef = useRef<{ raum: string; anzahl: number } | null>(null)
 
   const heldenListe = useMemo(() => helden.data?.heroes ?? [], [helden.data])
 
@@ -474,13 +521,19 @@ export default function DraftBoard() {
   useEffect(() => {
     const s = lobby.data
     if (!s) return
-    if (bekanntRef.current === null) {
-      bekanntRef.current = s.actions.length
+    // Ein Rematch wechselt den Raum-Code, aber React kann die Seite weiterverwenden.
+    // Die Ereignisposition muss daher pro Raum statt global für die Komponente gelten.
+    if (!bekanntRef.current || bekanntRef.current.raum !== s.code) {
+      bekanntRef.current = { raum: s.code, anzahl: s.actions.length }
       return
     }
-    if (s.actions.length > bekanntRef.current) {
+    if (s.actions.length < bekanntRef.current.anzahl) {
+      bekanntRef.current.anzahl = s.actions.length
+      return
+    }
+    if (s.actions.length > bekanntRef.current.anzahl) {
       const neu = s.actions[s.actions.length - 1]
-      bekanntRef.current = s.actions.length
+      bekanntRef.current.anzahl = s.actions.length
       const held = heldenListe.find((h) => h.name === neu.hero_name)
       if (!held || s.phase !== 'laeuft') return
       const id = window.setTimeout(() => {
