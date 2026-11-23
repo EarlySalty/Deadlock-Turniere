@@ -1,3 +1,4 @@
+import { Suspense } from 'react'
 import { Outlet, useLocation } from 'react-router-dom'
 import Header from './Header'
 
@@ -17,7 +18,9 @@ export default function Layout() {
             ? 'mx-auto w-full max-w-[1680px] px-4 py-6 sm:px-6 xl:px-8'
             : 'mx-auto w-full max-w-[1560px] px-4 py-6 sm:px-6 xl:px-8'}
       >
-        <Outlet />
+        <Suspense fallback={<div role="status" className="mx-auto max-w-7xl px-6 py-12 text-sm text-muted">Ansicht wird geladen …</div>}>
+          <Outlet />
+        </Suspense>
       </main>
     </div>
   )

@@ -147,7 +147,9 @@ export function useScrimLobby(code: string | undefined) {
         { claim: leseClaimToken(code!) },
       ),
     enabled: !!code,
-    refetchIntervalInBackground: true,
+    // Hidden tabs must not issue a room GET every second; React Query
+    // refreshes on focus when the participant returns.
+    refetchIntervalInBackground: false,
     refetchInterval: (query) => {
       const s = query.state.data
       if (

@@ -1,12 +1,12 @@
-import { lazy, Suspense } from 'react'
+import { lazy } from 'react'
 import { Routes, Route } from 'react-router-dom'
 import Layout from '@/components/layout/Layout'
-import Home from '@/pages/Home'
-import DraftLobbyNeu from '@/pages/DraftLobbyNeu'
 import ProtectedRoute from '@/components/auth/ProtectedRoute'
 
 // Nur die tatsächlich geöffnete Ansicht laden. Das reduziert den initialen
 // JS-Download insbesondere für Draft-Räume und mobile Verbindungen.
+const Home = lazy(() => import('@/pages/Home'))
+const DraftLobbyNeu = lazy(() => import('@/pages/DraftLobbyNeu'))
 const Tournament = lazy(() => import('@/pages/Tournament'))
 const Login = lazy(() => import('@/pages/Login'))
 const Admin = lazy(() => import('@/pages/Admin'))
@@ -25,8 +25,7 @@ export default function App() {
           DDC-UI-VORSCHAU · Draft-Demo ohne echte Matches · Turnierdaten nur lesbar · Kein Produktiv-Deploy
         </div>
       )}
-      <Suspense fallback={<div role="status" className="mx-auto max-w-7xl px-6 py-12 text-sm text-muted">Ansicht wird geladen …</div>}>
-        <Routes>
+      <Routes>
       <Route element={<Layout />}>
         <Route index element={<Home />} />
         {/* Vor der :id-Route: sonst liest der Router "draft" als Turnier-ID und
@@ -52,8 +51,7 @@ export default function App() {
           </ProtectedRoute>
         } />
       </Route>
-        </Routes>
-      </Suspense>
+      </Routes>
     </>
   )
 }

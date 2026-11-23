@@ -62,6 +62,47 @@ test('der Lasttest ist streng auf bekannte lesende Endpunkte begrenzt', () => {
   assert.ok(benchmark.includes("Stopping for errors:"))
 })
 
+test('Schriftarten werden nur einmal über HTML angefordert', () => {
+  const css = read('../src/index.css')
+  const html = read('../index.html')
+  assert.ok(!css.includes("@import url('https://fonts.googleapis.com"))
+  assert.ok(html.includes('https://fonts.googleapis.com/css2?family=Manrope'))
+  assert.ok(html.includes('rel="preconnect"'))
+})
+
+test('Live-Polling bleibt nur bei sichtbaren aktiven Screens hochfrequent', () => {
+  const draft = read('../src/hooks/useDraftLobby.ts')
+  const observer = read('../src/components/admin/ObserverPanel.tsx')
+  const comp = read('../src/hooks/useCompFinder.ts')
+  assert.ok(draft.includes('refetchIntervalInBackground: false'))
+  assert.ok(!draft.includes('refetchIntervalInBackground: true'))
+  assert.ok(observer.includes('refetchIntervalInBackground: false'))
+  assert.ok(observer.includes("session?.state === 'live' ? 1_000 : 5_000"))
+  assert.ok(observer.includes("session?.state === 'finished'"))
+  assert.ok(comp.includes('retry: false'))
+})
+
+test('Profilbasis wird in einem Join statt sechs nacheinander ausgeführten Queries geladen', () => {
+  const leaderboard = read('../../rust/crates/turnier-api/src/leaderboard.rs')
+  const route = leaderboard.slice(leaderboard.indexOf('async fn get_player_profile('))
+  assert.ok(route.includes('struct ProfileHeadRow') || leaderboard.includes('struct ProfileHeadRow'))
+  assert.ok(route.includes('LEFT JOIN LATERAL'))
+  assert.ok(route.includes('LEFT JOIN turnier."user_profiles"'))
+  assert.ok(route.includes('LEFT JOIN turnier."rank_cache"'))
+  assert.ok(route.includes('LEFT JOIN turnier."player_points"'))
+  assert.ok(route.includes('.bind(head.discord_id)'))
+  assert.ok(!route.includes('SELECT rank FROM turnier."rank_cache" WHERE discord_id = $1'))
+})
+
+test('Server-Timing misst die API global und loggt keine privaten dynamischen URL-Segmente', () => {
+  const app = read('../../rust/crates/turnier-api/src/app.rs')
+  assert.ok(app.includes('MatchedPath'))
+  assert.ok(app.includes('from_fn_with_state'))
+  assert.ok(app.includes('pool_size = state.pool.size()'))
+  assert.ok(app.includes('pool_idle = state.pool.num_idle()'))
+  assert.ok(app.includes('server-timing'))
+})
+
 test('Rust-Routen messen langsame Requests und begrenzen parallele Abfragen', () => {
   const app = read('../../rust/crates/turnier-api/src/app.rs')
   const adminRoute = read('../../rust/crates/turnier-api/src/admin/tournaments.rs')

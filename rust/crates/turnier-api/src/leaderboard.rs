@@ -70,9 +70,16 @@ async fn get_leaderboard(State(state): State<AppState>) -> WebResult<Json<Vec<Le
     Ok(Json(entries))
 }
 
-/// Punkte-Zeile eines Spielers.
-#[derive(sqlx::FromRow, Default)]
-struct PointsRow {
+/// Öffentliche Profilbasis: ein Lookup statt sechs serieller SQL-Roundtrips.
+/// Optionale Datensätze (Punkte/Profil/Rang/Avatar) bleiben nullable.
+#[derive(sqlx::FromRow)]
+struct ProfileHeadRow {
+    discord_id: i64,
+    discord_avatar: Option<String>,
+    display_name: Option<String>,
+    bio: Option<String>,
+    avatar_filename: Option<String>,
+    rank: Option<String>,
     total_points: i64,
     tournaments_played: i64,
     matches_played: i64,
@@ -94,48 +101,39 @@ async fn get_player_profile(
 ) -> WebResult<Json<PlayerProfile>> {
     let pool = &state.pool;
 
-    let discord_id: Option<(i64,)> = sqlx::query_as(
-        r#"SELECT discord_id FROM turnier."sessions" WHERE discord_name = $1 LIMIT 1"#,
+    // Find a player once, then join the optional public fields in the same SQL
+    // statement. Avoid six serialized pool acquisitions for each profile view.
+    // LATERAL keeps the avatar lookup scoped to the selected Discord account.
+    let head: Option<ProfileHeadRow> = sqlx::query_as(
+        r#"SELECT identity.discord_id,
+                  avatar.discord_avatar,
+                  profile.display_name, profile.bio, profile.avatar_filename,
+                  ranks.rank,
+                  COALESCE(points.total_points, 0)::bigint AS total_points,
+                  COALESCE(points.tournaments_played, 0)::bigint AS tournaments_played,
+                  COALESCE(points.matches_played, 0)::bigint AS matches_played,
+                  COALESCE(points.matches_won, 0)::bigint AS matches_won,
+                  points.best_placement
+           FROM (SELECT discord_id FROM turnier."sessions"
+                 WHERE discord_name = $1 LIMIT 1) identity
+           LEFT JOIN LATERAL (
+                SELECT discord_avatar FROM turnier."sessions"
+                WHERE discord_id = identity.discord_id
+                  AND discord_avatar IS NOT NULL LIMIT 1
+           ) avatar ON TRUE
+           LEFT JOIN turnier."user_profiles" profile
+             ON profile.discord_id = identity.discord_id
+           LEFT JOIN turnier."rank_cache" ranks
+             ON ranks.discord_id = identity.discord_id
+           LEFT JOIN turnier."player_points" points
+             ON points.discord_id = identity.discord_id"#,
     )
     .bind(&discord_name)
     .fetch_optional(pool)
     .await?;
-    let Some((discord_id,)) = discord_id else {
+    let Some(head) = head else {
         return Err(WebError::not_found("Spieler nicht gefunden"));
     };
-
-    let discord_avatar: Option<(Option<String>,)> = sqlx::query_as(
-        r#"SELECT discord_avatar FROM turnier."sessions"
-         WHERE discord_id = $1 AND discord_avatar IS NOT NULL LIMIT 1"#,
-    )
-    .bind(discord_id)
-    .fetch_optional(pool)
-    .await?;
-    let discord_avatar = discord_avatar.and_then(|r| r.0);
-
-    let profile: Option<(Option<String>, Option<String>, Option<String>)> = sqlx::query_as(
-        r#"SELECT display_name, bio, avatar_filename FROM turnier."user_profiles" WHERE discord_id = $1"#,
-    )
-    .bind(discord_id)
-    .fetch_optional(pool)
-    .await?;
-    let (display_name, bio, avatar_filename) = profile.unwrap_or((None, None, None));
-
-    let rank: Option<(Option<String>,)> =
-        sqlx::query_as(r#"SELECT rank FROM turnier."rank_cache" WHERE discord_id = $1"#)
-            .bind(discord_id)
-            .fetch_optional(pool)
-            .await?;
-    let rank = rank.and_then(|r| r.0);
-
-    let points: Option<PointsRow> = sqlx::query_as(
-        r#"SELECT total_points, tournaments_played, matches_played, matches_won, best_placement
-         FROM turnier."player_points" WHERE discord_id = $1"#,
-    )
-    .bind(discord_id)
-    .fetch_optional(pool)
-    .await?;
-    let points = points.unwrap_or_default();
 
     let history: Vec<HistoryRow> = sqlx::query_as(
         r#"SELECT t.name AS tournament_name, teams.name AS team_name
@@ -144,7 +142,7 @@ async fn get_player_profile(
          JOIN turnier."tournaments" t ON teams.tournament_id = t.id
          WHERE tm.discord_id = $1 ORDER BY t.created_at DESC"#,
     )
-    .bind(discord_id)
+    .bind(head.discord_id)
     .fetch_all(pool)
     .await?;
     let tournament_history = history
@@ -158,19 +156,19 @@ async fn get_player_profile(
 
     Ok(Json(PlayerProfile {
         discord_name: discord_name.clone(),
-        display_name: Some(display_name.unwrap_or(discord_name)),
-        discord_avatar,
-        avatar_filename,
-        bio,
-        rank,
-        // 1:1 erhaltener Original-Bug: rank_score bekommt matches_won (siehe
-        // docs/known-issues.md KI-W01), nicht den echten Rang-Score.
-        rank_score: points.matches_won,
-        tournaments_played: points.tournaments_played,
-        matches_played: points.matches_played,
-        matches_won: points.matches_won,
-        best_placement: points.best_placement,
-        total_points: points.total_points,
+        display_name: Some(head.display_name.unwrap_or(discord_name)),
+        discord_avatar: head.discord_avatar,
+        avatar_filename: head.avatar_filename,
+        bio: head.bio,
+        rank: head.rank,
+        // Das existierende API-Verhalten bleibt erhalten; die Korrektur dieses
+        // fachlichen Felds ist ein separater, rückwärtskompatibler Change.
+        rank_score: head.matches_won,
+        tournaments_played: head.tournaments_played,
+        matches_played: head.matches_played,
+        matches_won: head.matches_won,
+        best_placement: head.best_placement,
+        total_points: head.total_points,
         tournament_history,
     }))
 }

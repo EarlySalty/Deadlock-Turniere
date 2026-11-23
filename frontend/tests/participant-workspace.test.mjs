@@ -37,7 +37,11 @@ test('schwere Seiten werden nur bei Bedarf geladen, statt den Draft-Start zu blo
   assert.ok(app.includes("lazy(() => import('@/pages/Tournament'))"))
   assert.ok(app.includes("lazy(() => import('@/pages/Admin'))"))
   assert.ok(app.includes("lazy(() => import('@/pages/DraftBoard'))"))
-  assert.ok(app.includes('<Suspense fallback='))
+  const layout = source('../src/components/layout/Layout.tsx')
+  assert.ok(app.includes("lazy(() => import('@/pages/Home'))"))
+  assert.ok(app.includes("lazy(() => import('@/pages/DraftLobbyNeu'))"))
+  assert.ok(layout.includes('<Suspense fallback='))
+  assert.ok(!app.includes('<Suspense fallback='))
 })
 
 test('statische Vorschau bleibt getrennt vom regulären Vite/React-Routing', () => {
