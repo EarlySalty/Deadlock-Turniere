@@ -3,7 +3,7 @@
 
 use std::time::Instant;
 
-use axum::extract::{DefaultBodyLimit, Request, State};
+use axum::extract::{DefaultBodyLimit, MatchedPath, Request, State};
 use axum::http::header::HOST;
 use axum::http::HeaderValue;
 use axum::middleware::Next;
@@ -44,7 +44,10 @@ pub fn build_router(state: AppState) -> Router {
         .merge(internal_scrims::router())
         .merge(crate::hud::router())
         .merge(test_mode::router(&state.config))
-        .layer(axum::middleware::from_fn(server_timing))
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            server_timing,
+        ))
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
             host_guard,
@@ -90,9 +93,16 @@ fn build_cors(state: &AppState) -> CorsLayer {
 
 /// Reports handler-side response time separately from DNS/TLS/proxy latency.
 /// This does not change request semantics or include secret query parameters.
-async fn server_timing(request: Request, next: Next) -> Response {
+async fn server_timing(State(state): State<AppState>, request: Request, next: Next) -> Response {
     let method = request.method().clone();
-    let path = request.uri().path().to_owned();
+    // MatchedPath gives the route template, not a private Discord name, draft
+    // room code or other user-controlled value from the actual URL.
+    let route = request
+        .extensions()
+        .get::<MatchedPath>()
+        .map(MatchedPath::as_str)
+        .unwrap_or("unmatched")
+        .to_owned();
     let started = Instant::now();
     let mut response = next.run(request).await;
     let duration_ms = started.elapsed().as_secs_f64() * 1_000.0;
@@ -100,10 +110,21 @@ async fn server_timing(request: Request, next: Next) -> Response {
     if duration_ms > 300.0 {
         tracing::warn!(
             method = %method,
-            path = %path,
+            route = %route,
             status = %response.status(),
             duration_ms,
+            pool_size = state.pool.size(),
+            pool_idle = state.pool.num_idle(),
             "slow turnier request"
+        );
+    } else if duration_ms > 100.0 {
+        tracing::debug!(
+            method = %method,
+            route = %route,
+            duration_ms,
+            pool_size = state.pool.size(),
+            pool_idle = state.pool.num_idle(),
+            "turnier request above preferred budget"
         );
     }
 

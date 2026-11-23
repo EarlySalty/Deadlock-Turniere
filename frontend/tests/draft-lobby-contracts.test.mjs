@@ -85,10 +85,13 @@ test('die Hero-Leiste reicht keine ungeprüfte Bildadresse an img weiter', () =>
   assert.ok(!leiste.includes('<img src={held.image_url}'))
 })
 
-test('externe Schriftimporte stehen vor allen erzeugenden CSS-Importen', () => {
+test('Schriftimport wird im HTML per Preconnect einmalig geladen, nicht zusätzlich per CSS', () => {
   const indexCss = readFileSync(new URL('../src/index.css', import.meta.url), 'utf8')
+  const indexHtml = readFileSync(new URL('../index.html', import.meta.url), 'utf8')
   const brandCss = readFileSync(new URL('../src/brand-tokens.css', import.meta.url), 'utf8')
 
-  assert.ok(indexCss.trimStart().startsWith('@import url('))
+  assert.ok(indexHtml.includes('rel="preconnect"'))
+  assert.ok(indexHtml.includes('https://fonts.googleapis.com/css2?family=Manrope'))
+  assert.ok(!indexCss.includes('@import url('))
   assert.ok(!brandCss.includes('@import url('))
 })

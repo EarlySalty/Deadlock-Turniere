@@ -1058,6 +1058,34 @@ async fn leaderboard_profile_reads_points_rank_and_history() {
             .await
             .expect("history team");
     assert_eq!(linked_team, team_id);
+
+    // Optional profile/rank/points rows must remain backward-compatible after
+    // consolidating the public profile SQL into one joined lookup.
+    let _empty_token = session(&ctx.pool, PLAYER_ID, "UnrankedName", &[]).await;
+    let (status, empty) = send_json(
+        &ctx.app,
+        None,
+        Method::GET,
+        "/api/players/UnrankedName",
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(empty["display_name"], "UnrankedName");
+    assert_eq!(empty["total_points"], 0);
+    assert_eq!(empty["matches_won"], 0);
+    assert!(empty["rank"].is_null());
+    assert_eq!(empty["tournament_history"].as_array().unwrap().len(), 0);
+
+    let (status, _) = send_json(
+        &ctx.app,
+        None,
+        Method::GET,
+        "/api/players/UnknownProfile",
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
 }
 
 #[tokio::test]

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Bounded, read-only production benchmark for the DDC tournament API.
 // Only fixed first-party GET endpoints; no arbitrary URLs, writes or stress spikes.
-// Usage: node scripts/perf/bench-readonly.mjs [local|public|staging|both]
+// Usage: node scripts/perf/bench-readonly.mjs [local|public|staging|both] [core|site]
 // Measure total response duration on warmed keep-alive connections; cold TLS is separate.
 import http from 'node:http'
 import https from 'node:https'
@@ -12,10 +12,15 @@ const targets = {
   staging: 'http://127.0.0.1:8901',
   public: 'https://deutsche-deadlock-community.de/turnier',
 }
-const routes = [
+const coreRoutes = [
   ['health', '/api/health'],
   ['heroes', '/api/draft/heroes'],
   ['tournament-17', '/api/tournaments/17'],
+]
+const siteRoutes = [
+  ...coreRoutes,
+  ['tournaments-list', '/api/tournaments'],
+  ['leaderboard', '/api/leaderboard'],
 ]
 const stages = [
   { concurrency: 1, requests: 24 },
@@ -23,11 +28,13 @@ const stages = [
   { concurrency: 8, requests: 96 },
 ]
 const choice = process.argv[2] || 'both'
-if (!['both', 'local', 'public', 'staging'].includes(choice)) {
-  console.error('Usage: node scripts/perf/bench-readonly.mjs [local|public|staging|both]')
+const scope = process.argv[3] || 'core'
+if (!['both', 'local', 'public', 'staging'].includes(choice) || !['core', 'site'].includes(scope)) {
+  console.error('Usage: node scripts/perf/bench-readonly.mjs [local|public|staging|both] [core|site]')
   process.exit(2)
 }
 const chosen = choice === 'both' ? ['local', 'public'] : [choice]
+const routes = scope === 'site' ? siteRoutes : coreRoutes
 const results = []
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms))
 const quantile = (sorted, q) => sorted[Math.min(sorted.length - 1, Math.ceil(sorted.length * q) - 1)]
@@ -121,4 +128,4 @@ for (const target of chosen) {
   }
   agent.destroy()
 }
-console.log('FINAL_REPORT=' + JSON.stringify({ date: new Date().toISOString(), results }))
+console.log('FINAL_REPORT=' + JSON.stringify({ date: new Date().toISOString(), scope, results }))
