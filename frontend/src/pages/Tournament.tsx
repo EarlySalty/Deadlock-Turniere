@@ -853,7 +853,7 @@ export default function Tournament() {
                     const recruiting = recruitingLabel(team.recruitment_status)
                     const isMyTeam = userTeam?.id === team.id
                     return (
-                      <Card key={team.id} className={`p-5 transition-all group ${isMyTeam ? 'border-primary/50' : 'hover:border-white/20'}`}>
+                      <Card key={team.id} className={`ddc-occult-panel min-w-0 p-5 transition-all group ${isMyTeam ? 'border-primary/50' : 'hover:border-primary/40'}`}>
                         <div className="space-y-4">
                           <div className="flex items-start justify-between gap-3">
                             <div>
