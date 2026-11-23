@@ -211,8 +211,8 @@ export default function Admin() {
 
   return (
     <div className="space-y-6">
-      <header className="flex flex-col gap-2">
-        <h1 className="text-2xl font-bold text-foreground">Turnier-Verwaltung</h1>
+      <header className="flex flex-col gap-2 border-b border-primary/30 pb-4">
+        <h1 className="font-display text-3xl font-black uppercase tracking-wide text-foreground">Turnier-Verwaltung</h1>
         <p className="text-sm text-muted">
           Live-Turniere steuern, Archiv einsehen oder im Test-Modus trockene Probeläufe
           fahren.
@@ -288,7 +288,21 @@ export default function Admin() {
                 <CreateTournamentForm key={createFormKey} template={createTemplate ?? undefined} />
               </section>
             ) : loadingLiveDetail && liveSelectedId ? (
-              <LoadingSpinner />
+              <section role="status" className="min-w-0 space-y-5" aria-label="Turnierdetails laden">
+                {selectedSummary && <TournamentSummaryCard tournament={selectedSummary} />}
+                <div className="grid gap-5 lg:grid-cols-[185px_minmax(0,1fr)]">
+                  <div className="space-y-3">
+                    <div className="h-12 animate-pulse bg-white/5" />
+                    <div className="h-12 animate-pulse bg-white/5" />
+                    <div className="h-12 animate-pulse bg-white/5" />
+                  </div>
+                  <div className="space-y-4">
+                    <div className="h-20 animate-pulse bg-white/5" />
+                    <div className="h-48 animate-pulse bg-white/5" />
+                  </div>
+                </div>
+                <p className="text-sm text-muted">Turnierdetails werden geladen …</p>
+              </section>
             ) : liveDetail && activePhase ? (
               <>
                 {selectedSummary && <TournamentSummaryCard tournament={selectedSummary} />}

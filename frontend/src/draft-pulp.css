@@ -540,6 +540,87 @@
   .draft-team-column>div:first-child{font-size:18px;}
   .draft-team-slot{height:58px;}
 }
+/* Cleanup pass: content-first sizing, no viewport-wide overflow or
+   clipped header, and no third-party character collages on the start page. */
+.draft-pulp {
+  width:100%;
+  margin-left:0;
+  min-width:0;
+  overflow-x:clip;
+  min-height:calc(100svh - 64px);
+}
+.draft-pulp__layout { min-height:calc(100svh - 64px); }
+.draft-pulp__poster { min-height:740px; }
+.draft-pulp__poster:before { inset:25px; }
+.draft-pulp__poster-head { padding-top:clamp(40px,6vh,70px); }
+.draft-pulp__poster h1 { margin-top:22px; line-height:.89; }
+.draft-pulp__poster h1 span {font-size:clamp(50px,5vw,78px);}
+.draft-pulp__poster h1 strong {font-size:clamp(92px,9.6vw,142px);}
+.draft-pulp__tagline {font-size:clamp(18px,1.8vw,22px);line-height:1.5;}
+.draft-pulp__poster-footer {font-size:11px;}
+.draft-pulp__desk-inner {
+  width:min(100%,760px);
+  padding:clamp(32px,4vw,58px) clamp(26px,4vw,64px) 60px;
+}
+.draft-pulp__desk:before {inset:17px;}
+.draft-pulp__intro h2 {font-size:clamp(48px,4.9vw,74px);line-height:1.0;}
+.draft-pulp__intro p {font-size:15px;color:#d3d2c5;}
+.draft-pulp__tabs {margin:26px 0 22px;}
+.draft-pulp__form {gap:20px;}
+.draft-pulp__footnote {font-size:13px;color:#bac3bd;}
+.pulp-overline {font-size:12px;letter-spacing:.08em;}
+.pulp-field .pulp-overline {font-size:11px;}
+.pulp-setting__hint,.draft-pulp__hint {font-size:12px;color:#bec2b5;}
+.draft-pulp__format strong,.pulp-setting__dial strong {font-size:37px;}
+.draft-pulp__submit {min-height:62px;font-size:22px;}
+.draft-pulp__poster-head {text-wrap:balance;}
+.draft-pulp__poster .draft-pulp__art {
+  position:absolute;
+  inset:0;
+  z-index:1;
+  -webkit-mask-image:none;
+  mask-image:none;
+}
+.draft-pulp__moon {
+  position:absolute;
+  width:clamp(220px,28vw,420px);
+  height:clamp(220px,28vw,420px);
+  border-radius:50%;
+  left:52%;top:30%;
+  transform:translateX(-50%);
+  background:radial-gradient(circle at 35% 35%,#c2ae87,#9b9982 50%,#646e64 75%);
+  opacity:.32;
+  box-shadow:0 0 105px #c8bd8a33;
+}
+.draft-pulp__skyline{
+  position:absolute;
+  left:0;right:0;bottom:-1%;
+  background:#102229;
+  clip-path:polygon(0 100%,0 35%,6% 35%,6% 27%,12% 27%,12% 44%,16% 44%,16% 22%,21% 22%,21% 31%,26% 31%,26% 15%,31% 15%,31% 5%,32% 5%,32% 15%,36% 15%,36% 41%,40% 41%,40% 26%,46% 26%,46% 16%,51% 16%,51% 32%,58% 32%,58% 20%,63% 20%,63% 5%,64% 5%,64% 20%,68% 20%,68% 38%,75% 38%,75% 24%,81% 24%,81% 35%,87% 35%,87% 15%,92% 15%,92% 29%,100% 29%,100% 100%);
+}
+.draft-pulp__skyline--back {height:46%;opacity:.58;transform:translateY(4%);background:#4c5c57;}
+.draft-pulp__skyline--front {height:34%;opacity:.9;background:#0c171e;}
+/* Preserve the existing page header; all drafts are now full width within the
+   route-specific main container, never using negative margin hacks. */
+.draft-arena-screen,.draft-waiting-screen {width:100%;margin-left:0;}
+@media(max-width:840px){
+  .draft-pulp__layout{grid-template-columns:1fr;}
+  .draft-pulp__poster{min-height:380px;}
+  .draft-pulp__poster h1 span{font-size:56px;}
+  .draft-pulp__poster h1 strong{font-size:clamp(80px,16vw,122px);}
+  .draft-pulp__poster-head{padding-top:26px;}
+  .draft-pulp__moon{top:23%;}
+  .draft-pulp__desk-inner{max-width:710px;padding:32px 27px 54px;}
+}
+@media(max-width:500px){
+  .draft-pulp__poster{min-height:350px;}
+  .draft-pulp__poster h1 span{font-size:48px;}
+  .draft-pulp__poster h1 strong{font-size:83px;}
+  .draft-pulp__poster:before{inset:12px;}
+  .draft-pulp__intro h2{font-size:50px;}
+  .draft-pulp__configuration{grid-template-columns:repeat(3,minmax(0,1fr));}
+  .pulp-overline{font-size:10px;}
+}
 @media (prefers-reduced-motion:reduce) {
   .draft-pulp *, .draft-pulp *:before,.draft-pulp *:after{transition:none!important;animation:none!important;}
 }

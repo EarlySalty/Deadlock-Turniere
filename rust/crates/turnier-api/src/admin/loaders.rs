@@ -12,6 +12,7 @@
 //! `crate::loaders`-Modul ist möglich.
 
 use chrono::{DateTime, Utc};
+use futures::{stream, StreamExt, TryStreamExt};
 use serde_json::Value;
 
 use turnier_core::{
@@ -139,11 +140,13 @@ pub async fn load_team_members(state: &AppState, team_id: i64) -> WebResult<Vec<
         .bind(team_id)
         .fetch_all(&state.pool)
         .await?;
-    let mut members = Vec::with_capacity(rows.len());
-    for row in rows {
-        members.push(member_from_row(state, row).await?);
-    }
-    Ok(members)
+    // Bounded parallel rank lookups. Previously each member awaited a Steam/
+    // Discord resolver roundtrip before the next member could be loaded.
+    // buffered() preserves the original SQL ordering.
+    stream::iter(rows.into_iter().map(|row| member_from_row(state, row)))
+        .buffered(3)
+        .try_collect()
+        .await
 }
 
 /// Rohzeile eines Teams.
@@ -194,10 +197,11 @@ pub async fn load_teams_for_tournament(
     .bind(tournament_id)
     .fetch_all(&state.pool)
     .await?;
-    let mut teams = Vec::with_capacity(rows.len());
-    for row in rows {
+    // A few teams can be loaded together; the old loop serialized all
+    // member queries and their Steam/Discord rank lookups across teams.
+    stream::iter(rows.into_iter().map(|row| async move {
         let members = load_team_members(state, row.id).await?;
-        teams.push(Team {
+        Ok::<_, crate::error::WebError>(Team {
             id: row.id,
             tournament_id: row.tournament_id,
             name: row.name,
@@ -206,9 +210,11 @@ pub async fn load_teams_for_tournament(
             created_at: db::ts_to_string(row.created_at),
             recruitment_status: parse_enum(&row.recruitment_status)?,
             members,
-        });
-    }
-    Ok(teams)
+        })
+    }))
+    .buffered(2)
+    .try_collect()
+    .await
 }
 
 /// Rohzeile einer Gruppen-Tabellenzeile.
@@ -507,8 +513,9 @@ pub async fn load_signups_for_tournament(
     .fetch_all(&state.pool)
     .await?;
 
-    let mut signups = Vec::with_capacity(rows.len());
-    for row in rows {
+    // Keep the original signup ordering, without serially awaiting every
+    // resolver fallback before the next signup can begin.
+    stream::iter(rows.into_iter().map(|row| async move {
         let discord_name = preferred_discord_name(
             &[
                 row.profile_display_name.as_deref(),
@@ -533,7 +540,7 @@ pub async fn load_signups_for_tournament(
             rank_score = profile.rank_score;
         }
 
-        signups.push(TournamentSignup {
+        Ok::<_, crate::error::WebError>(TournamentSignup {
             id: row.id,
             tournament_id: row.tournament_id,
             discord_id,
@@ -543,7 +550,9 @@ pub async fn load_signups_for_tournament(
             rank_score,
             team_id: row.team_id,
             signed_up_at: db::ts_to_string(row.signed_up_at),
-        });
-    }
-    Ok(signups)
+        })
+    }))
+    .buffered(4)
+    .try_collect()
+    .await
 }

@@ -84,12 +84,14 @@ async fn get_tournament(
     Path(tournament_id): Path<i64>,
 ) -> WebResult<Json<TournamentDetail>> {
     let tournament = load_tournament_dto(&state.pool, tournament_id).await?;
-    let teams = load_teams_for_tournament(&state, tournament_id).await?;
-    let groups = load_groups_for_tournament(&state.pool, tournament_id).await?;
-    let bracket_matches = load_bracket_matches(&state.pool, tournament_id).await?;
-    let mini_groups = load_mini_groups_for_tournament(&state.pool, tournament_id).await?;
-    let signups = load_signups_for_tournament(&state, tournament_id).await?;
-    let names = crate::public::helpers::participant_names(&state.pool, tournament_id).await?;
+    let (teams, groups, bracket_matches, mini_groups, signups, names) = tokio::try_join!(
+        load_teams_for_tournament(&state, tournament_id),
+        load_groups_for_tournament(&state.pool, tournament_id),
+        load_bracket_matches(&state.pool, tournament_id),
+        load_mini_groups_for_tournament(&state.pool, tournament_id),
+        load_signups_for_tournament(&state, tournament_id),
+        crate::public::helpers::participant_names(&state.pool, tournament_id),
+    )?;
     let guest_ids = guest_participant_ids(&teams, &signups);
     Ok(Json(TournamentDetail {
         tournament,

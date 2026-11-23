@@ -66,7 +66,13 @@ export function useTournament(id: number) {
     queryKey: ['tournaments', id],
     queryFn: () => fetchTournament(id),
     enabled: id > 0,
-    refetchInterval: 5_000,
+    staleTime: 15_000,
+    refetchInterval: (query) =>
+      ['checkin', 'group_phase', 'bracket'].includes(query.state.data?.status ?? '')
+        ? 10_000
+        : 30_000,
+    refetchIntervalInBackground: false,
+    refetchOnWindowFocus: false,
   })
 }
 
@@ -75,7 +81,9 @@ export function useMyTournamentStatus(tournamentId: number, enabled = true) {
     queryKey: ['tournaments', tournamentId, 'me'],
     queryFn: () => fetchMyTournamentStatus(tournamentId),
     enabled: tournamentId > 0 && enabled,
-    refetchInterval: 5_000,
+    staleTime: 10_000,
+    refetchInterval: 15_000,
+    refetchIntervalInBackground: false,
     retry: false,
   })
 }
@@ -84,7 +92,10 @@ export function useAdminTournaments() {
   return useQuery({
     queryKey: ['admin', 'tournaments'],
     queryFn: fetchAdminTournaments,
-    refetchInterval: 5_000,
+    staleTime: 15_000,
+    refetchInterval: 30_000,
+    refetchIntervalInBackground: false,
+    refetchOnWindowFocus: false,
   })
 }
 
@@ -93,7 +104,14 @@ export function useAdminTournament(id: number) {
     queryKey: ['admin', 'tournaments', id],
     queryFn: () => fetchAdminTournament(id),
     enabled: id > 0,
-    refetchInterval: 3_000,
+    staleTime: 8_000,
+    refetchInterval: (query) =>
+      ['group_phase', 'bracket', 'checkin'].includes(query.state.data?.status ?? '')
+        ? 10_000
+        : 30_000,
+    refetchIntervalInBackground: false,
+    refetchOnWindowFocus: false,
+    retry: 1,
   })
 }
 
@@ -247,7 +265,9 @@ export function useCheckinStatus(tournamentId: number) {
     queryKey: ['tournaments', tournamentId, 'checkin-status'],
     queryFn: () => getCheckinStatus(tournamentId),
     enabled: tournamentId > 0,
-    refetchInterval: 3_000,
+    staleTime: 8_000,
+    refetchInterval: 10_000,
+    refetchIntervalInBackground: false,
   })
 }
 
