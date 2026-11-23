@@ -7,7 +7,7 @@
 //! (Befunde routes.py „safe": Duplikation, lastrowid, N+1) zu jeweils EINER
 //! wiederverwendbaren Funktion.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use chrono::{DateTime, Utc};
 use serde_json::Value;
@@ -205,6 +205,19 @@ const MEMBER_SELECT: &str = "SELECT tm.id, tm.team_id, tm.discord_id, \
     LEFT JOIN turnier.\"user_profiles\" p ON p.discord_id = tm.discord_id \
     WHERE tm.team_id = $1 ORDER BY tm.joined_at";
 
+// Batch variant for the public tournament roster. Unlike MEMBER_SELECT,
+// this fetches all requested teams in ONE database roundtrip (not N rounds).
+const MEMBER_SELECT_BATCH: &str = "SELECT tm.id, tm.team_id, tm.discord_id, \
+    tm.discord_name AS team_member_discord_name, \
+    s.discord_name AS session_discord_name, p.display_name AS profile_display_name, \
+    tm.steam_id, tm.rank, tm.rank_score, tm.role, tm.joined_at \
+    FROM turnier.\"team_members\" tm \
+    LEFT JOIN (SELECT discord_id, MAX(discord_name) AS discord_name FROM turnier.\"sessions\" \
+        WHERE discord_name IS NOT NULL AND discord_name != '' GROUP BY discord_id) s \
+        ON s.discord_id = tm.discord_id \
+    LEFT JOIN turnier.\"user_profiles\" p ON p.discord_id = tm.discord_id \
+    WHERE tm.team_id = ANY($1) ORDER BY tm.team_id, tm.joined_at";
+
 /// Eine angereicherte Member-Zeile (Namens-Kandidaten + Rangfelder).
 struct MemberRow {
     id: i64,
@@ -256,6 +269,39 @@ async fn load_member_rows(pool: &Pool, team_id: i64) -> WebResult<Vec<MemberRow>
         });
     }
     Ok(out)
+}
+
+/// Group all tournament members with a single SQL query. The public response
+/// never needs live Steam/Discord rank lookups; stored ranks are sufficient.
+async fn load_member_rows_batch(
+    pool: &Pool,
+    team_ids: &[i64],
+) -> WebResult<HashMap<i64, Vec<MemberRow>>> {
+    if team_ids.is_empty() {
+        return Ok(HashMap::new());
+    }
+    let rows = sqlx::query(MEMBER_SELECT_BATCH)
+        .bind(team_ids)
+        .fetch_all(pool)
+        .await?;
+    let mut by_team: HashMap<i64, Vec<MemberRow>> = HashMap::new();
+    for row in rows {
+        let member = MemberRow {
+            id: row.try_get("id")?,
+            team_id: row.try_get("team_id")?,
+            discord_id: row.try_get("discord_id")?,
+            team_member_discord_name: row.try_get("team_member_discord_name")?,
+            session_discord_name: row.try_get("session_discord_name")?,
+            profile_display_name: row.try_get("profile_display_name")?,
+            steam_id: row.try_get("steam_id")?,
+            rank: row.try_get("rank")?,
+            rank_score: row.try_get::<Option<i64>, _>("rank_score")?.unwrap_or(0),
+            role: row.try_get("role")?,
+            joined_at: row.try_get("joined_at")?,
+        };
+        by_team.entry(member.team_id).or_default().push(member);
+    }
+    Ok(by_team)
 }
 
 // ---------------------------------------------------------------------------
@@ -349,9 +395,30 @@ pub async fn load_teams_public(pool: &Pool, tournament_id: i64) -> WebResult<Vec
             .fetch_all(pool)
             .await?;
 
+    let team_ids: Vec<i64> = team_rows.iter().map(|t| t.id).collect();
+    if team_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    // Two bounded database reads instead of 2*N queries for N teams.
+    // Membership and pending applications are independent.
+    let (mut members_by_team, pending_team_ids) =
+        tokio::try_join!(load_member_rows_batch(pool, &team_ids), async {
+            let pending = sqlx::query_scalar::<_, i64>(
+                r#"SELECT DISTINCT team_id
+                   FROM turnier."team_applications"
+                   WHERE status = 'pending' AND team_id = ANY($1)"#,
+            )
+            .bind(&team_ids)
+            .fetch_all(pool)
+            .await?;
+            Ok::<_, WebError>(pending)
+        },)?;
+    let pending: HashSet<i64> = pending_team_ids.into_iter().collect();
+
     let mut teams = Vec::with_capacity(team_rows.len());
     for t in team_rows {
-        let member_rows = load_member_rows(pool, t.id).await?;
+        let member_rows = members_by_team.remove(&t.id).unwrap_or_default();
         let members: Vec<TeamMemberPublic> = member_rows
             .into_iter()
             .map(|m| {
@@ -369,15 +436,8 @@ pub async fn load_teams_public(pool: &Pool, tournament_id: i64) -> WebResult<Vec
             })
             .collect();
 
-        let app_count: i64 = sqlx::query_scalar(
-            r#"SELECT COUNT(*) FROM turnier."team_applications" WHERE team_id = $1 AND status = 'pending'"#,
-        )
-        .bind(t.id)
-        .fetch_one(pool)
-        .await?;
-
         let has_pending_applications =
-            t.recruitment_status == RecruitmentStatus::Application && app_count > 0;
+            t.recruitment_status == RecruitmentStatus::Application && pending.contains(&t.id);
 
         teams.push(TeamPublic {
             id: t.id,
