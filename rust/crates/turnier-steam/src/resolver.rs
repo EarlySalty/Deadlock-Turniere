@@ -6,8 +6,10 @@
 //! oder Discord werden in den Cache geschrieben. Zusätzlich ein Batch-Lookup über
 //! mehrere Discord-IDs (gegen N+1 in den Konsumenten turnier-api/turnier-engine).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
+
+use futures::{stream, StreamExt, TryStreamExt};
 
 use async_trait::async_trait;
 use turnier_core::RankProfile;
@@ -157,17 +159,27 @@ impl RankResolver for SteamRankResolver {
         &self,
         discord_ids: &[String],
     ) -> SteamResult<HashMap<String, RankProfile>> {
-        let mut out = HashMap::new();
-        for discord_id in discord_ids {
-            // Duplikate doppelt aufzulösen ist überflüssig; der Cache fängt sie
-            // ohnehin ab, aber so sparen wir auch den Cache-Roundtrip.
-            if out.contains_key(discord_id) {
-                continue;
-            }
-            if let Some(profile) = self.rank_profile(discord_id).await? {
-                out.insert(discord_id.clone(), profile);
-            }
-        }
-        Ok(out)
+        // A "batch" must not make N sequential Steam/Discord roundtrips.
+        // Cap concurrency to avoid overwhelming the DB pool or Discord API.
+        let mut seen = HashSet::new();
+        let unique_ids: Vec<String> = discord_ids
+            .iter()
+            .filter(|id| seen.insert((*id).clone()))
+            .cloned()
+            .collect();
+
+        let resolved: Vec<(String, Option<RankProfile>)> = stream::iter(unique_ids)
+            .map(|discord_id| async move {
+                let profile = self.rank_profile(&discord_id).await?;
+                Ok::<_, crate::error::SteamError>((discord_id, profile))
+            })
+            .buffer_unordered(4)
+            .try_collect()
+            .await?;
+
+        Ok(resolved
+            .into_iter()
+            .filter_map(|(id, profile)| profile.map(|profile| (id, profile)))
+            .collect())
     }
 }

@@ -105,11 +105,15 @@ async fn get_tournament(
     Path(tournament_id): Path<i64>,
 ) -> WebResult<Json<TournamentDetail>> {
     let tournament = load_tournament_dto(&state.pool, tournament_id).await?;
-    let teams = load_teams_for_tournament(&state, tournament_id).await?;
-    let groups = load_groups_for_tournament(&state.pool, tournament_id).await?;
-    let bracket_matches = load_bracket_matches(&state.pool, tournament_id).await?;
-    let mini_groups = load_mini_groups_for_tournament(&state.pool, tournament_id).await?;
-    let signups = load_signups_for_tournament(&state, tournament_id).await?;
+    // Independent read models can be resolved concurrently. The previous
+    // sequential awaits made the slowest rank-enrichment path block all others.
+    let (teams, groups, bracket_matches, mini_groups, signups) = tokio::try_join!(
+        load_teams_for_tournament(&state, tournament_id),
+        load_groups_for_tournament(&state.pool, tournament_id),
+        load_bracket_matches(&state.pool, tournament_id),
+        load_mini_groups_for_tournament(&state.pool, tournament_id),
+        load_signups_for_tournament(&state, tournament_id),
+    )?;
     Ok(Json(TournamentDetail {
         tournament,
         teams,

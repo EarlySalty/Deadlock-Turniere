@@ -39,13 +39,15 @@ test('Room-Wechsel setzt die Ereignisposition zurück', () => {
   assert.ok(board.includes('bekanntRef.current.anzahl = s.actions.length'))
 })
 
-test('die Draft-Startseite verwendet die eigenständige Pulp-Bühne mit echten Hero-Artworks', () => {
+test('die Draft-Startseite verwendet eine eigenständige Bühne ohne externe Hero-Collagen', () => {
   const lobby = quelle('../src/pages/DraftLobbyNeu.tsx')
   const style = quelle('../src/draft-pulp.css')
   const index = quelle('../src/index.css')
   assert.ok(lobby.includes('draft-pulp__poster'))
   assert.ok(lobby.includes('draft-pulp__desk'))
-  assert.ok(lobby.includes('heroCardImageUrl'))
+  assert.ok(lobby.includes('draft-pulp__skyline'))
+  assert.ok(!lobby.includes('heroCardImageUrl'))
+  assert.ok(!lobby.includes('useDraftHeroList'))
   assert.ok(!lobby.includes('heldenListe.slice(0, 40)'))
   assert.ok(style.includes('draft-pulp__poster h1 strong'))
   assert.ok(style.includes('draft-arena-screen'))

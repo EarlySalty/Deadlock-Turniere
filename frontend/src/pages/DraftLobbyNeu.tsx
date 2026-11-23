@@ -1,9 +1,8 @@
 import { useState, type FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ArrowUpRight, ChevronLeft, ChevronRight, Swords } from 'lucide-react'
 import TeamModeNav from '@/components/draft/TeamModeNav'
-import { useDraftHeroList, useDraftRaumAnlegen } from '@/hooks/useDraftLobby'
-import { heroCardImageUrl } from '@/hooks/draftLobbyState'
+import { ArrowUpRight, ChevronLeft, ChevronRight } from 'lucide-react'
+import { useDraftRaumAnlegen } from '@/hooks/useDraftLobby'
 
 const BANS_OPTIONEN = [0, 1, 2, 3, 4, 5, 6]
 const TIMER_OPTIONEN = [0, 30, 45, 60, 90]
@@ -40,7 +39,6 @@ function Einstellung({
 
 export default function DraftLobbyNeu() {
   const navigate = useNavigate()
-  const helden = useDraftHeroList()
   const anlegen = useDraftRaumAnlegen()
   const [segment, setSegment] = useState<'anlegen' | 'beitreten'>('anlegen')
   const [team1, setTeam1] = useState('Amber Hand')
@@ -48,11 +46,6 @@ export default function DraftLobbyNeu() {
   const [bans, setBans] = useState(2)
   const [timer, setTimer] = useState(30)
   const [beitrittsCode, setBeitrittsCode] = useState('')
-
-  const bilder = ['Lady Geist', 'Wraith', 'Haze'].map((name) => {
-    const hero = helden.data?.heroes.find((h) => h.name === name)
-    return hero ? heroCardImageUrl(hero.card_image_url, hero.image_url) : null
-  })
 
   const draftStarten = (event: FormEvent) => {
     event.preventDefault()
@@ -71,20 +64,16 @@ export default function DraftLobbyNeu() {
   }
 
   return (
-    <div className="draft-pulp -my-8">
-      <div className="draft-pulp__topline" aria-hidden="true">
-        <span>DDC // NEW YORK CITY</span>
-        <span>EST. IN THE SHADOWS</span>
-        <span>SCRIM DEPARTMENT</span>
-      </div>
+    <div className="draft-pulp">
+
 
       <div className="draft-pulp__layout">
         <section className="draft-pulp__poster" aria-label="Deadlock Draft Arena">
           <div className="draft-pulp__city" aria-hidden="true" />
           <div className="draft-pulp__art" aria-hidden="true">
-            {bilder[1] && <img className="draft-pulp__hero draft-pulp__hero--back" src={bilder[1]} alt="" />}
-            {bilder[0] && <img className="draft-pulp__hero draft-pulp__hero--front" src={bilder[0]} alt="" />}
-            {bilder[2] && <img className="draft-pulp__hero draft-pulp__hero--edge" src={bilder[2]} alt="" />}
+            <div className="draft-pulp__moon" />
+            <div className="draft-pulp__skyline draft-pulp__skyline--back" />
+            <div className="draft-pulp__skyline draft-pulp__skyline--front" />
           </div>
           <div className="draft-pulp__poster-head">
             <div className="draft-pulp__seal" aria-hidden="true">✶</div>
@@ -102,12 +91,7 @@ export default function DraftLobbyNeu() {
 
         <section className="draft-pulp__desk" aria-label="Draft-Raum einrichten">
           <div className="draft-pulp__desk-inner">
-            <div className="draft-pulp__desk-header">
-              <span className="pulp-overline">MATCH OPERATIONS / 01</span>
-              <Swords size={25} strokeWidth={1.3} aria-hidden="true" />
-            </div>
             <TeamModeNav />
-
             <div className="draft-pulp__intro">
               <div className="pulp-overline">PRIVATE SCRIM / CUSTOM GAME</div>
               <h2>{segment === 'anlegen' ? <>BEREIT FÜR<br /><em>DEN DRAFT?</em></> : <>ZURÜCK IN<br /><em>DEN KAMPF.</em></>}</h2>
@@ -166,12 +150,7 @@ export default function DraftLobbyNeu() {
                     onChange={setTimer} suffix="s" hint="Pro Entscheidung" />
                 </div>
 
-                <div className="draft-pulp__sequence">
-                  <span className="pulp-overline">DER ABLAUF</span>
-                  <p><b>01</b> Captains treten bei <span>—</span> <b>02</b> Helden bannen <span>—</span> <b>03</b> Helden wählen</p>
-                </div>
-
-                {anlegen.isError && <p role="alert" className="draft-pulp__error">
+                    {anlegen.isError && <p role="alert" className="draft-pulp__error">
                   Der Raum konnte nicht erstellt werden. Bitte erneut versuchen.
                 </p>}
                 <button type="submit" disabled={anlegen.isPending} className="draft-pulp__submit">
@@ -185,7 +164,7 @@ export default function DraftLobbyNeu() {
               </form>
             )}
           </div>
-          <div className="draft-pulp__desk-foot" aria-hidden="true"><span>CHOOSE YOUR SIDE</span><span>✦</span><span>LET THE RITUAL BEGIN</span></div>
+
         </section>
       </div>
     </div>

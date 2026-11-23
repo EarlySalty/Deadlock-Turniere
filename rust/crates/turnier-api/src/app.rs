@@ -1,6 +1,8 @@
 //! Zusammenbau des HTTP-Routers: alle Router-Module mergen, die Querschnitt-
 //! Middleware (CORS, TrustedHost) anlegen und den `AppState` anhängen.
 
+use std::time::Instant;
+
 use axum::extract::{DefaultBodyLimit, Request, State};
 use axum::http::header::HOST;
 use axum::http::HeaderValue;
@@ -42,6 +44,7 @@ pub fn build_router(state: AppState) -> Router {
         .merge(internal_scrims::router())
         .merge(crate::hud::router())
         .merge(test_mode::router(&state.config))
+        .layer(axum::middleware::from_fn(server_timing))
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
             host_guard,
@@ -83,6 +86,31 @@ fn build_cors(state: &AppState) -> CorsLayer {
         .allow_methods(AllowMethods::mirror_request())
         .allow_headers(AllowHeaders::mirror_request())
         .allow_credentials(true)
+}
+
+/// Reports handler-side response time separately from DNS/TLS/proxy latency.
+/// This does not change request semantics or include secret query parameters.
+async fn server_timing(request: Request, next: Next) -> Response {
+    let method = request.method().clone();
+    let path = request.uri().path().to_owned();
+    let started = Instant::now();
+    let mut response = next.run(request).await;
+    let duration_ms = started.elapsed().as_secs_f64() * 1_000.0;
+
+    if duration_ms > 300.0 {
+        tracing::warn!(
+            method = %method,
+            path = %path,
+            status = %response.status(),
+            duration_ms,
+            "slow turnier request"
+        );
+    }
+
+    if let Ok(header) = HeaderValue::from_str(&format!("rust;dur={duration_ms:.1}")) {
+        response.headers_mut().insert("server-timing", header);
+    }
+    response
 }
 
 /// TrustedHost-Äquivalent: lässt nur Requests mit erlaubtem `Host`-Header durch
