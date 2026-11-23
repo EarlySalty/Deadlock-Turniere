@@ -108,13 +108,32 @@
   animation: 3s ease-in forwards confetti-fall;
 }
 
+.draft-hero-panel {
+  min-width: 0;
+  border: 1px solid rgb(200 168 107 / .28);
+  border-radius: 12px;
+  background:
+    linear-gradient(155deg, rgb(200 168 107 / .08), transparent 32%),
+    linear-gradient(30deg, #111724, #11120f);
+  padding: clamp(12px, 2vw, 22px);
+  box-shadow: inset 0 1px rgb(255 255 255 / .05), 0 20px 60px rgb(0 0 0 / .35);
+}
+
 .draft-hero-grid-v2 {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(44px, 1fr));
-  gap: 3px;
-  max-height: 180px;
-  overflow-y: auto;
-  scrollbar-width: thin;
+  grid-template-columns: repeat(auto-fill, minmax(76px, 1fr));
+  gap: clamp(5px, .7vw, 10px);
+}
+
+.draft-hero-card {
+  background: #1b2330;
+  min-width: 0;
+}
+
+@media (max-width: 640px) {
+  .draft-hero-grid-v2 {
+    grid-template-columns: repeat(auto-fill, minmax(66px, 1fr));
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

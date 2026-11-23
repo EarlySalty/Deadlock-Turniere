@@ -19,9 +19,9 @@ export default function TeamSpalte({
   const vonLinks = team === 1
 
   return (
-    <div className="flex w-full flex-col gap-2">
+    <div className="flex w-full min-w-0 flex-col gap-2">
       <div
-        className="border-b pb-1.5 text-[11px] font-black uppercase tracking-[0.25em]"
+        className="border-b pb-2 font-display text-sm font-black uppercase tracking-[0.15em] md:text-base"
         style={{ color: farbe, borderColor: `${farbe}66` }}
       >
         {name}
@@ -33,7 +33,7 @@ export default function TeamSpalte({
         return (
           <div
             key={i}
-            className={`relative flex h-12 items-center gap-2.5 overflow-hidden rounded-lg border px-2.5 transition-all duration-300 ${
+            className={`relative flex h-14 items-center gap-2 overflow-hidden rounded-md border px-2 transition-all duration-300 lg:h-16 ${
               aktiv ? 'draft-slot-pulse' : ''
             }`}
             style={{
@@ -54,14 +54,14 @@ export default function TeamSpalte({
                     initial={{ opacity: 0, x: vonLinks ? -25 : 25 }}
                     animate={{ opacity: 1, x: 0 }}
                     transition={{ duration: 0.35, ease: 'easeOut' }}
-                    className="h-9 w-9 rounded object-cover"
+                    className="h-11 w-10 shrink-0 rounded object-cover object-top lg:h-12 lg:w-12"
                   />
                 )}
                 <motion.span
                   initial={{ opacity: 0, y: 8 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: 0.1, duration: 0.3 }}
-                  className="truncate text-xs font-semibold text-white/90"
+                  className="truncate text-xs font-bold text-white/90 lg:text-sm"
                 >
                   {pick.hero_name}
                 </motion.span>
