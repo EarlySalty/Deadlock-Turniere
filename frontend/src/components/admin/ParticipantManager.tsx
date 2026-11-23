@@ -274,9 +274,9 @@ export default function ParticipantManager({
         )}
       </Card>
 
-      <div className="grid min-w-0 items-start gap-5 xl:grid-cols-[minmax(300px,0.9fr)_minmax(0,2.1fr)]" data-testid="teilnehmer-arbeitsflaeche">
+      <div className="dl-roster grid min-w-0 items-start gap-5 xl:grid-cols-[minmax(300px,0.9fr)_minmax(0,2.1fr)]" data-testid="teilnehmer-arbeitsflaeche">
         <section className="min-w-0 xl:sticky xl:top-20" aria-label="Solo-Spieler">
-          <Card className="ddc-occult-panel space-y-4 p-4 sm:p-5">
+          <Card className="dl-roster__pool space-y-4 p-4 sm:p-5">
             <div className="flex items-center justify-between gap-3 border-b border-primary/25 pb-3">
               <div>
                 <div className="text-[11px] font-bold uppercase tracking-[0.22em] text-primary">Spielerpool</div>
@@ -356,7 +356,7 @@ export default function ParticipantManager({
           {teams.length === 0 && <p className="rounded border border-dashed border-primary/30 p-5 text-sm text-muted">Noch keine Teams angelegt.</p>}
           <div className="grid min-w-0 gap-4 2xl:grid-cols-2">
             {teams.map((team) => (
-              <Card key={team.id} className="ddc-occult-panel min-w-0 space-y-4 p-4 sm:p-5">
+              <Card key={team.id} className="dl-roster__team min-w-0 space-y-4 p-4 sm:p-5">
             <div className="flex flex-col gap-3">
               <div className="flex flex-col gap-2 sm:flex-row">
                 <input

@@ -765,7 +765,12 @@ export default function Tournament() {
         )}
 
         {activeTab === 'teams' && (
-          <div className="space-y-8">
+          <div className="dl-roster space-y-8">
+            <div className="dl-roster__masthead">
+              <span>NEW YORK CITY / TOURNAMENT REGISTRY</span>
+              <h2>TEAMS <em>&</em> SPIELER</h2>
+              <p>Jede Crew. Jeder Name. Auf einen Blick.</p>
+            </div>
             <div className={`grid min-w-0 gap-6 ${userTeam || (isSignupOpen && !soloOnly && isLoggedIn && !userHasSoloSignup) ? 'xl:grid-cols-[minmax(14rem,260px)_minmax(0,1fr)]' : ''}`}>
               {(userTeam || (isSignupOpen && !soloOnly && isLoggedIn && !userHasSoloSignup)) && <div className="space-y-6">
                  {isSignupOpen && !soloOnly && isLoggedIn && !userTeam && !userHasSoloSignup && (
@@ -840,7 +845,7 @@ export default function Tournament() {
                  )}
               </div>}
 
-              <div className="min-w-0 space-y-6">
+              <div className="dl-roster__teams min-w-0 space-y-6">
                 <div className="flex items-center justify-between">
                   <h3 className="text-sm font-bold uppercase tracking-widest text-muted">Gemeldete Teams</h3>
                   <span className="text-xs font-bold text-foreground bg-white/5 px-2 py-1 rounded-lg border border-white/5">
@@ -853,11 +858,11 @@ export default function Tournament() {
                     const recruiting = recruitingLabel(team.recruitment_status)
                     const isMyTeam = userTeam?.id === team.id
                     return (
-                      <Card key={team.id} className={`ddc-occult-panel min-w-0 p-5 transition-all group ${isMyTeam ? 'border-primary/50' : 'hover:border-primary/40'}`}>
+                      <Card key={team.id} className={`dl-roster__team min-w-0 p-5 transition-all group ${isMyTeam ? 'border-primary/50' : ''}`}>
                         <div className="space-y-4">
                           <div className="flex items-start justify-between gap-3">
                             <div>
-                              <h4 className="font-bold text-foreground uppercase tracking-wide group-hover:text-primary transition-colors">{team.name}</h4>
+                              <h4 className="dl-roster__team-name group-hover:text-primary transition-colors">{team.name}</h4>
                               <p className="text-[10px] text-muted font-bold uppercase mt-1">
                                 {team.members.length} / {tournament.team_size} Mitglieder
                               </p>
@@ -869,7 +874,7 @@ export default function Tournament() {
                             )}
                           </div>
 
-                          <ul className="space-y-1.5 border-t border-border/60 pt-3" aria-label={`Mitglieder von ${team.name}`}>
+                          <ul className="dl-roster__team-members space-y-1.5 p-3" aria-label={`Mitglieder von ${team.name}`}>
                             {team.members.length === 0 && (
                               <li className="text-xs text-muted">Noch keine Spieler im Team.</li>
                             )}
