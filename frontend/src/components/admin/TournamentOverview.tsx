@@ -3,6 +3,7 @@ import Card from '@/components/ui/Card'
 import Badge from '@/components/ui/Badge'
 import Button from '@/components/ui/Button'
 import { tournamentStart } from '@/lib/adminTournaments'
+import { isOverdueOpenTournament } from '@/lib/homeTournaments'
 import type { AdminTournamentSummary } from '@/types/tournament'
 
 function formatDate(value: string | null): string {
@@ -74,6 +75,11 @@ export function TournamentSidebar({ tournaments, selectedId, creating, onSelect,
                   <span className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1">
                     <Badge status={t.status} mode={t.tournament_mode} />
                     <span className="text-[11px] text-muted">Start {formatDate(tournamentStart(t))}</span>
+                    {isOverdueOpenTournament(t) && (
+                      <span className="rounded bg-amber-500/10 px-1.5 py-0.5 text-[11px] font-medium text-amber-300">
+                        Abschluss prüfen
+                      </span>
+                    )}
                   </span>
                 </button>
               </li>

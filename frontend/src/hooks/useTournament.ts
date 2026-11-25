@@ -57,6 +57,7 @@ export function useTournaments() {
   return useQuery({
     queryKey: ['tournaments'],
     queryFn: fetchTournaments,
+    refetchInterval: 60_000,
   })
 }
 

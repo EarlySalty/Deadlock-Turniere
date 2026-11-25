@@ -18,7 +18,7 @@ use crate::extract::AuthUser;
 use crate::state::AppState;
 use crate::{
     account, admin, auth, consent, draft, internal_automatik, internal_scrims, leaderboard,
-    observer, operations, public, test_mode,
+    mcp, observer, operations, public, test_mode,
 };
 
 /// Baut den vollständigen axum-Router inkl. State und Middleware.
@@ -32,6 +32,7 @@ pub fn build_router(state: AppState) -> Router {
         .merge(account::router())
         .merge(public::router())
         .merge(admin::router())
+        .merge(mcp::router())
         .merge(operations::router())
         .merge(consent::router())
         .merge(leaderboard::router())

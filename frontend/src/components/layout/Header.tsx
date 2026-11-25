@@ -4,7 +4,6 @@ import { useQuery } from '@tanstack/react-query'
 import { useAuth } from '@/hooks/useAuth'
 import { fetchMyProfile } from '@/api/client'
 import LoginButton from '@/components/auth/LoginButton'
-import Button from '@/components/ui/Button'
 import { Trophy, LogOut, Settings, BarChart2, User, Swords, Users, Menu, X } from 'lucide-react'
 
 const navItems = [
@@ -77,11 +76,12 @@ export default function Header() {
             {isLoggedIn && user ? (
               <>
                 {(user.is_mod || user.is_admin) && (
-                  <Link to="/admin" className="hidden sm:block">
-                    <Button variant="ghost" size="sm">
-                      <Settings size={15} />
-                      Admin
-                    </Button>
+                  <Link
+                    to="/admin"
+                    className="hidden items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-muted transition-colors hover:bg-card hover:text-foreground sm:inline-flex"
+                  >
+                    <Settings size={15} />
+                    Admin
                   </Link>
                 )}
                 <Link
@@ -150,13 +150,28 @@ export default function Header() {
               )
             })}
             {isLoggedIn && user && (
-              <button
-                onClick={logout}
-                className="mt-2 flex items-center gap-3 border-t border-border px-3 pt-3 text-left text-sm font-medium text-muted hover:text-danger sm:hidden"
-              >
-                <LogOut size={16} />
-                Abmelden
-              </button>
+              <>
+                {(user.is_mod || user.is_admin) && (
+                  <Link
+                    to="/admin"
+                    onClick={() => setMenuOpen(false)}
+                    className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-muted hover:bg-card hover:text-foreground sm:hidden"
+                  >
+                    <Settings size={16} />
+                    Admin
+                  </Link>
+                )}
+                <button
+                  onClick={() => {
+                    setMenuOpen(false)
+                    logout()
+                  }}
+                  className="mt-2 flex items-center gap-3 border-t border-border px-3 pt-3 text-left text-sm font-medium text-muted hover:text-danger sm:hidden"
+                >
+                  <LogOut size={16} />
+                  Abmelden
+                </button>
+              </>
             )}
           </div>
         </nav>

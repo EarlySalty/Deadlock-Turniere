@@ -84,6 +84,7 @@ Guest participant IDs are negative values allocated from the signup identity seq
 ## Repository layout
 
 - `rust/`: backend workspace (see `rust/README.md`)
+- `docs/mcp-brain-adapter.md`: gesicherte MCP-Tools für Deadlock Brain mit Discord-Rollenprüfung (Brain-Identitätsbroker separat erforderlich)
 - `frontend/`: web frontend
 - `config/bot.example.toml`: template for the live `bot.toml`
 - `ops/systemd/`: example unit and launcher config; the live unit uses the paths above

@@ -26,6 +26,7 @@ pub mod internal_automatik;
 pub mod internal_scrims;
 pub mod leaderboard;
 pub mod league_view;
+pub mod mcp;
 pub mod observer;
 pub mod operations;
 pub mod public;

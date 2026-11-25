@@ -1,4 +1,5 @@
 import { LEAGUE_LABEL, isLeague, plannedTournamentStart } from '@/lib/league'
+import { groupHomeTournaments } from '@/lib/homeTournaments'
 import { Link } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import { useTournaments } from '@/hooks/useTournament'
@@ -23,17 +24,6 @@ const item = {
   show: { opacity: 1, y: 0 }
 }
 
-const OPEN_STATUSES = ['registration', 'checkin', 'group_phase', 'bracket']
-
-function startTime(t: Tournament): number {
-  const start = plannedTournamentStart(t)
-  return start ? new Date(start).getTime() : Number.POSITIVE_INFINITY
-}
-
-function byStart(a: Tournament, b: Tournament): number {
-  return startTime(a) - startTime(b) || a.id - b.id
-}
-
 function formatStart(value: string): string {
   return new Date(value).toLocaleString('de-DE', {
     weekday: 'short',
@@ -45,16 +35,26 @@ function formatStart(value: string): string {
 }
 
 export default function Home() {
-  const { data: tournaments, isLoading } = useTournaments()
+  const { data: tournaments, isLoading, isError, refetch } = useTournaments()
 
   if (isLoading) return <LoadingSpinner />
+  if (isError && !tournaments) {
+    return (
+      <Card className="mx-auto max-w-xl space-y-4 p-8 text-center">
+        <p className="font-semibold text-foreground">Die Turnierliste konnte nicht geladen werden.</p>
+        <p className="text-sm text-muted">Bitte versuche es erneut. Die Turniere sind dadurch nicht gelöscht.</p>
+        <button
+          type="button"
+          onClick={() => void refetch()}
+          className="rounded-lg border border-border px-4 py-2 text-sm font-medium text-primary hover:bg-card-hover"
+        >
+          Erneut laden
+        </button>
+      </Card>
+    )
+  }
 
-  const open = (tournaments ?? [])
-    .filter(t => OPEN_STATUSES.includes(t.status))
-    .sort(byStart)
-  const archived = tournaments?.filter(t =>
-    ['completed', 'archived'].includes(t.status)
-  ) ?? []
+  const { open, past, overdueIds } = groupHomeTournaments(tournaments ?? [])
 
   return (
     <motion.div
@@ -105,11 +105,11 @@ export default function Home() {
         <motion.section variants={item} className="space-y-6">
           <h2 className="text-2xl font-bold flex items-center gap-3 tracking-widest text-muted">
             <Archive size={20} />
-            Vergangene Turniere
+            Frühere Turniere
           </h2>
 
           <div className="flex flex-col gap-4">
-            {archived.length > 0 ? archived.map(t => (
+            {past.length > 0 ? past.map(t => (
               <Link key={t.id} to={`/${t.id}`} className="relative block group">
                 <Card hoverable className="p-4 border-white/5 bg-white/[0.02] hover:z-10 relative">
                   <div className="flex items-center justify-between gap-4">
@@ -121,7 +121,12 @@ export default function Home() {
                         {new Date(t.created_at).toLocaleDateString('de-DE')}
                       </span>
                     </div>
-                    <Badge status={t.status} mode={t.tournament_mode} className="scale-75 origin-right" />
+                    <div className="flex shrink-0 flex-col items-end gap-1">
+                      {overdueIds.has(t.id) && (
+                        <span className="text-[11px] font-medium text-amber-400">Abschluss ausstehend</span>
+                      )}
+                      <Badge status={t.status} mode={t.tournament_mode} className="scale-75 origin-right" />
+                    </div>
                   </div>
                 </Card>
               </Link>
@@ -184,7 +189,7 @@ function OpenTournamentCard({ tournament: t }: { tournament: Tournament }) {
 
           <div className="pt-4">
             <span className="inline-flex items-center gap-2 text-primary font-bold uppercase tracking-widest text-xs group-hover:gap-4 transition-all">
-              Jetzt teilnehmen <Swords size={14} />
+              {t.status === 'registration' ? 'Jetzt teilnehmen' : 'Turnier ansehen'} <Swords size={14} />
             </span>
           </div>
         </div>

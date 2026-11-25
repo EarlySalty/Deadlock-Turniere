@@ -12,12 +12,14 @@ import CreateTournamentForm from '@/components/admin/CreateTournamentForm'
 import TournamentManager from '@/components/admin/TournamentManager'
 import ParticipantManager from '@/components/admin/ParticipantManager'
 import TeamBuilderPanel from '@/components/admin/TeamBuilderPanel'
+import AdminWorkflowPanel from '@/components/admin/AdminWorkflowPanel'
 import {
   CollapsedTournamentRow,
   TournamentSidebar,
   TournamentSummaryCard,
 } from '@/components/admin/TournamentOverview'
-import { sortByStart } from '@/lib/adminTournaments'
+import { sortAdminLive } from '@/lib/adminTournaments'
+import { isOverdueOpenTournament } from '@/lib/homeTournaments'
 import CheckinManager from '@/components/admin/CheckinManager'
 import MatchAdminPanel from '@/components/admin/MatchAdminPanel'
 import MatchEventPanel from '@/components/admin/MatchEventPanel'
@@ -66,7 +68,7 @@ const MODE_TABS: { key: AdminMode; label: string; icon: typeof Trophy }[] = [
 ]
 
 export default function Admin() {
-  const { data: tournaments, isLoading } = useAdminTournaments()
+  const { data: tournaments, isLoading, isError: tournamentsError, refetch: refetchTournaments } = useAdminTournaments()
   const [adminMode, setAdminMode] = useState<AdminMode>('live')
   const [selectedLiveId, setSelectedLiveId] = useState<number | null>(null)
   const [selectedArchiveId, setSelectedArchiveId] = useState<number | null>(null)
@@ -78,7 +80,7 @@ export default function Admin() {
 
   const liveTournaments = useMemo(
     () =>
-      sortByStart(
+      sortAdminLive(
         (tournaments ?? []).filter(
           (t) =>
             ['draft', 'registration', 'checkin', 'group_phase', 'bracket'].includes(t.status) &&
@@ -138,6 +140,17 @@ export default function Admin() {
   }, [liveDetail, hasGroups, hasBracket])
 
   if (isLoading) return <LoadingSpinner />
+  if (tournamentsError && !tournaments) {
+    return (
+      <Card className="space-y-4 p-6">
+        <h1 className="text-lg font-semibold text-foreground">Turnier-Verwaltung nicht erreichbar</h1>
+        <p className="text-sm text-muted">Die Turnierliste konnte nicht geladen werden. Bitte die Verbindung prüfen und erneut versuchen.</p>
+        <Button variant="secondary" size="sm" onClick={() => void refetchTournaments()}>
+          Erneut laden
+        </Button>
+      </Card>
+    )
+  }
 
   const teamCount = liveDetail?.teams.length ?? 0
   const playerCount =
@@ -238,8 +251,8 @@ export default function Admin() {
       </div>
 
       {adminMode === 'live' && (
-        <div className="grid gap-6 lg:grid-cols-[280px_1fr]">
-          <aside className="lg:sticky lg:top-4 lg:self-start lg:max-h-[calc(100vh-2rem)] lg:overflow-y-auto">
+        <div className="grid min-w-0 gap-6 xl:grid-cols-[260px_minmax(0,1fr)]">
+          <aside className="xl:sticky xl:top-4 xl:self-start xl:max-h-[calc(100vh-2rem)] xl:overflow-y-auto">
             <TournamentSidebar
               tournaments={liveTournaments}
               selectedId={liveSelectedId}
@@ -272,17 +285,24 @@ export default function Admin() {
             ) : liveDetail && activePhase ? (
               <>
                 {selectedSummary && <TournamentSummaryCard tournament={selectedSummary} />}
-                <div className="grid gap-5 lg:grid-cols-[170px_1fr]">
-                  <AdminPhaseNav
-                    status={liveDetail.status}
-                    hasGroups={hasGroups}
-                    hasBracket={hasBracket}
-                    league={liveLeague}
-                    activePhase={activePhase}
-                    onChange={setActivePhase}
-                  />
+                <AdminWorkflowPanel tournament={liveDetail} onNavigate={setActivePhase} />
+                {selectedSummary && isOverdueOpenTournament(selectedSummary) && (
+                  <div role="status" className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-4 text-sm text-amber-300">
+                    Dieses Turnier wurde seit mehr als 72 Stunden nicht aktualisiert und sein geplanter Start liegt zurück.
+                    Auf der öffentlichen Startseite erscheint es unter „Frühere Turniere“.
+                    Bitte den Status im Setup prüfen und das Turnier gegebenenfalls abschließen.
+                  </div>
+                )}
+                <AdminPhaseNav
+                  status={liveDetail.status}
+                  hasGroups={hasGroups}
+                  hasBracket={hasBracket}
+                  league={liveLeague}
+                  activePhase={activePhase}
+                  onChange={setActivePhase}
+                />
 
-                  <div className="min-w-0 space-y-5">
+                <div className="min-w-0 space-y-5">
                     {(liveDetail.status === 'group_phase' ||
                       liveDetail.status === 'bracket') && (
                       <Leitstand tournamentId={liveDetail.id} />
@@ -309,7 +329,24 @@ export default function Admin() {
                       />
                     )}
 
-                    {activePhase === 'participants' && canManageParticipants && (
+                    {activePhase === 'participants' && canManageParticipants && liveDetail.team_size > 1 && (
+                      <details className="min-w-0 rounded-xl border border-border bg-card/40">
+                        <summary className="cursor-pointer px-4 py-3 text-sm font-medium text-foreground hover:text-primary">
+                          Weitere Teamaktionen (Löschen, Recruiting, Ersatzspieler)
+                        </summary>
+                        <div className="min-w-0 border-t border-border p-3 sm:p-4">
+                          <ParticipantManager
+                            tournamentId={liveDetail.id}
+                            tournamentStatus={liveDetail.status}
+                            teamSize={liveDetail.team_size}
+                            teams={liveDetail.teams}
+                            signups={liveDetail.signups}
+                          />
+                        </div>
+                      </details>
+                    )}
+
+                    {activePhase === 'participants' && canManageParticipants && liveDetail.team_size <= 1 && (
                       <ParticipantManager
                         tournamentId={liveDetail.id}
                         tournamentStatus={liveDetail.status}
@@ -439,7 +476,6 @@ export default function Admin() {
                         )}
                       </section>
                     )}
-                  </div>
                 </div>
                 {otherLiveTournaments.length > 0 && (
                   <section className="space-y-2">
