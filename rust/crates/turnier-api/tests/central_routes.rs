@@ -1526,6 +1526,85 @@ async fn signup_rows(pool: &Pool, tournament_id: i64, discord_id: i64) -> (i64, 
 }
 
 #[tokio::test]
+async fn assigned_signup_withdraw_matches_invite_mode() {
+    let ctx = setup().await;
+    let admin = session(&ctx.pool, ADMIN_ID, "Admin", &["admin-role", "mod-role"]).await;
+    let player = session(&ctx.pool, PLAYER_ID, "Player", &[]).await;
+
+    for (mode, expected) in [
+        (
+            "solo_only",
+            "Zum Austragen wende dich bitte an das Orga-Team.",
+        ),
+        (
+            "always",
+            "Du bist bereits in einem Team. Verlasse zuerst das Team",
+        ),
+    ] {
+        let tournament = seed_tournament(&ctx.pool, mode, "registration", 6).await;
+        sqlx::query("UPDATE turnier.tournaments SET invite_mode = $1 WHERE id = $2")
+            .bind(mode)
+            .bind(tournament)
+            .execute(&ctx.pool)
+            .await
+            .unwrap();
+        let team = seed_team(&ctx.pool, tournament, "Orga Team", CAPTAIN_ID).await;
+        let signup = seed_signup(&ctx.pool, tournament, PLAYER_ID, "Player").await;
+        let (status, body) = send_json(
+            &ctx.app,
+            Some(&admin),
+            Method::POST,
+            &format!("/api/admin/tournaments/{tournament}/teams/{team}/signups/assign"),
+            Some(json!({"signup_id": signup})),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+
+        for phase in ["registration", "checkin"] {
+            sqlx::query("UPDATE turnier.tournaments SET status = $1 WHERE id = $2")
+                .bind(phase)
+                .bind(tournament)
+                .execute(&ctx.pool)
+                .await
+                .unwrap();
+            if phase == "checkin" {
+                checkin_all(&ctx.pool, tournament).await;
+            }
+            let (status, body) = send_json(
+                &ctx.app,
+                Some(&player),
+                Method::DELETE,
+                &format!("/api/tournaments/{tournament}/signup"),
+                None,
+            )
+            .await;
+            assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+            assert_eq!(body["detail"], json!(expected));
+            assert_eq!(
+                signup_rows(&ctx.pool, tournament, id(PLAYER_ID)).await,
+                (1, i64::from(phase == "checkin"))
+            );
+            let assigned: Option<i64> =
+                sqlx::query_scalar("SELECT team_id FROM turnier.tournament_signups WHERE id = $1")
+                    .bind(signup)
+                    .fetch_one(&ctx.pool)
+                    .await
+                    .unwrap();
+            assert_eq!(assigned, Some(team));
+            let members: i64 = sqlx::query_scalar(
+                "SELECT count(*) FROM turnier.team_members WHERE team_id = $1 AND discord_id = $2",
+            )
+            .bind(team)
+            .bind(id(PLAYER_ID))
+            .fetch_one(&ctx.pool)
+            .await
+            .unwrap();
+            assert_eq!(members, 1);
+        }
+    }
+}
+
+#[tokio::test]
 async fn pug_finalize_formation_withdraw_and_admin_signup_contract() {
     let ctx = setup().await;
     let admin = session(&ctx.pool, ADMIN_ID, "Admin", &["admin-role", "mod-role"]).await;
