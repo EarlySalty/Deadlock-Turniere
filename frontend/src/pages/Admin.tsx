@@ -44,12 +44,14 @@ import BracketView from '@/components/bracket/BracketView'
 import MiniGroupPanel from '@/components/bracket/MiniGroupPanel'
 import AutoLobbyButton from '@/components/admin/AutoLobbyButton'
 import {
+  AlertCircle,
   Archive,
   CalendarClock,
   Crosshair,
   FlaskConical,
   Plus,
   Radio,
+  RefreshCw,
   Sparkles,
   Trash2,
   Trophy,
@@ -66,7 +68,14 @@ const MODE_TABS: { key: AdminMode; label: string; icon: typeof Trophy }[] = [
 ]
 
 export default function Admin() {
-  const { data: tournaments, isLoading } = useAdminTournaments()
+  const {
+    data: tournaments,
+    isLoading,
+    error: listError,
+    refetch: refetchList,
+    isRefetching: refetchingList,
+  } = useAdminTournaments()
+  const listFailed = Boolean(listError) && !tournaments
   const [adminMode, setAdminMode] = useState<AdminMode>('live')
   const [selectedLiveId, setSelectedLiveId] = useState<number | null>(null)
   const [selectedArchiveId, setSelectedArchiveId] = useState<number | null>(null)
@@ -237,7 +246,15 @@ export default function Admin() {
         })}
       </div>
 
-      {adminMode === 'live' && (
+      {listFailed && (adminMode === 'live' || adminMode === 'archive') && (
+        <TournamentListError
+          message={listError?.message ?? ''}
+          retrying={refetchingList}
+          onRetry={() => void refetchList()}
+        />
+      )}
+
+      {adminMode === 'live' && !listFailed && (
         <div className="grid gap-6 lg:grid-cols-[280px_1fr]">
           <aside className="lg:sticky lg:top-4 lg:self-start lg:max-h-[calc(100vh-2rem)] lg:overflow-y-auto">
             <TournamentSidebar
@@ -272,7 +289,7 @@ export default function Admin() {
             ) : liveDetail && activePhase ? (
               <>
                 {selectedSummary && <TournamentSummaryCard tournament={selectedSummary} />}
-                <div className="grid gap-5 lg:grid-cols-[170px_1fr]">
+                <div key={liveDetail.id} className="grid gap-5 lg:grid-cols-[170px_1fr]">
                   <AdminPhaseNav
                     status={liveDetail.status}
                     hasGroups={hasGroups}
@@ -311,6 +328,7 @@ export default function Admin() {
 
                     {activePhase === 'participants' && canManageParticipants && (
                       <ParticipantManager
+                        builderActive={liveDetail.team_size > 1}
                         tournamentId={liveDetail.id}
                         tournamentStatus={liveDetail.status}
                         teamSize={liveDetail.team_size}
@@ -474,7 +492,7 @@ export default function Admin() {
         </div>
       )}
 
-      {adminMode === 'archive' && (
+      {adminMode === 'archive' && !listFailed && (
         <div className="grid gap-6 lg:grid-cols-[320px_1fr]">
           <aside className="lg:sticky lg:top-4 lg:self-start lg:max-h-[calc(100vh-2rem)] lg:overflow-y-auto">
             <Card className="space-y-3 p-4">
@@ -560,5 +578,27 @@ export default function Admin() {
       {adminMode === 'automatik' && <AutomatikPanel />}
       {adminMode === 'observer' && <ObserverPanel />}
     </div>
+  )
+}
+
+function TournamentListError({
+  message,
+  retrying,
+  onRetry,
+}: {
+  message: string
+  retrying: boolean
+  onRetry: () => void
+}) {
+  return (
+    <Card className="p-8 text-center" role="alert">
+      <AlertCircle size={32} className="mx-auto mb-3 text-red-300" />
+      <p className="font-medium text-foreground">Die Turnierliste konnte nicht geladen werden.</p>
+      {message && <p className="mt-1 text-sm text-red-300">{message}</p>}
+      <Button variant="secondary" size="sm" className="mt-4" disabled={retrying} onClick={onRetry}>
+        <RefreshCw size={14} className={retrying ? 'animate-spin' : undefined} />
+        {retrying ? 'Lädt …' : 'Erneut versuchen'}
+      </Button>
+    </Card>
   )
 }

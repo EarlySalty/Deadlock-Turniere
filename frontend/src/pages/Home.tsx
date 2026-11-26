@@ -5,8 +5,9 @@ import { useTournaments } from '@/hooks/useTournament'
 import Card from '@/components/ui/Card'
 import Badge from '@/components/ui/Badge'
 import LoadingSpinner from '@/components/ui/LoadingSpinner'
-import { Trophy, Users, Archive, Swords, Shield, ScrollText, CalendarClock } from 'lucide-react'
+import { ArrowRight, Trophy, Users, Archive, Swords, Shield, ScrollText, CalendarClock } from 'lucide-react'
 import type { Tournament } from '@/types/tournament'
+import { byEffectiveStart, effectiveStart, signupOpen } from '@/lib/tournamentStart'
 
 const container = {
   hidden: { opacity: 0 },
@@ -25,20 +26,6 @@ const item = {
 
 const OPEN_STATUSES = ['registration', 'checkin', 'group_phase', 'bracket']
 
-function tournamentStart(t: Tournament): string | null {
-  const planned = t.tournament_mode === 'bracket_only' ? t.bracket_start : t.group_phase_start ?? t.bracket_start
-  return planned ?? t.registration_end
-}
-
-function startTime(t: Tournament): number {
-  const start = tournamentStart(t)
-  return start ? new Date(start).getTime() : Number.POSITIVE_INFINITY
-}
-
-function byStart(a: Tournament, b: Tournament): number {
-  return startTime(a) - startTime(b) || a.id - b.id
-}
-
 function formatStart(value: string): string {
   return new Date(value).toLocaleString('de-DE', {
     weekday: 'short',
@@ -56,7 +43,7 @@ export default function Home() {
 
   const open = (tournaments ?? [])
     .filter(t => OPEN_STATUSES.includes(t.status))
-    .sort(byStart)
+    .sort(byEffectiveStart)
   const archived = tournaments?.filter(t =>
     ['completed', 'archived'].includes(t.status)
   ) ?? []
@@ -141,7 +128,7 @@ export default function Home() {
 }
 
 function OpenTournamentCard({ tournament: t }: { tournament: Tournament }) {
-  const start = tournamentStart(t)
+  const start = effectiveStart(t)
   return (
     <Link to={`/${t.id}`}>
       <Card hoverable className="p-8 border-primary/20 bg-primary/5 group relative overflow-hidden">
@@ -189,7 +176,11 @@ function OpenTournamentCard({ tournament: t }: { tournament: Tournament }) {
 
           <div className="pt-4">
             <span className="inline-flex items-center gap-2 text-primary font-bold uppercase tracking-widest text-xs group-hover:gap-4 transition-all">
-              Jetzt teilnehmen <Swords size={14} />
+              {signupOpen(t.status) ? (
+                <>Jetzt teilnehmen <Swords size={14} /></>
+              ) : (
+                <>Zum Turnier <ArrowRight size={14} /></>
+              )}
             </span>
           </div>
         </div>
