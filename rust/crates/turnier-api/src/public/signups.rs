@@ -152,7 +152,8 @@ async fn cancel_solo_signup(
     let user_discord_id = db::parse_participant_id(&user.discord_id)?;
 
     let mut tx = pool.begin().await?;
-    let status = helpers::lock_tournament_status(&mut tx, tournament_id).await?;
+    let tournament = helpers::lock_tournament_or_404(&mut tx, tournament_id).await?;
+    let status = tournament.status;
     if !status.registration_window_open() {
         return Err(WebError::bad_request(
             "Austragen ist nur bis zum Ende des Check-ins möglich",
@@ -171,7 +172,11 @@ async fn cancel_solo_signup(
     };
     if team_id.is_some() {
         return Err(WebError::bad_request(
-            "Du bist bereits in einem Team. Verlasse zuerst das Team",
+            if tournament.invite_mode == Some(turnier_core::InviteMode::SoloOnly) {
+                "Zum Austragen wende dich bitte an das Orga-Team."
+            } else {
+                "Du bist bereits in einem Team. Verlasse zuerst das Team"
+            },
         ));
     }
 

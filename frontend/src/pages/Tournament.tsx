@@ -822,7 +822,10 @@ export default function Tournament() {
                         ))}
                       </div>
 
-                      {isRegistration && (
+                      {isSignupOpen && soloOnly && (
+                        <p className="text-sm text-muted">Zum Austragen wende dich bitte an das Orga-Team.</p>
+                      )}
+                      {isRegistration && !soloOnly && (
                          <Button
                           variant="ghost"
                           size="sm"
