@@ -28,6 +28,9 @@ chrono.workspace = true
 
 [dev-dependencies]
 tokio = { workspace = true }
+axum.workspace = true
+async-trait.workspace = true
+dl-broker = { path = "../../../../Deadlock-Bots/rust/crates/dl-broker" }
 
 [features]
 default = []
