@@ -29,7 +29,7 @@ Links: https://github.com/EarlySalty/Deadlock-Turniere/pull/34 ; https://github.
 - [ ] Browserabnahme 390/1440 px: 30 Solo-Anmeldungen, 5 manuell gebaute Teams mit je 6 Spielern, Captain, Gast-/Namensdubletten, Admin-Add/Remove/Check-in, Withdraw, Save/Entwürfe anderer Tabs, Start, tatsächliches Bracket-Format, Voice/Caster. Keine ungewollte automatische Teambildung oder automatische Beendigung des Check-ins; Admin/Public konsistent. Der Zwischenstand 12d03a3 sichert laufende Korrekturen zur Austrage-Semantik bereits zugeteilter Solo-only-Spieler, nicht freigegeben.
 - [ ] Unabhängiger Kritiker, gültiges Gate (historisch R1/R2 BLOCK, R3 offen laut letztem vollständigem Bericht), neue Befunde beheben. Werkzeugblocker regelkonform lösen oder konkrete Übergabe an berechtigte Prüfumgebung.
 - [ ] Testnachweise der letzten finalen Revision: Rust, Clippy, fmt, Frontend lint/test/tsc/build; gemeinsamer Broker-Vertragstest; Release-Freigabe. Zuletzt gemeldet: 628 Rust bestanden, 0 Fehler, 2 ignored; central_routes 17/17 auf PUG-Basis, PR34-Vergleich 15/15 grün mit aktueller Bots-Abhängigkeit und isolierter DB. Keine neue Solo-Balance-Migration duplizieren.
-- [ ] Nach ALLOW kontrollierte Integration/Deployment gemäß Betriebsregeln; bestehende Events schützen.
+- [ ] Nach aktuellem unabhängigen Review und Freigabe PR zur kontrollierten Integration/Deployment durch den Maintainer übergeben; bestehende Events schützen.
 
 ## 2. P0/P1 – Caddy (Paket 04; sofort unabhängig bearbeitbar)
 - [ ] Auf 06c7af1 weiterarbeiten. Aktuell Gate R3 BLOCK; alle R1/R2-Befunde laut Worker behoben, 23/23 relevante Tests grün, drei Alias-Bestandsfehler (Gesamt 23/26, Basis 21/24); nicht als vollständig grüne Gesamtsuite ausgeben.
@@ -71,7 +71,7 @@ Links: https://github.com/EarlySalty/Deadlock-Turniere/pull/34 ; https://github.
 - [ ] Nicht freigegebene oder nicht mehr reproduzierbare historische Arbeit dokumentieren, nicht als ungeprüften Fehlerfix ausliefern.
 
 ## 10. P0 – Gesamtabnahme und Release (Paket 13)
-- [ ] Sämtliche relevanten freigegebenen Änderungen tatsächlich in Main/Master und kompatiblen Releases nachweisen; nur nach ALLOW und Integrationsfreigabe mergen/deployen, keine Main-Änderungen während laufender Release-Builds.
+- [ ] Sämtliche relevanten freigegebenen Änderungen tatsächlich in Main/Master und kompatiblen Releases nachweisen; nur nach nachgewiesener Review-Freigabe und ausdrücklicher Maintainer-Entscheidung mergen/deployen, keine Main-Änderungen während laufender Release-Builds.
 - [ ] End-to-End-Testturnier: Erstellung, 30 Anmeldungen, Check-in, 5x6 Teams, Draft, Lobby, Caster/Voice, Match/Ergebnis, Rangliste/Archiv; zusätzlich Teamturnier, Gruppen-/Double-Elim, Liga, Mobile/PC, Gast-/Discord-Anmeldung, Fehlerpfade.
 - [ ] Zentral-DB, Broker, Steam, Twitch, Caddy, Logs, reale Build-SHAs und Health/HTTP prüfen. Rollback-Binary, Frontend und Config sichern. Kein Test mit echten Nutzern oder produktiven Daten; bestehende Turniere #16/#17, reale Lobbyprobe und disruptive Releases nur nach expliziter Zustimmung bei Bedarf.
 - [ ] Kein unfertiger Stand nur lokal: jede fertige Änderung auf Remote-Feature-Branch, SHA verifizieren. Sicherungsbranches nicht blind mergen oder löschen; nach nachgewiesener Übernahme archivieren. Abschlussbericht mit Commit, Tests, Gate, Live-Beweis und konkret verbleibenden Blockern.
