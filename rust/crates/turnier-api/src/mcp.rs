@@ -237,7 +237,7 @@ async fn run(state: &AppState, query: Query) -> WebResult<Option<Value>> {
 async fn list(state: &AppState) -> WebResult<Value> {
     let tournaments = helpers::list_tournament_dtos(
         &state.pool,
-        "WHERE status != 'draft' AND is_test = false ORDER BY created_at DESC LIMIT 50",
+        "WHERE status != 'draft' AND is_test = false ORDER BY created_at DESC, id DESC LIMIT 50",
     )
     .await?;
     let summaries: Vec<TournamentSummary> = tournaments
@@ -592,11 +592,95 @@ struct GroupSummary {
     matches: Vec<GroupGame>,
 }
 
+fn pair_key(team_a: i64, team_b: i64) -> (i64, i64) {
+    (team_a.min(team_b), team_a.max(team_b))
+}
+
+fn round_robin_pairs(team_ids: &[i64]) -> Vec<Vec<(i64, i64)>> {
+    let mut working: Vec<Option<i64>> = team_ids.iter().copied().map(Some).collect();
+    if working.len() % 2 == 1 {
+        working.push(None);
+    }
+    let half = working.len() / 2;
+    let mut rounds = Vec::new();
+    for _ in 0..working.len().saturating_sub(1) {
+        let pairs = working[..half]
+            .iter()
+            .zip(working.iter().rev())
+            .filter_map(|(first, second)| Some(((*first)?, (*second)?)))
+            .collect();
+        rounds.push(pairs);
+        if let Some(last) = working.pop() {
+            working.insert(1, last);
+        }
+    }
+    rounds
+}
+
+fn derived_rounds(team_ids: &[i64], games: &[(i64, i64, i64)]) -> HashMap<i64, i64> {
+    let mut by_id = games.to_vec();
+    by_id.sort_by_key(|(id, _, _)| *id);
+    let by_pair: HashMap<(i64, i64), i64> = by_id
+        .iter()
+        .map(|&(id, team1, team2)| (pair_key(team1, team2), id))
+        .collect();
+    let mut rounds = HashMap::new();
+    let mut filled = 0;
+    for (index, pairs) in round_robin_pairs(team_ids).iter().enumerate() {
+        let found: Vec<i64> = pairs
+            .iter()
+            .filter_map(|&(team1, team2)| by_pair.get(&pair_key(team1, team2)).copied())
+            .collect();
+        if !found.is_empty() {
+            filled += 1;
+        }
+        for id in found {
+            rounds.insert(id, index as i64 + 1);
+        }
+    }
+    for (id, _, _) in by_id {
+        rounds.entry(id).or_insert(filled + 1);
+    }
+    rounds
+}
+
+fn group_games(names: &HashMap<i64, String>, group: &Group) -> Vec<GroupGame> {
+    let mut seeded: Vec<(i64, i64)> = group.teams.iter().map(|t| (t.id, t.team_id)).collect();
+    seeded.sort_unstable();
+    let team_ids: Vec<i64> = seeded.into_iter().map(|(_, team_id)| team_id).collect();
+    let pairs: Vec<(i64, i64, i64)> = group
+        .matches
+        .iter()
+        .map(|m| (m.id, m.team1_id, m.team2_id))
+        .collect();
+    let derived = derived_rounds(&team_ids, &pairs);
+    let mut games: Vec<GroupGame> = group
+        .matches
+        .iter()
+        .map(|m| GroupGame {
+            id: m.id,
+            round: m.round.or_else(|| derived.get(&m.id).copied()),
+            status: m.status,
+            team1: resolve(names, Some(m.team1_id)),
+            team2: resolve(names, Some(m.team2_id)),
+            winner: resolve(names, m.winner_id),
+            scheduled_at: m.scheduled_at.clone(),
+            played_at: m.played_at.clone(),
+        })
+        .collect();
+    games.sort_by_key(|game| (game.round, game.id));
+    games
+}
+
 fn group_summary(names: &HashMap<i64, String>, mut group: Group, league: bool) -> GroupSummary {
+    let matches = group_games(names, &group);
     if !league {
-        group
-            .teams
-            .sort_by(|a, b| b.points.cmp(&a.points).then(b.wins.cmp(&a.wins)));
+        group.teams.sort_by(|a, b| {
+            b.points
+                .cmp(&a.points)
+                .then(b.wins.cmp(&a.wins))
+                .then(a.id.cmp(&b.id))
+        });
     }
     GroupSummary {
         id: group.id,
@@ -613,20 +697,7 @@ fn group_summary(names: &HashMap<i64, String>, mut group: Group, league: bool) -
                 points: team.points,
             })
             .collect(),
-        matches: group
-            .matches
-            .into_iter()
-            .map(|m| GroupGame {
-                id: m.id,
-                round: m.round,
-                status: m.status,
-                team1: resolve(names, Some(m.team1_id)),
-                team2: resolve(names, Some(m.team2_id)),
-                winner: resolve(names, m.winner_id),
-                scheduled_at: m.scheduled_at,
-                played_at: m.played_at,
-            })
-            .collect(),
+        matches,
     }
 }
 
@@ -730,6 +801,101 @@ mod tests {
         assert!(team_name_is_safe("nova team (3)", discord, &nova, &guests));
         assert!(team_name_is_safe("Team Bravo", discord, &nova, &guests));
         assert!(team_name_is_safe("Team Bravo", 0, &[], &[]));
+    }
+
+    fn group_team(id: i64, team_id: i64, wins: i64, points: i64) -> turnier_core::GroupTeam {
+        turnier_core::GroupTeam {
+            id,
+            group_id: 1,
+            team_id,
+            team_name: String::new(),
+            wins,
+            losses: 0,
+            points,
+        }
+    }
+
+    fn group_match(id: i64, team1_id: i64, team2_id: i64) -> turnier_core::GroupMatch {
+        turnier_core::GroupMatch {
+            id,
+            group_id: 1,
+            team1_id,
+            team2_id,
+            winner_id: None,
+            status: MatchStatus::Pending,
+            steam_party_id: None,
+            party_code: None,
+            deadlock_match_id: None,
+            match_duration_s: None,
+            match_stats: None,
+            hero_assignments: None,
+            scheduled_at: None,
+            played_at: None,
+            round: None,
+        }
+    }
+
+    fn group(matches: Vec<turnier_core::GroupMatch>) -> Group {
+        Group {
+            id: 1,
+            tournament_id: 1,
+            name: "A".to_string(),
+            seeding_order: 0,
+            teams: vec![
+                group_team(3, 30, 1, 3),
+                group_team(1, 10, 1, 3),
+                group_team(2, 20, 0, 0),
+            ],
+            matches,
+        }
+    }
+
+    fn rounds(summary: &GroupSummary) -> Vec<(i64, Option<i64>)> {
+        summary.matches.iter().map(|m| (m.id, m.round)).collect()
+    }
+
+    #[test]
+    fn group_games_get_the_site_round_robin_rounds() {
+        let names = HashMap::new();
+        let full = group(vec![
+            group_match(9, 20, 30),
+            group_match(7, 10, 20),
+            group_match(8, 10, 99),
+            group_match(5, 30, 10),
+            group_match(6, 30, 20),
+        ]);
+        let summary = group_summary(&names, full, false);
+        assert_eq!(
+            rounds(&summary),
+            [
+                (9, Some(1)),
+                (5, Some(2)),
+                (7, Some(3)),
+                (6, Some(4)),
+                (8, Some(4))
+            ]
+        );
+        let order: Vec<(usize, &str)> = summary
+            .standings
+            .iter()
+            .map(|s| (s.rank, s.team.as_str()))
+            .collect();
+        assert_eq!(order, [(1, "Team 10"), (2, "Team 30"), (3, "Team 20")]);
+
+        let first_round_missing = group(vec![
+            group_match(8, 10, 99),
+            group_match(7, 10, 20),
+            group_match(5, 30, 10),
+        ]);
+        assert_eq!(
+            rounds(&group_summary(&names, first_round_missing, false)),
+            [(5, Some(2)), (7, Some(3)), (8, Some(3))]
+        );
+
+        let mut scheduled = group_match(4, 10, 20);
+        scheduled.round = Some(7);
+        let kept = group(vec![scheduled]);
+        assert_eq!(rounds(&group_summary(&names, kept, true)), [(4, Some(7))]);
     }
 
     #[test]

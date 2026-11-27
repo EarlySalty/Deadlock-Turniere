@@ -215,7 +215,7 @@ const MEMBER_SELECT: &str = "SELECT tm.id, tm.team_id, tm.discord_id, \
         WHERE discord_name IS NOT NULL AND discord_name != '' GROUP BY discord_id) s \
         ON s.discord_id = tm.discord_id \
     LEFT JOIN turnier.\"user_profiles\" p ON p.discord_id = tm.discord_id \
-    WHERE tm.team_id = $1 ORDER BY tm.joined_at";
+    WHERE tm.team_id = $1 ORDER BY tm.joined_at, tm.id";
 
 /// Eine angereicherte Member-Zeile (Namens-Kandidaten + Rangfelder).
 struct MemberRow {
@@ -317,7 +317,7 @@ pub async fn load_teams_for_tournament(
 ) -> WebResult<Vec<Team>> {
     let pool = &state.pool;
     let team_rows: Vec<TeamRow> =
-        sqlx::query_as(r#"SELECT * FROM turnier."teams" WHERE tournament_id = $1"#)
+        sqlx::query_as(r#"SELECT * FROM turnier."teams" WHERE tournament_id = $1 ORDER BY id"#)
             .bind(tournament_id)
             .fetch_all(pool)
             .await?;
@@ -356,7 +356,7 @@ pub async fn load_teams_for_tournament(
 /// (routes.py:159). Bewusst OHNE Rang-Anreicherung, 1:1 zum Original.
 pub async fn load_teams_public(pool: &Pool, tournament_id: i64) -> WebResult<Vec<TeamPublic>> {
     let team_rows: Vec<TeamRow> =
-        sqlx::query_as(r#"SELECT * FROM turnier."teams" WHERE tournament_id = $1"#)
+        sqlx::query_as(r#"SELECT * FROM turnier."teams" WHERE tournament_id = $1 ORDER BY id"#)
             .bind(tournament_id)
             .fetch_all(pool)
             .await?;
@@ -506,7 +506,7 @@ const SIGNUP_SELECT: &str = "SELECT ts.id, ts.tournament_id, ts.discord_id, \
         WHERE discord_name IS NOT NULL AND discord_name != '' GROUP BY discord_id) tm \
         ON tm.discord_id = ts.discord_id \
     LEFT JOIN turnier.\"user_profiles\" p ON p.discord_id = ts.discord_id \
-    WHERE ts.tournament_id = $1 ORDER BY ts.signed_up_at DESC";
+    WHERE ts.tournament_id = $1 ORDER BY ts.signed_up_at DESC, ts.id DESC";
 
 async fn load_signup_rows(pool: &Pool, tournament_id: i64) -> WebResult<Vec<SignupRow>> {
     let rows = sqlx::query(SIGNUP_SELECT)
@@ -626,7 +626,7 @@ pub async fn load_groups_for_tournament(pool: &Pool, tournament_id: i64) -> WebR
         let team_rows = sqlx::query(
             r#"SELECT gt.id, gt.group_id, gt.team_id, t.name AS team_name,
                     gt.wins, gt.losses, gt.points
-             FROM turnier."group_teams" gt JOIN turnier."teams" t ON gt.team_id = t.id WHERE gt.group_id = $1"#,
+             FROM turnier."group_teams" gt JOIN turnier."teams" t ON gt.team_id = t.id WHERE gt.group_id = $1 ORDER BY gt.id"#,
         )
         .bind(g.id)
         .fetch_all(pool)
@@ -648,7 +648,7 @@ pub async fn load_groups_for_tournament(pool: &Pool, tournament_id: i64) -> WebR
             r#"SELECT id, group_id, team1_id, team2_id, winner_id, status, steam_party_id,
                     party_code, deadlock_match_id, match_duration_s, match_stats,
                     hero_assignments, scheduled_at, played_at
-             FROM turnier."group_matches" WHERE group_id = $1"#,
+             FROM turnier."group_matches" WHERE group_id = $1 ORDER BY id"#,
         )
         .bind(g.id)
         .fetch_all(pool)
@@ -691,7 +691,7 @@ pub async fn load_groups_for_tournament(pool: &Pool, tournament_id: i64) -> WebR
 /// (routes.py:239). `series_wins_*`/`games` defaulten wie im Pydantic-Modell.
 pub async fn load_bracket_matches(pool: &Pool, tournament_id: i64) -> WebResult<Vec<BracketMatch>> {
     let rows = sqlx::query(
-        r#"SELECT * FROM turnier."bracket_matches" WHERE tournament_id = $1 ORDER BY round, position"#,
+        r#"SELECT * FROM turnier."bracket_matches" WHERE tournament_id = $1 ORDER BY round, position, id"#,
     )
     .bind(tournament_id)
     .fetch_all(pool)
