@@ -294,7 +294,7 @@ export default function ParticipantManager({
           <div className="space-y-3">
             {pendingSignups.map((signup) => (
               <div key={signup.id} className="rounded-xl border border-border bg-background/60 p-4">
-                <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                <div className="flex flex-col gap-3">
                   <div className="min-w-0 space-y-1">
                     <div className="break-words font-medium text-foreground">{playerName(signup.discord_name)}</div>
                     {showDiscordIds && <div className="text-xs text-muted">{signup.discord_id}</div>}
@@ -303,11 +303,11 @@ export default function ParticipantManager({
                     </div>
                   </div>
 
-                  <div className="flex flex-col gap-2 sm:flex-row">
+                  <div className="flex flex-wrap gap-2">
                     <select
                       value={signupTargets[signup.id] ?? ''}
                       onChange={(event) => setSignupTargets((current) => ({ ...current, [signup.id]: event.target.value }))}
-                      className="rounded-lg border border-border bg-card px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
+                      className="w-full min-w-0 rounded-lg border border-border bg-card px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
                     >
                       <option value="">Team wählen...</option>
                       {teams
@@ -515,7 +515,7 @@ export default function ParticipantManager({
                               onChange={(event) =>
                                 setMoveTargets((current) => ({ ...current, [moveKey]: event.target.value }))
                               }
-                              className="flex-1 rounded-lg border border-border bg-card px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
+                              className="min-w-0 flex-1 rounded-lg border border-border bg-card px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
                             >
                               <option value="">In anderes Team verschieben...</option>
                               {availableTargets.map((candidate) => (
