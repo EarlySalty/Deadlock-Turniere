@@ -147,20 +147,56 @@ async fn guest_signup_preserves_consent_and_identity_isolation() {
     let captain_token = session(&ctx.pool, CAPTAIN_ID, "Captain", &[]).await;
     let team_id = seed_team(&ctx.pool, tournament_id, "Guest team", CAPTAIN_ID).await;
     let guest_id = identities[0].as_str().unwrap();
-    let (status, team) = send_json(
+    let guest_signup_id: i64 = sqlx::query_scalar(
+        r#"SELECT id FROM turnier."tournament_signups" WHERE tournament_id = $1 AND discord_id = $2"#,
+    )
+    .bind(tournament_id)
+    .bind(id(guest_id))
+    .fetch_one(&ctx.pool)
+    .await
+    .unwrap();
+    let (status, invited) = send_json(
         &ctx.app,
         Some(&captain_token),
         Method::POST,
-        &format!("/api/tournaments/{tournament_id}/teams/{team_id}/invite/{guest_id}"),
+        &format!(
+            "/api/tournaments/{tournament_id}/teams/{team_id}/invite-by-signup/{guest_signup_id}"
+        ),
         None,
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    assert!(team["members"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|member| member["discord_name"] == "Jörg"));
+    assert_eq!(invited["status"], "invited");
+    let invite_id: i64 = sqlx::query_scalar(
+        r#"SELECT id FROM turnier."team_invitations"
+         WHERE team_id = $1 AND discord_id = $2 AND status = 'pending'"#,
+    )
+    .bind(team_id)
+    .bind(id(guest_id))
+    .fetch_one(&ctx.pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        send_json(
+            &ctx.app,
+            Some(token),
+            Method::POST,
+            &format!("/api/tournaments/{tournament_id}/invitations/{invite_id}/accept"),
+            None
+        )
+        .await
+        .0,
+        StatusCode::OK
+    );
+    let member_name: String = sqlx::query_scalar(
+        r#"SELECT discord_name FROM turnier."team_members" WHERE team_id = $1 AND discord_id = $2"#,
+    )
+    .bind(team_id)
+    .bind(id(guest_id))
+    .fetch_one(&ctx.pool)
+    .await
+    .unwrap();
+    assert_eq!(member_name, "Jörg");
     assert_eq!(
         send_json(
             &ctx.app,

@@ -101,15 +101,21 @@ Ablauf). Der Port erzwingt das nicht selbst; als externe Invariante im
 
 ## Turnier-Engine (`turnier-engine`)
 
-### KI-T01 [erhalten]: Platzierungs-Heuristik ist Single-Elim-zentriert
-`points.py`: `max(round)` gilt als Finale, `round-1` als Halbfinale. Bei
-Double-Elim ist das teils unscharf (Losers-Runden zählen anders).
-**Folgefix-Vorschlag:** Platzierung aus der tatsächlichen Bracket-Topologie statt
-aus der Rundennummer ableiten.
+### KI-T01 [gefixt]: Platzierung bei Double Elimination
+Bisher galt `max(round)` als Finale. Bei 8 und 16 Teams teilt sich das
+Losers-Finale die Rundennummer mit dem Grand Final, der Turniersieger bekam
+keinen Platz 1. Jetzt entscheidet bei Double Elimination das
+nicht abgesagte `grand_final` mit der höchsten Runde (der Reset, solange er
+nicht abgesagt ist) über Platz 1 und 2; ist es noch offen, gibt es keinen Titel,
+der Verlierer des Losers-Finales wird 3., der des Losers-Halbfinales 4. Single
+Elimination ist unverändert. Der Recompute rechnet alle abgeschlossenen Turniere
+neu, frühere Double-Elimination-Turniere ändern sich beim nächsten Abschluss.
 
 ### KI-T02 [erhalten]: Toter Platzierungs-Schlüssel + Halbfinal-Pauschale
-`points.py`: `PLACEMENT_POINTS[4]` wird nie getroffen; alle Halbfinal-Verlierer
-bekommen Platz 3. 1:1 erhalten.
+Bei Single Elimination bekommen alle Halbfinal-Verlierer Platz 3, der Schlüssel
+`PLACEMENT_POINTS[4]` wird dort nie getroffen. Double Elimination nutzt ihn seit
+KI-T01 für den Verlierer des Losers-Halbfinales, der Eintrag (4, 3) darf nicht
+entfernt werden. Single Elimination 1:1 erhalten.
 
 ### KI-T03 [erhalten]: `matches_played` zählt global statt teambezogen
 Ein Spieler bekommt alle abgeschlossenen Bracket-Matches gezählt, nicht nur die
@@ -259,13 +265,15 @@ liegt. 1:1 erhalten.
 `accept`-Routen (Einladung/Bewerbung) prüfen `ensure_registration_open`, die
 `reject`-Pendants und `get_team_applications` nicht; reject ändert nur noch
 offene Einträge. create/join/solo/accept und das Austragen erlauben
-`registration` und `checkin`; kick/leave/invite (`ensure_team_roster_open`)
-nur `registration`.
+`registration` und `checkin`, ebenso Einladungen über `invite-by-signup`
+(`ensure_registration_open`); kick/leave (`ensure_team_roster_open`) nur
+`registration`.
 
-### KI-W04 [erhalten]: Direkt-Add umgeht Zustimmung & invite_mode
-`routes.py` `invite_to_team`: fügt den Spieler sofort ohne Zustimmung und ohne
-`team_invitations`-Eintrag ein, umgeht `invite_mode`/-window. Abweichend von
-„invite-by-signup". 1:1 erhalten.
+### KI-W04 [gefixt]: Direkt-Add ohne Zustimmung entfernt
+`POST /api/tournaments/{tournament_id}/teams/{team_id}/invite/{target_discord_id}`
+fügte den Spieler ohne Zustimmung, ohne `team_invitations`-Eintrag und ohne
+`invite_mode`/-window ein. Kein Frontend und kein Bot rief die Route auf, sie ist
+entfernt. Einladungen laufen nur noch über `invite-by-signup`.
 
 ### KI-W05 [gefixt]: Solo-Signup-Auto-Team
 `solo_signup` (team_size==1) läuft unter der Turnier-Zeilensperre
