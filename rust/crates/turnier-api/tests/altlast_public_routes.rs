@@ -199,7 +199,7 @@ async fn direct_team_invite_does_not_add_player_without_acceptance() {
     let team_id = seed_team(&ctx.pool, tournament_id, "Captain Team", CAPTAIN_ID).await;
     seed_solo_signup(&ctx.pool, tournament_id, PLAYER_ID, "Player").await;
 
-    send_json(
+    let (status, _) = send_json(
         &ctx.app,
         Some(&captain_token),
         Method::POST,
@@ -207,6 +207,13 @@ async fn direct_team_invite_does_not_add_player_without_acceptance() {
         None,
     )
     .await;
+    assert!(
+        matches!(
+            status,
+            StatusCode::NOT_FOUND | StatusCode::METHOD_NOT_ALLOWED
+        ),
+        "removed direct invite route answered {status}"
+    );
 
     let member_count: i64 = sqlx::query_scalar(
         r#"SELECT COUNT(*) FROM turnier."team_members" WHERE team_id = $1 AND discord_id = $2"#,

@@ -42,6 +42,7 @@ const GAME_MODE_LABEL: Record<TournamentGameMode, string> = {
 import { ApiError } from '@/api/client'
 import { bracketFormatLabel, effectiveBracketFormat } from '@/lib/bracketFormat'
 import { bracketPlacements } from '@/lib/bracketPlacements'
+import { bracketStageLabel } from '@/lib/bracketStage'
 import ReactMarkdown from 'react-markdown'
 import { playerName } from '@/lib/playerName'
 import { teamLabel, teamNameById } from '@/lib/teamName'
@@ -93,14 +94,6 @@ function isCompletedMatch(status: string): boolean {
   return status === 'completed' || status === 'forfeit'
 }
 
-function getBracketRoundLabel(round: number, maxRound: number): string {
-  if (maxRound <= 1) return 'Finale'
-  if (round === maxRound) return 'Finale'
-  if (round === maxRound - 1) return 'Halbfinale'
-  if (round === maxRound - 2) return 'Viertelfinale'
-  return `Runde ${round}`
-}
-
 function buildGroupResultEntries(
   groups: { name: string; matches: GroupMatch[] }[],
   teams: TeamPublic[],
@@ -125,7 +118,6 @@ function buildGroupResultEntries(
 }
 
 function buildBracketResultEntries(matches: BracketMatch[], teams: TeamPublic[]): ResultEntry[] {
-  const maxRound = matches.reduce((highest, match) => Math.max(highest, match.round), 0)
   return matches
     .filter((match) => (
       isCompletedMatch(match.status)
@@ -138,7 +130,7 @@ function buildBracketResultEntries(matches: BracketMatch[], teams: TeamPublic[])
       const loserId = match.winner_id === match.team1_id ? match.team2_id : match.team1_id
       return {
         id: `bracket-${match.id}`,
-        title: `Bracket • ${getBracketRoundLabel(match.round, maxRound)}`,
+        title: `Bracket • ${bracketStageLabel(match, matches)}`,
         winnerName,
         loserName: getTeamName(loserId, teams),
         playedAt: match.played_at,

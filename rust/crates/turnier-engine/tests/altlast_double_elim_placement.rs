@@ -13,7 +13,7 @@ const SINGLE: &str = "single_elimination";
 enum GrandFinal {
     WinnersSideWins,
     LosersSideForcesReset,
-    LosersSideWinsWithoutReset,
+    LosersSideWinsResetLeftOpen,
 }
 
 struct Playable {
@@ -135,7 +135,7 @@ async fn play_out(pool: &Pool, tournament_id: i64, team_count: i64, gf: GrandFin
         if m.bracket_type == "winners" && m.round == winners_final_round - 1 {
             outcome.semifinal_losers.push(loser);
         }
-        if is_grand_final && gf == GrandFinal::LosersSideWinsWithoutReset {
+        if is_grand_final && gf == GrandFinal::LosersSideWinsResetLeftOpen {
             break;
         }
     }
@@ -217,13 +217,6 @@ async fn assert_single_elim_places(team_count: i64) {
 }
 
 #[tokio::test]
-async fn double_elim_grand_final_winner_is_placed_first() {
-    let (teams, outcome, db) = run(8, DOUBLE, GrandFinal::WinnersSideWins).await;
-    let pool = db.pool();
-    assert_eq!(placement(pool, &teams, outcome.champion).await, Some(1));
-}
-
-#[tokio::test]
 async fn double_elim_places_follow_bracket_for_4_8_16_teams() {
     for team_count in [4, 8, 16] {
         assert_double_elim_places(team_count, GrandFinal::WinnersSideWins).await;
@@ -238,9 +231,15 @@ async fn double_elim_reset_winner_is_placed_first() {
 }
 
 #[tokio::test]
-async fn double_elim_unplayed_reset_keeps_first_grand_final_result() {
+async fn double_elim_open_reset_awards_no_title() {
     for team_count in [4, 8, 16] {
-        assert_double_elim_places(team_count, GrandFinal::LosersSideWinsWithoutReset).await;
+        let (teams, outcome, db) =
+            run(team_count, DOUBLE, GrandFinal::LosersSideWinsResetLeftOpen).await;
+        let pool = db.pool();
+        assert_eq!(placement(pool, &teams, outcome.champion).await, None);
+        assert_eq!(placement(pool, &teams, outcome.runner_up).await, None);
+        let third = outcome.losers_final_loser.expect("losers final played");
+        assert_eq!(placement(pool, &teams, third).await, Some(3));
     }
 }
 

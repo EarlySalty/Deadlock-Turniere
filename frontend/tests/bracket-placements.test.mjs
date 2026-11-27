@@ -60,3 +60,19 @@ test('Single Elimination bleibt bei Finale und Halbfinale', () => {
     [4, 3, '3./4. Platz'],
   ])
 })
+
+test('Double Elimination: offener Reset vergibt noch keinen Titel', () => {
+  const matches = [
+    match('winners', 1, 1, 2, 1),
+    match('winners', 1, 3, 4, 3),
+    match('losers', 1, 2, 4, 2),
+    match('winners', 2, 1, 3, 1),
+    match('losers', 2, 2, 3, 3),
+    match('grand_final', 3, 1, 3, 3),
+    match('grand_final', 4, 1, 3, null, 'pending'),
+  ]
+  assert.deepEqual(places(matches), [
+    [2, 3, '3. Platz'],
+    [4, 4, '4. Platz'],
+  ])
+})

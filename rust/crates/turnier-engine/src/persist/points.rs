@@ -19,6 +19,7 @@ use turnier_core::{now_utc, BracketFormat, BracketType, TournamentMode};
 
 use crate::error::TournamentResult;
 use crate::league::{league_table, LeagueGame};
+use crate::persist::PLAYED_BRACKET_FORMAT_SQL;
 use crate::points::{
     contribution_for_team, team_placements, team_wins, CompletedMatch, PointsContribution,
 };
@@ -78,8 +79,10 @@ async fn bracket_results(
         })
         .collect();
     let format = played_bracket_format(tx, tournament_id).await?;
+    let decisive_round = decisive_grand_final_round(tx, tournament_id).await?;
+    let placement_matches = without_non_decisive_grand_finals(&matches, decisive_round);
     Ok(TournamentResults {
-        placements: team_placements(&matches, format),
+        placements: team_placements(&placement_matches, format),
         wins: team_wins(&matches),
         matches_played: MatchesPlayed::TournamentWide(matches.len() as i64),
     })
@@ -89,18 +92,37 @@ async fn played_bracket_format(
     tx: &mut Transaction<'_, Postgres>,
     tournament_id: i64,
 ) -> TournamentResult<BracketFormat> {
-    let double: bool = sqlx::query_scalar(
-        "SELECT COALESCE(bool_or(bracket_type IN ('losers', 'grand_final')), false) \
-         FROM turnier.bracket_matches WHERE tournament_id = $1",
-    )
+    let played: Option<BracketFormat> = sqlx::query_scalar(&format!(
+        "SELECT {PLAYED_BRACKET_FORMAT_SQL} FROM turnier.tournaments WHERE id = $1"
+    ))
     .bind(tournament_id)
     .fetch_one(&mut **tx)
     .await?;
-    Ok(if double {
-        BracketFormat::DoubleElimination
-    } else {
-        BracketFormat::SingleElimination
-    })
+    Ok(played.unwrap_or(BracketFormat::SingleElimination))
+}
+
+async fn decisive_grand_final_round(
+    tx: &mut Transaction<'_, Postgres>,
+    tournament_id: i64,
+) -> TournamentResult<Option<i64>> {
+    Ok(sqlx::query_scalar(
+        "SELECT MAX(round) FROM turnier.bracket_matches \
+         WHERE tournament_id = $1 AND bracket_type = 'grand_final' AND status <> 'cancelled'",
+    )
+    .bind(tournament_id)
+    .fetch_one(&mut **tx)
+    .await?)
+}
+
+fn without_non_decisive_grand_finals(
+    matches: &[CompletedMatch],
+    decisive_round: Option<i64>,
+) -> Vec<CompletedMatch> {
+    matches
+        .iter()
+        .filter(|m| m.bracket_type != BracketType::GrandFinal || Some(m.round) == decisive_round)
+        .cloned()
+        .collect()
 }
 
 async fn league_results(

@@ -1,4 +1,5 @@
 import type { BracketMatch } from '../types/tournament'
+import { isDoubleElimination } from './bracketStage.ts'
 
 export interface BracketPlacement {
   position: number
@@ -63,9 +64,9 @@ function rangeLabel(start: number, size: number): string {
 function doubleEliminationPlacements(matches: PlacementMatch[]): BracketPlacement[] {
   const entries: BracketPlacement[] = []
   const grandFinal = matches
-    .filter((m) => m.bracket_type === 'grand_final' && isDecided(m))
+    .filter((m) => m.bracket_type === 'grand_final' && m.status !== 'cancelled')
     .sort((a, b) => b.round - a.round)[0]
-  if (grandFinal) {
+  if (grandFinal && isDecided(grandFinal)) {
     entries.push({ position: 1, teamId: grandFinal.winner_id!, label: '1. Platz' })
     const runnerUp = loserOf(grandFinal)
     if (runnerUp !== null) {
@@ -92,6 +93,5 @@ function doubleEliminationPlacements(matches: PlacementMatch[]): BracketPlacemen
 }
 
 export function bracketPlacements(matches: PlacementMatch[]): BracketPlacement[] {
-  const doubleElimination = matches.some((m) => m.bracket_type === 'losers' || m.bracket_type === 'grand_final')
-  return doubleElimination ? doubleEliminationPlacements(matches) : singleEliminationPlacements(matches)
+  return isDoubleElimination(matches) ? doubleEliminationPlacements(matches) : singleEliminationPlacements(matches)
 }

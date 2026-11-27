@@ -76,15 +76,13 @@ fn double_elimination_placements(matches: &[CompletedMatch]) -> HashMap<i64, i64
             .iter()
             .filter(move |m| m.bracket_type == kind && m.winner_id.is_some())
     };
-    let Some(final_match) = decided(BracketType::GrandFinal).max_by_key(|m| m.round) else {
-        return placements;
-    };
-    let Some(winner_id) = final_match.winner_id else {
-        return placements;
-    };
-    placements.insert(winner_id, 1);
-    if let Some(loser_id) = loser_of(final_match) {
-        placements.insert(loser_id, 2);
+    if let Some(final_match) = decided(BracketType::GrandFinal).max_by_key(|m| m.round) {
+        if let Some(winner_id) = final_match.winner_id {
+            placements.insert(winner_id, 1);
+        }
+        if let Some(loser_id) = loser_of(final_match) {
+            placements.insert(loser_id, 2);
+        }
     }
     let Some(losers_final_round) = decided(BracketType::Losers).map(|m| m.round).max() else {
         return placements;
