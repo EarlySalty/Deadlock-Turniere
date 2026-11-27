@@ -349,6 +349,7 @@ pub struct TournamentDetailPublic {
     pub final_series_format: Option<i64>,
     pub registration_start: Option<String>,
     pub registration_end: Option<String>,
+    pub checkin_start: Option<String>,
     pub group_phase_start: Option<String>,
     pub bracket_start: Option<String>,
     pub bracket_format: BracketFormat,

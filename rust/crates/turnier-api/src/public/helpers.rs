@@ -877,6 +877,7 @@ pub fn build_detail_public(
         final_series_format: t.final_series_format,
         registration_start: t.registration_start,
         registration_end: t.registration_end,
+        checkin_start: t.checkin_start,
         group_phase_start: t.group_phase_start,
         bracket_start: t.bracket_start,
         bracket_format: t.bracket_format,
