@@ -264,6 +264,7 @@ export default function Tournament() {
   }
 
   const isRegistration = tournament.status === 'registration'
+  const soloSignups = tournament.signups.filter((signup) => signup.team_id === null)
   const tournamentStart = plannedTournamentStart(tournament)
   const isSignupOpen = tournament.registration_open
   const isCheckinPhase = tournament.status === 'checkin'
@@ -765,9 +766,8 @@ export default function Tournament() {
 
         {activeTab === 'teams' && (
           <div className="space-y-8">
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-              {/* Sidebar: Your Team / Create Team */}
-              <div className="space-y-6">
+            <div className={`grid min-w-0 gap-6 ${userTeam || (isSignupOpen && !soloOnly && isLoggedIn && !userHasSoloSignup) ? 'xl:grid-cols-[minmax(14rem,260px)_minmax(0,1fr)]' : ''}`}>
+              {(userTeam || (isSignupOpen && !soloOnly && isLoggedIn && !userHasSoloSignup)) && <div className="space-y-6">
                  {isSignupOpen && !soloOnly && isLoggedIn && !userTeam && !userHasSoloSignup && (
                     <Card className="p-6 space-y-6 border-primary/10">
                       <h3 className="text-sm font-bold uppercase tracking-widest text-foreground">Team gründen</h3>
@@ -838,49 +838,9 @@ export default function Tournament() {
                       )}
                     </Card>
                  )}
-              </div>
+              </div>}
 
-              {/* Team List */}
-              <div className="lg:col-span-2 space-y-6">
-                {/* Registered players overview */}
-                {tournament.signups.length > 0 && (
-                  <div className="space-y-3">
-                    <div className="flex items-center justify-between">
-                      <h3 className="text-sm font-bold uppercase tracking-widest text-muted">Eingetragene Spieler</h3>
-                      <span className="text-xs font-bold text-foreground bg-white/5 px-2 py-1 rounded-lg border border-white/5">
-                        {tournament.signups.length}
-                      </span>
-                    </div>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                      {tournament.signups.map((signup) => {
-                        const teamName = signup.team_id != null
-                          ? tournament.teams.find((t) => t.id === signup.team_id)?.name
-                          : null
-                        return (
-                          <div
-                            key={signup.id}
-                            className="flex items-center gap-3 p-2.5 rounded-lg bg-white/5 border border-white/5"
-                          >
-                            <User size={13} className="text-muted shrink-0" />
-                            <span className="text-sm text-foreground font-medium truncate flex-1">
-                              {playerName(signup.discord_name)}
-                            </span>
-                            {teamName ? (
-                              <span className="text-[10px] font-bold text-primary uppercase tracking-wide shrink-0">
-                                {teamName}
-                              </span>
-                            ) : (
-                              <span className="text-[10px] font-bold text-muted uppercase tracking-wide shrink-0">
-                                Solo
-                              </span>
-                            )}
-                          </div>
-                        )
-                      })}
-                    </div>
-                  </div>
-                )}
-
+              <div className="min-w-0 space-y-6">
                 <div className="flex items-center justify-between">
                   <h3 className="text-sm font-bold uppercase tracking-widest text-muted">Gemeldete Teams</h3>
                   <span className="text-xs font-bold text-foreground bg-white/5 px-2 py-1 rounded-lg border border-white/5">
@@ -888,7 +848,7 @@ export default function Tournament() {
                   </span>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
                   {tournament.teams.map((team) => {
                     const recruiting = recruitingLabel(team.recruitment_status)
                     const isMyTeam = userTeam?.id === team.id
@@ -909,18 +869,29 @@ export default function Tournament() {
                             )}
                           </div>
 
-                          <div className="flex flex-wrap gap-2">
-                             {team.members.slice(0, 3).map((m, i) => (
-                               <div key={i} title={playerName(m.discord_name)} className="w-6 h-6 rounded-lg bg-white/5 border border-white/10 flex items-center justify-center overflow-hidden">
-                                  <User size={12} className="text-muted" />
-                               </div>
-                             ))}
-                             {team.members.length > 3 && (
-                               <div className="w-6 h-6 rounded-lg bg-white/5 border border-white/10 flex items-center justify-center text-[10px] font-bold text-muted">
-                                 +{team.members.length - 3}
-                               </div>
-                             )}
-                          </div>
+                          <ul className="space-y-1.5 border-t border-border/60 pt-3" aria-label={`Mitglieder von ${team.name}`}>
+                            {team.members.length === 0 && (
+                              <li className="text-xs text-muted">Noch keine Spieler im Team.</li>
+                            )}
+                            {team.members.map((m, i) => (
+                              <li key={m.id ?? `${team.id}-${i}`} className="flex min-w-0 items-center justify-between gap-3 rounded-md bg-white/5 px-3 py-2">
+                                <span className="flex min-w-0 items-center gap-2">
+                                  <User size={14} className="shrink-0 text-muted" />
+                                  <span className="min-w-0 break-words text-sm font-medium text-foreground">
+                                    {playerName(m.discord_name)}
+                                  </span>
+                                </span>
+                                {m.role === 'captain' && (
+                                  <span className="shrink-0 text-[10px] font-bold uppercase text-primary">Captain</span>
+                                )}
+                              </li>
+                            ))}
+                            {team.members.length < tournament.team_size && (
+                              <li className="px-3 pt-1 text-xs text-muted">
+                                {tournament.team_size - team.members.length} Plätze frei
+                              </li>
+                            )}
+                          </ul>
 
                           {!isMyTeam && isSignupOpen && !soloOnly && (
                             <div className="pt-2">
@@ -940,8 +911,46 @@ export default function Tournament() {
                     )
                   })}
                 </div>
+                {tournament.teams.length === 0 && (
+                  <Card className="p-6 text-sm text-muted">
+                    Noch keine Teams eingetragen. Die Turnierleitung stellt die Teams zusammen.
+                  </Card>
+                )}
               </div>
             </div>
+
+            <section aria-label="Solo-Spieler ohne Team" className="space-y-3 border-t border-border pt-6">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <h3 className="text-base font-bold text-foreground">Noch nicht zugeteilte Solo-Spieler</h3>
+                  <p className="mt-1 text-sm text-muted">
+                    Diese Spieler haben sich angemeldet, sind aber noch keinem Team zugeordnet.
+                  </p>
+                </div>
+                <span className="rounded-lg border border-border bg-card px-3 py-1 text-sm font-semibold text-foreground">
+                  {soloSignups.length}
+                </span>
+              </div>
+              {soloSignups.length === 0 ? (
+                <p className="rounded-xl border border-border bg-card/40 px-4 py-5 text-sm text-muted">
+                  Momentan keine offenen Solo-Anmeldungen.
+                </p>
+              ) : (
+                <ul className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                  {soloSignups.map((signup) => (
+                    <li
+                      key={signup.id}
+                      className="flex min-w-0 items-center gap-2 rounded-lg border border-border bg-card/60 px-3 py-3"
+                    >
+                      <User size={15} className="shrink-0 text-muted" />
+                      <span className="min-w-0 break-words text-sm font-medium text-foreground">
+                        {playerName(signup.discord_name)}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
           </div>
         )}
 

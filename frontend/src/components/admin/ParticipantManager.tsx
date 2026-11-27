@@ -289,8 +289,8 @@ export default function ParticipantManager({
             {pendingSignups.map((signup) => (
               <div key={signup.id} className="rounded-xl border border-border bg-background/60 p-4">
                 <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-                  <div className="space-y-1">
-                    <div className="font-medium text-foreground">{playerName(signup.discord_name)}</div>
+                  <div className="min-w-0 space-y-1">
+                    <div className="break-words font-medium text-foreground">{playerName(signup.discord_name)}</div>
                     {showDiscordIds && <div className="text-xs text-muted">{signup.discord_id}</div>}
                     <div className="text-xs text-muted">
                       {signup.rank ? `${signup.rank} · Score ${signup.rank_score}` : `Score ${signup.rank_score}`}
@@ -452,8 +452,8 @@ export default function ParticipantManager({
                     <div key={member.discord_id} className="rounded-lg border border-border bg-background/60 p-3">
                       <div className="flex flex-col gap-3">
                         <div className="flex items-start justify-between gap-3">
-                          <div>
-                            <div className="font-medium text-foreground">{playerName(member.discord_name)}</div>
+                          <div className="min-w-0">
+                            <div className="break-words font-medium text-foreground">{playerName(member.discord_name)}</div>
                             {showDiscordIds && <div className="text-xs text-muted">{member.discord_id}</div>}
                             <div className="text-xs text-muted">
                               {member.role === 'captain' ? 'Captain' : 'Mitglied'}
