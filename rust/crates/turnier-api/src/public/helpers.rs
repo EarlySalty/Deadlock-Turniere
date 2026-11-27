@@ -882,6 +882,7 @@ pub fn build_detail_public(
         bracket_format: t.bracket_format,
         played_bracket_format: t.played_bracket_format,
         tournament_mode: t.tournament_mode,
+        tournament_mode_auto: t.tournament_mode_auto,
         tournament_game_mode: t.tournament_game_mode,
         auto_lobby_enabled: t.auto_lobby_enabled,
         created_by: t.created_by,

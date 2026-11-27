@@ -80,7 +80,7 @@ async fn auto_tournament_with_teams(pool: &Pool, teams: i64) -> i64 {
 }
 
 #[tokio::test]
-async fn automatik_mit_sechzehn_teams_startet_gruppenphase() {
+async fn auto_mode_with_sixteen_teams_starts_group_stage() {
     let db = temp_db().await;
     let pool = db.pool().clone();
     let id = auto_tournament_with_teams(&pool, 16).await;
@@ -98,7 +98,7 @@ async fn automatik_mit_sechzehn_teams_startet_gruppenphase() {
 }
 
 #[tokio::test]
-async fn automatik_unter_sechzehn_teams_bleibt_beim_bracket() {
+async fn auto_mode_below_sixteen_teams_stays_bracket_only() {
     for teams in [5_i64, 6, 8, 15] {
         let db = temp_db().await;
         let pool = db.pool().clone();
@@ -117,7 +117,7 @@ async fn automatik_unter_sechzehn_teams_bleibt_beim_bracket() {
 }
 
 #[tokio::test]
-async fn expliziter_modus_wird_bei_sechzehn_teams_nicht_ueberschrieben() {
+async fn explicit_mode_is_not_overwritten_at_sixteen_teams() {
     let db = temp_db().await;
     let pool = db.pool().clone();
     let id = insert_tournament(&pool, "Explizit", "checkin", false).await;
@@ -135,7 +135,7 @@ async fn expliziter_modus_wird_bei_sechzehn_teams_nicht_ueberschrieben() {
 }
 
 #[tokio::test]
-async fn vorschau_zeigt_aufgeloesten_modus_ohne_zu_schreiben() {
+async fn preview_reports_resolved_mode_without_writing() {
     let db = temp_db().await;
     let pool = db.pool().clone();
     let id = auto_tournament_with_teams(&pool, 16).await;
@@ -151,7 +151,7 @@ async fn vorschau_zeigt_aufgeloesten_modus_ohne_zu_schreiben() {
 }
 
 #[tokio::test]
-async fn automatik_zaehlt_aus_dem_pool_gebildete_teams() {
+async fn auto_mode_counts_teams_formed_from_the_pool() {
     let db = temp_db().await;
     let pool = db.pool().clone();
     let id = insert_tournament(&pool, "Pool", "checkin", false).await;
@@ -179,7 +179,7 @@ async fn automatik_zaehlt_aus_dem_pool_gebildete_teams() {
 }
 
 #[tokio::test]
-async fn automatik_bei_solo_pug_nutzt_die_fertigen_teams() {
+async fn auto_mode_in_solo_pug_uses_the_finished_teams() {
     let db = temp_db().await;
     let pool = db.pool().clone();
     let id = auto_tournament_with_teams(&pool, 16).await;
@@ -198,7 +198,7 @@ async fn automatik_bei_solo_pug_nutzt_die_fertigen_teams() {
 }
 
 #[tokio::test]
-async fn automatik_wechsel_prueft_den_startabstand() {
+async fn auto_mode_switch_checks_the_start_gap() {
     let db = temp_db().await;
     let pool = db.pool().clone();
     let base = Utc::now() + Duration::days(2);

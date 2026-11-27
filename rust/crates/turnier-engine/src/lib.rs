@@ -46,8 +46,9 @@ pub use status::{
 // Persistenz-API.
 #[cfg(feature = "persist")]
 pub use persist::{
-    acquire_tournament_schedule_lock, effective_start, ensure_start_gap, start_gap_message,
-    starts_too_close, MIN_START_GAP_HOURS, TOURNAMENT_SCHEDULE_ADVISORY_LOCK_KEY,
+    acquire_tournament_schedule_lock, candidate_starts, effective_start, ensure_start_gap,
+    mode_undecided, start_gap_message, starts_too_close, MIN_START_GAP_HOURS,
+    TOURNAMENT_SCHEDULE_ADVISORY_LOCK_KEY,
 };
 #[cfg(feature = "persist")]
 pub use persist::{

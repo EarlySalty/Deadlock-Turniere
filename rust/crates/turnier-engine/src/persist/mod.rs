@@ -40,8 +40,9 @@ pub use rows::{
     insert_signup, insert_team, insert_team_member, lock_tournament_row, NewSignup, NewTeamMember,
 };
 pub use start_gap::{
-    acquire_tournament_schedule_lock, effective_start, ensure_start_gap, start_gap_message,
-    starts_too_close, MIN_START_GAP_HOURS, TOURNAMENT_SCHEDULE_ADVISORY_LOCK_KEY,
+    acquire_tournament_schedule_lock, candidate_starts, effective_start, ensure_start_gap,
+    mode_undecided, start_gap_message, starts_too_close, MIN_START_GAP_HOURS,
+    TOURNAMENT_SCHEDULE_ADVISORY_LOCK_KEY,
 };
 
 use serde_json::Value;

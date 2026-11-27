@@ -288,7 +288,7 @@ async fn rundenplan_verschieben_haelt_den_startabstand() {
 }
 
 #[tokio::test]
-async fn automatik_wertet_teamgroesse_nicht_als_teamzahl() {
+async fn auto_mode_does_not_read_team_size_as_team_count() {
     let app = app().await;
     let mut payload = form_payload("Großteam-Cup", evening());
     payload["team_size"] = json!(16);
@@ -329,4 +329,22 @@ async fn automatik_wertet_teamgroesse_nicht_als_teamzahl() {
     assert_eq!(status, StatusCode::OK, "{auto}");
     assert_eq!(auto["tournament_mode"], "bracket_only");
     assert_eq!(auto["tournament_mode_auto"], true);
+}
+
+#[tokio::test]
+async fn undecided_auto_mode_keeps_the_gap_to_its_group_start() {
+    let app = app().await;
+    let (status, neighbour) = app
+        .create("Nachbar", evening() + Duration::hours(1), false)
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{neighbour}");
+
+    let mut payload = form_payload("Automatik-Cup", evening() - Duration::hours(1));
+    payload["group_phase_start"] = json!(evening().to_rfc3339());
+    payload["bracket_start"] = json!((evening() + Duration::hours(6)).to_rfc3339());
+    let (status, body) = app
+        .call(Method::POST, "/api/admin/tournaments", payload)
+        .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert!(detail(&body).contains("Nachbar"));
 }

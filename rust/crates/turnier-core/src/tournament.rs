@@ -354,6 +354,7 @@ pub struct TournamentDetailPublic {
     pub bracket_format: BracketFormat,
     pub played_bracket_format: Option<BracketFormat>,
     pub tournament_mode: TournamentMode,
+    pub tournament_mode_auto: bool,
     pub tournament_game_mode: TournamentGameMode,
     pub auto_lobby_enabled: bool,
     pub created_by: String,

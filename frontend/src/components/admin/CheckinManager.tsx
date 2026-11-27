@@ -324,7 +324,7 @@ export default function CheckinManager({
               </div>
             )}
 
-            {preview.tournament_mode_auto && preview.tournament_mode !== 'league' && (
+            {preview.tournament_mode_auto && preview.tournament_mode !== 'league' && preview.bracket_startable && (
               <div className="mt-4 rounded-xl border border-border bg-background/60 p-4 text-sm text-foreground">
                 Turniermodus Automatisch: Mit {pluralize(preview.final_team_count, 'Team', 'Teams')} startet das Turnier mit {modeLabel(preview.tournament_mode)}.
                 Ab {preview.auto_group_stage_threshold} Teams gibt es eine Gruppenphase, darunter nur das Bracket.
