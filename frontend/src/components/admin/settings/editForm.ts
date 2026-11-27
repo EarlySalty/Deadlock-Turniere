@@ -1,4 +1,4 @@
-import { localInputToIso, toLocalInput } from '@/lib/league'
+import { localInputToIso, modeUndecided, toLocalInput } from '@/lib/league'
 import type { Tournament, TournamentUpdate } from '@/types/tournament'
 import { lobbyChanged, lobbyFromStored, resolveLobbyPayload, type GameRulesState } from './gameRules'
 import { DATE_HINTS, type TournamentFormat } from './options'
@@ -28,11 +28,8 @@ export function storedGroupStart(tournament: Tournament): string {
   return toLocalInput(tournament.group_phase_start)
 }
 
-const UNDECIDED_STATUSES: Tournament['status'][] = ['draft', 'registration', 'checkin']
-
 export function storedTournamentFormat(tournament: Tournament): TournamentFormat {
-  const undecided = tournament.tournament_mode_auto && UNDECIDED_STATUSES.includes(tournament.status)
-  return undecided && tournament.tournament_mode !== 'league' ? 'auto' : tournament.tournament_mode
+  return modeUndecided(tournament) ? 'auto' : tournament.tournament_mode
 }
 
 export function autoFormatSelectable(tournament: Tournament): boolean {

@@ -10,13 +10,11 @@ import { pluralWord, pluralize } from '@/lib/countLabel'
 import type {
   FinalizeCheckinResult,
   Team,
-  TournamentMode,
   TournamentSignup,
 } from '@/types/tournament'
 import { AlertCircle, CheckCircle2, ClipboardCheck, TriangleAlert, UserCheck, X } from 'lucide-react'
 import { playerName } from '@/lib/playerName'
 import { teamNameOr } from '@/lib/teamName'
-import { MODE_OPTIONS } from '@/components/admin/settings/options'
 
 interface CheckinManagerProps {
   tournamentId: number
@@ -32,10 +30,6 @@ interface ParticipantRow {
   team_id: number | null
   team_name: string
   signup_id: number | null
-}
-
-function modeLabel(mode: TournamentMode): string {
-  return MODE_OPTIONS.find((option) => option.value === mode)?.label ?? mode
 }
 
 export default function CheckinManager({
@@ -326,7 +320,8 @@ export default function CheckinManager({
 
             {preview.tournament_mode_auto && preview.tournament_mode !== 'league' && preview.bracket_startable && (
               <div className="mt-4 rounded-xl border border-border bg-background/60 p-4 text-sm text-foreground">
-                Turniermodus Automatisch: Mit {pluralize(preview.final_team_count, 'Team', 'Teams')} startet das Turnier mit {modeLabel(preview.tournament_mode)}.
+                Turniermodus Automatisch: Mit {pluralize(preview.final_team_count, 'Team', 'Teams')}{' '}
+                {preview.tournament_mode === 'group_stage' ? 'gibt es eine Gruppenphase mit anschließendem Bracket.' : 'geht es direkt ins Bracket.'}{' '}
                 Ab {preview.auto_group_stage_threshold} Teams gibt es eine Gruppenphase, darunter nur das Bracket.
               </div>
             )}

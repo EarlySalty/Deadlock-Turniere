@@ -50,8 +50,24 @@ export function slotMinutesOf(rounds: LeagueRound[]): number {
   return minutes > 0 ? minutes : DEFAULT_SLOT_MINUTES
 }
 
+const UNDECIDED_STATUSES: Tournament['status'][] = ['draft', 'registration', 'checkin']
+
+export function modeUndecided(t: Pick<Tournament, 'tournament_mode' | 'tournament_mode_auto' | 'status'>): boolean {
+  return t.tournament_mode_auto && t.tournament_mode !== 'league' && UNDECIDED_STATUSES.includes(t.status)
+}
+
+function earliest(values: (string | null | undefined)[]): string | null {
+  const dated = values.filter((value): value is string => !!value && !Number.isNaN(Date.parse(value)))
+  if (dated.length === 0) return null
+  return dated.reduce((first, value) => (Date.parse(value) < Date.parse(first) ? value : first))
+}
+
 export function plannedTournamentStart(t: Tournament): string | null {
-  const planned = t.tournament_mode === 'bracket_only' ? t.bracket_start : t.group_phase_start ?? t.bracket_start
+  const planned = modeUndecided(t)
+    ? earliest([t.group_phase_start, t.bracket_start])
+    : t.tournament_mode === 'bracket_only'
+      ? t.bracket_start
+      : t.group_phase_start ?? t.bracket_start
   return planned ?? t.registration_end
 }
 
