@@ -4,13 +4,13 @@ import Card from '@/components/ui/Card'
 import Button from '@/components/ui/Button'
 import { useSubmitMatchResult } from '@/hooks/useTournament'
 import type { BracketMatch, Team } from '@/types/tournament'
-import { AlertCircle, CheckCircle, Gavel } from 'lucide-react'
+import { AlertCircle, Gavel } from 'lucide-react'
 
 interface ManualResultFormProps {
   tournamentId: number
   match: BracketMatch
   teams: Team[]
-  onSuccess: () => void
+  onSuccess: (message: string) => void
   allowOverride?: boolean
 }
 
@@ -29,7 +29,6 @@ export default function ManualResultForm({
   const [winnerId, setWinnerId] = useState<number | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [error, setError] = useState('')
-  const [success, setSuccess] = useState(false)
 
   if (isTerminalMatch(match) && !allowOverride) {
     return null
@@ -37,25 +36,34 @@ export default function ManualResultForm({
 
   const team1 = match.team1_id !== null ? teams.find(t => t.id === match.team1_id) : null
   const team2 = match.team2_id !== null ? teams.find(t => t.id === match.team2_id) : null
+  const isOverride = allowOverride && isTerminalMatch(match)
+  const currentWinner = teams.find((team) => team.id === match.winner_id) ?? null
+  const unchangedWinner = isOverride && winnerId !== null && winnerId === match.winner_id
+
+  const confirmOverride = (nextWinnerId: number): boolean => {
+    if (!isOverride || !currentWinner) return true
+    const nextWinner = teams.find((team) => team.id === nextWinnerId)
+    return window.confirm(
+      `Ergebnis überschreiben? Bisher gewinnt ${currentWinner.name}, neu gewinnt ${nextWinner?.name ?? 'das andere Team'}. Spätere Matches, in die dieses Ergebnis schon eingegangen ist, werden zurückgesetzt und müssen neu gespielt oder eingetragen werden.`,
+    )
+  }
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault()
-    if (!winnerId) return
+    if (!winnerId || unchangedWinner || !confirmOverride(winnerId)) return
 
     setIsSubmitting(true)
     setError('')
-    setSuccess(false)
 
     try {
       await submitResultMutation.mutateAsync({
         tournamentId,
         matchId: match.id,
         data: { winner_id: winnerId },
-        force: allowOverride && isTerminalMatch(match),
+        force: isOverride,
       })
-      setSuccess(true)
       setWinnerId(null)
-      onSuccess()
+      onSuccess(isOverride ? 'Ergebnis korrigiert.' : 'Ergebnis gespeichert.')
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Fehler beim Speichern')
     } finally {
@@ -68,17 +76,18 @@ export default function ManualResultForm({
       <div className="flex items-center gap-2 mb-3">
         <Gavel size={16} className="text-primary" />
         <h4 className="text-sm font-semibold text-foreground">
-          {allowOverride && isTerminalMatch(match) ? 'Ergebnis korrigieren' : 'Manuelles Ergebnis'}
+          {isOverride ? 'Ergebnis korrigieren' : 'Manuelles Ergebnis'}
         </h4>
       </div>
-      {!allowOverride && (
-        <p className="mb-3 text-xs text-muted">
-          Dieses Ergebnis kann auch ohne Bot-Lobby oder automatischen Match-Start direkt gesetzt werden.
-        </p>
-      )}
+      <p className="mb-3 text-xs text-muted">
+        {isOverride
+          ? `Aktuell eingetragen: ${currentWinner ? `${currentWinner.name} gewinnt` : 'kein Sieger'}.`
+          : 'Dieses Ergebnis kann auch ohne Bot-Lobby oder automatischen Match-Start direkt gesetzt werden.'}
+      </p>
 
       <form onSubmit={handleSubmit} className="space-y-3">
-        <div className="flex flex-col gap-2">
+        <fieldset className="flex flex-col gap-2">
+          <legend className="mb-1 text-xs font-medium uppercase tracking-wider text-muted">Sieger</legend>
           {team1 && (
             <label className="flex items-center gap-2 cursor-pointer">
               <input
@@ -105,7 +114,11 @@ export default function ManualResultForm({
               <span className="text-foreground text-sm">{team2.name}</span>
             </label>
           )}
-        </div>
+        </fieldset>
+
+        {unchangedWinner && (
+          <p className="text-xs text-muted">Dieses Team ist bereits als Sieger eingetragen.</p>
+        )}
 
         {error && (
           <div className="flex items-center gap-2 text-red-400 text-xs bg-red-500/10 border border-red-500/20 rounded-lg p-2">
@@ -114,18 +127,11 @@ export default function ManualResultForm({
           </div>
         )}
 
-        {success && (
-          <div className="flex items-center gap-2 text-green-400 text-xs bg-green-500/10 border border-green-500/20 rounded-lg p-2">
-            <CheckCircle size={14} />
-            <span>Ergebnis gespeichert</span>
-          </div>
-        )}
-
         <Button
           type="submit"
           variant="primary"
           size="sm"
-          disabled={!winnerId || isSubmitting}
+          disabled={!winnerId || unchangedWinner || isSubmitting}
         >
           {isSubmitting ? 'Wird gespeichert...' : 'Ergebnis speichern'}
         </Button>

@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { isPugTournament, teamOverview, workflowAction, workflowStage } from '../src/lib/adminWorkflow.ts'
+import { bracketHasResults, isPugTournament, teamOverview, workflowAction, workflowStage } from '../src/lib/adminWorkflow.ts'
 
 const member = (id) => ({ discord_id: id })
 const team = (id, ids) => ({ id, members: ids.map(member) })
@@ -51,4 +51,16 @@ test('Team-Statistik zählt nur noch nicht zugeteilte Solo-Spieler', () => {
 
 test('Status-Fortschritt bleibt vor und nach den Spielen konsistent', () => {
   assert.deepEqual(['draft', 'registration', 'checkin', 'group_phase', 'bracket', 'completed', 'archived'].map(workflowStage), [0, 1, 2, 3, 3, 4, 4])
+})
+
+test('Nach dem letzten Bracket-Ergebnis zeigt der Ablauf den Turnierabschluss', () => {
+  const played = { status: 'completed', winner_id: 1 }
+  const open = { status: 'pending', winner_id: null }
+  const BRACKET = { hasGroups: false, hasBracket: true }
+  assert.equal(workflowAction(tournament('bracket', { bracket_matches: [played, open] }), BRACKET).phase, 'bracket')
+  const finished = workflowAction(tournament('bracket', { bracket_matches: [played, { status: 'cancelled', winner_id: null }] }), BRACKET)
+  assert.equal(finished.phase, 'setup')
+  assert.equal(finished.title, 'Turnier abschließen')
+  assert.equal(bracketHasResults(tournament('bracket', { bracket_matches: [open] })), false)
+  assert.equal(bracketHasResults(tournament('bracket', { bracket_matches: [open, played] })), true)
 })

@@ -204,10 +204,11 @@ export const leaveLobby = (tournamentId: number, matchId: number) =>
     method: 'POST',
   })
 
-export const resetMatch = (tournamentId: number, matchId: number) =>
-  request<{ success: boolean }>(`/admin/tournaments/${tournamentId}/matches/${matchId}/reset`, {
-    method: 'POST',
-  })
+export const resetMatch = (tournamentId: number, matchId: number, options?: { force?: boolean }) =>
+  request<{ success: boolean }>(
+    `/admin/tournaments/${tournamentId}/matches/${matchId}/reset${options?.force ? '?force=true' : ''}`,
+    { method: 'POST' },
+  )
 
 export const setManualMatchLobby = (
   tournamentId: number,

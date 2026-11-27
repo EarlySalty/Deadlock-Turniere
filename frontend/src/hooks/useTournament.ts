@@ -447,8 +447,8 @@ export function useLeaveLobby() {
 export function useResetMatch() {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: ({ tournamentId, matchId }: { tournamentId: number; matchId: number }) =>
-      resetMatch(tournamentId, matchId),
+    mutationFn: ({ tournamentId, matchId, force }: { tournamentId: number; matchId: number; force?: boolean }) =>
+      resetMatch(tournamentId, matchId, { force }),
     onSuccess: (_data, vars) => {
       invalidateTournamentCaches(qc, vars.tournamentId)
     },

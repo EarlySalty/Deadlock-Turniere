@@ -32,6 +32,7 @@ interface MatchAdminPanelProps {
   teams: Team[]
   onRefresh?: () => void
   allowManualOverride?: boolean
+  allowResultReset?: boolean
 }
 
 type ActionKey = 'create' | 'start' | 'result' | 'leave'
@@ -91,6 +92,7 @@ export default function MatchAdminPanel({
   teams,
   onRefresh,
   allowManualOverride = false,
+  allowResultReset = false,
 }: MatchAdminPanelProps) {
   const createLobbyMutation = useCreateLobby()
   const startMatchMutation = useStartMatch()
@@ -139,6 +141,11 @@ export default function MatchAdminPanel({
 
   const handleRefresh = () => {
     onRefresh?.()
+  }
+
+  const handleResultSaved = (matchId: number, text: string) => {
+    setMessage(matchId, 'success', text)
+    handleRefresh()
   }
 
   const handleCreateLobby = async (matchId: number) => {
@@ -217,13 +224,18 @@ export default function MatchAdminPanel({
     }
   }
 
-  const handleResetMatch = async (matchId: number) => {
-    if (isLocked || !window.confirm('Match wirklich zurücksetzen? Lobby-Daten und Match-Channel werden gelöscht.')) return
+  const handleResetMatch = async (match: BracketMatch) => {
+    const matchId = match.id
+    const withResult = match.status === 'completed'
+    const question = withResult
+      ? `Ergebnis von ${teamName(match.team1_id, teams)} vs ${teamName(match.team2_id, teams)} wirklich zurücksetzen? Der Sieger wird gelöscht und spätere Matches, in die dieses Ergebnis schon eingegangen ist, werden ebenfalls zurückgesetzt.`
+      : 'Match wirklich zurücksetzen? Lobby-Daten und Match-Channel werden gelöscht.'
+    if (isLocked || !window.confirm(question)) return
     setActiveAction({ matchId, action: 'leave' })
     clearMessage(matchId)
     try {
-      await resetMatchMutation.mutateAsync({ tournamentId, matchId })
-      setMessage(matchId, 'success', 'Match wurde auf pending zurückgesetzt.')
+      await resetMatchMutation.mutateAsync({ tournamentId, matchId, force: withResult })
+      setMessage(matchId, 'success', withResult ? 'Ergebnis wurde zurückgesetzt. Das Match ist wieder offen.' : 'Match wurde zurückgesetzt.')
       handleRefresh()
     } catch (err) {
       setMessage(matchId, 'error', err instanceof Error ? err.message : 'Match konnte nicht zurückgesetzt werden')
@@ -274,7 +286,7 @@ export default function MatchAdminPanel({
         const canFetchResult = match.status === 'in_progress' && (Boolean(match.deadlock_match_id) || Boolean(match.steam_party_id))
         const canLeaveLobby =
           ['lobby_created', 'in_progress'].includes(match.status) && Boolean(match.steam_party_id)
-        const canReset = !['completed', 'forfeit', 'cancelled'].includes(match.status)
+        const canReset = !isTerminalMatch(match) || (allowResultReset && match.status === 'completed')
         const message = messages[match.id]
 
         return (
@@ -395,10 +407,10 @@ export default function MatchAdminPanel({
                   variant="ghost"
                   size="sm"
                   disabled={isBusy}
-                  onClick={() => void handleResetMatch(match.id)}
+                  onClick={() => void handleResetMatch(match)}
                 >
                   <RefreshCcw size={14} />
-                  Match zurücksetzen
+                  {match.status === 'completed' ? 'Ergebnis zurücksetzen' : 'Match zurücksetzen'}
                 </Button>
               )}
             </div>
@@ -519,7 +531,7 @@ export default function MatchAdminPanel({
                 tournamentId={tournamentId}
                 match={match}
                 teams={teams}
-                onSuccess={handleRefresh}
+                onSuccess={(text) => handleResultSaved(match.id, text)}
               />
             )}
 
@@ -528,7 +540,7 @@ export default function MatchAdminPanel({
                 tournamentId={tournamentId}
                 match={match}
                 teams={teams}
-                onSuccess={handleRefresh}
+                onSuccess={(text) => handleResultSaved(match.id, text)}
                 allowOverride
               />
             )}
