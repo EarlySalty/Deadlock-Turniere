@@ -1,4 +1,4 @@
-import { plannedTournamentStart } from './league.ts'
+import { isLeague, plannedTournamentStart } from './league.ts'
 import type { Tournament } from '@/types/tournament'
 
 const OPEN_STATUSES = new Set(['registration', 'checkin', 'group_phase', 'bracket'])
@@ -19,7 +19,7 @@ function byStart(a: Tournament, b: Tournament): number {
 }
 
 export function isOverdueOpenTournament(t: Tournament, now = Date.now()): boolean {
-  if (!OPEN_STATUSES.has(t.status)) return false
+  if (!OPEN_STATUSES.has(t.status) || isLeague(t.tournament_mode)) return false
   const start = startTime(t)
   const lastActivity = time(t.updated_at)
   return (

@@ -3,6 +3,7 @@ import Button from '@/components/ui/Button'
 import { isPugTournament, teamOverview, workflowAction, type PhaseAvailability } from '@/lib/adminWorkflow'
 import type { AdminPhase } from '@/components/admin/adminPhase'
 import type { TournamentDetail } from '@/types/tournament'
+import { pluralWord } from '@/lib/countLabel'
 
 interface Props extends PhaseAvailability {
   tournament: TournamentDetail
@@ -10,7 +11,7 @@ interface Props extends PhaseAvailability {
 }
 
 const STEPS = [
-  { label: 'Anmeldung', icon: Flag },
+  { label: 'Anmeldung eröffnen', icon: Flag },
   { label: 'Teams bilden', icon: Users },
   { label: 'Check-in', icon: ClipboardCheck },
   { label: 'Spiele', icon: GitBranch },
@@ -63,10 +64,10 @@ export default function AdminWorkflowPanel({ tournament, hasGroups, hasBracket, 
         </Button>
       </div>
       <div className="flex flex-wrap gap-x-5 gap-y-2 border-t border-border pt-3 text-sm text-muted">
-        <span><strong className="text-foreground">{counts.teams}</strong> Teams</span>
+        <span><strong className="text-foreground">{counts.teams}</strong> {pluralWord(counts.teams, 'Team', 'Teams')}</span>
         <span><strong className="text-foreground">{counts.playersInTeams}</strong> Spieler in Teams</span>
         <span><strong className="text-foreground">{counts.solos}</strong> Solo-Spieler offen</span>
-        <span><strong className="text-foreground">{counts.incompleteTeams}</strong> unvollständige Teams</span>
+        <span><strong className="text-foreground">{counts.incompleteTeams}</strong> {pluralWord(counts.incompleteTeams, 'unvollständiges Team', 'unvollständige Teams')}</span>
       </div>
     </section>
   )

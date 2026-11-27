@@ -45,3 +45,15 @@ test('Abgeschlossene Turniere landen unter den früheren Turnieren', () => {
   assert.equal(open.length, 0)
   assert.deepEqual(past.map((t) => t.id), [1, 2])
 })
+
+test('Laufende Liga bleibt aktuell, auch wenn ihr Datensatz lange nicht bearbeitet wurde', () => {
+  const league = tournament(3, {
+    status: 'group_phase',
+    tournament_mode: 'league',
+    group_phase_start: '2026-11-01T18:00:00Z',
+    updated_at: '2026-11-01T18:00:00Z',
+  })
+  const { open, past } = groupHomeTournaments([league], NOW)
+  assert.deepEqual(open.map((t) => t.id), [3])
+  assert.equal(past.length, 0)
+})

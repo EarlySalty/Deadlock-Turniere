@@ -300,7 +300,7 @@ function TeamCard(props: TeamCardProps) {
       <TeamHeader {...props} />
       <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted">
         <span>{team.members.length}/{teamSize} Spieler</span>
-        <span>{free === 0 ? 'Vollständig' : `${free} Plätze frei`}</span>
+        <span>{free === 0 ? 'Vollständig' : `${pluralize(free, 'Platz', 'Plätze')} frei`}</span>
       </div>
       <ul className="space-y-1.5">
         {team.members.map((player) => (
@@ -326,7 +326,7 @@ function TeamCard(props: TeamCardProps) {
                   : 'border-border text-muted'
               }`}
             >
-              {selectedOutside ? 'Ausgewählten Spieler hier einsetzen' : `${free} freie Plätze`}
+              {selectedOutside ? 'Ausgewählten Spieler hier einsetzen' : pluralize(free, 'freier Platz', 'freie Plätze')}
             </button>
           </li>
         )}
@@ -652,7 +652,7 @@ export default function TeamBuilderPanel({ tournamentId, teamSize, teams, signup
         <section aria-label="Teams" className="space-y-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <h3 className="text-base font-semibold text-foreground">Teams und Mitglieder</h3>
-            <span className="text-xs text-muted">{view.teams.length} Teams · {view.teams.reduce((sum, team) => sum + team.members.length, 0)} Spieler zugeteilt</span>
+            <span className="text-xs text-muted">{pluralize(view.teams.length, 'Team', 'Teams')} · {view.teams.reduce((sum, team) => sum + team.members.length, 0)} Spieler zugeteilt</span>
           </div>
           {view.teams.length === 0 ? (
             <p className="rounded-xl border border-dashed border-border p-4 text-sm text-muted">

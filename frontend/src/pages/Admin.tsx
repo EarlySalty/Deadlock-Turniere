@@ -350,7 +350,7 @@ export default function Admin() {
                     {activePhase === 'participants' && canManageParticipants && liveDetail.team_size > 1 && (
                       <details className="min-w-0 rounded-xl border border-border bg-card/40">
                         <summary className="cursor-pointer px-4 py-3 text-sm font-medium text-foreground hover:text-primary">
-                          Weitere Teamaktionen (Löschen, Recruiting, Ersatzspieler)
+                          Weitere Teamaktionen (Solo-Balance, Anmeldungen, Löschen, Recruiting, Ersatzspieler)
                         </summary>
                         <div className="min-w-0 border-t border-border p-3 sm:p-4">
                           <ParticipantManager

@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { registrationSummary } from '@/lib/countLabel'
+import { pluralize, registrationSummary } from '@/lib/countLabel'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { loginGuest } from '@/api/client'
 import type { FormEvent } from 'react'
@@ -888,7 +888,7 @@ export default function Tournament() {
                             ))}
                             {team.members.length < tournament.team_size && (
                               <li className="px-3 pt-1 text-xs text-muted">
-                                {tournament.team_size - team.members.length} Plätze frei
+                                {pluralize(tournament.team_size - team.members.length, 'Platz', 'Plätze')} frei
                               </li>
                             )}
                           </ul>
@@ -919,7 +919,7 @@ export default function Tournament() {
               </div>
             </div>
 
-            <section aria-label="Solo-Spieler ohne Team" className="space-y-3 border-t border-border pt-6">
+            {(isRegistration || isCheckinPhase) && <section aria-label="Solo-Spieler ohne Team" className="space-y-3 border-t border-border pt-6">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
                   <h3 className="text-base font-bold text-foreground">Noch nicht zugeteilte Solo-Spieler</h3>
@@ -950,7 +950,7 @@ export default function Tournament() {
                   ))}
                 </ul>
               )}
-            </section>
+            </section>}
           </div>
         )}
 

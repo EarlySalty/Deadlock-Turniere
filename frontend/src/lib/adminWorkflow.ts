@@ -1,5 +1,6 @@
 import type { Tournament, TournamentDetail } from '@/types/tournament'
 import type { AdminPhase } from '@/components/admin/adminPhase'
+import { isLeague } from './league.ts'
 
 export type WorkflowStage = 0 | 1 | 2 | 3 | 4
 
@@ -64,8 +65,10 @@ export function workflowAction(t: TournamentDetail, { hasGroups, hasBracket }: P
       return {
         stage: 3,
         title: 'Spiele und Ergebnisse verwalten',
-        description: 'Öffne den Spielplan, verwalte die Matches und trage Ergebnisse ein. Der Übergang zum Bracket erfolgt im Setup.',
-        button: 'Zum Spielplan',
+        description: isLeague(t.tournament_mode)
+          ? 'Öffne den Spielplan, verwalte die Matches und trage Ergebnisse ein. Abgeschlossen wird die Liga im Setup.'
+          : 'Öffne den Spielplan, verwalte die Matches und trage Ergebnisse ein. Der Übergang zum Bracket erfolgt im Setup.',
+        button: hasGroups ? 'Zum Spielplan' : 'Setup prüfen',
         phase: hasGroups ? 'group_phase' : 'setup',
       }
     case 'bracket':
