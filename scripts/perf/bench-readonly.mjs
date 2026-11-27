@@ -1,8 +1,4 @@
 #!/usr/bin/env node
-// Bounded, read-only production benchmark for the DDC tournament API.
-// Only fixed first-party GET endpoints; no arbitrary URLs, writes or stress spikes.
-// Usage: node scripts/perf/bench-readonly.mjs [local|public|staging|both] [core|site]
-// Measure total response duration on warmed keep-alive connections; cold TLS is separate.
 import http from 'node:http'
 import https from 'node:https'
 import { performance } from 'node:perf_hooks'

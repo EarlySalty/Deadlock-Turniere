@@ -206,7 +206,10 @@ fn apply_profile(fields: &mut RankFields, profile: Option<&RankProfile>) {
 
 /// SELECT-Liste + JOINs für team_members inkl. Namens-Kandidaten aus
 /// sessions/user_profiles. Konsolidiert die 4-fach kopierte Query.
-const MEMBER_SELECT: &str = "SELECT tm.id, tm.team_id, tm.discord_id, \
+macro_rules! member_select {
+    ($filter:literal) => {
+        concat!(
+            "SELECT tm.id, tm.team_id, tm.discord_id, \
     tm.discord_name AS team_member_discord_name, \
     s.discord_name AS session_discord_name, p.display_name AS profile_display_name, \
     tm.steam_id, tm.rank, tm.rank_score, tm.role, tm.joined_at \
@@ -214,21 +217,16 @@ const MEMBER_SELECT: &str = "SELECT tm.id, tm.team_id, tm.discord_id, \
     LEFT JOIN (SELECT discord_id, MAX(discord_name) AS discord_name FROM turnier.\"sessions\" \
         WHERE discord_name IS NOT NULL AND discord_name != '' GROUP BY discord_id) s \
         ON s.discord_id = tm.discord_id \
-    LEFT JOIN turnier.\"user_profiles\" p ON p.discord_id = tm.discord_id \
-    WHERE tm.team_id = $1 ORDER BY tm.joined_at";
+    LEFT JOIN turnier.\"user_profiles\" p ON p.discord_id = tm.discord_id ",
+            $filter
+        )
+    };
+}
 
-// Batch variant for the public tournament roster. Unlike MEMBER_SELECT,
-// this fetches all requested teams in ONE database roundtrip (not N rounds).
-const MEMBER_SELECT_BATCH: &str = "SELECT tm.id, tm.team_id, tm.discord_id, \
-    tm.discord_name AS team_member_discord_name, \
-    s.discord_name AS session_discord_name, p.display_name AS profile_display_name, \
-    tm.steam_id, tm.rank, tm.rank_score, tm.role, tm.joined_at \
-    FROM turnier.\"team_members\" tm \
-    LEFT JOIN (SELECT discord_id, MAX(discord_name) AS discord_name FROM turnier.\"sessions\" \
-        WHERE discord_name IS NOT NULL AND discord_name != '' GROUP BY discord_id) s \
-        ON s.discord_id = tm.discord_id \
-    LEFT JOIN turnier.\"user_profiles\" p ON p.discord_id = tm.discord_id \
-    WHERE tm.team_id = ANY($1) ORDER BY tm.team_id, tm.joined_at";
+const MEMBER_SELECT: &str = member_select!("WHERE tm.team_id = $1 ORDER BY tm.joined_at");
+
+const MEMBER_SELECT_BATCH: &str =
+    member_select!("WHERE tm.team_id = ANY($1) ORDER BY tm.team_id, tm.joined_at");
 
 /// Eine angereicherte Member-Zeile (Namens-Kandidaten + Rangfelder).
 struct MemberRow {
@@ -246,6 +244,22 @@ struct MemberRow {
 }
 
 impl MemberRow {
+    fn from_row(row: &sqlx::postgres::PgRow) -> WebResult<Self> {
+        Ok(Self {
+            id: row.try_get("id")?,
+            team_id: row.try_get("team_id")?,
+            discord_id: row.try_get("discord_id")?,
+            team_member_discord_name: row.try_get("team_member_discord_name")?,
+            session_discord_name: row.try_get("session_discord_name")?,
+            profile_display_name: row.try_get("profile_display_name")?,
+            steam_id: row.try_get("steam_id")?,
+            rank: row.try_get("rank")?,
+            rank_score: row.try_get::<Option<i64>, _>("rank_score")?.unwrap_or(0),
+            role: row.try_get("role")?,
+            joined_at: row.try_get("joined_at")?,
+        })
+    }
+
     fn preferred_name(&self) -> Option<String> {
         preferred_discord_name(
             &[
@@ -266,25 +280,11 @@ async fn load_member_rows(pool: &Pool, team_id: i64) -> WebResult<Vec<MemberRow>
         .await?;
     let mut out = Vec::with_capacity(rows.len());
     for row in rows {
-        out.push(MemberRow {
-            id: row.try_get("id")?,
-            team_id: row.try_get("team_id")?,
-            discord_id: row.try_get("discord_id")?,
-            team_member_discord_name: row.try_get("team_member_discord_name")?,
-            session_discord_name: row.try_get("session_discord_name")?,
-            profile_display_name: row.try_get("profile_display_name")?,
-            steam_id: row.try_get("steam_id")?,
-            rank: row.try_get("rank")?,
-            rank_score: row.try_get::<Option<i64>, _>("rank_score")?.unwrap_or(0),
-            role: row.try_get("role")?,
-            joined_at: row.try_get("joined_at")?,
-        });
+        out.push(MemberRow::from_row(&row)?);
     }
     Ok(out)
 }
 
-/// Group all tournament members with a single SQL query. The public response
-/// never needs live Steam/Discord rank lookups; stored ranks are sufficient.
 async fn load_member_rows_batch(
     pool: &Pool,
     team_ids: &[i64],
@@ -298,19 +298,7 @@ async fn load_member_rows_batch(
         .await?;
     let mut by_team: HashMap<i64, Vec<MemberRow>> = HashMap::new();
     for row in rows {
-        let member = MemberRow {
-            id: row.try_get("id")?,
-            team_id: row.try_get("team_id")?,
-            discord_id: row.try_get("discord_id")?,
-            team_member_discord_name: row.try_get("team_member_discord_name")?,
-            session_discord_name: row.try_get("session_discord_name")?,
-            profile_display_name: row.try_get("profile_display_name")?,
-            steam_id: row.try_get("steam_id")?,
-            rank: row.try_get("rank")?,
-            rank_score: row.try_get::<Option<i64>, _>("rank_score")?.unwrap_or(0),
-            role: row.try_get("role")?,
-            joined_at: row.try_get("joined_at")?,
-        };
+        let member = MemberRow::from_row(&row)?;
         by_team.entry(member.team_id).or_default().push(member);
     }
     Ok(by_team)
@@ -412,8 +400,6 @@ pub async fn load_teams_public(pool: &Pool, tournament_id: i64) -> WebResult<Vec
         return Ok(Vec::new());
     }
 
-    // Two bounded database reads instead of 2*N queries for N teams.
-    // Membership and pending applications are independent.
     let (mut members_by_team, pending_team_ids) =
         tokio::try_join!(load_member_rows_batch(pool, &team_ids), async {
             let pending = sqlx::query_scalar::<_, i64>(

@@ -1,4 +1,3 @@
-/* Webfonts are loaded once from index.html with preconnect, not twice via CSS. */
 @import "tailwindcss";
 @import "./brand-tokens.css";
 @import "./draft.css";
@@ -120,8 +119,6 @@ h1, h2, h3, h4, .font-display {
   color: var(--color-bg);
 }
 
-/* Lokale Turnier-/Draft-Atmosphäre nach Deadlocks okkultem New-York-Look.
-   Nur gezielte Panels: Das globale DDC-Markensystem bleibt unverändert. */
 .ddc-occult-panel {
   border: 1px solid rgba(199, 169, 108, .3);
   border-radius: .65rem;

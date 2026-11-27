@@ -91,12 +91,8 @@ fn build_cors(state: &AppState) -> CorsLayer {
         .allow_credentials(true)
 }
 
-/// Reports handler-side response time separately from DNS/TLS/proxy latency.
-/// This does not change request semantics or include secret query parameters.
 async fn server_timing(State(state): State<AppState>, request: Request, next: Next) -> Response {
     let method = request.method().clone();
-    // MatchedPath gives the route template, not a private Discord name, draft
-    // room code or other user-controlled value from the actual URL.
     let route = request
         .extensions()
         .get::<MatchedPath>()

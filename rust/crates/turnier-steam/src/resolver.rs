@@ -162,8 +162,6 @@ impl RankResolver for SteamRankResolver {
         &self,
         discord_ids: &[String],
     ) -> SteamResult<HashMap<String, RankProfile>> {
-        // A "batch" must not make N sequential Steam/Discord roundtrips.
-        // Cap concurrency to avoid overwhelming the DB pool or Discord API.
         let mut seen = HashSet::new();
         let unique_ids: Vec<String> = discord_ids
             .iter()

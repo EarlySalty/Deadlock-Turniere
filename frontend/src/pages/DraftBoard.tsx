@@ -518,8 +518,6 @@ export default function DraftBoard() {
   useEffect(() => {
     const s = lobby.data
     if (!s) return
-    // Ein Rematch wechselt den Raum-Code, aber React kann die Seite weiterverwenden.
-    // Die Ereignisposition muss daher pro Raum statt global für die Komponente gelten.
     if (!bekanntRef.current || bekanntRef.current.raum !== s.code) {
       bekanntRef.current = { raum: s.code, anzahl: s.actions.length }
       return

@@ -1,7 +1,3 @@
-/* Deadlock-inspired editorial draft shell.
-   Pulp poster + occult New York, not dashboard cards.
-   Purposefully uses vector/CSS surfaces and existing hero art to avoid
-   shipping giant background images or additional font requests. */
 .draft-pulp {
   --pulp-paper: #e6dcc3;
   --pulp-ink: #20272a;
@@ -409,7 +405,6 @@
   .draft-pulp__sequence p{font-size:11px;}
   .draft-pulp__sequence p span{margin:0 3px;}
 }
-/* LIVE DRAFT: complete the same visual language in the actual match room. */
 .draft-arena-screen,.draft-waiting-screen{
   isolation:isolate;
   width:100vw;
@@ -540,8 +535,6 @@
   .draft-team-column>div:first-child{font-size:18px;}
   .draft-team-slot{height:58px;}
 }
-/* Cleanup pass: content-first sizing, no viewport-wide overflow or
-   clipped header, and no third-party character collages on the start page. */
 .draft-pulp {
   width:100%;
   margin-left:0;
@@ -600,8 +593,6 @@
 }
 .draft-pulp__skyline--back {height:46%;opacity:.58;transform:translateY(4%);background:#4c5c57;}
 .draft-pulp__skyline--front {height:34%;opacity:.9;background:#0c171e;}
-/* Preserve the existing page header; all drafts are now full width within the
-   route-specific main container, never using negative margin hacks. */
 .draft-arena-screen,.draft-waiting-screen {width:100%;margin-left:0;}
 @media(max-width:840px){
   .draft-pulp__layout{grid-template-columns:1fr;}

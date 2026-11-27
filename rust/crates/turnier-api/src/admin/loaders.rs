@@ -140,9 +140,6 @@ pub async fn load_team_members(state: &AppState, team_id: i64) -> WebResult<Vec<
         .bind(team_id)
         .fetch_all(&state.pool)
         .await?;
-    // Bounded parallel rank lookups. Previously each member awaited a Steam/
-    // Discord resolver roundtrip before the next member could be loaded.
-    // buffered() preserves the original SQL ordering.
     stream::iter(rows.into_iter().map(|row| member_from_row(state, row)))
         .buffered(3)
         .try_collect()
@@ -197,8 +194,6 @@ pub async fn load_teams_for_tournament(
     .bind(tournament_id)
     .fetch_all(&state.pool)
     .await?;
-    // A few teams can be loaded together; the old loop serialized all
-    // member queries and their Steam/Discord rank lookups across teams.
     stream::iter(rows.into_iter().map(|row| async move {
         let members = load_team_members(state, row.id).await?;
         Ok::<_, crate::error::WebError>(Team {
@@ -513,8 +508,6 @@ pub async fn load_signups_for_tournament(
     .fetch_all(&state.pool)
     .await?;
 
-    // Keep the original signup ordering, without serially awaiting every
-    // resolver fallback before the next signup can begin.
     stream::iter(rows.into_iter().map(|row| async move {
         let discord_name = preferred_discord_name(
             &[

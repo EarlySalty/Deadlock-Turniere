@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
+import { URL } from 'node:url'
 import test from 'node:test'
 
 const read = (relative) => readFileSync(new URL(relative, import.meta.url), 'utf8')
@@ -19,18 +20,19 @@ test('Turnier- und Admin-Abfragen wiederholen sich nicht alle drei Sekunden', ()
 
 test('Admin-Datenfehler bleiben sichtbar und ausführbare Wiederholungen stehen bereit', () => {
   const admin = read('../src/pages/Admin.tsx')
-  assert.ok(admin.includes('Turnierübersicht nicht erreichbar'))
-  assert.ok(admin.includes('Turnierdetails nicht geladen'))
+  assert.ok(admin.includes('Turnier-Verwaltung nicht erreichbar'))
+  assert.ok(admin.includes('Turnier konnte nicht geladen werden'))
+  assert.ok(admin.includes('liveDetailError && !liveDetail'))
   assert.ok(admin.includes('refetchTournaments()'))
-  assert.ok(admin.includes('refetchLiveDetail()'))
+  assert.ok(admin.includes('Turnierdetails werden geladen'))
 })
 
 test('Seitenlayouts nutzen die Breite und überschneiden den gemeinsamen Header nicht', () => {
   const layout = read('../src/components/layout/Layout.tsx')
   const draft = read('../src/pages/DraftLobbyNeu.tsx')
   const css = read('../src/draft-pulp.css')
-  assert.match(layout, /max-w-\[1680px\]/)
-  assert.match(layout, /max-w-\[1560px\]/)
+  assert.match(layout, /max-w-\[1600px\]/)
+  assert.match(layout, /max-w-none px-0 py-0/)
   assert.ok(layout.includes("isDraft"))
   assert.ok(!draft.includes('-my-8'))
   assert.ok(css.includes('width:100%'))
@@ -90,7 +92,7 @@ test('Profilbasis wird in einem Join statt sechs nacheinander ausgeführten Quer
   assert.ok(route.includes('LEFT JOIN turnier."user_profiles"'))
   assert.ok(route.includes('LEFT JOIN turnier."rank_cache"'))
   assert.ok(route.includes('LEFT JOIN turnier."player_points"'))
-  assert.ok(route.includes('.bind(head.discord_id)'))
+  assert.ok(route.includes('discord_account_id_by_name(pool, &discord_name)'))
   assert.ok(!route.includes('SELECT rank FROM turnier."rank_cache" WHERE discord_id = $1'))
 })
 

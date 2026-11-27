@@ -1059,8 +1059,6 @@ async fn leaderboard_profile_reads_points_rank_and_history() {
             .expect("history team");
     assert_eq!(linked_team, team_id);
 
-    // Optional profile/rank/points rows must remain backward-compatible after
-    // consolidating the public profile SQL into one joined lookup.
     let _empty_token = session(&ctx.pool, PLAYER_ID, "UnrankedName", &[]).await;
     let (status, empty) = send_json(
         &ctx.app,

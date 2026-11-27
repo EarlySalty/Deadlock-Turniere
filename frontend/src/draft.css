@@ -7,8 +7,6 @@
   --draft-bg: #0c100f;
 }
 
-/* Zurueckhaltende Stadt-/Okkult-Atmosphaere: keine grossen Blur-Orbs oder
-   dauerhaften Animationen auf der eigentlichen Spielflaeche. */
 .draft-noir-backdrop {
   background:
     radial-gradient(ellipse 75% 55% at 50% 8%, rgba(110, 142, 128, .10), transparent 74%),
