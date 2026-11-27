@@ -470,12 +470,16 @@ async fn leave_lobby(
     .await
 }
 
-/// `POST .../matches/{match_id}/reset`: Bracket-Match auf pending zurücksetzen (Admin).
 async fn reset_match(
     State(state): State<AppState>,
     AdminUser(user): AdminUser,
     Path((tournament_id, match_id)): Path<(i64, i64)>,
+    Query(query): Query<ForceQuery>,
 ) -> WebResult<Json<Value>> {
+    if query.force {
+        return reset_completed_bracket_match(&state, tournament_id, match_id, &user.discord_id)
+            .await;
+    }
     steam_ops::reset_match(
         &state,
         MatchKind::Bracket,
@@ -484,6 +488,27 @@ async fn reset_match(
         &user.discord_id,
     )
     .await
+}
+
+async fn reset_completed_bracket_match(
+    state: &AppState,
+    tournament_id: i64,
+    match_id: i64,
+    actor: &str,
+) -> WebResult<Json<Value>> {
+    state
+        .match_manager
+        .reset_bracket_match_result(tournament_id, match_id)
+        .await
+        .map_err(map_bracket_result_error)?;
+    audit(
+        &state.pool,
+        "match_result_reset",
+        actor,
+        json!({ "tournament_id": tournament_id, "match_id": match_id }),
+    )
+    .await?;
+    Ok(Json(json!({ "success": true })))
 }
 
 /// `POST .../matches/{match_id}/manual-lobby`: party_code/steam_party_id setzen.

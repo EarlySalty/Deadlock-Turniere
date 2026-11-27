@@ -233,6 +233,130 @@ async fn force_reset_setzt_downstream_zurueck() {
     assert_eq!(finale_row.get::<Option<i64>, _>("team1_id"), Some(team2));
 }
 
+async fn exec(pool: &turnier_db::Pool, sql: &str, binds: &[i64]) {
+    let mut query = sqlx::query(sql);
+    for value in binds {
+        query = query.bind(*value);
+    }
+    query.execute(pool).await.expect("fixture update");
+}
+
+async fn match_state(
+    pool: &turnier_db::Pool,
+    id: i64,
+) -> (Option<i64>, Option<i64>, Option<i64>, String) {
+    sqlx::query_as(
+        "SELECT team1_id, team2_id, winner_id, status FROM turnier.bracket_matches WHERE id = $1",
+    )
+    .bind(id)
+    .fetch_one(pool)
+    .await
+    .expect("match state")
+}
+
+const SET_WINNER: &str = "UPDATE turnier.bracket_matches SET winner_id = $1 WHERE id = $2";
+
+#[tokio::test]
+async fn reset_of_completed_semifinal_clears_played_final() {
+    let db = temp_db().await;
+    let pool = db.pool().clone();
+    let tid = insert_tournament(&pool, "T", false, false).await;
+    let team1 = insert_team(&pool, tid, "Alpha").await;
+    let team2 = insert_team(&pool, tid, "Beta").await;
+    let team3 = insert_team(&pool, tid, "Gamma").await;
+    let semi = insert_bracket_match(&pool, tid, 1, 0, Some(team1), Some(team2), "completed").await;
+    let finale =
+        insert_bracket_match(&pool, tid, 2, 0, Some(team1), Some(team3), "completed").await;
+    exec(&pool, SET_WINNER, &[team1, semi]).await;
+    exec(&pool, SET_WINNER, &[team1, finale]).await;
+    exec(
+        &pool,
+        "UPDATE turnier.bracket_matches SET source_match1_id = $1 WHERE id = $2",
+        &[semi, finale],
+    )
+    .await;
+    let mgr = manager_without_services(pool.clone());
+
+    mgr.reset_bracket_match_result(tid, semi)
+        .await
+        .expect("reset completed semi");
+
+    assert_eq!(
+        match_state(&pool, semi).await,
+        (Some(team1), Some(team2), None, "pending".to_string())
+    );
+    assert_eq!(
+        match_state(&pool, finale).await,
+        (None, Some(team3), None, "pending".to_string())
+    );
+    assert!(mgr.reset_bracket_match_result(tid, semi).await.is_err());
+}
+
+#[tokio::test]
+async fn force_correction_moves_loser_in_losers_bracket() {
+    let db = temp_db().await;
+    let pool = db.pool().clone();
+    let tid = insert_tournament(&pool, "T", false, false).await;
+    let team1 = insert_team(&pool, tid, "Alpha").await;
+    let team2 = insert_team(&pool, tid, "Beta").await;
+    let team3 = insert_team(&pool, tid, "Gamma").await;
+    let winners =
+        insert_bracket_match(&pool, tid, 1, 0, Some(team1), Some(team2), "completed").await;
+    let losers =
+        insert_bracket_match(&pool, tid, 1, 0, Some(team3), Some(team2), "completed").await;
+    let losers_next = insert_bracket_match(&pool, tid, 2, 0, Some(team3), None, "pending").await;
+    let winners_next = insert_bracket_match(&pool, tid, 2, 0, Some(team1), None, "pending").await;
+    exec(
+        &pool,
+        "UPDATE turnier.bracket_matches SET source_match1_id = $1 WHERE id = $2",
+        &[winners, winners_next],
+    )
+    .await;
+    exec(&pool, SET_WINNER, &[team1, winners]).await;
+    exec(&pool, SET_WINNER, &[team3, losers]).await;
+    exec(
+        &pool,
+        "UPDATE turnier.bracket_matches SET bracket_type = 'losers' WHERE id IN ($1, $2)",
+        &[losers, losers_next],
+    )
+    .await;
+    exec(
+        &pool,
+        "UPDATE turnier.bracket_matches SET loser_to_match_id = $1, loser_to_slot = 2 WHERE id = $2",
+        &[losers, winners],
+    )
+    .await;
+    exec(
+        &pool,
+        "UPDATE turnier.bracket_matches SET source_match1_id = $1 WHERE id = $2",
+        &[losers, losers_next],
+    )
+    .await;
+    let mgr = manager_without_services(pool.clone());
+
+    let params = ApplyBracketParams {
+        winner_id: Some(team2),
+        force: true,
+        ..ApplyBracketParams::automatic()
+    };
+    mgr.apply_bracket_match_result(tid, winners, params)
+        .await
+        .expect("force correction");
+
+    assert_eq!(
+        match_state(&pool, losers).await,
+        (Some(team3), Some(team1), None, "pending".to_string())
+    );
+    assert_eq!(
+        match_state(&pool, losers_next).await,
+        (None, None, None, "pending".to_string())
+    );
+    assert_eq!(
+        match_state(&pool, winners_next).await,
+        (Some(team2), None, None, "pending".to_string())
+    );
+}
+
 #[tokio::test]
 async fn caster_laden_nutzt_match_fallback_wenn_turnier_liste_leer_ist() {
     let db = temp_db().await;

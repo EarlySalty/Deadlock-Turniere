@@ -137,8 +137,6 @@ impl ApplyGroupParams {
 #[derive(Debug, Clone, sqlx::FromRow)]
 struct BracketResultRow {
     id: i64,
-    round: i64,
-    position: i64,
     team1_id: Option<i64>,
     team2_id: Option<i64>,
     winner_id: Option<i64>,
@@ -159,7 +157,7 @@ impl MatchManager {
         params: ApplyBracketParams,
     ) -> MatchResult<ApplyResultOutcome> {
         let match_row: Option<BracketResultRow> = sqlx::query_as::<_, BracketResultRow>(
-            "SELECT id, round, position, team1_id, team2_id, winner_id, status, \
+            "SELECT id, team1_id, team2_id, winner_id, status, \
                     mini_group_id, match_duration_s, match_stats, discord_channel_id \
              FROM turnier.bracket_matches WHERE id = $1 AND tournament_id = $2",
         )
@@ -202,18 +200,12 @@ impl MatchManager {
         let winner_id_value = canonical.winner_id;
         let winning_team_value = bracket_winning_team(canonical.winner_slot);
 
-        // Force-Reset bei Gewinnerwechsel.
         if params.force
             && match_row.winner_id.is_some()
             && match_row.winner_id != Some(winner_id_value)
         {
-            self.reset_bracket_downstream(
-                tournament_id,
-                match_row.id,
-                match_row.round,
-                match_row.position,
-            )
-            .await?;
+            self.reset_bracket_downstream(tournament_id, match_row.id)
+                .await?;
         }
 
         let duration_value = params.duration_s.or(match_row.match_duration_s);
@@ -454,65 +446,118 @@ impl MatchManager {
         })
     }
 
-    /// Setzt den Downstream eines Bracket-Matches rekursiv zurück.
-    /// Portiert `_reset_bracket_downstream`. Bug-preserved (behavior-change): KEIN
-    /// Zyklus-/Tiefenschutz: bei fehlerhaften Source-Verweisen droht (wie im
-    /// Original) Endlosrekursion. Bewusst 1:1 erhalten.
+    pub async fn reset_bracket_match_result(
+        &self,
+        tournament_id: i64,
+        match_id: i64,
+    ) -> MatchResult<()> {
+        let status: Option<String> = sqlx::query_scalar(
+            "SELECT status FROM turnier.bracket_matches WHERE id = $1 AND tournament_id = $2",
+        )
+        .bind(match_id)
+        .bind(tournament_id)
+        .fetch_optional(&self.pool)
+        .await?;
+        let status = status.ok_or_else(|| {
+            MatchError::not_found(format!("Bracket-Match {match_id} nicht gefunden"))
+        })?;
+        if status != "completed" {
+            return Err(MatchError::state(
+                "Nur abgeschlossene Bracket-Matches können mit Ergebnis zurückgesetzt werden",
+            ));
+        }
+        self.reset_bracket_downstream(tournament_id, match_id)
+            .await?;
+        let mut tx = self.pool.begin().await.map_err(turnier_db::DbError::from)?;
+        sqlx::query(
+            "UPDATE turnier.bracket_matches \
+             SET winner_id = NULL, status = 'pending', steam_party_id = NULL, party_code = NULL, \
+                 deadlock_match_id = NULL, discord_channel_id = NULL, match_duration_s = NULL, \
+                 match_stats = NULL, played_at = NULL \
+             WHERE id = $1 AND tournament_id = $2",
+        )
+        .bind(match_id)
+        .bind(tournament_id)
+        .execute(&mut *tx)
+        .await?;
+        sqlx::query("DELETE FROM turnier.match_results WHERE bracket_match_id = $1")
+            .bind(match_id)
+            .execute(&mut *tx)
+            .await?;
+        tx.commit().await.map_err(turnier_db::DbError::from)?;
+        Ok(())
+    }
+
     fn reset_bracket_downstream<'a>(
         &'a self,
         tournament_id: i64,
         match_id: i64,
-        round: i64,
-        position: i64,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = MatchResult<()>> + Send + 'a>> {
         Box::pin(async move {
-            let next =
-                load_next_bracket_match(&self.pool, tournament_id, match_id, round, position)
-                    .await?;
-            let Some(next) = next else {
-                return Ok(());
-            };
-
-            // Erst den Downstream des Folge-Matches (Post-Order wie das Original).
-            self.reset_bracket_downstream(tournament_id, next.id, next.round, next.position)
-                .await?;
-
-            let slot_is_team1 = resolve_next_slot_is_team1(
-                match_id,
-                position,
-                next.source_match1_id,
-                next.source_match2_id,
-            );
-            // Zwei feste Query-Zweige statt dynamischem Spaltennamen.
-            if slot_is_team1 {
-                sqlx::query(
-                    "UPDATE turnier.bracket_matches \
-                     SET team1_id = NULL, winner_id = NULL, status = 'pending', \
-                         steam_party_id = NULL, party_code = NULL, deadlock_match_id = NULL, \
-                         match_duration_s = NULL, match_stats = NULL, played_at = NULL \
-                     WHERE id = $1",
-                )
-                .bind(next.id)
-                .execute(&self.pool)
-                .await?;
-            } else {
-                sqlx::query(
-                    "UPDATE turnier.bracket_matches \
-                     SET team2_id = NULL, winner_id = NULL, status = 'pending', \
-                         steam_party_id = NULL, party_code = NULL, deadlock_match_id = NULL, \
-                         match_duration_s = NULL, match_stats = NULL, played_at = NULL \
-                     WHERE id = $1",
-                )
-                .bind(next.id)
-                .execute(&self.pool)
-                .await?;
+            let links = load_downstream_links(&self.pool, match_id).await?;
+            if links.bracket_type == "grand_final" {
+                return self
+                    .reset_grand_final_follow_up(tournament_id, match_id, links.round)
+                    .await;
             }
-            sqlx::query("DELETE FROM turnier.match_results WHERE bracket_match_id = $1")
-                .bind(next.id)
-                .execute(&self.pool)
-                .await?;
+            if let Some(next) =
+                load_next_bracket_match(&self.pool, tournament_id, match_id, &links).await?
+            {
+                self.reset_bracket_downstream(tournament_id, next.id)
+                    .await?;
+                let slot_is_team1 = resolve_next_slot_is_team1(
+                    match_id,
+                    links.position,
+                    next.source_match1_id,
+                    next.source_match2_id,
+                );
+                clear_bracket_slot(&self.pool, next.id, slot_is_team1).await?;
+            }
+            if let (Some(loser_match_id), Some(loser_slot)) =
+                (links.loser_to_match_id, links.loser_to_slot)
+            {
+                self.reset_bracket_downstream(tournament_id, loser_match_id)
+                    .await?;
+                clear_bracket_slot(&self.pool, loser_match_id, loser_slot == 1).await?;
+            }
             Ok(())
         })
+    }
+
+    async fn reset_grand_final_follow_up(
+        &self,
+        tournament_id: i64,
+        match_id: i64,
+        round: i64,
+    ) -> MatchResult<()> {
+        let follow_up: Option<i64> = sqlx::query_scalar(
+            "SELECT id FROM turnier.bracket_matches \
+             WHERE tournament_id = $1 AND bracket_type = 'grand_final' AND id != $2 AND round > $3 \
+             ORDER BY round ASC LIMIT 1",
+        )
+        .bind(tournament_id)
+        .bind(match_id)
+        .bind(round)
+        .fetch_optional(&self.pool)
+        .await?;
+        let Some(follow_up) = follow_up else {
+            return Ok(());
+        };
+        sqlx::query(
+            "UPDATE turnier.bracket_matches \
+             SET team1_id = NULL, team2_id = NULL, winner_id = NULL, status = 'pending', \
+                 steam_party_id = NULL, party_code = NULL, deadlock_match_id = NULL, \
+                 match_duration_s = NULL, match_stats = NULL, played_at = NULL \
+             WHERE id = $1",
+        )
+        .bind(follow_up)
+        .execute(&self.pool)
+        .await?;
+        sqlx::query("DELETE FROM turnier.match_results WHERE bracket_match_id = $1")
+            .bind(follow_up)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
     }
 
     /// Lädt die Stats-Zeile (Team-/Sieger-Namen) und postet die Match-Stats.
@@ -638,8 +683,6 @@ async fn ensure_group_result_still_wanted(
 #[derive(Debug, Clone, sqlx::FromRow)]
 struct NextBracketMatch {
     id: i64,
-    round: i64,
-    position: i64,
     source_match1_id: Option<i64>,
     source_match2_id: Option<i64>,
 }
@@ -943,17 +986,63 @@ async fn complete_mini_group_round_robin_pg(
     Ok(Some(winner_team_id))
 }
 
-/// Lädt das Folge-Match: zuerst über source_match-Verweise, sonst über
-/// round+1/position//2. Portiert `_load_next_bracket_match`.
+#[derive(Debug, Clone, sqlx::FromRow)]
+struct DownstreamLinks {
+    round: i64,
+    position: i64,
+    bracket_type: String,
+    loser_to_match_id: Option<i64>,
+    loser_to_slot: Option<i64>,
+}
+
+async fn load_downstream_links(
+    pool: &turnier_db::Pool,
+    match_id: i64,
+) -> MatchResult<DownstreamLinks> {
+    let links: Option<DownstreamLinks> = sqlx::query_as::<_, DownstreamLinks>(
+        "SELECT round, position, bracket_type, loser_to_match_id, loser_to_slot \
+         FROM turnier.bracket_matches WHERE id = $1",
+    )
+    .bind(match_id)
+    .fetch_optional(pool)
+    .await?;
+    links.ok_or_else(|| MatchError::not_found(format!("Bracket-Match {match_id} nicht gefunden")))
+}
+
+async fn clear_bracket_slot(
+    pool: &turnier_db::Pool,
+    match_id: i64,
+    slot_is_team1: bool,
+) -> MatchResult<()> {
+    let sql = if slot_is_team1 {
+        "UPDATE turnier.bracket_matches \
+         SET team1_id = NULL, winner_id = NULL, status = 'pending', \
+             steam_party_id = NULL, party_code = NULL, deadlock_match_id = NULL, \
+             match_duration_s = NULL, match_stats = NULL, played_at = NULL \
+         WHERE id = $1"
+    } else {
+        "UPDATE turnier.bracket_matches \
+         SET team2_id = NULL, winner_id = NULL, status = 'pending', \
+             steam_party_id = NULL, party_code = NULL, deadlock_match_id = NULL, \
+             match_duration_s = NULL, match_stats = NULL, played_at = NULL \
+         WHERE id = $1"
+    };
+    sqlx::query(sql).bind(match_id).execute(pool).await?;
+    sqlx::query("DELETE FROM turnier.match_results WHERE bracket_match_id = $1")
+        .bind(match_id)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
 async fn load_next_bracket_match(
     pool: &turnier_db::Pool,
     tournament_id: i64,
     match_id: i64,
-    round: i64,
-    position: i64,
+    links: &DownstreamLinks,
 ) -> MatchResult<Option<NextBracketMatch>> {
     let by_source: Option<NextBracketMatch> = sqlx::query_as::<_, NextBracketMatch>(
-        "SELECT id, round, position, source_match1_id, source_match2_id \
+        "SELECT id, source_match1_id, source_match2_id \
          FROM turnier.bracket_matches \
          WHERE tournament_id = $1 AND (source_match1_id = $2 OR source_match2_id = $3) LIMIT 1",
     )
@@ -962,16 +1051,16 @@ async fn load_next_bracket_match(
     .bind(match_id)
     .fetch_optional(pool)
     .await?;
-    if by_source.is_some() {
+    if by_source.is_some() || links.bracket_type != "winners" {
         return Ok(by_source);
     }
     let legacy: Option<NextBracketMatch> = sqlx::query_as::<_, NextBracketMatch>(
-        "SELECT id, round, position, source_match1_id, source_match2_id \
+        "SELECT id, source_match1_id, source_match2_id \
          FROM turnier.bracket_matches WHERE tournament_id = $1 AND round = $2 AND position = $3 LIMIT 1",
     )
     .bind(tournament_id)
-    .bind(round + 1)
-    .bind(position / 2)
+    .bind(links.round + 1)
+    .bind(links.position / 2)
     .fetch_optional(pool)
     .await?;
     Ok(legacy)
