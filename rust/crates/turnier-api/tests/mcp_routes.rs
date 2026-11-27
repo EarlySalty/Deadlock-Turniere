@@ -298,6 +298,8 @@ mod database {
     const CAPTAIN_ID: i64 = 910_000_000_000_020_002;
     const GUEST_CAPTAIN_ID: i64 = -910_000_000_000_020_003;
     const GUEST_SOLO_ID: i64 = -910_000_000_000_020_004;
+    const HANDOVER_CAPTAIN_ID: i64 = 910_000_000_000_020_005;
+    const NOVA_ID: i64 = 910_000_000_000_020_006;
     const PLAYER_STEAM_ID: &str = "76561198000000042";
     const PARTY_CODE: &str = "PARTYCODE42";
 
@@ -406,7 +408,7 @@ mod database {
         .fetch_one(pool)
         .await
         .expect("seed group");
-        for (team, wins, losses, points) in [(winner, 1, 0, 3), (loser, 0, 1, 0)] {
+        for (team, wins, losses, points) in [(loser, 0, 1, 0), (winner, 1, 0, 3)] {
             sqlx::query(
                 r#"INSERT INTO turnier."group_teams" (group_id, team_id, wins, losses, points)
                  VALUES ($1, $2, $3, $4, $5)"#,
@@ -456,6 +458,7 @@ mod database {
         for leak in [
             "Jörg",
             "Gastspielerin Mara",
+            "Mara Team",
             "Spieler Bravo",
             PLAYER_STEAM_ID,
             PARTY_CODE,
@@ -487,6 +490,15 @@ mod database {
         seed_game(&pool, final_match, 3, 1).await;
         seed_group(&pool, public, guest_team, bravo).await;
         seed_solo(&pool, public).await;
+        let handed_over = seed_team(
+            &pool,
+            public,
+            "Mara Team",
+            HANDOVER_CAPTAIN_ID,
+            "Spieler Bravo",
+        )
+        .await;
+        let nova = seed_team(&pool, public, "Nova Team", NOVA_ID, "Nova").await;
         let draft_team = seed_team(&pool, draft, "Team Geheim", CAPTAIN_ID, "Spieler Bravo").await;
         seed_match(&pool, draft, draft_team, draft_team, draft_team).await;
 
@@ -515,7 +527,16 @@ mod database {
             .iter()
             .filter_map(|t| t["name"].as_str())
             .collect();
-        assert_eq!(teams, [format!("Team {guest_team}").as_str(), "Team Bravo"]);
+        assert_eq!(
+            teams,
+            [
+                format!("Team {guest_team}").as_str(),
+                "Team Bravo",
+                format!("Team {handed_over}").as_str(),
+                "Nova Team"
+            ]
+        );
+        assert!(nova > handed_over);
         assert_minimised(&body.to_string());
 
         let (_, body) = send(
@@ -550,8 +571,12 @@ mod database {
             .iter()
             .filter_map(|row| row["team"].as_str())
             .collect();
-        assert!(standings.contains(&format!("Team {guest_team}").as_str()));
-        assert!(standings.contains(&"Team Bravo"));
+        assert_eq!(
+            standings,
+            [format!("Team {guest_team}").as_str(), "Team Bravo"]
+        );
+        assert_eq!(group["standings"][0]["rank"], 1);
+        assert_eq!(group["standings"][0]["points"], 3);
         assert_eq!(group["matches"][0]["winner"], format!("Team {guest_team}"));
         assert_minimised(&body.to_string());
 

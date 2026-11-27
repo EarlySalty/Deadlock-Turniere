@@ -28,19 +28,22 @@ const NOT_FOUND: &str = "Turnier nicht gefunden";
 const UNAVAILABLE: &str = "Turnierdaten gerade nicht verfügbar";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum View {
+    Detail,
+    Bracket,
+    Groups,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Query {
     List,
-    Detail(i64),
-    Bracket(i64),
-    Groups(i64),
+    Tournament(View, i64),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ToolKind {
     List,
-    Detail,
-    Bracket,
-    Groups,
+    Tournament(View),
 }
 
 struct Tool {
@@ -60,18 +63,18 @@ const TOOLS: &[Tool] = &[
         name: "turnier_get",
         description:
             "Öffentliche Eckdaten eines Turniers mit Teams und Anzahl der Solo-Anmeldungen.",
-        kind: ToolKind::Detail,
+        kind: ToolKind::Tournament(View::Detail),
     },
     Tool {
         name: "turnier_bracket",
         description:
             "Öffentlicher Turnierbaum eines Turniers mit Paarungen, Serienstand und Siegern.",
-        kind: ToolKind::Bracket,
+        kind: ToolKind::Tournament(View::Bracket),
     },
     Tool {
         name: "turnier_groups",
         description: "Öffentliche Gruppentabellen und Gruppenspiele eines Turniers.",
-        kind: ToolKind::Groups,
+        kind: ToolKind::Tournament(View::Groups),
     },
 ];
 
@@ -198,13 +201,11 @@ fn parse_arguments(kind: ToolKind, arguments: &Value) -> Result<Query, &'static 
     let object = arguments
         .as_object()
         .ok_or("Argumente müssen ein Objekt sein")?;
-    if kind == ToolKind::List {
-        return if object.is_empty() {
-            Ok(Query::List)
-        } else {
-            Err("Unerlaubte Parameter")
-        };
-    }
+    let view = match kind {
+        ToolKind::List if object.is_empty() => return Ok(Query::List),
+        ToolKind::List => return Err("Unerlaubte Parameter"),
+        ToolKind::Tournament(view) => view,
+    };
     if object.len() != 1 {
         return Err("Genau tournament_id erforderlich");
     }
@@ -213,27 +214,22 @@ fn parse_arguments(kind: ToolKind, arguments: &Value) -> Result<Query, &'static 
         .and_then(Value::as_i64)
         .filter(|value| *value > 0)
         .ok_or("tournament_id muss eine positive Zahl sein")?;
-    Ok(match kind {
-        ToolKind::List => Query::List,
-        ToolKind::Detail => Query::Detail(tournament_id),
-        ToolKind::Bracket => Query::Bracket(tournament_id),
-        ToolKind::Groups => Query::Groups(tournament_id),
-    })
+    Ok(Query::Tournament(view, tournament_id))
 }
 
 async fn run(state: &AppState, query: Query) -> WebResult<Option<Value>> {
-    let tournament_id = match query {
+    let (view, tournament_id) = match query {
         Query::List => return list(state).await.map(Some),
-        Query::Detail(id) | Query::Bracket(id) | Query::Groups(id) => id,
+        Query::Tournament(view, id) => (view, id),
     };
     let Some(tournament) = visible_tournament(state, tournament_id).await? else {
         return Ok(None);
     };
     let teams = load_teams(state, tournament_id).await?;
-    let value = match query {
-        Query::Bracket(_) => bracket(state, tournament_id, &teams).await?,
-        Query::Groups(_) => groups(state, tournament_id, &teams).await?,
-        Query::List | Query::Detail(_) => detail(state, tournament, teams).await?,
+    let value = match view {
+        View::Detail => detail(state, tournament, teams).await?,
+        View::Bracket => bracket(state, tournament_id, &teams).await?,
+        View::Groups => groups(state, tournament_id, &teams).await?,
     };
     Ok(Some(value))
 }
@@ -284,6 +280,19 @@ struct TeamSummary {
     recruitment_status: RecruitmentStatus,
 }
 
+#[derive(sqlx::FromRow)]
+struct MemberRow {
+    team_id: i64,
+    discord_id: i64,
+    discord_name: Option<String>,
+}
+
+#[derive(Default)]
+struct NameEvidence {
+    guest_names: Vec<String>,
+    members: HashMap<i64, Vec<(i64, String)>>,
+}
+
 async fn load_teams(state: &AppState, tournament_id: i64) -> WebResult<Vec<TeamSummary>> {
     let rows: Vec<TeamRow> = sqlx::query_as(
         r#"SELECT t.id, t.name, t.captain_discord_id, t.recruitment_status,
@@ -293,24 +302,133 @@ async fn load_teams(state: &AppState, tournament_id: i64) -> WebResult<Vec<TeamS
     .bind(tournament_id)
     .fetch_all(&state.pool)
     .await?;
-    Ok(rows.into_iter().map(team_summary).collect())
+    let evidence = load_name_evidence(state, tournament_id).await?;
+    Ok(rows
+        .into_iter()
+        .map(|row| team_summary(&evidence, row))
+        .collect())
 }
 
-fn team_summary(row: TeamRow) -> TeamSummary {
+async fn load_name_evidence(state: &AppState, tournament_id: i64) -> WebResult<NameEvidence> {
+    let members: Vec<MemberRow> = sqlx::query_as(
+        r#"SELECT tm.team_id, tm.discord_id, tm.discord_name
+         FROM turnier."team_members" tm JOIN turnier."teams" t ON t.id = tm.team_id
+         WHERE t.tournament_id = $1"#,
+    )
+    .bind(tournament_id)
+    .fetch_all(&state.pool)
+    .await?;
+    let signup_guests: Vec<Option<String>> = sqlx::query_scalar(
+        r#"SELECT discord_name FROM turnier."tournament_signups"
+         WHERE tournament_id = $1 AND discord_id < 0"#,
+    )
+    .bind(tournament_id)
+    .fetch_all(&state.pool)
+    .await?;
+    let mut evidence = NameEvidence::default();
+    evidence
+        .guest_names
+        .extend(signup_guests.into_iter().flatten());
+    for member in members {
+        let name = member.discord_name.unwrap_or_default();
+        if is_guest_participant(member.discord_id) {
+            evidence.guest_names.push(name.clone());
+        }
+        evidence
+            .members
+            .entry(member.team_id)
+            .or_default()
+            .push((member.discord_id, name));
+    }
+    Ok(evidence)
+}
+
+fn team_summary(evidence: &NameEvidence, row: TeamRow) -> TeamSummary {
+    let members = evidence
+        .members
+        .get(&row.id)
+        .map(Vec::as_slice)
+        .unwrap_or_default();
+    let safe = team_name_is_safe(
+        &row.name,
+        row.captain_discord_id,
+        members,
+        &evidence.guest_names,
+    );
     TeamSummary {
-        name: public_team_name(row.id, &row.name, row.captain_discord_id),
+        name: if safe {
+            row.name
+        } else {
+            format!("Team {}", row.id)
+        },
         id: row.id,
         member_count: row.member_count,
         recruitment_status: row.recruitment_status,
     }
 }
 
-fn public_team_name(team_id: i64, name: &str, captain_discord_id: i64) -> String {
-    if is_guest_participant(captain_discord_id) {
-        format!("Team {team_id}")
-    } else {
-        name.to_string()
+fn normalized(text: &str) -> String {
+    text.trim().to_lowercase()
+}
+
+fn derived_base(name: &str) -> Option<&str> {
+    let trimmed = name.trim();
+    let without_suffix = match trimmed.rsplit_once(" (") {
+        Some((head, tail))
+            if tail.ends_with(')')
+                && tail.len() > 1
+                && tail[..tail.len() - 1].chars().all(|c| c.is_ascii_digit()) =>
+        {
+            head
+        }
+        _ => trimmed,
+    };
+    let cut = without_suffix.len().checked_sub(" team".len())?;
+    let tail = without_suffix.get(cut..)?;
+    tail.eq_ignore_ascii_case(" team")
+        .then(|| &without_suffix[..cut])
+}
+
+fn may_be_truncated(name: &str) -> bool {
+    name.trim().chars().count() + 5 >= turnier_engine::TEAM_NAME_MAX_CHARS
+}
+
+fn derived_from_listed_member(name: &str, members: &[(i64, String)]) -> bool {
+    let key = normalized(name);
+    let base = derived_base(name).map(normalized);
+    members
+        .iter()
+        .filter(|(id, member)| !is_guest_participant(*id) && !member.trim().is_empty())
+        .map(|(_, member)| normalized(member))
+        .any(|member| {
+            base.as_deref() == Some(member.as_str())
+                || (may_be_truncated(name) && format!("{member} team").starts_with(&key))
+        })
+}
+
+fn team_name_is_safe(
+    name: &str,
+    captain_discord_id: i64,
+    members: &[(i64, String)],
+    guest_names: &[String],
+) -> bool {
+    if is_guest_participant(captain_discord_id)
+        || members.iter().any(|(id, _)| is_guest_participant(*id))
+    {
+        return false;
     }
+    let key = normalized(name);
+    let mentions_guest = guest_names
+        .iter()
+        .map(|guest| normalized(guest))
+        .any(|guest| guest.chars().count() >= 2 && key.contains(&guest));
+    if mentions_guest {
+        return false;
+    }
+    if derived_base(name).is_some() || may_be_truncated(name) {
+        return derived_from_listed_member(name, members);
+    }
+    true
 }
 
 #[derive(Serialize)]
@@ -447,6 +565,7 @@ async fn bracket(state: &AppState, tournament_id: i64, teams: &[TeamSummary]) ->
 
 #[derive(Serialize)]
 struct Standing {
+    rank: usize,
     team: String,
     wins: i64,
     losses: i64,
@@ -473,14 +592,21 @@ struct GroupSummary {
     matches: Vec<GroupGame>,
 }
 
-fn group_summary(names: &HashMap<i64, String>, group: Group) -> GroupSummary {
+fn group_summary(names: &HashMap<i64, String>, mut group: Group, league: bool) -> GroupSummary {
+    if !league {
+        group
+            .teams
+            .sort_by(|a, b| b.points.cmp(&a.points).then(b.wins.cmp(&a.wins)));
+    }
     GroupSummary {
         id: group.id,
         name: group.name,
         standings: group
             .teams
             .into_iter()
-            .map(|team| Standing {
+            .enumerate()
+            .map(|(index, team)| Standing {
+                rank: index + 1,
                 team: resolve(names, Some(team.team_id)).unwrap_or_default(),
                 wins: team.wins,
                 losses: team.losses,
@@ -506,10 +632,11 @@ fn group_summary(names: &HashMap<i64, String>, group: Group) -> GroupSummary {
 
 async fn groups(state: &AppState, tournament_id: i64, teams: &[TeamSummary]) -> WebResult<Value> {
     let names = team_names(teams);
+    let league = turnier_match::league::tournament_is_league(&state.pool, tournament_id).await?;
     let groups: Vec<GroupSummary> = helpers::load_groups_for_tournament(&state.pool, tournament_id)
         .await?
         .into_iter()
-        .map(|group| group_summary(&names, group))
+        .map(|group| group_summary(&names, group, league))
         .collect();
     Ok(json!({ "tournament_id": tournament_id, "groups": groups }))
 }
@@ -564,22 +691,56 @@ mod tests {
             json!({}),
             json!([1]),
         ] {
-            assert!(parse_arguments(ToolKind::Detail, &arguments).is_err());
+            assert!(parse_arguments(ToolKind::Tournament(View::Detail), &arguments).is_err());
         }
         assert_eq!(
-            parse_arguments(ToolKind::Bracket, &json!({"tournament_id": 12})),
-            Ok(Query::Bracket(12))
+            parse_arguments(
+                ToolKind::Tournament(View::Bracket),
+                &json!({"tournament_id": 12})
+            ),
+            Ok(Query::Tournament(View::Bracket, 12))
         );
         assert!(parse_arguments(ToolKind::List, &json!({"limit": 500})).is_err());
         assert_eq!(parse_arguments(ToolKind::List, &json!({})), Ok(Query::List));
     }
 
     #[test]
-    fn guest_captain_team_names_are_masked() {
-        assert_eq!(public_team_name(7, "Team Jörg", -42), "Team 7");
-        assert_eq!(
-            public_team_name(8, "Team Bravo", 910_000_000_000_010_002),
-            "Team Bravo"
-        );
+    fn team_names_that_may_carry_a_guest_name_are_masked() {
+        let discord = 910_000_000_000_010_002;
+        let nova = [(discord, "Nova".to_string())];
+        let guests = ["Jörg".to_string()];
+        assert!(!team_name_is_safe("Team Bravo", -42, &[], &[]));
+        assert!(!team_name_is_safe(
+            "Team Bravo",
+            discord,
+            &[(discord, "Nova".to_string()), (-3, "Mara".to_string())],
+            &[]
+        ));
+        assert!(!team_name_is_safe("Jörg Team", discord, &nova, &guests));
+        assert!(!team_name_is_safe(
+            "Die Jörg-Bande",
+            discord,
+            &nova,
+            &guests
+        ));
+        assert!(!team_name_is_safe("Mara Team", discord, &nova, &[]));
+        assert!(!team_name_is_safe("Mara Team (2)", discord, &nova, &[]));
+        assert!(!team_name_is_safe(&"M".repeat(32), discord, &nova, &[]));
+        assert!(team_name_is_safe("Nova Team", discord, &nova, &guests));
+        assert!(team_name_is_safe("nova team (3)", discord, &nova, &guests));
+        assert!(team_name_is_safe("Team Bravo", discord, &nova, &guests));
+        assert!(team_name_is_safe("Team Bravo", 0, &[], &[]));
+    }
+
+    #[test]
+    fn derived_names_are_recognised_with_collision_suffix() {
+        assert_eq!(derived_base("Mara Team"), Some("Mara"));
+        assert_eq!(derived_base("Mara Team (12)"), Some("Mara"));
+        assert_eq!(derived_base("Team Alpha"), None);
+        assert_eq!(derived_base("Mara Team (x)"), None);
+        assert_eq!(derived_base("MARA TEAM"), Some("MARA"));
+        assert_eq!(derived_base("Jörg Team"), Some("Jörg"));
+        assert_eq!(derived_base("Team"), None);
+        assert_eq!(derived_base("üteam"), None);
     }
 }

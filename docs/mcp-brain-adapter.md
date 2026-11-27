@@ -32,11 +32,16 @@ All tools carry `readOnlyHint: true`. Input schemas reject extra fields.
 ## Visibility and data minimisation
 
 - Only tournaments with `status != draft` and `is_test = false` are visible. Draft, test, foreign and missing IDs all return the same tool error `Turnier nicht gefunden`.
-- No Discord IDs, Steam IDs, player names, party codes, Steam party IDs, match stats, hero assignments, lobby settings, reminders or `created_by` leave the adapter.
-- Team names whose captain is a guest are replaced by `Team <id>`, because engine-generated names can contain the guest's name.
+- No Discord IDs, Steam IDs, member lists, signup names, party codes, Steam party IDs, match stats, hero assignments, lobby settings, reminders or `created_by` leave the adapter.
+- Team names can contain a person's name, because auto-formed teams are named `<captain name> Team` and keep that name when the captain changes. A team name is replaced by `Team <id>` when any of these holds:
+  - the captain or any current member is a guest,
+  - the name contains the name of a guest who signed up for or plays in the tournament,
+  - the name has the auto-formed shape `<name> Team` (optionally with a `(n)` suffix) or is long enough to be a truncated one, and `<name>` is not a current non-guest member of that team.
+- A team auto-named after a current non-guest member (for example `Nova Team`) keeps its name, as on the public site, so that name contains that member's Discord name.
+- Group standings come sorted with a `rank` field: league tournaments use the league table, all others sort by points, then wins, like the site.
 - Solo signups are reported as a count only.
 - Database failures return `Turnierdaten gerade nicht verfügbar`. The log line holds only the tool name.
-- Tournament names, descriptions, rules, group names and non-guest team names are organizer or captain input and pass through as on the public site. The Brain must treat tool output as data, not instructions.
+- Tournament names, descriptions, rules, group names and unmasked team names are organizer or captain input and pass through as on the public site. The Brain must treat tool output as data, not instructions.
 
 ## Not ported from the WIP adapter
 
