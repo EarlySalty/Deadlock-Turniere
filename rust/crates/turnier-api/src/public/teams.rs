@@ -1,5 +1,5 @@
 //! Team-Lifecycle: Erstellen, Beitreten (mit Auto-Austritt), Verlassen, Kicken,
-//! Recruiting-Status setzen, Captain-Direkt-Einladung.
+//! Recruiting-Status setzen.
 
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
@@ -11,7 +11,6 @@ use serde_json::{json, Value};
 use sqlx::Postgres;
 
 use turnier_core::{RecruitmentStatus, Team, TeamMember, TeamRole};
-use turnier_discord::NotificationEvent;
 
 use crate::db;
 use crate::error::{WebError, WebResult};
@@ -39,10 +38,6 @@ pub fn router() -> Router<AppState> {
         .route(
             "/api/tournaments/{tournament_id}/teams/{team_id}/members/{discord_id}",
             delete(kick_team_member),
-        )
-        .route(
-            "/api/tournaments/{tournament_id}/teams/{team_id}/invite/{target_discord_id}",
-            post(invite_to_team),
         )
 }
 
@@ -467,119 +462,6 @@ async fn leave_team(
     ))
 }
 
-/// `POST /api/tournaments/{tournament_id}/teams/{team_id}/invite/{target_discord_id}`:
-/// Captain fügt einen solo-angemeldeten Spieler SOFORT ins Team ein
-/// (KEIN team_invitations-Eintrag; BEWUSST 1:1 erhalten, „needs-decision").
-async fn invite_to_team(
-    State(state): State<AppState>,
-    AuthUser(user): AuthUser,
-    Path((tournament_id, team_id, target_discord_id)): Path<(i64, i64, String)>,
-) -> WebResult<Json<Team>> {
-    let target_discord_id_i64 = db::parse_participant_id(&target_discord_id)?;
-    let target_discord_id = db::discord_id_to_string(target_discord_id_i64);
-
-    let pool = &state.pool;
-    let mut tx = pool.begin().await?;
-    let t = helpers::lock_tournament_or_404(&mut tx, tournament_id).await?;
-    let team = helpers::load_team_or_404(&mut *tx, tournament_id, team_id).await?;
-
-    if user.discord_id != team.captain_discord_id {
-        return Err(WebError::forbidden("Nur der Captain darf Spieler einladen"));
-    }
-    helpers::ensure_player_teams_allowed(&t)?;
-    helpers::ensure_team_roster_open(t.status)?;
-
-    // Spieler nicht bereits in einem Team.
-    let in_team: Option<(i64,)> = sqlx::query_as(
-        r#"SELECT tm.id FROM turnier."team_members" tm JOIN turnier."teams" t ON tm.team_id = t.id
-         WHERE t.tournament_id = $1 AND tm.discord_id = $2"#,
-    )
-    .bind(tournament_id)
-    .bind(target_discord_id_i64)
-    .fetch_optional(&mut *tx)
-    .await?;
-    if in_team.is_some() {
-        return Err(WebError::conflict("Spieler ist bereits in einem Team"));
-    }
-
-    // Ziel-Spieler ist solo angemeldet (team_id IS NULL).
-    let solo: Option<SoloSignupRow> = sqlx::query_as(
-        r#"SELECT discord_name, steam_id, rank, rank_score FROM turnier."tournament_signups"
-         WHERE tournament_id = $1 AND discord_id = $2 AND team_id IS NULL"#,
-    )
-    .bind(tournament_id)
-    .bind(target_discord_id_i64)
-    .fetch_optional(&mut *tx)
-    .await?;
-    let Some(solo) = solo else {
-        return Err(WebError::bad_request(
-            "Spieler ist nicht als Solo-Spieler angemeldet",
-        ));
-    };
-
-    let name_row: Option<(Option<String>,)> = sqlx::query_as(
-        r#"SELECT discord_name FROM turnier."team_members"
-         WHERE discord_id = $1 AND discord_name != '' LIMIT 1"#,
-    )
-    .bind(target_discord_id_i64)
-    .fetch_optional(&mut *tx)
-    .await?;
-    let discord_name = name_row
-        .and_then(|(n,)| n)
-        .or(solo.discord_name)
-        .unwrap_or_else(|| target_discord_id.clone());
-
-    // Team-Größe prüfen (innerhalb der Tx).
-    helpers::ensure_team_has_capacity(&mut *tx, team_id, t.team_size).await?;
-
-    let rank = RankInput {
-        steam_id: solo.steam_id.clone(),
-        rank: solo.rank.clone(),
-        rank_score: solo.rank_score.unwrap_or(0),
-    };
-    helpers::insert_team_member(
-        &mut tx,
-        team_id,
-        target_discord_id_i64,
-        Some(&discord_name),
-        &rank,
-        TeamRole::Member,
-    )
-    .await?;
-    helpers::upsert_signup(
-        &mut tx,
-        tournament_id,
-        &target_discord_id,
-        Some(&discord_name),
-        &rank,
-        Some(team_id),
-    )
-    .await?;
-
-    tx.commit().await?;
-
-    // Notify als Side-Effect nach Commit (Felder vorher kopiert; is_test unterdrückt).
-    if !t.is_test {
-        let message = format!("Du wurdest zu `{}` für `{}` eingeladen.", team.name, t.name);
-        if let Err(err) = state
-            .notifier
-            .notify_users(
-                std::slice::from_ref(&target_discord_id),
-                NotificationEvent::TeamInvite,
-                &message,
-            )
-            .await
-        {
-            tracing::error!(
-                tournament_id, team_id, target = %target_discord_id, error = %err,
-                "Team-Invite-Benachrichtigung fehlgeschlagen"
-            );
-        }
-    }
-
-    Ok(Json(helpers::load_team_response(&state, team_id).await?))
-}
-
 // ---------------------------------------------------------------------------
 // Geteilte Helfer dieses Moduls
 // ---------------------------------------------------------------------------
@@ -587,15 +469,6 @@ async fn invite_to_team(
 /// Member-Daten, die vor einem Löschen für den Solo-Signup gesichert werden.
 #[derive(sqlx::FromRow)]
 struct OldMemberRow {
-    discord_name: Option<String>,
-    steam_id: Option<String>,
-    rank: Option<String>,
-    rank_score: Option<i64>,
-}
-
-/// Rangfelder eines Solo-Signups.
-#[derive(sqlx::FromRow)]
-struct SoloSignupRow {
     discord_name: Option<String>,
     steam_id: Option<String>,
     rank: Option<String>,

@@ -265,10 +265,11 @@ offene Einträge. create/join/solo/accept und das Austragen erlauben
 `registration` und `checkin`; kick/leave/invite (`ensure_team_roster_open`)
 nur `registration`.
 
-### KI-W04 [erhalten]: Direkt-Add umgeht Zustimmung & invite_mode
-`routes.py` `invite_to_team`: fügt den Spieler sofort ohne Zustimmung und ohne
-`team_invitations`-Eintrag ein, umgeht `invite_mode`/-window. Abweichend von
-„invite-by-signup". 1:1 erhalten.
+### KI-W04 [gefixt]: Direkt-Add ohne Zustimmung entfernt
+`POST /api/tournaments/{tournament_id}/teams/{team_id}/invite/{target_discord_id}`
+fügte den Spieler ohne Zustimmung, ohne `team_invitations`-Eintrag und ohne
+`invite_mode`/-window ein. Kein Frontend und kein Bot rief die Route auf, sie ist
+entfernt. Einladungen laufen nur noch über `invite-by-signup`.
 
 ### KI-W05 [gefixt]: Solo-Signup-Auto-Team
 `solo_signup` (team_size==1) läuft unter der Turnier-Zeilensperre
