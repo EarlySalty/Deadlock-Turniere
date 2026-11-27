@@ -10,13 +10,12 @@
 //! sind die resultierenden Zahlen identisch zum additiven Lauf; mehrere
 //! Turniere summieren sich genauso, aber ein erneuter Aufruf ändert nichts mehr
 //! (idempotent). Die Punkte-/Platzierungs-WERTE je Turnier stammen 1:1 aus
-//! [`crate::points`] (inkl. der bug-preserved SE-Round-Heuristik und des
-//! globalen `matches_played`).
+//! [`crate::points`] (inkl. des globalen `matches_played`).
 
 use std::collections::HashMap;
 
 use sqlx::{Pool, Postgres, Transaction};
-use turnier_core::{now_utc, TournamentMode};
+use turnier_core::{now_utc, BracketFormat, BracketType, TournamentMode};
 
 use crate::error::TournamentResult;
 use crate::league::{league_table, LeagueGame};
@@ -31,6 +30,7 @@ const POINTS_RECOMPUTE_ADVISORY_LOCK_KEY: i64 = i64::from_be_bytes(*b"trnpnts1")
 #[derive(sqlx::FromRow)]
 struct MatchRow {
     round: i64,
+    bracket_type: BracketType,
     team1_id: Option<i64>,
     team2_id: Option<i64>,
     winner_id: Option<i64>,
@@ -61,7 +61,7 @@ async fn bracket_results(
     tournament_id: i64,
 ) -> TournamentResult<TournamentResults> {
     let raw_matches: Vec<MatchRow> = sqlx::query_as::<_, MatchRow>(
-        "SELECT round, team1_id, team2_id, winner_id FROM turnier.bracket_matches \
+        "SELECT round, bracket_type, team1_id, team2_id, winner_id FROM turnier.bracket_matches \
          WHERE tournament_id = $1 AND status = 'completed' ORDER BY round DESC, id",
     )
     .bind(tournament_id)
@@ -71,15 +71,35 @@ async fn bracket_results(
         .iter()
         .map(|r| CompletedMatch {
             round: r.round,
+            bracket_type: r.bracket_type,
             team1_id: r.team1_id,
             team2_id: r.team2_id,
             winner_id: r.winner_id,
         })
         .collect();
+    let format = played_bracket_format(tx, tournament_id).await?;
     Ok(TournamentResults {
-        placements: team_placements(&matches),
+        placements: team_placements(&matches, format),
         wins: team_wins(&matches),
         matches_played: MatchesPlayed::TournamentWide(matches.len() as i64),
+    })
+}
+
+async fn played_bracket_format(
+    tx: &mut Transaction<'_, Postgres>,
+    tournament_id: i64,
+) -> TournamentResult<BracketFormat> {
+    let double: bool = sqlx::query_scalar(
+        "SELECT COALESCE(bool_or(bracket_type IN ('losers', 'grand_final')), false) \
+         FROM turnier.bracket_matches WHERE tournament_id = $1",
+    )
+    .bind(tournament_id)
+    .fetch_one(&mut **tx)
+    .await?;
+    Ok(if double {
+        BracketFormat::DoubleElimination
+    } else {
+        BracketFormat::SingleElimination
     })
 }
 

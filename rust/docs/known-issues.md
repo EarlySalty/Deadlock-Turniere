@@ -101,11 +101,14 @@ Ablauf). Der Port erzwingt das nicht selbst; als externe Invariante im
 
 ## Turnier-Engine (`turnier-engine`)
 
-### KI-T01 [erhalten]: Platzierungs-Heuristik ist Single-Elim-zentriert
-`points.py`: `max(round)` gilt als Finale, `round-1` als Halbfinale. Bei
-Double-Elim ist das teils unscharf (Losers-Runden zählen anders).
-**Folgefix-Vorschlag:** Platzierung aus der tatsächlichen Bracket-Topologie statt
-aus der Rundennummer ableiten.
+### KI-T01 [gefixt]: Platzierung bei Double Elimination
+Bisher galt `max(round)` als Finale. Bei 8 und 16 Teams teilt sich das
+Losers-Finale die Rundennummer mit dem Grand Final, der Turniersieger bekam
+keinen Platz 1. Jetzt entscheidet bei Double Elimination das gespielte
+`grand_final` mit der höchsten Runde (Reset, falls gespielt) über Platz 1 und 2,
+der Verlierer des Losers-Finales wird 3., der des Losers-Halbfinales 4. Single
+Elimination ist unverändert. Der Recompute rechnet alle abgeschlossenen Turniere
+neu, frühere Double-Elimination-Turniere ändern sich beim nächsten Abschluss.
 
 ### KI-T02 [erhalten]: Toter Platzierungs-Schlüssel + Halbfinal-Pauschale
 `points.py`: `PLACEMENT_POINTS[4]` wird nie getroffen; alle Halbfinal-Verlierer

@@ -41,6 +41,7 @@ const GAME_MODE_LABEL: Record<TournamentGameMode, string> = {
 }
 import { ApiError } from '@/api/client'
 import { bracketFormatLabel, effectiveBracketFormat } from '@/lib/bracketFormat'
+import { bracketPlacements } from '@/lib/bracketPlacements'
 import ReactMarkdown from 'react-markdown'
 import { playerName } from '@/lib/playerName'
 import { teamLabel, teamNameById } from '@/lib/teamName'
@@ -79,44 +80,7 @@ interface BracketRankEntry {
 }
 
 function deriveBracketPlacements(matches: BracketMatch[], teams: TeamPublic[]): BracketRankEntry[] {
-  const completed = matches.filter(
-    (m) => m.bracket_type === 'winners'
-      && (m.status === 'completed' || m.status === 'forfeit')
-      && m.winner_id !== null,
-  )
-  if (completed.length === 0) return []
-
-  const maxRound = Math.max(...completed.map((m) => m.round))
-  const entries: BracketRankEntry[] = []
-
-  for (const match of completed) {
-    const distance = maxRound - match.round
-    const winnerId = match.winner_id!
-    const loserId = match.team1_id === winnerId ? match.team2_id : match.team1_id
-
-    if (distance === 0) {
-      entries.push({ position: 1, teamId: winnerId, teamName: getTeamName(winnerId, teams), label: '1. Platz' })
-      if (loserId !== null) {
-        entries.push({ position: 2, teamId: loserId, teamName: getTeamName(loserId, teams), label: '2. Platz' })
-      }
-    } else {
-      const startPos = Math.pow(2, distance) + 1
-      const label = distance === 1 ? '3./4. Platz' : distance === 2 ? '5.–8. Platz' : '9.+ Platz'
-      if (loserId !== null) {
-        entries.push({ position: startPos, teamId: loserId, teamName: getTeamName(loserId, teams), label })
-      }
-    }
-  }
-
-  const seen = new Map<number, BracketRankEntry>()
-  for (const entry of entries) {
-    const existing = seen.get(entry.teamId)
-    if (!existing || entry.position < existing.position) {
-      seen.set(entry.teamId, entry)
-    }
-  }
-
-  return Array.from(seen.values()).sort((a, b) => a.position - b.position)
+  return bracketPlacements(matches).map((entry) => ({ ...entry, teamName: getTeamName(entry.teamId, teams) }))
 }
 
 function getSortTime(value: string | null, fallback: number): number {
