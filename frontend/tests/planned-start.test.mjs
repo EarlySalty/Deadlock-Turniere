@@ -27,6 +27,17 @@ test('explicit and resolved modes keep their own start', () => {
   assert.equal(plannedTournamentStart(tournament({ tournament_mode_auto: true, tournament_mode: 'league' })), '2026-12-05T17:00:00Z')
 })
 
+test('undecided auto mode without bracket start uses the registration end like the reminders', () => {
+  assert.equal(
+    plannedTournamentStart(tournament({ tournament_mode_auto: true, bracket_start: null })),
+    '2026-12-05T16:00:00Z',
+  )
+  assert.equal(
+    plannedTournamentStart(tournament({ tournament_mode_auto: true, bracket_start: null, registration_end: null })),
+    '2026-12-05T17:00:00Z',
+  )
+})
+
 test('undecided auto mode without starts falls back to the registration end', () => {
   assert.equal(
     plannedTournamentStart(tournament({ tournament_mode_auto: true, group_phase_start: null, bracket_start: null })),
