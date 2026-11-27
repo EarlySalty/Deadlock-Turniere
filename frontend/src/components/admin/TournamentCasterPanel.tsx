@@ -114,7 +114,7 @@ export default function TournamentCasterPanel({
 
       <div className="space-y-2">
         <p className="text-xs font-medium uppercase tracking-wider text-muted">
-          Aktiv für dieses Turnier ({assignedCasters.length})
+          Aktiv für dieses Turnier{assignedError ? '' : ` (${assignedCasters.length})`}
         </p>
         {loadingAssigned ? (
           <p className="text-xs text-muted">Lade...</p>

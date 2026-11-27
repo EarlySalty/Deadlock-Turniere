@@ -43,6 +43,8 @@ interface TournamentManagerProps {
   canChangeTournamentMode: boolean
   bracketHasResults?: boolean
   onFinished?: () => void
+  successMessage?: string
+  onSuccessMessage?: (text: string) => void
 }
 
 const STATUS_ACTIONS: Record<string, { label: string; confirmMsg: string }> = {
@@ -83,6 +85,8 @@ export default function TournamentManager({
   canChangeTournamentMode,
   bracketHasResults = false,
   onFinished,
+  successMessage = '',
+  onSuccessMessage,
 }: TournamentManagerProps) {
   const detailsUpdateMutation = useUpdateTournament()
   const advanceMutation = useAdvanceTournament()
@@ -101,7 +105,7 @@ export default function TournamentManager({
   const [customJsonError, setCustomJsonError] = useState('')
   const [setupTab, setSetupTab] = useState<SetupTab>(() => lastSetupTab.get(tournament.id) ?? 'settings')
   const [settingsOpen, setSettingsOpen] = useState(false)
-  const [successMessage, setSuccessMessage] = useState('')
+  const setSuccessMessage = (text: string) => onSuccessMessage?.(text)
   const [deleteConfirmationId, setDeleteConfirmationId] = useState<number | null>(null)
   const deleteConfirmed = deleteConfirmationId === tournament.id
 

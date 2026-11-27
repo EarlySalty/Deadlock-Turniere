@@ -80,6 +80,7 @@ export default function Admin() {
   const [createFormKey, setCreateFormKey] = useState(0)
   const [activePhase, setActivePhase] = useState<AdminPhase | null>(null)
   const [finishedLiveId, setFinishedLiveId] = useState<number | null>(null)
+  const [managerNotice, setManagerNotice] = useState<{ tournamentId: number; text: string } | null>(null)
   const deleteMutation = useDeleteTournament()
 
   const liveTournaments = useMemo(
@@ -337,6 +338,8 @@ export default function Admin() {
                         canChangeTournamentMode={canChangeTournamentMode}
                         bracketHasResults={bracketHasResults(liveDetail)}
                         onFinished={() => setFinishedLiveId(liveDetail.id)}
+                        successMessage={managerNotice?.tournamentId === liveDetail.id ? managerNotice.text : ''}
+                        onSuccessMessage={(text) => setManagerNotice({ tournamentId: liveDetail.id, text })}
                       />
                     )}
 

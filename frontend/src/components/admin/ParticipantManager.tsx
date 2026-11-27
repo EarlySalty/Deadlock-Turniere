@@ -409,7 +409,10 @@ export default function ParticipantManager({
                     variant="secondary"
                     size="sm"
                     disabled={isBusy || team.members.length >= teamSize}
-                    onClick={() => setReplacementTeam(team)}
+                    onClick={() => {
+                      addMemberMutation.reset()
+                      setReplacementTeam(team)
+                    }}
                   >
                     <UserPlus size={14} />
                     Spieler ersetzen
@@ -535,10 +538,10 @@ export default function ParticipantManager({
               />
             </div>
 
-            {error && (
+            {addMemberMutation.error && (
               <div role="alert" className="mt-4 flex items-start gap-2 rounded-lg border border-red-500/20 bg-red-500/10 p-3 text-sm text-red-400">
                 <AlertCircle size={16} className="mt-0.5 shrink-0" />
-                <span>{error instanceof Error ? error.message : 'Ein Fehler ist aufgetreten'}</span>
+                <span>{addMemberMutation.error instanceof Error ? addMemberMutation.error.message : 'Ein Fehler ist aufgetreten'}</span>
               </div>
             )}
 

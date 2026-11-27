@@ -108,6 +108,13 @@ export default function MatchAdminPanel({
   const [manualCodes, setManualCodes] = useState<Record<number, string>>({})
 
   const actionableMatches = matches.filter((match) => match.team1_id !== null && match.team2_id !== null)
+  const touchesMiniGroup = (match: BracketMatch) =>
+    match.mini_group_id !== null ||
+    matches.some(
+      (other) =>
+        other.mini_group_id !== null &&
+        (other.source_match1_id === match.id || other.source_match2_id === match.id),
+    )
 
   if (actionableMatches.length === 0) {
     return (
@@ -286,7 +293,9 @@ export default function MatchAdminPanel({
         const canFetchResult = match.status === 'in_progress' && (Boolean(match.deadlock_match_id) || Boolean(match.steam_party_id))
         const canLeaveLobby =
           ['lobby_created', 'in_progress'].includes(match.status) && Boolean(match.steam_party_id)
-        const canReset = !isTerminalMatch(match) || (allowResultReset && match.status === 'completed')
+        const canReset =
+          !isTerminalMatch(match) ||
+          (allowResultReset && match.status === 'completed' && !touchesMiniGroup(match))
         const message = messages[match.id]
 
         return (

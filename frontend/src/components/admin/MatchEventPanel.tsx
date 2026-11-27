@@ -228,6 +228,12 @@ export default function MatchEventPanel({
           </p>
         </div>
 
+        {presetsQuery.error && (
+          <p role="alert" className="text-sm text-red-400">
+            Presets konnten nicht geladen werden: {presetsQuery.error.message}
+          </p>
+        )}
+
         <div className="grid gap-3 lg:grid-cols-2">
           {(presetsQuery.data?.presets ?? []).map((preset) => (
             <div key={preset.key} className="min-w-0 rounded-xl border border-border bg-background/60 p-4">

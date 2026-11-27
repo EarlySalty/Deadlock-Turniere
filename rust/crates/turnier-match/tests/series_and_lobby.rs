@@ -275,11 +275,26 @@ async fn reset_of_completed_semifinal_clears_played_final() {
         &[semi, finale],
     )
     .await;
+    turnier_match::series::ensure_game_exists(&pool, semi, 1)
+        .await
+        .expect("semi game");
+    turnier_match::series::ensure_game_exists(&pool, finale, 1)
+        .await
+        .expect("final game");
     let mgr = manager_without_services(pool.clone());
 
     mgr.reset_bracket_match_result(tid, semi)
         .await
         .expect("reset completed semi");
+
+    let games: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM turnier.match_games WHERE bracket_match_id = ANY($1)",
+    )
+    .bind(vec![semi, finale])
+    .fetch_one(&pool)
+    .await
+    .expect("count games");
+    assert_eq!(games, 0);
 
     assert_eq!(
         match_state(&pool, semi).await,
@@ -377,4 +392,133 @@ async fn caster_laden_nutzt_match_fallback_wenn_turnier_liste_leer_ist() {
         .await
         .expect("load tournament casters");
     assert_eq!(casters, vec![TEST_CASTER_ID.to_string()]);
+}
+
+async fn insert_mini_group(pool: &turnier_db::Pool, tid: i64) -> i64 {
+    sqlx::query_scalar(
+        "INSERT INTO turnier.bracket_mini_groups (tournament_id, round, position, created_at) \
+         VALUES ($1, 1, 2, now()) RETURNING id",
+    )
+    .bind(tid)
+    .fetch_one(pool)
+    .await
+    .expect("insert mini group")
+}
+
+async fn insert_mini_match(
+    pool: &turnier_db::Pool,
+    tid: i64,
+    mini_group_id: i64,
+    position: i64,
+    teams: (i64, i64),
+    status: &str,
+) -> i64 {
+    sqlx::query_scalar(
+        "INSERT INTO turnier.bracket_matches \
+             (tournament_id, round, position, bracket_type, mini_group_id, team1_id, team2_id, status, on_stream) \
+         VALUES ($1, 1, $2, 'winners', $3, $4, $5, $6, false) RETURNING id",
+    )
+    .bind(tid)
+    .bind(position)
+    .bind(mini_group_id)
+    .bind(teams.0)
+    .bind(teams.1)
+    .bind(status)
+    .fetch_one(pool)
+    .await
+    .expect("insert mini match")
+}
+
+#[tokio::test]
+async fn mini_group_result_leaves_next_round_slot_alone() {
+    let db = temp_db().await;
+    let pool = db.pool().clone();
+    let tid = insert_tournament(&pool, "T", false, false).await;
+    let team1 = insert_team(&pool, tid, "Alpha").await;
+    let team2 = insert_team(&pool, tid, "Beta").await;
+    let team3 = insert_team(&pool, tid, "Gamma").await;
+    let mini_group_id = insert_mini_group(&pool, tid).await;
+    let mini = insert_mini_match(&pool, tid, mini_group_id, 2, (team2, team3), "in_progress").await;
+    let next = insert_bracket_match(&pool, tid, 2, 1, Some(team1), None, "pending").await;
+    let mgr = manager_without_services(pool.clone());
+
+    let params = ApplyBracketParams {
+        winner_id: Some(team2),
+        ..ApplyBracketParams::automatic()
+    };
+    mgr.apply_bracket_match_result(tid, mini, params)
+        .await
+        .expect("mini result");
+
+    assert_eq!(
+        match_state(&pool, next).await,
+        (Some(team1), None, None, "pending".to_string())
+    );
+}
+
+#[tokio::test]
+async fn reset_refuses_mini_group_paths_and_live_follow_ups() {
+    let db = temp_db().await;
+    let pool = db.pool().clone();
+    let tid = insert_tournament(&pool, "T", false, false).await;
+    let team1 = insert_team(&pool, tid, "Alpha").await;
+    let team2 = insert_team(&pool, tid, "Beta").await;
+    let team3 = insert_team(&pool, tid, "Gamma").await;
+    let mini_group_id = insert_mini_group(&pool, tid).await;
+    let mini = insert_mini_match(&pool, tid, mini_group_id, 2, (team2, team3), "completed").await;
+    exec(&pool, SET_WINNER, &[team2, mini]).await;
+    let feeder =
+        insert_bracket_match(&pool, tid, 1, 0, Some(team1), Some(team2), "completed").await;
+    exec(&pool, SET_WINNER, &[team1, feeder]).await;
+    let fed_mini = insert_mini_match(&pool, tid, mini_group_id, 3, (team1, team3), "pending").await;
+    exec(
+        &pool,
+        "UPDATE turnier.bracket_matches SET source_match1_id = $1 WHERE id = $2",
+        &[feeder, fed_mini],
+    )
+    .await;
+    let semi = insert_bracket_match(&pool, tid, 1, 1, Some(team1), Some(team3), "completed").await;
+    exec(&pool, SET_WINNER, &[team3, semi]).await;
+    let finale =
+        insert_bracket_match(&pool, tid, 2, 0, Some(team3), Some(team2), "in_progress").await;
+    exec(
+        &pool,
+        "UPDATE turnier.bracket_matches SET source_match1_id = $1 WHERE id = $2",
+        &[semi, finale],
+    )
+    .await;
+    let mgr = manager_without_services(pool.clone());
+
+    for id in [mini, feeder, semi] {
+        assert!(mgr.reset_bracket_match_result(tid, id).await.is_err());
+        assert_eq!(match_state(&pool, id).await.3, "completed");
+    }
+    let correction = ApplyBracketParams {
+        winner_id: Some(team1),
+        force: true,
+        ..ApplyBracketParams::automatic()
+    };
+    assert!(mgr
+        .apply_bracket_match_result(tid, semi, correction)
+        .await
+        .is_err());
+    assert_eq!(
+        match_state(&pool, finale).await,
+        (Some(team3), Some(team2), None, "in_progress".to_string())
+    );
+
+    exec(
+        &pool,
+        "UPDATE turnier.tournaments SET status = 'completed' WHERE id = $1",
+        &[tid],
+    )
+    .await;
+    exec(
+        &pool,
+        "UPDATE turnier.bracket_matches SET status = 'completed', winner_id = $1 WHERE id = $2",
+        &[team3, finale],
+    )
+    .await;
+    assert!(mgr.reset_bracket_match_result(tid, semi).await.is_err());
+    assert_eq!(match_state(&pool, semi).await.3, "completed");
 }

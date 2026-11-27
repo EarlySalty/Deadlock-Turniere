@@ -40,6 +40,7 @@ const TERMINAL_STATUSES: [&str; 3] = ["completed", "cancelled", "forfeit"];
 /// (`VALID_MANUAL_RESULT_STATUSES`).
 const VALID_MANUAL_RESULT_STATUSES: [&str; 4] =
     ["pending", "checkin", "lobby_created", "in_progress"];
+const RESETTABLE_DOWNSTREAM_STATUSES: [&str; 4] = ["pending", "completed", "cancelled", "forfeit"];
 
 /// Ergebnis von [`MatchManager::apply_bracket_match_result`] /
 /// [`MatchManager::apply_group_match_result`] (Wire-Form analog zum Python-Dict).
@@ -204,6 +205,8 @@ impl MatchManager {
             && match_row.winner_id.is_some()
             && match_row.winner_id != Some(winner_id_value)
         {
+            self.ensure_downstream_resettable(tournament_id, match_row.id)
+                .await?;
             self.reset_bracket_downstream(tournament_id, match_row.id)
                 .await?;
         }
@@ -451,21 +454,30 @@ impl MatchManager {
         tournament_id: i64,
         match_id: i64,
     ) -> MatchResult<()> {
-        let status: Option<String> = sqlx::query_scalar(
-            "SELECT status FROM turnier.bracket_matches WHERE id = $1 AND tournament_id = $2",
+        let row: Option<(String, String)> = sqlx::query_as(
+            "SELECT m.status, t.status FROM turnier.bracket_matches m \
+             JOIN turnier.tournaments t ON t.id = m.tournament_id \
+             WHERE m.id = $1 AND m.tournament_id = $2",
         )
         .bind(match_id)
         .bind(tournament_id)
         .fetch_optional(&self.pool)
         .await?;
-        let status = status.ok_or_else(|| {
+        let (status, tournament_status) = row.ok_or_else(|| {
             MatchError::not_found(format!("Bracket-Match {match_id} nicht gefunden"))
         })?;
+        if tournament_status != "bracket" {
+            return Err(MatchError::state(
+                "Ergebnisse können nur während der laufenden K.-o.-Phase zurückgesetzt werden",
+            ));
+        }
         if status != "completed" {
             return Err(MatchError::state(
                 "Nur abgeschlossene Bracket-Matches können mit Ergebnis zurückgesetzt werden",
             ));
         }
+        self.ensure_downstream_resettable(tournament_id, match_id)
+            .await?;
         self.reset_bracket_downstream(tournament_id, match_id)
             .await?;
         let mut tx = self.pool.begin().await.map_err(turnier_db::DbError::from)?;
@@ -484,8 +496,45 @@ impl MatchManager {
             .bind(match_id)
             .execute(&mut *tx)
             .await?;
+        sqlx::query("DELETE FROM turnier.match_games WHERE bracket_match_id = $1")
+            .bind(match_id)
+            .execute(&mut *tx)
+            .await?;
         tx.commit().await.map_err(turnier_db::DbError::from)?;
         Ok(())
+    }
+
+    fn ensure_downstream_resettable<'a>(
+        &'a self,
+        tournament_id: i64,
+        match_id: i64,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = MatchResult<()>> + Send + 'a>> {
+        Box::pin(async move {
+            let links = load_downstream_links(&self.pool, match_id).await?;
+            if links.mini_group_id.is_some() {
+                return Err(MatchError::state(
+                    "Matches einer Mini-Gruppe können nicht nachträglich zurückgesetzt oder umgewertet werden",
+                ));
+            }
+            for target in
+                load_downstream_targets(&self.pool, tournament_id, match_id, &links).await?
+            {
+                if target.mini_group_id.is_some() {
+                    return Err(MatchError::state(
+                        "Dieses Match führt in eine Mini-Gruppe und kann nicht nachträglich zurückgesetzt oder umgewertet werden",
+                    ));
+                }
+                if !RESETTABLE_DOWNSTREAM_STATUSES.contains(&target.status.as_str()) {
+                    return Err(MatchError::state(format!(
+                        "Das Folgematch {} läuft bereits. Setze zuerst dieses Match zurück.",
+                        target.id
+                    )));
+                }
+                self.ensure_downstream_resettable(tournament_id, target.id)
+                    .await?;
+            }
+            Ok(())
+        })
     }
 
     fn reset_bracket_downstream<'a>(
@@ -554,6 +603,10 @@ impl MatchManager {
         .execute(&self.pool)
         .await?;
         sqlx::query("DELETE FROM turnier.match_results WHERE bracket_match_id = $1")
+            .bind(follow_up)
+            .execute(&self.pool)
+            .await?;
+        sqlx::query("DELETE FROM turnier.match_games WHERE bracket_match_id = $1")
             .bind(follow_up)
             .execute(&self.pool)
             .await?;
@@ -679,7 +732,6 @@ async fn ensure_group_result_still_wanted(
     Ok(())
 }
 
-/// Verkettetes Folge-Match (Snapshot für den Downstream-Reset).
 #[derive(Debug, Clone, sqlx::FromRow)]
 struct NextBracketMatch {
     id: i64,
@@ -693,6 +745,7 @@ struct MatchSnapshot {
     round: i64,
     position: i64,
     bracket_type: String,
+    mini_group_id: Option<i64>,
     team1_id: Option<i64>,
     team2_id: Option<i64>,
     loser_to_match_id: Option<i64>,
@@ -707,7 +760,7 @@ async fn advance_bracket_winner_pg(
 ) -> MatchResult<()> {
     let mut tx = pool.begin().await.map_err(turnier_db::DbError::from)?;
     let snapshot: Option<MatchSnapshot> = sqlx::query_as::<_, MatchSnapshot>(
-        "SELECT id, round, position, bracket_type, team1_id, team2_id, \
+        "SELECT id, round, position, bracket_type, mini_group_id, team1_id, team2_id, \
                 loser_to_match_id, loser_to_slot \
          FROM turnier.bracket_matches WHERE id = $1",
     )
@@ -859,12 +912,13 @@ async fn advance_in_tx_pg(
         return Ok(());
     }
 
-    if m.bracket_type != "winners" {
+    if m.bracket_type != "winners" || m.mini_group_id.is_some() {
         return Ok(());
     }
     let legacy: Option<(i64,)> = sqlx::query_as(
         "SELECT id FROM turnier.bracket_matches \
-         WHERE tournament_id = $1 AND round = $2 AND position = $3",
+         WHERE tournament_id = $1 AND round = $2 AND position = $3 AND bracket_type = 'winners' AND mini_group_id IS NULL \
+         AND source_mini_group1_id IS NULL AND source_mini_group2_id IS NULL",
     )
     .bind(tournament_id)
     .bind(m.round + 1)
@@ -991,6 +1045,7 @@ struct DownstreamLinks {
     round: i64,
     position: i64,
     bracket_type: String,
+    mini_group_id: Option<i64>,
     loser_to_match_id: Option<i64>,
     loser_to_slot: Option<i64>,
 }
@@ -1000,7 +1055,7 @@ async fn load_downstream_links(
     match_id: i64,
 ) -> MatchResult<DownstreamLinks> {
     let links: Option<DownstreamLinks> = sqlx::query_as::<_, DownstreamLinks>(
-        "SELECT round, position, bracket_type, loser_to_match_id, loser_to_slot \
+        "SELECT round, position, bracket_type, mini_group_id, loser_to_match_id, loser_to_slot \
          FROM turnier.bracket_matches WHERE id = $1",
     )
     .bind(match_id)
@@ -1032,6 +1087,10 @@ async fn clear_bracket_slot(
         .bind(match_id)
         .execute(pool)
         .await?;
+    sqlx::query("DELETE FROM turnier.match_games WHERE bracket_match_id = $1")
+        .bind(match_id)
+        .execute(pool)
+        .await?;
     Ok(())
 }
 
@@ -1051,12 +1110,14 @@ async fn load_next_bracket_match(
     .bind(match_id)
     .fetch_optional(pool)
     .await?;
-    if by_source.is_some() || links.bracket_type != "winners" {
+    if by_source.is_some() || links.bracket_type != "winners" || links.mini_group_id.is_some() {
         return Ok(by_source);
     }
     let legacy: Option<NextBracketMatch> = sqlx::query_as::<_, NextBracketMatch>(
         "SELECT id, source_match1_id, source_match2_id \
-         FROM turnier.bracket_matches WHERE tournament_id = $1 AND round = $2 AND position = $3 LIMIT 1",
+         FROM turnier.bracket_matches WHERE tournament_id = $1 AND round = $2 AND position = $3 \
+         AND bracket_type = 'winners' AND mini_group_id IS NULL \
+         AND source_mini_group1_id IS NULL AND source_mini_group2_id IS NULL LIMIT 1",
     )
     .bind(tournament_id)
     .bind(links.round + 1)
@@ -1066,9 +1127,62 @@ async fn load_next_bracket_match(
     Ok(legacy)
 }
 
-/// Bestimmt, ob der zurückzusetzende Slot `team1_id` ist. Portiert
-/// `_resolve_next_slot` (source_match1 → team1, source_match2 → team2, sonst über
-/// Position-Parität).
+#[derive(Debug, Clone, sqlx::FromRow)]
+struct DownstreamTarget {
+    id: i64,
+    status: String,
+    mini_group_id: Option<i64>,
+}
+
+async fn load_downstream_targets(
+    pool: &turnier_db::Pool,
+    tournament_id: i64,
+    match_id: i64,
+    links: &DownstreamLinks,
+) -> MatchResult<Vec<DownstreamTarget>> {
+    let mut ids: Vec<i64> = if links.bracket_type == "grand_final" {
+        sqlx::query_scalar(
+            "SELECT id FROM turnier.bracket_matches \
+             WHERE tournament_id = $1 AND bracket_type = 'grand_final' AND id != $2 AND round > $3 \
+             ORDER BY round ASC LIMIT 1",
+        )
+        .bind(tournament_id)
+        .bind(match_id)
+        .bind(links.round)
+        .fetch_all(pool)
+        .await?
+    } else {
+        let followers: Vec<i64> = sqlx::query_scalar(
+            "SELECT id FROM turnier.bracket_matches \
+             WHERE tournament_id = $1 AND (source_match1_id = $2 OR source_match2_id = $2)",
+        )
+        .bind(tournament_id)
+        .bind(match_id)
+        .fetch_all(pool)
+        .await?;
+        if followers.is_empty() {
+            load_next_bracket_match(pool, tournament_id, match_id, links)
+                .await?
+                .map(|next| vec![next.id])
+                .unwrap_or_default()
+        } else {
+            followers
+        }
+    };
+    if links.bracket_type != "grand_final" {
+        ids.extend(links.loser_to_match_id);
+    }
+    let targets: Vec<DownstreamTarget> = sqlx::query_as::<_, DownstreamTarget>(
+        "SELECT id, status, mini_group_id FROM turnier.bracket_matches \
+         WHERE tournament_id = $1 AND id = ANY($2) ORDER BY id",
+    )
+    .bind(tournament_id)
+    .bind(&ids)
+    .fetch_all(pool)
+    .await?;
+    Ok(targets)
+}
+
 fn resolve_next_slot_is_team1(
     match_id: i64,
     position: i64,
