@@ -40,10 +40,12 @@ function describeStage(match: BracketMatchType, allMatches: BracketMatchType[]):
   if (match.bracket_type === 'winners') {
     const winners = allMatches.filter((m) => m.bracket_type === 'winners')
     const maxR = Math.max(...winners.map((m) => m.round))
-    if (match.round === maxR) return 'WB-Finale'
-    if (match.round === maxR - 1) return 'WB-Halbfinale'
-    if (match.round === maxR - 2) return 'WB-Viertelfinale'
-    return `WB R${match.round}`
+    const doubleElimination = allMatches.some((m) => m.bracket_type !== 'winners')
+    const prefix = doubleElimination ? 'WB-' : ''
+    if (match.round === maxR) return `${prefix}Finale`
+    if (match.round === maxR - 1) return `${prefix}Halbfinale`
+    if (match.round === maxR - 2) return `${prefix}Viertelfinale`
+    return doubleElimination ? `WB R${match.round}` : `Runde ${match.round}`
   }
   if (match.bracket_type === 'losers') {
     const losers = allMatches.filter((m) => m.bracket_type === 'losers')

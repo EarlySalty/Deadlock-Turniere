@@ -125,6 +125,20 @@ function getSortTime(value: string | null, fallback: number): number {
   return Number.isNaN(parsed) ? Number.MAX_SAFE_INTEGER - fallback : parsed
 }
 
+function tournamentChampion(tournament: TournamentDetailPublic): string | null {
+  if (!['completed', 'archived'].includes(tournament.status)) return null
+  if (isLeague(tournament.tournament_mode)) {
+    const leader = tournament.groups[0]?.teams[0]
+    return leader ? leader.team_name : null
+  }
+  const decided = tournament.bracket_matches.filter((m) => isCompletedMatch(m.status) && m.winner_id !== null)
+  const grandFinals = decided.filter((m) => m.bracket_type === 'grand_final')
+  const pool = grandFinals.length > 0 ? grandFinals : decided.filter((m) => m.bracket_type === 'winners')
+  if (pool.length === 0) return null
+  const last = pool.reduce((best, m) => (m.round > best.round || (m.round === best.round && m.position > best.position) ? m : best))
+  return getTeamName(last.winner_id, tournament.teams)
+}
+
 function isCompletedMatch(status: string): boolean {
   return status === 'completed' || status === 'forfeit'
 }
@@ -183,7 +197,8 @@ function buildBracketResultEntries(matches: BracketMatch[], teams: TeamPublic[])
     })
 }
 
-function recruitingLabel(status: string) {
+function recruitingLabel(status: string, full: boolean) {
+  if (full) return { text: 'Voll', color: 'text-muted bg-border/30 border-border' }
   if (status === 'application') return { text: 'Bewerbung', color: 'text-amber-400 bg-amber-500/15 border-amber-500/30' }
   if (status === 'closed') return { text: 'Geschlossen', color: 'text-muted bg-border/30 border-border' }
   return { text: 'Offen', color: 'text-green-400 bg-green-500/15 border-green-500/30' }
@@ -266,6 +281,7 @@ export default function Tournament() {
   const isRegistration = tournament.status === 'registration'
   const soloSignups = tournament.signups.filter((signup) => signup.team_id === null)
   const tournamentStart = plannedTournamentStart(tournament)
+  const champion = tournamentChampion(tournament)
   const isSignupOpen = tournament.registration_open
   const isCheckinPhase = tournament.status === 'checkin'
   const soloOnly = tournament.invite_mode === 'solo_only'
@@ -275,7 +291,6 @@ export default function Tournament() {
     tournament.signups.filter((signup) => signup.team_id === null).length,
   )
 
-  // User state from status endpoint (no discord_id scanning needed)
   const userTeam = myStatus?.team_id != null
     ? tournament.teams.find((t) => t.id === myStatus.team_id) ?? null
     : null
@@ -427,6 +442,12 @@ export default function Tournament() {
           <h1 className="text-4xl md:text-5xl font-bold text-foreground font-display tracking-tight">{tournament.name}</h1>
           {tournament.description && (
             <p className="text-muted italic max-w-3xl leading-relaxed">{tournament.description}</p>
+          )}
+          {champion && (
+            <p className="flex items-center gap-2 text-lg font-bold text-primary">
+              <Trophy size={18} className="shrink-0" />
+              Turniersieger: {champion}
+            </p>
           )}
 
           <div className="flex flex-wrap items-center gap-x-8 gap-y-3 pt-4">
@@ -604,6 +625,14 @@ export default function Tournament() {
                         <p className="text-[10px] uppercase font-bold text-muted tracking-widest">Anmeldung ab</p>
                         <p className="text-lg font-bold text-foreground">
                           {new Date(tournament.registration_start).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                        </p>
+                      </div>
+                    )}
+                    {tournament.checkin_start && (
+                      <div className="space-y-2">
+                        <p className="text-[10px] uppercase font-bold text-muted tracking-widest">Check-in ab</p>
+                        <p className="text-lg font-bold text-foreground">
+                          {new Date(tournament.checkin_start).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
                         </p>
                       </div>
                     )}
@@ -850,7 +879,8 @@ export default function Tournament() {
 
                 <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
                   {tournament.teams.map((team) => {
-                    const recruiting = recruitingLabel(team.recruitment_status)
+                    const teamFull = tournament.team_size > 0 && team.members.length >= tournament.team_size
+                    const recruiting = recruitingLabel(team.recruitment_status, teamFull)
                     const isMyTeam = userTeam?.id === team.id
                     return (
                       <Card key={team.id} className={`p-5 transition-all group ${isMyTeam ? 'border-primary/50' : 'hover:border-white/20'}`}>
@@ -893,7 +923,7 @@ export default function Tournament() {
                             )}
                           </ul>
 
-                          {!isMyTeam && isSignupOpen && !soloOnly && (
+                          {!isMyTeam && isSignupOpen && !soloOnly && !teamFull && (
                             <div className="pt-2">
                                {team.recruitment_status === 'open' ? (
                                  <Button variant="secondary" size="sm" className="w-full" disabled={isMutating} onClick={() => handleJoinTeam(team)}>
