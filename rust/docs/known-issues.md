@@ -278,10 +278,12 @@ kürzt den Basisnamen für das Suffix auf 32 Zeichen.
 blind (+3 Sieger), kein Unentschieden, bei Doppelaufruf doppelt; `force` wird für
 Group ignoriert (Bracket delegiert, Group inline). 1:1 erhalten.
 
-### KI-W07 [erhalten]: Auto-Modus aus `team_size` statt Teamanzahl
-`admin_routes.py:835`: `create_tournament` ruft `determine_tournament_mode` mit
-`team_size` (Spieler/Team) als Teamanzahl; der ≥16-Schwellwert ist faktisch
-wirkungslos. 1:1 erhalten.
+### KI-W07 [gefixt]: Auto-Modus aus `team_size` statt Teamanzahl
+`admin_routes.py:835`: `create_tournament` rief `determine_tournament_mode` mit
+`team_size` (Spieler/Team) als Teamanzahl; der ≥16-Schwellwert war faktisch
+wirkungslos. Jetzt setzt das Anlegen `tournament_mode_auto` (vorläufig `bracket_only`), und der
+Check-in-Abschluss entscheidet anhand der finalen Teamanzahl
+(`resolve_tournament_mode`, Tests in `turnier-scheduler/tests/auto_mode.rs`).
 
 ### KI-W08 [erhalten]: Match-Caster-Routen sind 410-Gone-Stubs
 `admin_routes.py:2982`: Die Match-Ebene-Caster-Routen (POST/DELETE) antworten

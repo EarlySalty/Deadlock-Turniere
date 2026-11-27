@@ -182,19 +182,35 @@ async fn auto_mode_counts_teams_formed_from_the_pool() {
 async fn auto_mode_in_solo_pug_uses_the_finished_teams() {
     let db = temp_db().await;
     let pool = db.pool().clone();
-    let id = auto_tournament_with_teams(&pool, 16).await;
+    let id = auto_tournament_with_teams(&pool, 12).await;
     sqlx::query("UPDATE turnier.tournaments SET invite_mode = 'solo_only' WHERE id = $1")
         .bind(id)
         .execute(&pool)
         .await
         .expect("solo only");
+    for player in 0..8_i64 {
+        insert_signup(&pool, id, 123_456_789_012_349_000 + player).await;
+    }
+    check_in_members(&pool, id).await;
+    sqlx::query(
+        "INSERT INTO turnier.tournament_checkins (tournament_id, discord_id, checked_in_at) \
+         SELECT tournament_id, discord_id, now() FROM turnier.tournament_signups \
+         WHERE tournament_id = $1 ON CONFLICT DO NOTHING",
+    )
+    .bind(id)
+    .execute(&pool)
+    .await
+    .expect("check in pool players");
 
     let result = finalize_checkin_and_advance(&pool, id)
         .await
         .expect("finalize");
 
-    assert_eq!(result.tournament_mode, TournamentMode::GroupStage);
-    assert_eq!(tournament_status(&pool, id).await, "group_phase");
+    assert_eq!(result.final_team_count, 12);
+    assert_eq!(result.tournament_mode, TournamentMode::BracketOnly);
+    assert_eq!(tournament_status(&pool, id).await, "bracket");
+    assert_eq!(stored_mode(&pool, id).await, ("bracket_only".into(), true));
+    assert_eq!(group_count(&pool, id).await, 0);
 }
 
 #[tokio::test]
