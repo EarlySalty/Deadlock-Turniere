@@ -16,7 +16,7 @@
 use std::collections::HashMap;
 
 use sqlx::{Pool, Postgres, Transaction};
-use turnier_core::now_utc;
+use turnier_core::{now_utc, TournamentMode};
 
 use crate::error::TournamentResult;
 use crate::league::{league_table, LeagueGame};
@@ -185,7 +185,7 @@ pub async fn recalculate_player_points_in_tx(
     // Alle gewerteten Turniere: abgeschlossen UND nicht von der Rangliste
     // ausgeschlossen (der Original-Caller filtert exclude_from_leaderboard vor
     // dem Recalc; hier zentral).
-    let tournaments: Vec<(i64, String)> = sqlx::query_as(
+    let tournaments: Vec<(i64, TournamentMode)> = sqlx::query_as(
         "SELECT id, tournament_mode FROM turnier.tournaments \
          WHERE status = 'completed' AND exclude_from_leaderboard = false \
          ORDER BY id",
@@ -196,7 +196,7 @@ pub async fn recalculate_player_points_in_tx(
     let mut aggregates: HashMap<i64, PlayerAggregate> = HashMap::new();
 
     for (tid, mode) in &tournaments {
-        let results = if mode == "league" {
+        let results = if *mode == TournamentMode::League {
             league_results(tx, *tid).await?
         } else {
             bracket_results(tx, *tid).await?

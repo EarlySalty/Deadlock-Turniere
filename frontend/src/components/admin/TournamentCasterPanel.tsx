@@ -78,7 +78,7 @@ export default function TournamentCasterPanel({
               </option>
               {remainingCasters.map((caster) => (
                 <option key={caster.discord_id} value={caster.discord_id}>
-                  {playerName(caster.display_name)}
+                  {playerName(caster.display_name, caster.discord_id)}
                 </option>
               ))}
             </select>
@@ -121,7 +121,7 @@ export default function TournamentCasterPanel({
                 className="flex items-center gap-2 rounded-full border border-border bg-background/40 px-3 py-1.5 text-xs text-foreground"
               >
                 <Mic2 size={12} className="text-primary" />
-                <span>{playerName(caster.display_name)}</span>
+                <span>{playerName(caster.display_name, caster.discord_id)}</span>
                 {!readOnly && (
                   <button
                     type="button"
@@ -130,7 +130,7 @@ export default function TournamentCasterPanel({
                     onClick={() =>
                       removeCaster.mutate({ tournamentId, discordId: caster.discord_id })
                     }
-                    aria-label={`Caster ${playerName(caster.display_name)} entfernen`}
+                    aria-label={`Caster ${playerName(caster.display_name, caster.discord_id)} entfernen`}
                   >
                     <X size={12} />
                   </button>

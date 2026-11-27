@@ -1011,14 +1011,27 @@ pub async fn ensure_guest_name_free(
     if !turnier_core::is_guest_participant(participant_id) {
         return Ok(());
     }
-    ensure_participant_name_free(
-        tx,
-        tournament_id,
-        name.unwrap_or(""),
-        participant_id,
-        GUEST_NAME_TAKEN,
-    )
-    .await
+    let key = participant_name_key(name.unwrap_or(""));
+    let names = participant_names(&mut **tx, tournament_id).await?;
+    if holds_name(&names, participant_id, &key) {
+        return Ok(());
+    }
+    if name_taken_by_other(&names, participant_id, &key) {
+        return Err(WebError::conflict(GUEST_NAME_TAKEN));
+    }
+    Ok(())
+}
+
+fn holds_name(names: &[(i64, String)], participant_id: i64, key: &str) -> bool {
+    names
+        .iter()
+        .any(|(id, name)| *id == participant_id && participant_name_key(name) == key)
+}
+
+fn name_taken_by_other(names: &[(i64, String)], own_id: i64, key: &str) -> bool {
+    names
+        .iter()
+        .any(|(id, name)| *id != own_id && participant_name_key(name) == key)
 }
 
 pub async fn lock_tournament_status(
@@ -1079,10 +1092,7 @@ pub async fn ensure_participant_name_free(
 ) -> WebResult<()> {
     let key = participant_name_key(name);
     let names = participant_names(&mut **tx, tournament_id).await?;
-    let taken = names
-        .iter()
-        .any(|(discord_id, other)| *discord_id != own_id && participant_name_key(other) == key);
-    if taken {
+    if name_taken_by_other(&names, own_id, &key) {
         return Err(WebError::conflict(taken_message));
     }
     Ok(())
@@ -1629,7 +1639,17 @@ pub fn parse_recruitment_status(raw: &str) -> WebResult<RecruitmentStatus> {
 
 #[cfg(test)]
 mod tests {
-    use super::duplicate_name_ids;
+    use super::{duplicate_name_ids, holds_name, name_taken_by_other, participant_name_key};
+
+    #[test]
+    fn registered_guest_keeps_name_after_same_named_discord_signup() {
+        let names = vec![(-5, "Alex".to_string()), (42, "alex ".to_string())];
+        let key = participant_name_key("Alex");
+        assert!(holds_name(&names, -5, &key));
+        assert!(name_taken_by_other(&names, -5, &key));
+        assert!(!holds_name(&names, -6, &key));
+        assert!(!holds_name(&names, -5, &participant_name_key("Bob")));
+    }
 
     #[test]
     fn duplicate_name_ids_trim_unicode_space_and_fold_case() {

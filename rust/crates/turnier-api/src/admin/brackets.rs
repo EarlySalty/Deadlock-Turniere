@@ -8,6 +8,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use sqlx::Row;
+use turnier_core::TournamentMode;
 use turnier_engine::league::DEFAULT_SLOT_MINUTES;
 use turnier_engine::{
     generate_bracket_in_tx, generate_group_matches_in_tx, generate_groups_in_tx,
@@ -38,8 +39,8 @@ async fn locked_tournament_is_league(
     tournament_id: i64,
 ) -> WebResult<bool> {
     let row = crate::public::helpers::lock_tournament_row(tx, tournament_id).await?;
-    let mode: String = row.try_get("tournament_mode")?;
-    Ok(mode == "league")
+    let mode: TournamentMode = row.try_get("tournament_mode")?;
+    Ok(mode == TournamentMode::League)
 }
 
 /// Body von `groups/generate` (`num_groups` optional).

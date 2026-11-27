@@ -192,7 +192,7 @@ export default function ArchivedTournamentView({ tournament, onUseAsTemplate }: 
                         {m.role === 'captain' && (
                           <span className="mr-1 text-amber-400">★</span>
                         )}
-                        {playerName(m.discord_name)}
+                        {playerName(m.discord_name, m.discord_id)}
                       </span>
                       <span className="text-xs">{m.rank ?? '-'}</span>
                     </li>
