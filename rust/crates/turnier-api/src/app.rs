@@ -17,7 +17,7 @@ use crate::error::WebError;
 use crate::extract::AuthUser;
 use crate::state::AppState;
 use crate::{
-    account, admin, auth, consent, draft, internal_automatik, internal_scrims, leaderboard,
+    account, admin, auth, consent, draft, internal_automatik, internal_scrims, leaderboard, mcp,
     observer, operations, public, test_mode,
 };
 
@@ -40,6 +40,7 @@ pub fn build_router(state: AppState) -> Router {
         .merge(observer::router())
         .merge(internal_automatik::router())
         .merge(internal_scrims::router())
+        .merge(mcp::router())
         .merge(crate::hud::router())
         .merge(test_mode::router(&state.config))
         .layer(axum::middleware::from_fn_with_state(
