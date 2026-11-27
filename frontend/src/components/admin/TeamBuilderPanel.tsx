@@ -135,12 +135,12 @@ function PlayerChip({ player, selected, onSelect, compact = false }: PlayerChipP
           : 'border-border bg-background/60 hover:border-border-hover hover:bg-card-hover'
       }`}
     >
-      <span className="min-w-0">
+      <span className="min-w-0 flex-1">
         <span className="flex min-w-0 items-center">
-          <span className="truncate font-medium text-foreground">{player.name}</span>
+          <span className="min-w-0 break-words font-medium text-foreground">{player.name}</span>
           <ParticipantMarks discordId={player.discordId} />
         </span>
-        <span className="block truncate text-xs text-muted">
+        <span className="block break-words text-xs text-muted">
           {player.rank ?? 'Ohne Rang'}
           {compact ? '' : ` · ${formatSignupTime(player.signedUpAt)}`}
         </span>
@@ -262,7 +262,7 @@ function MemberSlot({
 }: Pick<TeamCardProps, 'team' | 'onSelect' | 'onPlace' | 'onCaptain'> & { player: BuilderPlayer; selected: boolean }) {
   const isCaptain = team.captainId === player.discordId
   return (
-    <li className="flex items-center gap-1">
+    <li className="flex min-w-0 items-center gap-1 rounded-lg bg-background/35 p-1">
       <button
         type="button"
         onClick={() => onCaptain(team.key, player.discordId)}
@@ -296,11 +296,12 @@ function TeamCard(props: TeamCardProps) {
   const handlers = dropHandlers(free > 0, (id) => onPlace(id, team.key))
 
   return (
-    <div {...handlers} className="space-y-3 rounded-xl border border-border bg-card/60 p-3">
+    <div {...handlers} className="min-w-0 space-y-3 rounded-xl border border-border bg-card/70 p-4 shadow-sm">
       <TeamHeader {...props} />
-      <p className="text-xs text-muted">
-        {team.members.length}/{teamSize} Plätze belegt
-      </p>
+      <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted">
+        <span>{team.members.length}/{teamSize} Spieler</span>
+        <span>{free === 0 ? 'Vollständig' : `${pluralize(free, 'Platz', 'Plätze')} frei`}</span>
+      </div>
       <ul className="space-y-1.5">
         {team.members.map((player) => (
           <MemberSlot
@@ -313,8 +314,8 @@ function TeamCard(props: TeamCardProps) {
             onCaptain={props.onCaptain}
           />
         ))}
-        {Array.from({ length: free }, (_, index) => (
-          <li key={`free-${index}`}>
+        {free > 0 && (
+          <li>
             <button
               type="button"
               disabled={!selectedOutside}
@@ -325,10 +326,10 @@ function TeamCard(props: TeamCardProps) {
                   : 'border-border text-muted'
               }`}
             >
-              {selectedOutside ? 'Hier einsetzen' : 'Freier Platz'}
+              {selectedOutside ? 'Ausgewählten Spieler hier einsetzen' : pluralize(free, 'freier Platz', 'freie Plätze')}
             </button>
           </li>
-        ))}
+        )}
       </ul>
     </div>
   )
@@ -388,10 +389,10 @@ function PoolColumn({ pool, selectedId, removing, canAddPlayers, onSelect, onPla
   const handlers = dropHandlers(true, (id) => onPlace(id, null))
 
   return (
-    <div {...handlers} className="space-y-3 rounded-xl border border-border bg-background/40 p-3">
-      <div className="flex items-baseline justify-between gap-2">
-        <h4 className="font-semibold text-foreground">Ohne Team</h4>
-        <span className="text-xs text-muted">{pool.length} Spieler</span>
+    <div {...handlers} className="space-y-3 rounded-xl border border-border bg-background/40 p-4">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <h4 className="font-semibold text-foreground">Solo-Spieler ohne Team</h4>
+        <span className="text-xs text-muted">{pool.length} noch nicht zugeteilt</span>
       </div>
       <input
         type="search"
@@ -413,7 +414,7 @@ function PoolColumn({ pool, selectedId, removing, canAddPlayers, onSelect, onPla
           {pool.length === 0 ? 'Alle Solo-Anmeldungen sind einem Team zugeteilt.' : 'Kein Treffer.'}
         </p>
       ) : (
-        <ul className="max-h-[32rem] space-y-1.5 overflow-y-auto pr-1">
+        <ul className="grid max-h-[28rem] grid-cols-1 gap-2 overflow-y-auto pr-1 sm:grid-cols-2 xl:grid-cols-3">
           {visible.map((player) => (
             <li key={player.discordId} className="flex items-center gap-1">
               <div className="min-w-0 flex-1">
@@ -625,8 +626,8 @@ export default function TeamBuilderPanel({ tournamentId, teamSize, teams, signup
         <div>
           <h2 className="text-lg font-semibold text-foreground">Teams von Hand bilden</h2>
           <p className="mt-1 text-sm text-muted">
-            Spieler aus der Liste auf einen freien Platz ziehen. Ohne Maus: Spieler antippen, dann den Platz.
-            Der Stern macht jemanden zum Captain. Erst „Speichern“ überträgt alles.
+            Oben sind alle Teams mit ihren Spielern. Solo-Spieler stehen darunter und können per Drag-and-drop
+            oder durch Antippen und Einsetzen zugeteilt werden. Der Stern bestimmt den Captain. Erst „Speichern“ übernimmt Änderungen.
           </p>
         </div>
       </div>
@@ -648,23 +649,17 @@ export default function TeamBuilderPanel({ tournamentId, teamSize, teams, signup
       <fieldset disabled={saving} className="min-w-0 space-y-4">
         <NewTeamForm teams={view.teams} onCreate={createTeam} />
 
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-[minmax(0,17rem)_minmax(0,1fr)]">
-          <PoolColumn
-            pool={view.pool}
-            selectedId={selectedId}
-            removing={deleteSignup.isPending}
-            canAddPlayers={canAddPlayers}
-            onSelect={select}
-            onPlace={place}
-            onRemove={removePlayer}
-            onAdd={addPlayer}
-          />
+        <section aria-label="Teams" className="space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h3 className="text-base font-semibold text-foreground">Teams und Mitglieder</h3>
+            <span className="text-xs text-muted">{pluralize(view.teams.length, 'Team', 'Teams')} · {view.teams.reduce((sum, team) => sum + team.members.length, 0)} Spieler zugeteilt</span>
+          </div>
           {view.teams.length === 0 ? (
             <p className="rounded-xl border border-dashed border-border p-4 text-sm text-muted">
-              Noch kein Team. Lege oben eins an.
+              Noch kein Team vorhanden. Lege oben ein Team an und weise anschließend Solo-Spieler zu.
             </p>
           ) : (
-            <div className="grid content-start gap-3 grid-cols-[repeat(auto-fill,minmax(15rem,1fr))]">
+            <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
               {view.teams.map((team) => (
                 <TeamCard
                   key={team.key}
@@ -681,7 +676,19 @@ export default function TeamBuilderPanel({ tournamentId, teamSize, teams, signup
               ))}
             </div>
           )}
-        </div>
+        </section>
+        <section aria-label="Solo-Spieler" className="space-y-2 border-t border-border pt-4">
+          <PoolColumn
+            pool={view.pool}
+            selectedId={selectedId}
+            removing={deleteSignup.isPending}
+            canAddPlayers={canAddPlayers}
+            onSelect={select}
+            onPlace={place}
+            onRemove={removePlayer}
+            onAdd={addPlayer}
+          />
+        </section>
       </fieldset>
 
       {notice && (

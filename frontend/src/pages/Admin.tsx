@@ -14,6 +14,7 @@ import TournamentManager from '@/components/admin/TournamentManager'
 import ParticipantManager from '@/components/admin/ParticipantManager'
 import TeamBuilderPanel from '@/components/admin/TeamBuilderPanel'
 import { ParticipantMarksContext } from '@/components/admin/participantMarksContext'
+import AdminWorkflowPanel from '@/components/admin/AdminWorkflowPanel'
 import {
   CollapsedTournamentRow,
   TournamentSidebar,
@@ -69,7 +70,7 @@ const MODE_TABS: { key: AdminMode; label: string; icon: typeof Trophy }[] = [
 ]
 
 export default function Admin() {
-  const { data: tournaments, isLoading } = useAdminTournaments()
+  const { data: tournaments, isLoading, isError: tournamentsError, refetch: refetchTournaments } = useAdminTournaments()
   const [adminMode, setAdminMode] = useState<AdminMode>('live')
   const [selectedLiveId, setSelectedLiveId] = useState<number | null>(null)
   const [selectedArchiveId, setSelectedArchiveId] = useState<number | null>(null)
@@ -146,6 +147,17 @@ export default function Admin() {
   }, [liveDetail, hasGroups, hasBracket])
 
   if (isLoading) return <LoadingSpinner />
+  if (tournamentsError && !tournaments) {
+    return (
+      <Card className="space-y-4 p-6">
+        <h1 className="text-lg font-semibold text-foreground">Turnier-Verwaltung nicht erreichbar</h1>
+        <p className="text-sm text-muted">Die Turnierliste konnte nicht geladen werden. Bitte die Verbindung prüfen und erneut versuchen.</p>
+        <Button variant="secondary" size="sm" onClick={() => void refetchTournaments()}>
+          Erneut laden
+        </Button>
+      </Card>
+    )
+  }
 
   const teamCount = liveDetail?.teams.length ?? 0
   const playerCount =
@@ -246,8 +258,8 @@ export default function Admin() {
       </div>
 
       {adminMode === 'live' && (
-        <div className="grid gap-6 lg:grid-cols-[280px_1fr]">
-          <aside className="lg:sticky lg:top-20 lg:self-start lg:max-h-[calc(100vh-6rem)] lg:overflow-y-auto">
+        <div className="grid min-w-0 gap-6 xl:grid-cols-[260px_minmax(0,1fr)]">
+          <aside className="xl:sticky xl:top-20 xl:self-start xl:max-h-[calc(100vh-6rem)] xl:overflow-y-auto">
             <TournamentSidebar
               tournaments={liveTournaments}
               selectedId={liveSelectedId}
@@ -280,17 +292,22 @@ export default function Admin() {
             ) : liveDetail && activePhase ? (
               <>
                 {selectedSummary && <TournamentSummaryCard tournament={selectedSummary} />}
-                <div className="grid gap-5 lg:grid-cols-[170px_1fr]">
-                  <AdminPhaseNav
-                    status={liveDetail.status}
-                    hasGroups={hasGroups}
-                    hasBracket={hasBracket}
-                    league={liveLeague}
-                    activePhase={activePhase}
-                    onChange={setActivePhase}
-                  />
+                <AdminWorkflowPanel
+                  tournament={liveDetail}
+                  hasGroups={hasGroups}
+                  hasBracket={hasBracket}
+                  onNavigate={setActivePhase}
+                />
+                <AdminPhaseNav
+                  status={liveDetail.status}
+                  hasGroups={hasGroups}
+                  hasBracket={hasBracket}
+                  league={liveLeague}
+                  activePhase={activePhase}
+                  onChange={setActivePhase}
+                />
 
-                  <div className="min-w-0 space-y-5">
+                <div className="min-w-0 space-y-5">
                     {(liveDetail.status === 'group_phase' ||
                       liveDetail.status === 'bracket') && (
                       <Leitstand tournamentId={liveDetail.id} />
@@ -320,7 +337,25 @@ export default function Admin() {
                       </ParticipantMarksContext.Provider>
                     )}
 
-                    {activePhase === 'participants' && canManageParticipants && (
+                    {activePhase === 'participants' && canManageParticipants && liveDetail.team_size > 1 && (
+                      <details className="min-w-0 rounded-xl border border-border bg-card/40">
+                        <summary className="cursor-pointer px-4 py-3 text-sm font-medium text-foreground hover:text-primary">
+                          Weitere Teamaktionen (Solo-Balance, Anmeldungen, Löschen, Recruiting, Ersatzspieler)
+                        </summary>
+                        <div className="min-w-0 border-t border-border p-3 sm:p-4">
+                          <ParticipantManager
+                            tournamentId={liveDetail.id}
+                            replacementsOpen={liveDetail.replacements_open}
+                            teamSize={liveDetail.team_size}
+                            teams={liveDetail.teams}
+                            signups={liveDetail.signups}
+                            soloOnly={liveDetail.invite_mode === 'solo_only'}
+                          />
+                        </div>
+                      </details>
+                    )}
+
+                    {activePhase === 'participants' && canManageParticipants && liveDetail.team_size <= 1 && (
                       <ParticipantManager
                         tournamentId={liveDetail.id}
                         replacementsOpen={liveDetail.replacements_open}
@@ -455,7 +490,6 @@ export default function Admin() {
                         )}
                       </section>
                     )}
-                  </div>
                 </div>
                 {otherLiveTournaments.length > 0 && (
                   <section className="space-y-2">

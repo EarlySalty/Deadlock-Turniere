@@ -96,6 +96,7 @@ export default function TournamentManager({
   const [gameRules, setGameRules] = useState(initial.gameRules)
   const [customJsonError, setCustomJsonError] = useState('')
   const [setupTab, setSetupTab] = useState<SetupTab>(() => lastSetupTab.get(tournament.id) ?? 'settings')
+  const [settingsOpen, setSettingsOpen] = useState(false)
   const [successMessage, setSuccessMessage] = useState('')
   const [deleteConfirmationId, setDeleteConfirmationId] = useState<number | null>(null)
   const deleteConfirmed = deleteConfirmationId === tournament.id
@@ -140,11 +141,15 @@ export default function TournamentManager({
     if (!result.ok) {
       setCustomJsonError(result.error)
       selectTab('rules')
+      setSettingsOpen(true)
       return
     }
     detailsUpdateMutation.mutate(
       { id: tournament.id, data: result.payload },
-      { onSuccess: () => setSuccessMessage('Turnierdaten gespeichert.') }
+      { onSuccess: () => {
+        setSuccessMessage('Turnierdaten gespeichert.')
+        setSettingsOpen(false)
+      } }
     )
   }
 
@@ -213,7 +218,7 @@ export default function TournamentManager({
   }
 
   return (
-    <Card className="space-y-6 sm:p-2">
+    <Card className="space-y-5 p-4 sm:p-6">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
         <div className="space-y-2">
           <div className="flex items-center gap-3">
@@ -257,6 +262,53 @@ export default function TournamentManager({
         </div>
       )}
 
+      <section aria-label="Nächste Turnieraktion" className="space-y-3 rounded-xl border border-primary/25 bg-primary/5 p-4">
+        <h3 className="text-base font-semibold text-foreground">Turnierablauf steuern</h3>
+        <p className="text-sm text-muted">
+          Hier stehen nur die Aktionen für die aktuelle Phase. Spieler und Teams findest du unter „Teilnehmer“.
+          Technische Einstellungen und besondere Eingriffe sind weiter unten eingeklappt.
+        </p>
+        <div className="flex flex-wrap items-center gap-3">
+          {tournament.status === 'registration' && (
+            <Button variant="primary" size="sm" disabled={isLoading} onClick={handleOpenCheckin}>
+              <ArrowRight size={14} />
+              {openCheckinMutation.isPending ? 'Öffnet...' : 'Check-in öffnen'}
+            </Button>
+          )}
+          {tournament.status === 'checkin' && (
+            <p className="text-sm text-foreground">
+              Jetzt unter „Check-in“ die Teilnehmer prüfen und den Turnierstart vorbereiten.
+            </p>
+          )}
+          {action && tournament.status !== 'archived' && (
+            <Button variant="primary" size="sm" disabled={isLoading} onClick={handleAdvance}>
+              <ArrowRight size={14} />
+              {advanceMutation.isPending ? 'Verarbeitet...' : action.label}
+            </Button>
+          )}
+          {tournament.status === 'archived' && (
+            <p className="text-sm text-muted">Dieses Turnier ist archiviert.</p>
+          )}
+        </div>
+        {tournament.status === 'registration' && (
+          <p className="text-xs text-muted">
+            Vor dem Öffnen des Check-ins alle Teams vervollständigen und Captains kontrollieren.
+          </p>
+        )}
+      </section>
+
+      <section className="space-y-3 rounded-xl border border-border bg-background/30 p-4">
+        <button
+          type="button"
+          aria-expanded={settingsOpen}
+          onClick={() => setSettingsOpen((open) => !open)}
+          className="flex w-full items-center justify-between gap-3 text-left text-sm font-semibold text-foreground hover:text-primary"
+        >
+          <span className="flex items-center gap-2"><PencilLine size={16} /> Einstellungen und Spielregeln bearbeiten</span>
+          <span className="text-xs font-normal text-muted">{settingsOpen ? 'Schließen' : 'Öffnen'}</span>
+        </button>
+        {settingsOpen && (
+          <div className="space-y-5 border-t border-border pt-4">
       <div role="tablist" aria-label="Turnier bearbeiten" className="flex flex-wrap gap-1 border-b border-border">
         {SETUP_TABS.map((tab) => (
           <button
@@ -333,74 +385,70 @@ export default function TournamentManager({
         </SettingsSection>
       )}
 
-      <div className="flex flex-wrap gap-2">
-        <Button
-          variant="primary"
-          size="sm"
-          disabled={isLoading || !form.name.trim()}
-          onClick={handleSave}
-        >
-          <PencilLine size={14} />
-          {detailsUpdateMutation.isPending ? 'Speichert...' : 'Änderungen speichern'}
-        </Button>
 
-        {tournament.status === 'registration' && (
-          <Button variant="secondary" size="sm" disabled={isLoading} onClick={handleAssignRandom}>
-            <Shuffle size={14} />
-            {assignMutation.isPending ? 'Weist zu...' : 'Solo-Spieler zuweisen'}
-          </Button>
+            <Button
+              variant="primary"
+              size="sm"
+              disabled={isLoading || !form.name.trim()}
+              onClick={handleSave}
+            >
+              <PencilLine size={14} />
+              {detailsUpdateMutation.isPending ? 'Speichert...' : 'Änderungen speichern'}
+            </Button>
+          </div>
         )}
+      </section>
 
-        {tournament.status === 'group_phase' && !storedLeague && (
-          <Button variant="secondary" size="sm" disabled={isLoading} onClick={handleGenerateGroups}>
-            <Users size={14} />
-            {generateGroupsMutation.isPending ? 'Generiert...' : 'Gruppen neu generieren'}
-          </Button>
-        )}
-
-        {tournament.status === 'bracket' && (
-          <Button variant="secondary" size="sm" disabled={isLoading} onClick={handleGenerateBracket}>
-            <GitBranch size={14} />
-            {generateBracketMutation.isPending ? 'Generiert...' : 'Bracket neu generieren'}
-          </Button>
-        )}
-
-        {tournament.status === 'registration' && (
-          <Button variant="primary" size="sm" disabled={isLoading} onClick={handleOpenCheckin}>
-            <ArrowRight size={14} />
-            {openCheckinMutation.isPending ? 'Öffnet...' : 'Check-in öffnen'}
-          </Button>
-        )}
-
-        {tournament.status === 'checkin' && (
-          <Button variant="danger" size="sm" disabled={isLoading} onClick={handleRevertCheckin}>
-            <ArrowRight size={14} />
-            {revertCheckinMutation.isPending ? 'Setzt zurück...' : 'Check-in zurücksetzen'}
-          </Button>
-        )}
-
-        {action && tournament.status !== 'archived' && (
-          <Button variant="primary" size="sm" disabled={isLoading} onClick={handleAdvance}>
-            <ArrowRight size={14} />
-            {advanceMutation.isPending ? 'Verarbeitet...' : action.label}
-          </Button>
-        )}
-
-        <Button
-          variant={deleteConfirmed ? 'danger' : 'ghost'}
-          size="sm"
-          disabled={isLoading}
-          onClick={handleDelete}
-          className={deleteConfirmed ? 'border-red-500 bg-red-500/10 text-red-400 hover:bg-red-500/20' : ''}
-        >
-          <Trash2 size={14} />
-          {deleteMutation.isPending
-            ? 'Löscht...'
-            : deleteConfirmed
-              ? 'Wirklich löschen? (Letzte Bestätigung)'
-              : 'Turnier löschen'}
-        </Button>
-      </div>
+      <details className="rounded-xl border border-border bg-background/20">
+        <summary className="cursor-pointer px-4 py-3 text-sm font-medium text-muted hover:text-foreground">
+          Weitere Verwaltungsaktionen (mit Vorsicht)
+        </summary>
+        <div className="space-y-3 border-t border-border p-4">
+          <p className="text-sm text-muted">
+            Diese Aktionen können Teams oder Turnierdaten verändern. Für einen normalen PUG-Ablauf sind sie meist nicht nötig.
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {tournament.status === 'registration' && (
+              <Button variant="secondary" size="sm" disabled={isLoading} onClick={handleAssignRandom}>
+                <Shuffle size={14} />
+                {assignMutation.isPending ? 'Weist zu...' : 'Solo-Spieler automatisch zuweisen'}
+              </Button>
+            )}
+            {tournament.status === 'group_phase' && !storedLeague && (
+              <Button variant="secondary" size="sm" disabled={isLoading} onClick={handleGenerateGroups}>
+                <Users size={14} />
+                {generateGroupsMutation.isPending ? 'Generiert...' : 'Gruppen neu generieren'}
+              </Button>
+            )}
+            {tournament.status === 'bracket' && (
+              <Button variant="secondary" size="sm" disabled={isLoading} onClick={handleGenerateBracket}>
+                <GitBranch size={14} />
+                {generateBracketMutation.isPending ? 'Generiert...' : 'Bracket neu generieren'}
+              </Button>
+            )}
+            {tournament.status === 'checkin' && (
+              <Button variant="danger" size="sm" disabled={isLoading} onClick={handleRevertCheckin}>
+                <ArrowRight size={14} />
+                {revertCheckinMutation.isPending ? 'Setzt zurück...' : 'Check-in zurücksetzen'}
+              </Button>
+            )}
+            <Button
+              variant={deleteConfirmed ? 'danger' : 'ghost'}
+              size="sm"
+              disabled={isLoading}
+              onClick={handleDelete}
+              className={deleteConfirmed ? 'border-red-500 bg-red-500/10 text-red-400 hover:bg-red-500/20' : ''}
+            >
+              <Trash2 size={14} />
+              {deleteMutation.isPending
+                ? 'Löscht...'
+                : deleteConfirmed
+                  ? 'Wirklich löschen? (Letzte Bestätigung)'
+                  : 'Turnier löschen'}
+            </Button>
+          </div>
+        </div>
+      </details>
 
       {successMessage && (
         <div className="flex items-center gap-2 rounded-lg border border-green-500/20 bg-green-500/10 p-3 text-sm text-green-400">
