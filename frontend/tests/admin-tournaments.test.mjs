@@ -1,8 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { sortAdminLive, tournamentStart } from '../src/lib/adminTournaments.ts'
+import { sortByStart, tournamentStart } from '../src/lib/adminTournaments.ts'
 
-const NOW = Date.parse('2026-11-23T20:00:00Z')
 const t = (id, overrides = {}) => ({
   id,
   name: 'Turnier',
@@ -17,20 +16,10 @@ const t = (id, overrides = {}) => ({
   ...overrides,
 })
 
-test('Im Admin wird ein aktueller Cup vor einem veralteten PUG ausgewählt', () => {
-  const oldPug = t(16, {
-    status: 'bracket',
-    registration_end: '2026-11-14T17:00:00Z',
-    updated_at: '2026-11-14T17:16:45Z',
-  })
-  const newCup = t(17)
-  assert.deepEqual(sortAdminLive([oldPug, newCup], NOW).map((item) => item.id), [17, 16])
-})
-
-test('Ein aktives Turnier mit neuer Aktivität bleibt vor archivbedürftigen Turnieren', () => {
-  const newActive = t(9, { status: 'bracket', registration_end: '2026-11-10T18:00:00Z' })
-  const inactive = t(8, { status: 'bracket', registration_end: '2026-11-10T18:00:00Z', updated_at: '2026-11-10T21:00:00Z' })
-  assert.deepEqual(sortAdminLive([inactive, newActive], NOW).map((item) => item.id), [9, 8])
+test('Im Admin bleibt ein lange laufendes Turnier nach Start sortiert statt nach Alter des Datensatzes', () => {
+  const running = t(16, { status: 'bracket', registration_end: '2026-11-14T17:00:00Z', updated_at: '2026-11-14T17:16:45Z' })
+  const upcoming = t(17)
+  assert.deepEqual(sortByStart([upcoming, running]).map((item) => item.id), [16, 17])
 })
 
 test('Startanzeige nutzt Anmeldeschluss als Ersatz für fehlenden Bracket-Start', () => {

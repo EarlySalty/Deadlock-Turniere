@@ -20,8 +20,7 @@ import {
   TournamentSidebar,
   TournamentSummaryCard,
 } from '@/components/admin/TournamentOverview'
-import { sortAdminLive } from '@/lib/adminTournaments'
-import { isOverdueOpenTournament } from '@/lib/homeTournaments'
+import { sortByStart } from '@/lib/adminTournaments'
 import CheckinManager from '@/components/admin/CheckinManager'
 import MatchAdminPanel from '@/components/admin/MatchAdminPanel'
 import MatchEventPanel from '@/components/admin/MatchEventPanel'
@@ -83,7 +82,7 @@ export default function Admin() {
 
   const liveTournaments = useMemo(
     () =>
-      sortAdminLive(
+      sortByStart(
         (tournaments ?? []).filter((t) =>
           ['draft', 'registration', 'checkin', 'group_phase', 'bracket'].includes(t.status),
         ),
@@ -299,15 +298,6 @@ export default function Admin() {
                   hasBracket={hasBracket}
                   onNavigate={setActivePhase}
                 />
-                {selectedSummary && isOverdueOpenTournament(selectedSummary) && (
-                  <div role="status" className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-4 text-sm text-amber-300">
-                    {[
-                      'Dieses Turnier wurde seit mehr als 72 Stunden nicht aktualisiert und sein geplanter Start liegt zurück.',
-                      selectedSummary.is_test ? null : 'Auf der öffentlichen Startseite erscheint es unter „Frühere Turniere“.',
-                      'Bitte den Status im Setup prüfen und das Turnier gegebenenfalls abschließen.',
-                    ].filter(Boolean).join(' ')}
-                  </div>
-                )}
                 <AdminPhaseNav
                   status={liveDetail.status}
                   hasGroups={hasGroups}

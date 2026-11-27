@@ -1,8 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { groupHomeTournaments, isOverdueOpenTournament } from '../src/lib/homeTournaments.ts'
+import { groupHomeTournaments } from '../src/lib/homeTournaments.ts'
 
-const NOW = Date.parse('2026-11-23T17:40:00Z')
 const tournament = (id, overrides = {}) => ({
   id,
   name: 'Turnier',
@@ -16,44 +15,23 @@ const tournament = (id, overrides = {}) => ({
   ...overrides,
 })
 
-test('Überfälliges PUG-Bracket wird nicht als aktuelles Turnier beworben', () => {
-  const pug = tournament(16, {
-    status: 'bracket',
-    registration_end: '2026-11-14T17:00:00Z',
-    updated_at: '2026-11-14T17:16:45Z',
-  })
-  const cup = tournament(17)
-  const { open, past, overdueIds } = groupHomeTournaments([pug, cup], NOW)
-  assert.deepEqual(open.map((t) => t.id), [17])
-  assert.deepEqual(past.map((t) => t.id), [16])
-  assert.equal(overdueIds.has(16), true)
-})
-
-test('Länger laufendes, aber kürzlich bearbeitetes Turnier bleibt sichtbar', () => {
-  const active = tournament(2, {
-    status: 'group_phase',
-    tournament_mode: 'group_stage',
-    group_phase_start: '2026-11-01T18:00:00Z',
-  })
-  assert.equal(isOverdueOpenTournament(active, NOW), false)
+test('Laufende Turniere bleiben aktuell, egal wie alt ihr letzter Datensatz-Stand ist', () => {
+  const stale = { status: 'bracket', registration_end: '2026-11-01T17:00:00Z', updated_at: '2026-11-01T17:00:00Z' }
+  const modes = [
+    tournament(1, { ...stale, tournament_mode: 'bracket_only' }),
+    tournament(2, { ...stale, tournament_mode: 'group_stage', status: 'group_phase', group_phase_start: '2026-11-01T18:00:00Z' }),
+    tournament(3, { ...stale, tournament_mode: 'league', status: 'group_phase', group_phase_start: '2026-11-01T18:00:00Z' }),
+    tournament(4, { ...stale, status: 'checkin' }),
+  ]
+  const { open, past } = groupHomeTournaments(modes)
+  assert.deepEqual(open.map((t) => t.id).sort(), [1, 2, 3, 4])
+  assert.equal(past.length, 0)
 })
 
 test('Abgeschlossene Turniere landen unter den früheren Turnieren', () => {
   const completed = tournament(1, { status: 'completed' })
   const archived = tournament(2, { status: 'archived', updated_at: '2026-11-20T10:00:00Z' })
-  const { open, past } = groupHomeTournaments([completed, archived], NOW)
+  const { open, past } = groupHomeTournaments([completed, archived])
   assert.equal(open.length, 0)
   assert.deepEqual(past.map((t) => t.id), [1, 2])
-})
-
-test('Laufende Liga bleibt aktuell, auch wenn ihr Datensatz lange nicht bearbeitet wurde', () => {
-  const league = tournament(3, {
-    status: 'group_phase',
-    tournament_mode: 'league',
-    group_phase_start: '2026-11-01T18:00:00Z',
-    updated_at: '2026-11-01T18:00:00Z',
-  })
-  const { open, past } = groupHomeTournaments([league], NOW)
-  assert.deepEqual(open.map((t) => t.id), [3])
-  assert.equal(past.length, 0)
 })

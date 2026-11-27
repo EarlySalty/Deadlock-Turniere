@@ -55,7 +55,7 @@ export default function Home() {
     )
   }
 
-  const { open, past, overdueIds } = groupHomeTournaments(tournaments ?? [])
+  const { open, past } = groupHomeTournaments(tournaments ?? [])
 
   return (
     <motion.div
@@ -122,12 +122,7 @@ export default function Home() {
                         {new Date(t.created_at).toLocaleDateString('de-DE')}
                       </span>
                     </div>
-                    <div className="flex shrink-0 flex-col items-end gap-1">
-                      {overdueIds.has(t.id) && (
-                        <span className="text-[11px] font-medium text-amber-400">Abschluss ausstehend</span>
-                      )}
-                      <Badge status={t.status} mode={t.tournament_mode} className="scale-75 origin-right" />
-                    </div>
+                    <Badge status={t.status} mode={t.tournament_mode} className="scale-75 origin-right" />
                   </div>
                 </Card>
               </Link>
