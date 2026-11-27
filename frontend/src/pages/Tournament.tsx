@@ -96,12 +96,8 @@ function tournamentChampion(tournament: TournamentDetailPublic): string | null {
     const leader = tournament.groups[0]?.teams[0]
     return leader ? leader.team_name : null
   }
-  const decided = tournament.bracket_matches.filter((m) => isCompletedMatch(m.status) && m.winner_id !== null)
-  const grandFinals = decided.filter((m) => m.bracket_type === 'grand_final')
-  const pool = grandFinals.length > 0 ? grandFinals : decided.filter((m) => m.bracket_type === 'winners')
-  if (pool.length === 0) return null
-  const last = pool.reduce((best, m) => (m.round > best.round || (m.round === best.round && m.position > best.position) ? m : best))
-  return getTeamName(last.winner_id, tournament.teams)
+  const winner = bracketPlacements(tournament.bracket_matches).find((entry) => entry.position === 1)
+  return winner ? getTeamName(winner.teamId, tournament.teams) : null
 }
 
 function isCompletedMatch(status: string): boolean {

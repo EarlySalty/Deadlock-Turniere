@@ -3,6 +3,7 @@ import { GitBranch } from 'lucide-react'
 import { useMemo } from 'react'
 import Card from '@/components/ui/Card'
 import BracketMatch from './BracketMatch'
+import { bracketStageLabel } from '@/lib/bracketStage'
 import type { BracketFormat, BracketMatch as BracketMatchType, TeamPublic } from '@/types/tournament'
 
 interface Props {
@@ -36,28 +37,6 @@ function getGrandFinalLabel(round: number, gfRounds: number[]): string {
   return 'Grand Final'
 }
 
-function describeStage(match: BracketMatchType, allMatches: BracketMatchType[]): string {
-  if (match.bracket_type === 'winners') {
-    const winners = allMatches.filter((m) => m.bracket_type === 'winners')
-    const maxR = Math.max(...winners.map((m) => m.round))
-    const doubleElimination = allMatches.some((m) => m.bracket_type !== 'winners')
-    const prefix = doubleElimination ? 'WB-' : ''
-    if (match.round === maxR) return `${prefix}Finale`
-    if (match.round === maxR - 1) return `${prefix}Halbfinale`
-    if (match.round === maxR - 2) return `${prefix}Viertelfinale`
-    return doubleElimination ? `WB R${match.round}` : `Runde ${match.round}`
-  }
-  if (match.bracket_type === 'losers') {
-    const losers = allMatches.filter((m) => m.bracket_type === 'losers')
-    const maxR = Math.max(...losers.map((m) => m.round))
-    if (match.round === maxR) return 'LB-Finale'
-    const minR = Math.min(...losers.map((m) => m.round))
-    const idx = match.round - minR + 1
-    return `LB R${idx}`
-  }
-  return 'Grand Final'
-}
-
 function computePlaceholder(
   match: BracketMatchType,
   slot: 1 | 2,
@@ -67,7 +46,7 @@ function computePlaceholder(
   if (sourceMatchId !== null && sourceMatchId !== undefined) {
     const source = allMatches.find((m) => m.id === sourceMatchId)
     if (source) {
-      return `Sieger ${describeStage(source, allMatches)}`
+      return `Sieger ${bracketStageLabel(source, allMatches)}`
     }
   }
   // Loser-Drop: ein anderes Match routet seinen Verlierer in diesen Slot
@@ -75,7 +54,7 @@ function computePlaceholder(
     (m) => m.loser_to_match_id === match.id && m.loser_to_slot === slot,
   )
   if (loserSource) {
-    return `Verlierer ${describeStage(loserSource, allMatches)}`
+    return `Verlierer ${bracketStageLabel(loserSource, allMatches)}`
   }
   return null
 }
