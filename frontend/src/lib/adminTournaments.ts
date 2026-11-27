@@ -1,11 +1,12 @@
+import { plannedTournamentStart } from './league.ts'
 import type { AdminTournamentSummary } from '@/types/tournament'
 
 export function tournamentStart(t: AdminTournamentSummary): string | null {
-  return t.group_phase_start ?? t.bracket_start ?? null
+  return plannedTournamentStart(t)
 }
 
 function startValue(t: AdminTournamentSummary): number {
-  const start = tournamentStart(t) ?? t.checkin_start ?? t.registration_end
+  const start = tournamentStart(t)
   return start ? new Date(start).getTime() : Number.POSITIVE_INFINITY
 }
 

@@ -108,11 +108,8 @@ export default function AdminPhaseNav({
     <nav
       role="tablist"
       aria-label="Turnier-Lebenszyklus"
-      className="flex flex-col gap-1 rounded-xl border border-border bg-card p-2"
+      className="flex min-w-0 flex-wrap gap-2 rounded-xl border border-border bg-card p-2"
     >
-      <div className="px-2 pb-1 pt-1 text-[10px] uppercase tracking-wider text-muted">
-        Phase
-      </div>
       {visible.map((phase) => {
         const Icon = phase.icon
         const isActive = activePhase === phase.id
@@ -124,7 +121,7 @@ export default function AdminPhaseNav({
             role="tab"
             aria-selected={isActive}
             onClick={() => onChange(phase.id)}
-            className={`group flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-left transition-colors ${
+            className={`group flex min-h-10 shrink-0 items-center gap-2.5 whitespace-nowrap rounded-lg px-3 py-2 text-left transition-colors ${
               isActive
                 ? 'bg-primary/15 text-primary'
                 : state === 'upcoming'
