@@ -63,7 +63,7 @@ export function templateFromTournament(tournament: TournamentDetail): CreateTemp
       description: tournament.description ?? '',
       rules: tournament.rules ?? '',
       teamSize: tournament.team_size,
-      tournamentFormat: tournament.tournament_mode,
+      tournamentFormat: tournament.tournament_mode_auto && tournament.tournament_mode !== 'league' ? 'auto' : tournament.tournament_mode,
       bracketFormat: tournament.bracket_format,
       seriesFormat: seriesOf(tournament.series_format) ?? 1,
       finalSeriesFormat: seriesOf(tournament.final_series_format),

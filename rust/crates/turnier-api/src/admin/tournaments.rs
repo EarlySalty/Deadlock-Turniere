@@ -17,8 +17,9 @@ use turnier_core::{
 };
 use turnier_engine::league::DEFAULT_SLOT_MINUTES;
 use turnier_engine::{
-    determine_tournament_mode, generate_bracket_in_tx, league_slot_minutes_in_tx,
+    generate_bracket_in_tx, initial_tournament_mode, league_slot_minutes_in_tx,
     reschedule_league_plan_in_tx, valid_next_statuses, valid_next_statuses_for_mode,
+    PROVISIONAL_AUTO_MODE,
 };
 
 use crate::db;
@@ -178,8 +179,8 @@ async fn create_tournament(
     let reminder_offsets = jsonb(serialize_reminder_offsets(&body.reminder_offsets))?;
     let start_reminder_offsets = jsonb(serialize_reminder_offsets(&body.start_reminder_offsets))?;
 
-    let tournament_mode =
-        determine_tournament_mode(body.team_size as usize, body.force_tournament_mode);
+    let (tournament_mode, tournament_mode_auto) =
+        initial_tournament_mode(body.force_tournament_mode);
 
     let mut tx = state.pool.begin().await?;
     turnier_scheduler::acquire_tournament_schedule_lock(&mut tx).await?;
@@ -191,11 +192,11 @@ async fn create_tournament(
           invite_mode, invite_window_start, invite_window_end, tournament_mode, tournament_game_mode,
           auto_lobby_enabled, exclude_from_leaderboard, is_test, reminder_offsets, rules,
           series_format, final_series_format, match_objective, no_show_grace_minutes,
-          start_reminder_offsets, lobby_settings, source)
+          start_reminder_offsets, lobby_settings, source, tournament_mode_auto)
          VALUES ($1, 'draft', $2, $3, $4, $5::timestamptz, $6::timestamptz, $7::timestamptz,
                  $8::timestamptz, $9::timestamptz, $10, now(), now(), $11,
                  $12::timestamptz, $13::timestamptz, $14, $15, $16, $17, $18,
-                 $19, $20, $21, $22, $23, $24, $25, $26, 'manual')
+                 $19, $20, $21, $22, $23, $24, $25, $26, 'manual', $27)
          RETURNING id"#,
     )
     .bind(&body.name)
@@ -224,6 +225,7 @@ async fn create_tournament(
     .bind(body.no_show_grace_minutes)
     .bind(start_reminder_offsets)
     .bind(lobby_settings)
+    .bind(tournament_mode_auto)
     .fetch_one(&mut *tx)
     .await?;
     turnier_scheduler::ensure_start_gap(&mut tx, tournament_id).await?;
@@ -421,40 +423,61 @@ async fn update_tournament(
     }
 
     let mut mode_changed_to_bracket_only = false;
-    if let Some(force_mode) = body.force_tournament_mode {
-        if !matches!(
-            current_status,
-            TournamentStatus::Draft | TournamentStatus::Checkin | TournamentStatus::GroupPhase
-        ) {
-            return Err(WebError::bad_request(
-                "Turnier-Modus kann nur in Draft-, Check-in- oder ungespielter Gruppenphase geändert werden",
-            ));
+    match body.force_tournament_mode {
+        Patch::Missing => {}
+        Patch::Null => {
+            if !matches!(
+                current_status,
+                TournamentStatus::Draft | TournamentStatus::Checkin
+            ) {
+                return Err(WebError::bad_request(
+                    "Automatisch lässt sich nur im Entwurf oder im Check-in wählen, solange die Teams noch nicht feststehen",
+                ));
+            }
+            let mode_s = serde_value_str(&PROVISIONAL_AUTO_MODE);
+            push_typed!(
+                "tournament_mode",
+                json!(mode_s),
+                PatchBind::Text(Some(mode_s))
+            );
+            push_typed!("tournament_mode_auto", json!(true), PatchBind::Bool(true));
         }
-        if current_status == TournamentStatus::GroupPhase
-            && group_phase_has_played_matches(&mut *tx, tournament_id).await?
-        {
-            return Err(WebError::bad_request(
-                "Turnier-Modus kann nach Start der Gruppenmatches nicht mehr geändert werden",
-            ));
+        Patch::Value(force_mode) => {
+            if !matches!(
+                current_status,
+                TournamentStatus::Draft | TournamentStatus::Checkin | TournamentStatus::GroupPhase
+            ) {
+                return Err(WebError::bad_request(
+                    "Turnier-Modus kann nur in Draft-, Check-in- oder ungespielter Gruppenphase geändert werden",
+                ));
+            }
+            if current_status == TournamentStatus::GroupPhase
+                && group_phase_has_played_matches(&mut *tx, tournament_id).await?
+            {
+                return Err(WebError::bad_request(
+                    "Turnier-Modus kann nach Start der Gruppenmatches nicht mehr geändert werden",
+                ));
+            }
+            let league_involved =
+                force_mode == TournamentMode::League || existing_mode == TournamentMode::League;
+            if current_status == TournamentStatus::GroupPhase
+                && league_involved
+                && force_mode != existing_mode
+            {
+                return Err(WebError::bad_request(
+                    "Das Format Jeder gegen jeden lässt sich in der laufenden Phase nicht wechseln",
+                ));
+            }
+            let mode_s = serde_value_str(&force_mode);
+            push_typed!(
+                "tournament_mode",
+                json!(mode_s),
+                PatchBind::Text(Some(mode_s))
+            );
+            push_typed!("tournament_mode_auto", json!(false), PatchBind::Bool(false));
+            mode_changed_to_bracket_only = force_mode == TournamentMode::BracketOnly
+                && existing_mode != TournamentMode::BracketOnly;
         }
-        let league_involved =
-            force_mode == TournamentMode::League || existing_mode == TournamentMode::League;
-        if current_status == TournamentStatus::GroupPhase
-            && league_involved
-            && force_mode != existing_mode
-        {
-            return Err(WebError::bad_request(
-                "Das Format Jeder gegen jeden lässt sich in der laufenden Phase nicht wechseln",
-            ));
-        }
-        let mode_s = serde_value_str(&force_mode);
-        push_typed!(
-            "tournament_mode",
-            json!(mode_s),
-            PatchBind::Text(Some(mode_s))
-        );
-        mode_changed_to_bracket_only = force_mode == TournamentMode::BracketOnly
-            && existing_mode != TournamentMode::BracketOnly;
     }
 
     // Bool-/Enum-Spezialfelder.

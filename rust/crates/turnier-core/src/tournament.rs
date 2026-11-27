@@ -202,7 +202,7 @@ pub struct TournamentUpdate {
     #[serde(default)]
     pub lobby_settings: Patch<Value>,
     #[serde(default)]
-    pub force_tournament_mode: Option<TournamentMode>,
+    pub force_tournament_mode: Patch<TournamentMode>,
     #[serde(default)]
     pub tournament_game_mode: Option<TournamentGameMode>,
     #[serde(default)]
@@ -266,6 +266,7 @@ pub struct Tournament {
     pub bracket_format: BracketFormat,
     pub played_bracket_format: Option<BracketFormat>,
     pub tournament_mode: TournamentMode,
+    pub tournament_mode_auto: bool,
     pub tournament_game_mode: TournamentGameMode,
     pub auto_lobby_enabled: bool,
     pub created_by: String,

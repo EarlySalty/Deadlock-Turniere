@@ -1,14 +1,14 @@
 import { localInputToIso, toLocalInput } from '@/lib/league'
-import type { Tournament, TournamentMode, TournamentUpdate } from '@/types/tournament'
+import type { Tournament, TournamentUpdate } from '@/types/tournament'
 import { lobbyChanged, lobbyFromStored, resolveLobbyPayload, type GameRulesState } from './gameRules'
-import { DATE_HINTS } from './options'
+import { DATE_HINTS, type TournamentFormat } from './options'
 import { DEFAULT_REMINDER_OFFSETS, DEFAULT_START_REMINDER_OFFSETS, offsetsOrDefault } from '../reminderOffsets'
 import type { SpecialSettingsState } from './specialSettings'
 import type { BasicsValue, DateEntry, MatchFormatValue, ReminderValue } from './StandardFields'
 import type { SeriesFormat } from './createFormValues'
 
 export interface EditForm extends BasicsValue, MatchFormatValue, ReminderValue {
-  tournamentMode: TournamentMode
+  tournamentMode: TournamentFormat
   registrationStart: string
   registrationEnd: string
   checkinStart: string
@@ -28,6 +28,17 @@ export function storedGroupStart(tournament: Tournament): string {
   return toLocalInput(tournament.group_phase_start)
 }
 
+const UNDECIDED_STATUSES: Tournament['status'][] = ['draft', 'registration', 'checkin']
+
+export function storedTournamentFormat(tournament: Tournament): TournamentFormat {
+  const undecided = tournament.tournament_mode_auto && UNDECIDED_STATUSES.includes(tournament.status)
+  return undecided && tournament.tournament_mode !== 'league' ? 'auto' : tournament.tournament_mode
+}
+
+export function autoFormatSelectable(tournament: Tournament): boolean {
+  return tournament.status === 'draft' || tournament.status === 'checkin'
+}
+
 export function initialEditState(tournament: Tournament): EditState {
   return {
     form: {
@@ -38,7 +49,7 @@ export function initialEditState(tournament: Tournament): EditState {
       seriesFormat: tournament.series_format as SeriesFormat,
       finalSeriesFormat: tournament.final_series_format as SeriesFormat | null,
       bracketFormat: tournament.bracket_format,
-      tournamentMode: tournament.tournament_mode,
+      tournamentMode: storedTournamentFormat(tournament),
       registrationStart: toLocalInput(tournament.registration_start),
       registrationEnd: toLocalInput(tournament.registration_end),
       checkinStart: toLocalInput(tournament.checkin_start ?? null),
@@ -111,8 +122,8 @@ export function buildUpdatePayload(
     rules: form.rules.trim() || null,
     ...specialPayload(state.special, tournament),
   }
-  if (canChangeTournamentMode && form.tournamentMode !== tournament.tournament_mode) {
-    payload.force_tournament_mode = form.tournamentMode
+  if (canChangeTournamentMode && form.tournamentMode !== storedTournamentFormat(tournament)) {
+    payload.force_tournament_mode = form.tournamentMode === 'auto' ? null : form.tournamentMode
   }
   if (!lobbyChanged(gameRules, initial.gameRules)) return { ok: true, payload }
   const lobby = resolveLobbyPayload(gameRules)
@@ -123,7 +134,7 @@ export function buildUpdatePayload(
 export function editDateEntries(
   form: EditForm,
   update: (patch: Partial<EditForm>) => void,
-  mode: TournamentMode,
+  mode: TournamentFormat,
 ): DateEntry[] {
   const league = mode === 'league'
   const entries: DateEntry[] = [

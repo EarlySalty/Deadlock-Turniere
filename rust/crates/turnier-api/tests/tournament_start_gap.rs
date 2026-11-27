@@ -286,3 +286,47 @@ async fn rundenplan_verschieben_haelt_den_startabstand() {
         (Some(late), Some(late))
     );
 }
+
+#[tokio::test]
+async fn automatik_wertet_teamgroesse_nicht_als_teamzahl() {
+    let app = app().await;
+    let mut payload = form_payload("Großteam-Cup", evening());
+    payload["team_size"] = json!(16);
+    let (status, created) = app
+        .call(Method::POST, "/api/admin/tournaments", payload)
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    assert_eq!(created["tournament_mode"], "bracket_only");
+    assert_eq!(created["tournament_mode_auto"], true);
+    let id = created["id"].as_i64().expect("id");
+    let uri = format!("/api/admin/tournaments/{id}");
+
+    let (status, detail) = app.call(Method::GET, &uri, Value::Null).await;
+    assert_eq!(status, StatusCode::OK, "{detail}");
+    assert_eq!(detail["tournament_mode_auto"], true);
+
+    let (status, explicit) = app
+        .call(
+            Method::PUT,
+            &uri,
+            json!({ "force_tournament_mode": "group_stage" }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{explicit}");
+    assert_eq!(explicit["tournament_mode"], "group_stage");
+    assert_eq!(explicit["tournament_mode_auto"], false);
+
+    let (status, untouched) = app
+        .call(Method::PUT, &uri, json!({ "description": "neu" }))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{untouched}");
+    assert_eq!(untouched["tournament_mode"], "group_stage");
+    assert_eq!(untouched["tournament_mode_auto"], false);
+
+    let (status, auto) = app
+        .call(Method::PUT, &uri, json!({ "force_tournament_mode": null }))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{auto}");
+    assert_eq!(auto["tournament_mode"], "bracket_only");
+    assert_eq!(auto["tournament_mode_auto"], true);
+}

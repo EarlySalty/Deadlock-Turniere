@@ -817,6 +817,7 @@ pub fn tournament_from_row(row: &sqlx::postgres::PgRow) -> WebResult<Tournament>
         bracket_format: row.try_get("bracket_format")?,
         played_bracket_format: row.try_get("played_bracket_format")?,
         tournament_mode: row.try_get("tournament_mode")?,
+        tournament_mode_auto: row.try_get("tournament_mode_auto")?,
         tournament_game_mode: row.try_get("tournament_game_mode")?,
         auto_lobby_enabled: row.try_get("auto_lobby_enabled")?,
         created_by: db::discord_id_to_string(row.try_get("created_by")?),

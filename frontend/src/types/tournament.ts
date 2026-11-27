@@ -55,6 +55,7 @@ export interface Tournament {
   bracket_format: BracketFormat
   played_bracket_format?: BracketFormat | null
   tournament_mode: TournamentMode
+  tournament_mode_auto: boolean
   tournament_game_mode: TournamentGameMode
   auto_lobby_enabled: boolean
   invite_mode: InviteMode
@@ -227,6 +228,10 @@ export interface FinalizeCheckinResult {
   effective_bracket_format: BracketFormat
   double_elimination_rule: string
   bracket_entrants: number | null
+  final_team_count: number
+  tournament_mode: TournamentMode
+  tournament_mode_auto: boolean
+  auto_group_stage_threshold: number
   bracket_startable: boolean
   min_bracket_entrants: number
   deleted_team_ids: number[]
@@ -356,7 +361,7 @@ export interface TournamentUpdate {
   status?: TournamentStatus
   team_size?: number
   bracket_format?: BracketFormat
-  force_tournament_mode?: TournamentMode
+  force_tournament_mode?: TournamentMode | null
   tournament_game_mode?: TournamentGameMode
   auto_lobby_enabled?: boolean
   series_format?: 1 | 3 | 5

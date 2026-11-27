@@ -1,14 +1,9 @@
-//! Turnier-Modus-Bestimmung und Status-Übergangstabelle (reine Logik).
-
 use turnier_core::{TournamentMode, TournamentStatus};
 
-/// Schwelle für den automatischen Group-Stage-Modus (`>= 16` Teams).
 pub const AUTO_GROUP_STAGE_THRESHOLD: usize = 16;
 
-/// Bestimmt den Turnier-Modus aus der Team-Anzahl (Override hat Vorrang).
-///
-/// Portiert `determine_tournament_mode`: `>= 16` Teams → Group-Stage, sonst
-/// Bracket-Only; `force_mode` überschreibt die Heuristik.
+pub const PROVISIONAL_AUTO_MODE: TournamentMode = TournamentMode::BracketOnly;
+
 pub fn determine_tournament_mode(
     team_count: usize,
     force_mode: Option<TournamentMode>,
@@ -23,11 +18,24 @@ pub fn determine_tournament_mode(
     }
 }
 
-/// Die erlaubten Folge-Status zu einem gegebenen Status.
-///
-/// Portiert `VALID_STATUS_TRANSITIONS`. `Draft` ist hier nicht als Schlüssel
-/// gelistet zu lassen wäre falsch: das Original kennt jeden Schlüssel; wir
-/// liefern für `Archived` eine leere Liste (kein Folgestatus).
+pub fn initial_tournament_mode(force_mode: Option<TournamentMode>) -> (TournamentMode, bool) {
+    match force_mode {
+        Some(mode) => (mode, false),
+        None => (PROVISIONAL_AUTO_MODE, true),
+    }
+}
+
+pub fn resolve_tournament_mode(
+    stored_mode: TournamentMode,
+    mode_auto: bool,
+    final_team_count: usize,
+) -> TournamentMode {
+    if !mode_auto || stored_mode == TournamentMode::League {
+        return stored_mode;
+    }
+    determine_tournament_mode(final_team_count, None)
+}
+
 pub fn valid_next_statuses(status: TournamentStatus) -> &'static [TournamentStatus] {
     use TournamentStatus::*;
     match status {
@@ -41,12 +49,10 @@ pub fn valid_next_statuses(status: TournamentStatus) -> &'static [TournamentStat
     }
 }
 
-/// Ist der Übergang `from -> to` erlaubt?
 pub fn is_valid_transition(from: TournamentStatus, to: TournamentStatus) -> bool {
     valid_next_statuses(from).contains(&to)
 }
 
-/// Berücksichtigt beim Abschluss des Check-ins den gespeicherten Turniermodus.
 pub fn valid_next_statuses_for_mode(
     status: TournamentStatus,
     mode: TournamentMode,
@@ -88,6 +94,57 @@ mod tests {
         assert_eq!(
             determine_tournament_mode(64, Some(TournamentMode::BracketOnly)),
             TournamentMode::BracketOnly
+        );
+    }
+
+    #[test]
+    fn auto_mode_counts_final_teams_not_players() {
+        for (teams, expected) in [
+            (1, TournamentMode::BracketOnly),
+            (5, TournamentMode::BracketOnly),
+            (6, TournamentMode::BracketOnly),
+            (8, TournamentMode::BracketOnly),
+            (15, TournamentMode::BracketOnly),
+            (16, TournamentMode::GroupStage),
+            (17, TournamentMode::GroupStage),
+        ] {
+            assert_eq!(
+                resolve_tournament_mode(PROVISIONAL_AUTO_MODE, true, teams),
+                expected,
+                "{teams} teams"
+            );
+        }
+    }
+
+    #[test]
+    fn explicit_and_league_modes_are_never_resolved() {
+        assert_eq!(
+            resolve_tournament_mode(TournamentMode::BracketOnly, false, 16),
+            TournamentMode::BracketOnly
+        );
+        assert_eq!(
+            resolve_tournament_mode(TournamentMode::GroupStage, false, 4),
+            TournamentMode::GroupStage
+        );
+        assert_eq!(
+            resolve_tournament_mode(TournamentMode::League, true, 32),
+            TournamentMode::League
+        );
+    }
+
+    #[test]
+    fn create_without_override_is_provisional_auto() {
+        assert_eq!(
+            initial_tournament_mode(None),
+            (TournamentMode::BracketOnly, true)
+        );
+        assert_eq!(
+            initial_tournament_mode(Some(TournamentMode::GroupStage)),
+            (TournamentMode::GroupStage, false)
+        );
+        assert_eq!(
+            initial_tournament_mode(Some(TournamentMode::BracketOnly)),
+            (TournamentMode::BracketOnly, false)
         );
     }
 

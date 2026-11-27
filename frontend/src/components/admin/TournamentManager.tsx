@@ -20,8 +20,8 @@ import GameRulesFields from './settings/GameRulesFields'
 import SpecialSettingsFields from './settings/SpecialSettingsFields'
 import { SettingsSection, SubHeading } from './settings/SettingsSection'
 import { BasicsFields, DateFields, MatchFormatFields, ReminderFields } from './settings/StandardFields'
-import { buildUpdatePayload, editDateEntries, initialEditState, type EditForm } from './settings/editForm'
-import { MODE_OPTIONS } from './settings/options'
+import { autoFormatSelectable, buildUpdatePayload, editDateEntries, initialEditState, type EditForm } from './settings/editForm'
+import { FORMAT_OPTIONS } from './settings/options'
 import {
   AlertCircle,
   ArrowRight,
@@ -288,11 +288,14 @@ export default function TournamentManager({
               <ChoiceCards
                 name="admin-tournament-mode"
                 legend="Turniermodus"
-                options={MODE_OPTIONS}
+                options={FORMAT_OPTIONS}
                 value={form.tournamentMode}
                 onChange={(tournamentMode) => update({ tournamentMode })}
                 disabled={modeLocked}
-                isOptionDisabled={(mode) => mode === 'league' && leagueRunning && !storedLeague}
+                isOptionDisabled={(mode) =>
+                  (mode === 'league' && leagueRunning && !storedLeague) ||
+                  (mode === 'auto' && !autoFormatSelectable(tournament))
+                }
                 hint={
                   league
                     ? 'Festlegen geht bis zum Abschluss des Check-ins.'

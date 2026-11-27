@@ -10,11 +10,13 @@ import { pluralWord, pluralize } from '@/lib/countLabel'
 import type {
   FinalizeCheckinResult,
   Team,
+  TournamentMode,
   TournamentSignup,
 } from '@/types/tournament'
 import { AlertCircle, CheckCircle2, ClipboardCheck, TriangleAlert, UserCheck, X } from 'lucide-react'
 import { playerName } from '@/lib/playerName'
 import { teamNameOr } from '@/lib/teamName'
+import { MODE_OPTIONS } from '@/components/admin/settings/options'
 
 interface CheckinManagerProps {
   tournamentId: number
@@ -30,6 +32,10 @@ interface ParticipantRow {
   team_id: number | null
   team_name: string
   signup_id: number | null
+}
+
+function modeLabel(mode: TournamentMode): string {
+  return MODE_OPTIONS.find((option) => option.value === mode)?.label ?? mode
 }
 
 export default function CheckinManager({
@@ -315,6 +321,13 @@ export default function CheckinManager({
                 Im Team-Builder {pluralWord(pendingBuilderChanges, 'ist', 'sind')} {pluralize(pendingBuilderChanges, 'Änderung', 'Änderungen')} noch nicht gespeichert
                 {pendingDrafts.otherTabs > 0 ? `, davon ${pendingDrafts.otherTabs} in einem anderen Tab dieses Browsers` : ''}.
                 Speichere sie unter „Teilnehmer“, sonst startet das Turnier ohne sie.
+              </div>
+            )}
+
+            {preview.tournament_mode_auto && preview.tournament_mode !== 'league' && (
+              <div className="mt-4 rounded-xl border border-border bg-background/60 p-4 text-sm text-foreground">
+                Turniermodus Automatisch: Mit {pluralize(preview.final_team_count, 'Team', 'Teams')} startet das Turnier mit {modeLabel(preview.tournament_mode)}.
+                Ab {preview.auto_group_stage_threshold} Teams gibt es eine Gruppenphase, darunter nur das Bracket.
               </div>
             )}
 

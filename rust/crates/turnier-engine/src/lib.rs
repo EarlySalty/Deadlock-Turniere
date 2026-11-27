@@ -38,8 +38,9 @@ pub use engine::groups::auto_num_groups;
 pub use engine::naming::{check_team_name, name_key, TeamNamePool, TEAM_NAME_MAX_CHARS};
 pub use engine::slots::BracketSlot;
 pub use status::{
-    determine_tournament_mode, is_valid_transition, is_valid_transition_for_mode,
-    valid_next_statuses, valid_next_statuses_for_mode, AUTO_GROUP_STAGE_THRESHOLD,
+    determine_tournament_mode, initial_tournament_mode, is_valid_transition,
+    is_valid_transition_for_mode, resolve_tournament_mode, valid_next_statuses,
+    valid_next_statuses_for_mode, AUTO_GROUP_STAGE_THRESHOLD, PROVISIONAL_AUTO_MODE,
 };
 
 // Persistenz-API.

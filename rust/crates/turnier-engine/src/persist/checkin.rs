@@ -455,8 +455,8 @@ async fn snapshot_token_in_tx(
     .fetch_all(&mut **tx)
     .await?;
 
-    let settings: Option<(InviteMode, BracketFormat, TournamentMode, i64)> = sqlx::query_as(
-        "SELECT invite_mode, bracket_format, tournament_mode, team_size \
+    let settings: Option<(InviteMode, BracketFormat, TournamentMode, i64, bool)> = sqlx::query_as(
+        "SELECT invite_mode, bracket_format, tournament_mode, team_size, tournament_mode_auto \
          FROM turnier.tournaments WHERE id = $1",
     )
     .bind(tournament_id)
@@ -502,6 +502,9 @@ pub struct FinalizeCheckinResult {
     pub bracket_format: BracketFormat,
     pub effective_bracket_format: BracketFormat,
     pub bracket_entrants: Option<usize>,
+    pub final_team_count: usize,
+    pub tournament_mode: TournamentMode,
+    pub tournament_mode_auto: bool,
     pub dry_run: bool,
     pub snapshot_token: String,
     pub groups_created: Option<i64>,
@@ -545,6 +548,23 @@ pub struct SoloPlayer {
     pub discord_name: Option<String>,
 }
 
+async fn store_resolved_mode(
+    tx: &mut Transaction<'_, Postgres>,
+    tournament_id: i64,
+    mode: TournamentMode,
+) -> TournamentResult<()> {
+    sqlx::query(
+        "UPDATE turnier.tournaments SET tournament_mode = $1, updated_at = $2 \
+         WHERE id = $3 AND tournament_mode_auto",
+    )
+    .bind(mode)
+    .bind(now_utc())
+    .bind(tournament_id)
+    .execute(&mut **tx)
+    .await?;
+    super::start_gap::ensure_start_gap(tx, tournament_id).await
+}
+
 fn formation_team_size(team_size: i64) -> TournamentResult<usize> {
     turnier_core::tournament::check_team_size(team_size).map_err(TournamentError::validation)?;
     usize::try_from(team_size).map_err(|_| TournamentError::validation("Teamgröße ungültig"))
@@ -555,6 +575,7 @@ struct TournamentRow {
     status: TournamentStatus,
     team_size: i64,
     tournament_mode: TournamentMode,
+    tournament_mode_auto: bool,
     bracket_format: BracketFormat,
     invite_mode: InviteMode,
 }
@@ -878,10 +899,13 @@ pub async fn finalize_checkin(
 
     let final_team_count =
         team_order.len().saturating_sub(deleted_team_ids.len()) + created_teams.len();
-    let bracket_entrants = crate::engine::double_elim::expected_bracket_entrants(
+    let tournament_mode = crate::status::resolve_tournament_mode(
         tournament.tournament_mode,
+        tournament.tournament_mode_auto,
         final_team_count,
     );
+    let bracket_entrants =
+        crate::engine::double_elim::expected_bracket_entrants(tournament_mode, final_team_count);
     let effective_bracket_format = crate::engine::double_elim::effective_bracket_format(
         tournament.bracket_format,
         bracket_entrants,
@@ -1034,8 +1058,11 @@ pub async fn finalize_checkin(
 
         // Optionales Vorrücken.
         if params.advance_to_group_phase {
+            if tournament_mode != tournament.tournament_mode {
+                store_resolved_mode(&mut tx, tournament_id, tournament_mode).await?;
+            }
             let status_changed: u64;
-            if tournament.tournament_mode == TournamentMode::League {
+            if tournament_mode == TournamentMode::League {
                 let plan = super::league::generate_league_plan_in_tx(
                     &mut tx,
                     tournament_id,
@@ -1054,7 +1081,7 @@ pub async fn finalize_checkin(
                 .execute(&mut *tx)
                 .await?;
                 status_changed = res.rows_affected();
-            } else if tournament.tournament_mode == TournamentMode::GroupStage {
+            } else if tournament_mode == TournamentMode::GroupStage {
                 let group_ids = generate_groups_in_tx(&mut tx, tournament_id, None).await?;
                 groups_created = group_ids.len() as i64;
                 matches_created = generate_group_matches_in_tx(&mut tx, tournament_id).await?;
@@ -1120,7 +1147,8 @@ pub async fn finalize_checkin(
             })).collect::<Vec<_>>(),
             "auto_team_formation": auto_team_formation,
             "effective_bracket_format": effective_bracket_format,
-            "tournament_mode": tournament.tournament_mode,
+            "tournament_mode": tournament_mode,
+            "tournament_mode_auto": tournament.tournament_mode_auto,
             "advanced_to_group_phase": params.advance_to_group_phase,
             "advanced_to_bracket": advanced_to_bracket,
             "groups_created": groups_created,
@@ -1161,6 +1189,9 @@ pub async fn finalize_checkin(
         bracket_format: tournament.bracket_format,
         effective_bracket_format,
         bracket_entrants,
+        final_team_count,
+        tournament_mode,
+        tournament_mode_auto: tournament.tournament_mode_auto,
         dry_run: !params.confirm,
         snapshot_token,
         groups_created: if params.confirm && params.advance_to_group_phase {
