@@ -8,8 +8,12 @@ export interface NowMatch {
   team2Id: number | null
   status: MatchStatus
   scheduledAt: string | null
-  order: number
+  phase: NowPhase
+  round: number
+  position: number
 }
+
+export type NowPhase = 'gruppen' | 'bracket'
 
 export type NowState =
   | { kind: 'live'; matches: NowMatch[] }
@@ -38,7 +42,9 @@ function allMatches(source: NowSource): NowMatch[] {
     team2Id: match.team2_id,
     status: match.status,
     scheduledAt: match.scheduled_at,
-    order: 100_000 + match.round * 1000 + match.position,
+    phase: 'bracket' as const,
+    round: match.round,
+    position: match.position,
   }))
   const groups = source.groups.flatMap((group) => group.matches.map((match) => ({
     key: `group-${match.id}`,
@@ -47,15 +53,25 @@ function allMatches(source: NowSource): NowMatch[] {
     team2Id: match.team2_id,
     status: match.status,
     scheduledAt: match.scheduled_at,
-    order: (match.round ?? 0) * 1000 + match.id,
+    phase: 'gruppen' as const,
+    round: match.round ?? 0,
+    position: match.id,
   })))
   return [...groups, ...bracket]
 }
 
+const PHASE_ORDER: Record<NowPhase, number> = { gruppen: 0, bracket: 1 }
+
+function scheduledTime(match: NowMatch): number {
+  const parsed = match.scheduledAt ? Date.parse(match.scheduledAt) : Number.NaN
+  return Number.isNaN(parsed) ? Number.MAX_SAFE_INTEGER : parsed
+}
+
 function byScheduleThenOrder(left: NowMatch, right: NowMatch): number {
-  const leftTime = left.scheduledAt ? Date.parse(left.scheduledAt) : Number.MAX_SAFE_INTEGER
-  const rightTime = right.scheduledAt ? Date.parse(right.scheduledAt) : Number.MAX_SAFE_INTEGER
-  return leftTime - rightTime || left.order - right.order
+  return scheduledTime(left) - scheduledTime(right)
+    || PHASE_ORDER[left.phase] - PHASE_ORDER[right.phase]
+    || left.round - right.round
+    || left.position - right.position
 }
 
 export function nowState(source: NowSource, start: string | null): NowState {

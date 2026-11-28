@@ -1,5 +1,5 @@
 import { CalendarClock, Radio, Swords } from 'lucide-react'
-import { nowState, type NowMatch } from '@/lib/liveNow'
+import { nowState, type NowMatch, type NowPhase } from '@/lib/liveNow'
 import { teamNameById } from '@/lib/teamName'
 import { whenLabel } from '@/lib/whenLabel'
 import type { MatchStatus, TeamPublic, TournamentDetailPublic } from '@/types/tournament'
@@ -7,7 +7,13 @@ import type { MatchStatus, TeamPublic, TournamentDetailPublic } from '@/types/to
 interface LiveNowProps {
   tournament: TournamentDetailPublic
   start: string | null
-  onOpenBracket?: () => void
+  canOpen: (phase: NowPhase) => boolean
+  onOpen: (phase: NowPhase) => void
+}
+
+const OPEN_LABEL: Record<NowPhase, string> = {
+  gruppen: 'Zu den Gruppen',
+  bracket: 'Zum Bracket',
 }
 
 const STATUS_LABEL: Partial<Record<MatchStatus, string>> = {
@@ -35,7 +41,7 @@ function MatchLine({ match, teams }: { match: NowMatch; teams: TeamPublic[] }) {
   )
 }
 
-export default function LiveNow({ tournament, start, onOpenBracket }: LiveNowProps) {
+export default function LiveNow({ tournament, start, canOpen, onOpen }: LiveNowProps) {
   const state = nowState(tournament, start)
   if (state.kind === 'none') return null
 
@@ -55,6 +61,7 @@ export default function LiveNow({ tournament, start, onOpenBracket }: LiveNowPro
   }
 
   const live = state.kind === 'live'
+  const target = state.matches[0].phase
   return (
     <section aria-label={live ? 'Läuft gerade' : 'Als Nächstes'} className="space-y-3 rounded-xl border border-border-hover bg-primary-soft p-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -62,9 +69,9 @@ export default function LiveNow({ tournament, start, onOpenBracket }: LiveNowPro
           {live ? <Radio size={16} aria-hidden="true" /> : <Swords size={16} aria-hidden="true" />}
           {live ? 'Läuft gerade' : 'Als Nächstes'}
         </h2>
-        {onOpenBracket && (
-          <button type="button" onClick={onOpenBracket} className="text-sm font-semibold text-primary underline-offset-4 hover:underline">
-            Zum Bracket
+        {canOpen(target) && (
+          <button type="button" onClick={() => onOpen(target)} className="text-sm font-semibold text-primary underline-offset-4 hover:underline">
+            {OPEN_LABEL[target]}
           </button>
         )}
       </div>

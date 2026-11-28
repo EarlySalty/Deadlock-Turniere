@@ -22,7 +22,7 @@ const TOURNAMENT_STEPS = [
   },
   {
     title: '4. Bracket',
-    text: 'In der K.O.-Phase geht es Runde für Runde bis ins Finale. Gewinner werden automatisch in die nächste Runde weitergetragen.',
+    text: 'In der K.-o.-Phase geht es Runde für Runde bis ins Finale. Gewinner werden automatisch in die nächste Runde weitergetragen.',
   },
   {
     title: '5. Abschluss',
@@ -41,7 +41,7 @@ const LEAGUE_STEPS = [
 const ADMIN_ACTIONS = [
   ['Anmeldung starten', 'Wenn das Turnier freigegeben werden soll.', 'Setzt den Status auf Anmeldung.'],
   ['Zur Gruppenphase', 'Wenn die Anmeldung beendet ist.', 'Generiert Gruppen und Spiele.'],
-  ['Zum Bracket', 'Wenn die Gruppenphase abgeschlossen ist.', 'Erstellt das K.O.-Bracket.'],
+  ['Zum Bracket', 'Wenn die Gruppenphase abgeschlossen ist.', 'Erstellt das K.-o.-Bracket.'],
   ['Lobby erstellen', 'Sobald ein Bracket-Match bereit ist.', 'Fordert den Steam-Bot an.'],
   ['Ergebnis abrufen', 'Wenn ein Match im Spiel gelaufen ist.', 'Lädt Daten vom Steam-Flow.'],
   ['Ergebnis manuell', 'Wenn Auto-Fetch fehlschlägt.', 'Setzt den Sieger manuell.'],

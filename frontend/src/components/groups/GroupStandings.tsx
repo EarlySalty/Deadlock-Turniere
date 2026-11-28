@@ -5,6 +5,8 @@ import TeamRosterTooltip from '@/components/ui/TeamRosterTooltip'
 import { LEAGUE_SCORING_TEXT } from '@/lib/league'
 import type { Group, TeamPublic } from '@/types/tournament'
 
+const QUALIFIERS_PER_GROUP = 2
+
 interface Props {
   groups: Group[]
   teams?: TeamPublic[]
@@ -59,7 +61,7 @@ export default function GroupStandings({ groups, teams = [], league = false, adm
                   </thead>
                   <tbody>
                     {group.teams.map((team, index) => {
-                      const isQualified = !league && index < 2
+                      const isQualified = !league && index < QUALIFIERS_PER_GROUP
                       const fullTeam = teamById.get(team.team_id)
                       return (
                         <tr
@@ -125,7 +127,7 @@ export default function GroupStandings({ groups, teams = [], league = false, adm
               ) : (
                 <p className="flex items-center gap-2 border-t border-border px-5 py-3 text-xs text-muted">
                   <span aria-hidden="true" className="h-3 w-3 shrink-0 rounded-sm border border-success/40 bg-success/10" />
-                  Platz 1 und 2 ziehen ins Bracket ein.
+                  Die besten {QUALIFIERS_PER_GROUP} jeder Gruppe ziehen ins Bracket ein.
                 </p>
               )}
             </Card>

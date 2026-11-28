@@ -27,6 +27,7 @@ import MiniGroupPanel from '@/components/bracket/MiniGroupPanel'
 import MyMatchReport from '@/components/MyMatchReport'
 import LoginButton from '@/components/auth/LoginButton'
 import LiveNow from '@/components/tournament/LiveNow'
+import TournamentDescription from '@/components/tournament/TournamentDescription'
 import { whenLabel } from '@/lib/whenLabel'
 import {
   Trophy, Users, LayoutGrid, GitBranch, Shield, X, Info, Book,
@@ -79,7 +80,7 @@ interface ResultEntry {
   winnerName: string
   loserName: string
   playedAt: string | null
-  sortTime: number
+  matchId: number
 }
 
 function getTeamName(teamId: number | null, teams: TeamPublic[]): string {
@@ -140,7 +141,7 @@ function buildGroupResultEntries(
         winnerName,
         loserName: getTeamName(loserId, teams),
         playedAt: match.played_at,
-        sortTime: getSortTime(match.played_at, match.id),
+        matchId: match.id,
       }
     })
   })
@@ -163,7 +164,7 @@ function buildBracketResultEntries(matches: BracketMatch[], teams: TeamPublic[])
         winnerName,
         loserName: getTeamName(loserId, teams),
         playedAt: match.played_at,
-        sortTime: getSortTime(match.played_at, match.id),
+        matchId: match.id,
       }
     })
 }
@@ -198,7 +199,6 @@ export default function Tournament() {
     },
   })
   const [searchParams, setSearchParams] = useSearchParams()
-  const [descriptionOpen, setDescriptionOpen] = useState(false)
   const [showCreateTeam, setShowCreateTeam] = useState(false)
   const [teamName, setTeamName] = useState('')
   const [successMsg, setSuccessMsg] = useState<string | null>(null)
@@ -262,7 +262,6 @@ export default function Tournament() {
     )
   }
 
-  const descriptionLong = (tournament.description?.length ?? 0) > 180 || (tournament.description ?? '').includes('\n')
   const isRegistration = tournament.status === 'registration'
   const soloSignups = tournament.signups.filter((signup) => signup.team_id === null)
   const tournamentStart = plannedTournamentStart(tournament)
@@ -289,7 +288,7 @@ export default function Tournament() {
     ? [
         ...buildGroupResultEntries(tournament.groups, tournament.teams),
         ...buildBracketResultEntries(tournament.bracket_matches, tournament.teams),
-      ].sort((left, right) => playedTime(right) - playedTime(left) || right.id.localeCompare(left.id))
+      ].sort((left, right) => playedTime(right) - playedTime(left) || right.matchId - left.matchId)
     : []
 
   const isMutating =
@@ -423,22 +422,7 @@ export default function Tournament() {
           </div>
           <h1 className="text-3xl sm:text-4xl md:text-5xl font-bold text-foreground font-display tracking-tight">{tournament.name}</h1>
           {tournament.description && (
-            <div className="max-w-3xl">
-              <p id="turnier-beschreibung" className={`whitespace-pre-line leading-relaxed text-muted ${descriptionOpen ? '' : 'max-h-[4.875rem] overflow-hidden'}`}>
-                {tournament.description}
-              </p>
-              {descriptionLong && (
-                <button
-                  type="button"
-                  onClick={() => setDescriptionOpen((open) => !open)}
-                  aria-expanded={descriptionOpen}
-                  aria-controls="turnier-beschreibung"
-                  className="mt-2 text-sm font-semibold text-primary underline-offset-4 hover:underline"
-                >
-                  {descriptionOpen ? 'Weniger anzeigen' : 'Mehr anzeigen'}
-                </button>
-              )}
-            </div>
+            <TournamentDescription text={tournament.description} />
           )}
           {champion && (
             <p className="flex items-center gap-2 text-lg font-bold text-primary">
@@ -571,7 +555,8 @@ export default function Tournament() {
       <LiveNow
         tournament={tournament}
         start={tournamentStart}
-        onOpenBracket={availableTabs.some((tab) => tab.key === 'bracket') && activeTab !== 'bracket' ? () => setActiveTab('bracket') : undefined}
+        canOpen={(phase) => phase !== activeTab && availableTabs.some((tab) => tab.key === phase)}
+        onOpen={setActiveTab}
       />
 
       <div className="relative">
@@ -585,6 +570,8 @@ export default function Tournament() {
               type="button"
               role="tab"
               aria-selected={isActive}
+              aria-controls="turnier-tabpanel"
+              id={`turnier-tab-${tab.key}`}
               onClick={() => setActiveTab(tab.key)}
               className={`relative flex shrink-0 items-center gap-2 whitespace-nowrap px-3 py-3 text-[13px] font-semibold transition-colors sm:px-5 sm:py-4 ${
                 isActive
@@ -609,6 +596,9 @@ export default function Tournament() {
 
       <motion.div
         key={activeTab}
+        id="turnier-tabpanel"
+        role="tabpanel"
+        aria-labelledby={`turnier-tab-${activeTab}`}
         initial={{ opacity: 0, y: 5 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.2 }}

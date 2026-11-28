@@ -1,9 +1,10 @@
 import { motion } from 'framer-motion'
-import { GitBranch } from 'lucide-react'
+import { GitBranch, Users2 } from 'lucide-react'
 import { useMemo } from 'react'
 import Card from '@/components/ui/Card'
 import BracketMatch from './BracketMatch'
 import { bracketStageLabel } from '@/lib/bracketStage'
+import { teamNameById } from '@/lib/teamName'
 import type { BracketFormat, BracketMatch as BracketMatchType, BracketMiniGroup, TeamPublic } from '@/types/tournament'
 
 interface Props {
@@ -54,26 +55,67 @@ function buildPlaceholderMap(allMatches: BracketMatchType[], miniGroups: Bracket
   return map
 }
 
+type TreeItem =
+  | { kind: 'match'; key: string; position: number; match: BracketMatchType }
+  | { kind: 'group'; key: string; position: number; match: BracketMatchType; group: BracketMiniGroup }
+
+function treeItem(match: BracketMatchType, miniGroups: BracketMiniGroup[]): TreeItem {
+  const group = match.mini_group_id === null ? undefined : miniGroups.find((entry) => entry.id === match.mini_group_id)
+  if (!group) return { kind: 'match', key: `match-${match.id}`, position: match.position, match }
+  return { kind: 'group', key: `group-${group.id}`, position: group.position, match, group }
+}
+
+function treeItems(matches: BracketMatchType[], miniGroups: BracketMiniGroup[]): TreeItem[] {
+  const byKey = new Map<string, TreeItem>()
+  for (const match of matches) {
+    if (isUnplayedFiller(match)) continue
+    const item = treeItem(match, miniGroups)
+    if (!byKey.has(item.key)) byKey.set(item.key, item)
+  }
+  return [...byKey.values()]
+}
+
+function itemRound(item: TreeItem): number {
+  return item.kind === 'group' ? item.group.round : item.match.round
+}
+
+function MiniGroupNode({ group, teams }: { group: BracketMiniGroup; teams: TeamPublic[] }) {
+  return (
+    <div className="w-[210px] flex-shrink-0 overflow-hidden rounded-lg border border-border bg-card shadow-sm">
+      <div className="flex items-center gap-1.5 border-b border-border px-3 py-1.5 text-xs text-muted">
+        <Users2 size={12} aria-hidden="true" />
+        Jeder gegen jeden · Slot {group.position + 1}
+      </div>
+      <ul className="divide-y divide-border">
+        {group.team_ids.map((teamId) => (
+          <li key={teamId} className="truncate px-3 py-2 text-sm text-foreground">
+            {teamNameById(teams, teamId)}
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
 interface BracketColumnsProps {
-  matches: BracketMatchType[]
+  items: TreeItem[]
   teams: TeamPublic[]
   allMatches: BracketMatchType[]
   placeholders: PlaceholderMap
 }
 
-function BracketColumns({ matches, teams, allMatches, placeholders }: BracketColumnsProps) {
-  const roundsMap = new Map<number, BracketMatchType[]>()
-  for (const match of matches) {
-    const existing = roundsMap.get(match.round) ?? []
-    existing.push(match)
-    roundsMap.set(match.round, existing)
+function BracketColumns({ items, teams, allMatches, placeholders }: BracketColumnsProps) {
+  const roundsMap = new Map<number, TreeItem[]>()
+  for (const item of items) {
+    const round = itemRound(item)
+    roundsMap.set(round, [...(roundsMap.get(round) ?? []), item])
   }
 
   const rounds = Array.from(roundsMap.entries())
     .sort(([a], [b]) => a - b)
-    .map(([round, roundMatches]) => ({
+    .map(([round, roundItems]) => ({
       round,
-      matches: roundMatches.sort((a, b) => a.position - b.position),
+      items: roundItems.sort((a, b) => a.position - b.position),
     }))
 
   const maxRound = Math.max(...rounds.map((r) => r.round))
@@ -94,12 +136,12 @@ function BracketColumns({ matches, teams, allMatches, placeholders }: BracketCol
               className="mb-4"
             >
               <span className="text-xs font-semibold text-foreground uppercase tracking-wider">
-                {bracketStageLabel(roundData.matches[0], allMatches)}
+                {bracketStageLabel(roundData.items[0].match, allMatches)}
               </span>
             </motion.div>
 
             <div className="flex flex-col justify-around flex-1 gap-4 relative">
-              {roundData.matches.map((match, matchIndex) => {
+              {roundData.items.map((item, matchIndex) => {
                 const spacingMultiplier = Math.pow(2, roundIndex)
                 const topPadding = matchIndex === 0
                   ? (spacingMultiplier - 1) * 32
@@ -108,11 +150,11 @@ function BracketColumns({ matches, teams, allMatches, placeholders }: BracketCol
                   ? (spacingMultiplier - 1) * 64
                   : 0
 
-                const ph = placeholders.get(match.id)
+                const ph = placeholders.get(item.match.id)
 
                 return (
                   <div
-                    key={match.id}
+                    key={item.key}
                     className="flex items-center"
                     style={{
                       marginTop: matchIndex === 0 ? topPadding : gap,
@@ -122,12 +164,16 @@ function BracketColumns({ matches, teams, allMatches, placeholders }: BracketCol
                       <div className="w-6 border-t-2 border-border-strong" />
                     )}
 
-                    <BracketMatch
-                      match={match}
-                      teams={teams}
-                      placeholder1={ph?.p1 ?? null}
-                      placeholder2={ph?.p2 ?? null}
-                    />
+                    {item.kind === 'group' ? (
+                      <MiniGroupNode group={item.group} teams={teams} />
+                    ) : (
+                      <BracketMatch
+                        match={item.match}
+                        teams={teams}
+                        placeholder1={ph?.p1 ?? null}
+                        placeholder2={ph?.p2 ?? null}
+                      />
+                    )}
 
                     {roundData.round < maxRound && (
                       <div className="w-6 border-t-2 border-border-strong" />
@@ -150,9 +196,9 @@ function isUnplayedFiller(match: BracketMatchType): boolean {
 
 export default function BracketView({ matches: allMatches, teams, format, miniGroups = [] }: Props) {
   const placeholders = useMemo(() => buildPlaceholderMap(allMatches, miniGroups), [allMatches, miniGroups])
-  const matches = allMatches.filter((match) => match.mini_group_id === null && !isUnplayedFiller(match))
+  const items = treeItems(allMatches, miniGroups)
 
-  if (matches.length === 0) {
+  if (items.length === 0) {
     return (
       <Card className="p-6 text-center">
         <GitBranch size={32} className="mx-auto text-muted mb-3" />
@@ -161,9 +207,9 @@ export default function BracketView({ matches: allMatches, teams, format, miniGr
     )
   }
 
-  const winners = matches.filter((m) => m.bracket_type === 'winners')
-  const losers = matches.filter((m) => m.bracket_type === 'losers')
-  const grandFinal = matches.filter((m) => m.bracket_type === 'grand_final')
+  const winners = items.filter((item) => item.match.bracket_type === 'winners')
+  const losers = items.filter((item) => item.match.bracket_type === 'losers')
+  const grandFinal = items.filter((item) => item.match.bracket_type === 'grand_final')
 
   const isDoubleElim = format === 'double_elimination'
 
@@ -171,7 +217,7 @@ export default function BracketView({ matches: allMatches, teams, format, miniGr
     return (
       <div className="space-y-4">
         <BracketColumns
-          matches={winners.length > 0 ? winners : matches}
+          items={winners.length > 0 ? winners : items}
           teams={teams}
           allMatches={allMatches}
           placeholders={placeholders}
@@ -187,7 +233,7 @@ export default function BracketView({ matches: allMatches, teams, format, miniGr
           Winner-Bracket
         </h3>
         <BracketColumns
-          matches={winners}
+          items={winners}
           teams={teams}
           allMatches={allMatches}
           placeholders={placeholders}
@@ -200,7 +246,7 @@ export default function BracketView({ matches: allMatches, teams, format, miniGr
             Loser-Bracket
           </h3>
           <BracketColumns
-            matches={losers}
+            items={losers}
             teams={teams}
             allMatches={allMatches}
             placeholders={placeholders}
@@ -214,7 +260,7 @@ export default function BracketView({ matches: allMatches, teams, format, miniGr
             Grand Final
           </h3>
           <BracketColumns
-            matches={grandFinal}
+            items={grandFinal}
             teams={teams}
             allMatches={allMatches}
             placeholders={placeholders}

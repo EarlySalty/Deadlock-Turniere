@@ -16,7 +16,7 @@ interface MyMatchReportProps {
 const TERMINAL = ['completed', 'forfeit', 'cancelled']
 
 function teamName(teamId: number | null, teams: TeamPublic[]): string {
-  if (teamId === null) return 'TBD'
+  if (teamId === null) return 'Offen'
   return teamNameById(teams, teamId)
 }
 
