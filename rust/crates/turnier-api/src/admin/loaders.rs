@@ -15,8 +15,8 @@ use chrono::{DateTime, Utc};
 use serde_json::Value;
 
 use turnier_core::{
-    BracketMatch, BracketMiniGroup, Group, GroupMatch, GroupTeam, MatchGame, Team, TeamMember,
-    TournamentSignup,
+    BracketMatch, BracketMiniGroup, Group, GroupMatch, GroupTeam, LobbyAccess, MatchGame, Team,
+    TeamMember, TournamentSignup,
 };
 use turnier_db::Pool;
 
@@ -301,8 +301,10 @@ pub async fn load_groups_for_tournament(pool: &Pool, tournament_id: i64) -> WebR
                 team2_id: r.team2_id,
                 winner_id: r.winner_id,
                 status: parse_enum(&r.status)?,
-                steam_party_id: r.steam_party_id,
-                party_code: r.party_code,
+                lobby: LobbyAccess {
+                    steam_party_id: r.steam_party_id,
+                    party_code: r.party_code,
+                },
                 deadlock_match_id: r.deadlock_match_id,
                 match_duration_s: r.match_duration_s,
                 match_stats: db::json_to_wire(r.match_stats),
@@ -382,8 +384,10 @@ async fn bracket_from_row(pool: &Pool, row: BracketRow) -> WebResult<BracketMatc
         source_match2_id: row.source_match2_id,
         loser_to_match_id: row.loser_to_match_id,
         loser_to_slot: row.loser_to_slot,
-        steam_party_id: row.steam_party_id,
-        party_code: row.party_code,
+        lobby: LobbyAccess {
+            steam_party_id: row.steam_party_id,
+            party_code: row.party_code,
+        },
         deadlock_match_id: row.deadlock_match_id,
         match_duration_s: row.match_duration_s,
         match_stats: db::json_to_wire(row.match_stats),

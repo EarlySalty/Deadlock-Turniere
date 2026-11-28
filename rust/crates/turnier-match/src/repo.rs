@@ -252,7 +252,8 @@ pub async fn set_discord_channel_id(
     }
     let sql = format!(
         "UPDATE turnier.group_matches SET discord_channel_id = $2 \
-         WHERE id = $3 AND status = ANY($4) AND steam_party_id = $5 AND {GROUP_ACCEPTS_WRITES}"
+         WHERE id = $3 AND status = ANY($4) \
+           AND steam_party_id IS NOT DISTINCT FROM NULLIF($5, '') AND {GROUP_ACCEPTS_WRITES}"
     );
     let written = sqlx::query(&sql)
         .bind(scope_value)

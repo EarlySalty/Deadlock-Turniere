@@ -7,9 +7,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::marker::PhantomData;
 
-use crate::bracket::{BracketMatch, BracketMiniGroup};
+use crate::bracket::{BracketMatch, BracketMiniGroup, PublicBracketMatch};
 use crate::enums::*;
-use crate::group::Group;
+use crate::group::{Group, PublicGroup};
 use crate::json::*;
 use crate::team::{Team, TeamPublic};
 
@@ -378,8 +378,8 @@ pub struct TournamentDetailPublic {
     pub rules: Option<String>,
     pub is_test: bool,
     pub teams: Vec<TeamPublic>,
-    pub groups: Vec<Group>,
-    pub bracket_matches: Vec<BracketMatch>,
+    pub groups: Vec<PublicGroup>,
+    pub bracket_matches: Vec<PublicBracketMatch>,
     pub mini_groups: Vec<BracketMiniGroup>,
     pub signups: Vec<TournamentSignupPublic>,
 }

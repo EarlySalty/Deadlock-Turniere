@@ -7,11 +7,12 @@ import {
   useLeaveGroupLobby,
   useResetGroupMatch,
   useSetManualGroupMatchLobby,
+  useDeliverGroupMatchLobbyCode,
   useStartGroupMatch,
   useSubmitMatchResult,
 } from '@/hooks/useTournament'
 import { formatRoundTime, leagueRounds } from '@/lib/league'
-import type { Group, GroupMatch, Team } from '@/types/tournament'
+import type { AdminGroup as Group, AdminGroupMatch as GroupMatch, Team } from '@/types/tournament'
 import {
   AlertCircle,
   CheckCircle2,
@@ -22,10 +23,12 @@ import {
   Play,
   Radio,
   RefreshCcw,
+  Send,
   Swords,
   Trophy,
 } from 'lucide-react'
 import { teamNameById } from '@/lib/teamName'
+import { LOBBY_CODE_NOT_DELIVERED, lobbyDeliveryMessage, lobbyResendMessage } from '@/lib/lobbyDelivery'
 
 interface GroupMatchAdminPanelProps {
   tournamentId: number
@@ -96,6 +99,7 @@ export default function GroupMatchAdminPanel({
   const leaveLobbyMutation = useLeaveGroupLobby()
   const resetMatchMutation = useResetGroupMatch()
   const setManualLobbyMutation = useSetManualGroupMatchLobby()
+  const deliverCodeMutation = useDeliverGroupMatchLobbyCode()
 
   const [selectedWinners, setSelectedWinners] = useState<Record<number, number>>({})
   const [submittingMatchId, setSubmittingMatchId] = useState<number | null>(null)
@@ -174,8 +178,11 @@ export default function GroupMatchAdminPanel({
 
     try {
       if (action === 'create') {
-        await createLobbyMutation.mutateAsync({ tournamentId, matchId })
-        setMessage(matchId, { kind: 'success', text: league ? 'Lobby wurde erstellt.' : 'Gruppen-Lobby wurde erstellt.' })
+        const result = await createLobbyMutation.mutateAsync({ tournamentId, matchId })
+        setMessage(
+          matchId,
+          lobbyDeliveryMessage(league ? 'Lobby wurde erstellt.' : 'Gruppen-Lobby wurde erstellt.', result.discord_channel_id),
+        )
       } else if (action === 'start') {
         await startMatchMutation.mutateAsync({ tournamentId, matchId })
         setMessage(matchId, { kind: 'success', text: league ? 'Match wurde gestartet.' : 'Gruppen-Match wurde gestartet.' })
@@ -230,6 +237,23 @@ export default function GroupMatchAdminPanel({
     }
   }
 
+  const handleDeliverCode = async (matchId: number) => {
+    if (isLocked) return
+    setActiveAction({ matchId, action: 'create' })
+    clearMessage(matchId)
+    try {
+      const result = await deliverCodeMutation.mutateAsync({ tournamentId, matchId })
+      setMessage(matchId, lobbyResendMessage(result.discord_channel_id))
+    } catch (error) {
+      setMessage(matchId, {
+        kind: 'error',
+        text: error instanceof Error ? error.message : LOBBY_CODE_NOT_DELIVERED,
+      })
+    } finally {
+      setActiveAction(null)
+    }
+  }
+
   const handleSetManualLobby = async (matchId: number) => {
     if (isLocked) return
     const partyCode = manualCodes[matchId]?.trim()
@@ -240,8 +264,8 @@ export default function GroupMatchAdminPanel({
     setActiveAction({ matchId, action: 'create' })
     clearMessage(matchId)
     try {
-      await setManualLobbyMutation.mutateAsync({ tournamentId, matchId, partyCode })
-      setMessage(matchId, { kind: 'success', text: 'Party-Code wurde manuell gespeichert.' })
+      const result = await setManualLobbyMutation.mutateAsync({ tournamentId, matchId, partyCode })
+      setMessage(matchId, lobbyDeliveryMessage('Party-Code wurde manuell gespeichert.', result.discord_channel_id))
       onRefresh?.()
     } catch (error) {
       setMessage(matchId, {
@@ -312,6 +336,18 @@ export default function GroupMatchAdminPanel({
             <Copy size={14} />
             {copyFeedback[match.id] ? 'Kopiert' : 'Code kopieren'}
           </Button>
+          {['lobby_created', 'in_progress'].includes(match.status) && (
+            <Button
+              variant="secondary"
+              size="sm"
+              className="mt-3 ml-2"
+              disabled={isLocked || Boolean(activeAction)}
+              onClick={() => void handleDeliverCode(match.id)}
+            >
+              <Send size={14} />
+              Code an Teams senden
+            </Button>
+          )}
         </div>
       )}
 

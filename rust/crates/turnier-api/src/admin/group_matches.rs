@@ -43,6 +43,10 @@ pub fn router() -> Router<AppState> {
             "/api/admin/tournaments/{tournament_id}/group-matches/{match_id}/manual-lobby",
             post(manual_lobby),
         )
+        .route(
+            "/api/admin/tournaments/{tournament_id}/group-matches/{match_id}/deliver-lobby-code",
+            post(deliver_lobby_code),
+        )
 }
 
 /// `POST .../group-matches/{match_id}/create-lobby`: Steam-Lobby für Group-Match.
@@ -141,4 +145,12 @@ async fn manual_lobby(
         &user.discord_id,
     )
     .await
+}
+
+async fn deliver_lobby_code(
+    State(state): State<AppState>,
+    _mod: ModUser,
+    Path((tournament_id, match_id)): Path<(i64, i64)>,
+) -> WebResult<Json<Value>> {
+    steam_ops::deliver_lobby_code(&state, MatchKind::Group, tournament_id, match_id).await
 }

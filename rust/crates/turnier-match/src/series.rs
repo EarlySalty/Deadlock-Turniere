@@ -220,8 +220,10 @@ pub async fn get_series_games(
                 bracket_match_id: r.get("bracket_match_id"),
                 game_number: r.get("game_number"),
                 status: r.get("status"),
-                steam_party_id: r.get("steam_party_id"),
-                party_code: r.get("party_code"),
+                lobby: turnier_core::LobbyAccess {
+                    steam_party_id: r.get("steam_party_id"),
+                    party_code: r.get("party_code"),
+                },
                 deadlock_match_id: r.get("deadlock_match_id"),
                 winner_team: r.get("winner_team"),
                 duration_s: r.get("duration_s"),
