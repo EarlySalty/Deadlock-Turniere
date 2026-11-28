@@ -29,7 +29,7 @@ function rosterNoteClass(entry: FinalizeCheckinRosterEntry): string {
 
 function soloOutcomeText(plan: FinalizeCheckinSoloPlan): string {
   if (plan.outcome === 'joins_team') return `kommt zu ${plan.team_name ?? 'einem Team'}`
-  if (plan.outcome === 'new_team') return `bildet mit anderen ${plan.team_name ?? 'ein neues Team'}`
+  if (plan.outcome === 'new_team') return plan.team_name ? `bildet das neue Team „${plan.team_name}“` : 'bildet ein neues Team'
   return plan.checked_in ? 'bleibt ohne Team, spielt nicht mit' : 'nicht eingecheckt, bleibt ohne Team'
 }
 
