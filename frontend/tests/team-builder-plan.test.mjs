@@ -68,6 +68,24 @@ test('Tausch zwischen zwei vollen Teams löst den Kreis über die Solo-Liste auf
   assert.equal(steps[2].signupId, null)
 })
 
+test('Tausch mit freiem Ersatzplatz hält beide Teams bei voller Stammbesetzung', () => {
+  const ids = (prefix) => [1, 2, 3, 4, 5, 6].map((n) => `${prefix}${n}`)
+  const teams = [team(1, ids('a')), team(2, ids('b'))]
+  const edits = { ...EMPTY_EDITS, placements: { a6: 's2', b6: 's1' } }
+  const steps = planSave(snapshotOf(teams, []), edits, 6, 1)
+  assert.deepEqual(
+    steps.map((s) => `${s.kind}:${s.discordId}:${s.teamKey}`),
+    ['remove:a6:s1', 'move:b6:s1', 'assign:a6:s2'],
+  )
+})
+
+test('Ersatzplatz wird erst belegt, wenn kein Stammplatz mehr frei wird', () => {
+  const teams = [team(1, ['a1', 'a2']), team(2, ['b1', 'b2'])]
+  const edits = { ...EMPTY_EDITS, placements: { a2: 's2' } }
+  const steps = planSave(snapshotOf(teams, []), edits, 2, 1)
+  assert.deepEqual(steps.map((s) => `${s.kind}:${s.discordId}:${s.teamKey}`), ['move:a2:s2'])
+})
+
 test('Entfernen aus einem Team kommt vor dem Auffüllen desselben Teams', () => {
   const teams = [team(1, ['a', 'b'])]
   const edits = { ...EMPTY_EDITS, placements: { a: null, x: 's1' } }

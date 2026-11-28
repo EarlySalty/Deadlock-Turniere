@@ -302,3 +302,84 @@ async fn kept_bench_only_team_gets_a_starting_captain() {
             .expect("captain");
     assert_eq!(captain, bench_id);
 }
+
+#[tokio::test]
+async fn checked_in_bench_member_beats_earlier_absent_bench_member_for_captain() {
+    let db = temp_pool().await;
+    let pool = db.pool();
+    let tournament_id = checkin_tournament(pool, 6).await;
+    enable_bench(pool, tournament_id, 2).await;
+    let absent_starter = 1_000;
+    let absent_bench = 1_001;
+    let present_bench = 1_002;
+    let team_id = insert_team(pool, tournament_id, "Bank gemischt", absent_starter).await;
+    insert_team_member(pool, team_id, absent_starter, "Abwesend", "captain", 0).await;
+    insert_signup(
+        pool,
+        tournament_id,
+        absent_starter,
+        "Abwesend",
+        Some(team_id),
+        0,
+    )
+    .await;
+    for bench_id in [absent_bench, present_bench] {
+        insert_team_member(pool, team_id, bench_id, "Ersatz", "member", 0).await;
+        insert_signup(pool, tournament_id, bench_id, "Ersatz", Some(team_id), 0).await;
+    }
+    sqlx::query("UPDATE turnier.team_members SET is_bench = true WHERE discord_id = ANY($1)")
+        .bind(vec![absent_bench, present_bench])
+        .execute(pool)
+        .await
+        .expect("bench flags");
+    insert_checkin(pool, tournament_id, present_bench).await;
+
+    let preview = finalize_checkin(
+        pool,
+        tournament_id,
+        FinalizeCheckinParams {
+            fill_from_solos: true,
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("preview");
+
+    finalize_checkin(
+        pool,
+        tournament_id,
+        FinalizeCheckinParams {
+            confirm: true,
+            allowed_team_ids: HashSet::from([team_id]),
+            actor_id: None,
+            expected_snapshot_token: Some(&preview.snapshot_token),
+            advance_to_group_phase: false,
+            fill_from_solos: true,
+        },
+    )
+    .await
+    .expect("confirm");
+
+    let mut members: Vec<(i64, String, bool)> = sqlx::query_as(
+        "SELECT discord_id, role, is_bench FROM turnier.team_members WHERE team_id = $1",
+    )
+    .bind(team_id)
+    .fetch_all(pool)
+    .await
+    .expect("members");
+    members.sort();
+    assert_eq!(
+        members,
+        vec![
+            (absent_bench, "member".to_string(), true),
+            (present_bench, "captain".to_string(), false),
+        ]
+    );
+    let captain: i64 =
+        sqlx::query_scalar("SELECT captain_discord_id FROM turnier.teams WHERE id = $1")
+            .bind(team_id)
+            .fetch_one(pool)
+            .await
+            .expect("captain");
+    assert_eq!(captain, present_bench);
+}

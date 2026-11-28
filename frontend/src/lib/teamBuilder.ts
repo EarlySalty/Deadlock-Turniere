@@ -31,7 +31,7 @@ export interface BuilderView {
 }
 
 export interface ServerSnapshot {
-  teams: { key: string; id: number; name: string; captainId: string | null; members: string[] }[]
+  teams: { key: string; id: number; name: string; captainId: string | null; members: string[]; bench: string[] }[]
   pool: { discordId: string; signupId: number }[]
 }
 
@@ -86,6 +86,7 @@ export function snapshotOf(teams: Team[], signups: TournamentSignup[]): ServerSn
         ? team.captain_discord_id
         : null,
       members: team.members.map((m) => m.discord_id),
+      bench: team.members.filter((m) => m.is_bench).map((m) => m.discord_id),
     })),
     pool: signups
       .filter((signup) => signup.team_id === null && !members.has(signup.discord_id))
@@ -246,10 +247,10 @@ function pendingMoves(snapshot: ServerSnapshot, edits: BuilderEdits): PendingMov
   return moves
 }
 
-function removalSteps(snapshot: ServerSnapshot, edits: BuilderEdits): SaveStep[] {
+function removalSteps(snapshot: ServerSnapshot, edits: BuilderEdits): Extract<SaveStep, { kind: 'remove' }>[] {
   const base = baseLocations(snapshot)
   const target = finalLocations(snapshot, edits)
-  const steps: SaveStep[] = []
+  const steps: Extract<SaveStep, { kind: 'remove' }>[] = []
   for (const [id, to] of target) {
     const from = base.get(id) ?? null
     if (to === null && from !== null) steps.push({ kind: 'remove', teamKey: from, discordId: id })
@@ -257,11 +258,25 @@ function removalSteps(snapshot: ServerSnapshot, edits: BuilderEdits): SaveStep[]
   return steps
 }
 
-function initialCounts(snapshot: ServerSnapshot, edits: BuilderEdits): Map<string, number> {
-  const counts = new Map<string, number>()
-  for (const team of snapshot.teams) counts.set(team.key, team.members.length)
-  for (const team of edits.newTeams) counts.set(team.key, 0)
-  return counts
+interface Seats {
+  starters: number
+  bench: number
+}
+
+interface SeatState {
+  teams: Map<string, Seats>
+  benchIds: Set<string>
+}
+
+function initialSeats(snapshot: ServerSnapshot, edits: BuilderEdits): SeatState {
+  const teams = new Map<string, Seats>()
+  const benchIds = new Set<string>()
+  for (const team of snapshot.teams) {
+    for (const id of team.bench) benchIds.add(`${team.key}|${id}`)
+    teams.set(team.key, { starters: team.members.length - team.bench.length, bench: team.bench.length })
+  }
+  for (const team of edits.newTeams) teams.set(team.key, { starters: 0, bench: 0 })
+  return { teams, benchIds }
 }
 
 function stepForMove(move: PendingMove): SaveStep {
@@ -271,39 +286,80 @@ function stepForMove(move: PendingMove): SaveStep {
   return { kind: 'move', fromKey: move.from, teamKey: move.to, discordId: move.discordId }
 }
 
-function shift(counts: Map<string, number>, key: string | null, delta: number) {
-  if (key !== null) counts.set(key, (counts.get(key) ?? 0) + delta)
+function seatsOf(state: SeatState, key: string): Seats {
+  const seats = state.teams.get(key) ?? { starters: 0, bench: 0 }
+  state.teams.set(key, seats)
+  return seats
 }
 
-function orderMoves(moves: PendingMove[], counts: Map<string, number>, teamSize: number): SaveStep[] {
+function leaveSeat(state: SeatState, key: string | null, discordId: string) {
+  if (key === null) return
+  const seats = seatsOf(state, key)
+  if (state.benchIds.delete(`${key}|${discordId}`)) seats.bench -= 1
+  else seats.starters -= 1
+}
+
+function takeSeat(state: SeatState, key: string, discordId: string, teamSize: number) {
+  const seats = seatsOf(state, key)
+  if (seats.starters < teamSize) {
+    seats.starters += 1
+    return
+  }
+  seats.bench += 1
+  state.benchIds.add(`${key}|${discordId}`)
+}
+
+function freesStarterLater(state: SeatState, pending: PendingMove[], key: string): boolean {
+  return pending.some((move) => move.from === key && !state.benchIds.has(`${key}|${move.discordId}`))
+}
+
+function readyMove(
+  pending: PendingMove[],
+  state: SeatState,
+  teamSize: number,
+  benchSlots: number,
+): PendingMove | undefined {
+  const starter = pending.find((move) => seatsOf(state, move.to).starters < teamSize)
+  if (starter) return starter
+  return pending.find(
+    (move) => seatsOf(state, move.to).bench < benchSlots && !freesStarterLater(state, pending, move.to),
+  )
+}
+
+function orderMoves(moves: PendingMove[], state: SeatState, teamSize: number, benchSlots: number): SaveStep[] {
   const steps: SaveStep[] = []
   let pending = [...moves]
   while (pending.length > 0) {
-    const ready = pending.find((move) => (counts.get(move.to) ?? 0) < teamSize)
+    const ready = readyMove(pending, state, teamSize, benchSlots)
     if (ready) {
       steps.push(stepForMove(ready))
-      shift(counts, ready.from, -1)
-      shift(counts, ready.to, 1)
+      leaveSeat(state, ready.from, ready.discordId)
+      takeSeat(state, ready.to, ready.discordId, teamSize)
       pending = pending.filter((move) => move !== ready)
       continue
     }
     const [blocked, ...rest] = pending
     if (blocked.from === null) return [...steps, ...pending.map(stepForMove)]
     steps.push({ kind: 'remove', teamKey: blocked.from, discordId: blocked.discordId })
-    shift(counts, blocked.from, -1)
+    leaveSeat(state, blocked.from, blocked.discordId)
     pending = [...rest, { ...blocked, from: null, signupId: null }]
   }
   return steps
 }
 
-export function planSave(snapshot: ServerSnapshot, edits: BuilderEdits, teamSize: number): SaveStep[] {
-  const counts = initialCounts(snapshot, edits)
+export function planSave(
+  snapshot: ServerSnapshot,
+  edits: BuilderEdits,
+  teamSize: number,
+  benchSlots = 0,
+): SaveStep[] {
+  const state = initialSeats(snapshot, edits)
   const removals = removalSteps(snapshot, edits)
-  for (const step of removals) shift(counts, step.teamKey, -1)
+  for (const step of removals) leaveSeat(state, step.teamKey, step.discordId)
   return [
     ...nameSteps(snapshot, edits),
     ...removals,
-    ...orderMoves(pendingMoves(snapshot, edits), counts, teamSize),
+    ...orderMoves(pendingMoves(snapshot, edits), state, teamSize, benchSlots),
   ]
 }
 

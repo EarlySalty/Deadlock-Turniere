@@ -116,7 +116,7 @@ separate flag, so "enabled with limit 0" cannot exist.
 | `bench_slots` | SQL: `TOURNAMENT_GUARD_SELECT`, admin tournament row, public detail | always selected, never null |
 | `bench_slots` | TS `types/tournament.ts` (required number), `editForm.ts`/`createFormValues.ts` (`?? 0` for old cached payloads) | 0 hides every bench control and the "bis zu M Ersatz" suffix |
 | `bench_slots` | TS `lib/lineup.ts` `lineupOf`, `teamFormatLabel` | 0 gives `benchFree = 0`, label "N gegen N"; negative bench count clamps to 0 |
-| `bench_slots` | TS `ParticipantManager` capacity `team_size + bench_slots`, `TeamBuilderPanel` size | capacity is the total roster; the backend still places starters first and rejects over-limit |
+| `bench_slots` | TS `ParticipantManager` capacity `team_size + bench_slots`, `TeamBuilderPanel` drop limit; `planSave` orders moves against starter seats (`team_size`) and uses a bench seat only when no pending move frees a starter seat in that team | capacity is the total roster for drops; save order matches the builder seat preview because the backend `SeatRequest::Auto` fills starters first and never promotes bench members later |
 | `is_bench` | SQL: `team_lineup` `COUNT(*) FILTER (WHERE NOT is_bench)`, check-in finalize, group seeding, member loaders `ORDER BY is_bench` | `NOT NULL DEFAULT false`, old rows are starters |
 | `is_bench` | TS `TeamMember`/`TeamMemberPublic`/start plan entries (required boolean), `lib/lineup.ts` `starterCount` | absent (old payload) counts as starter |
 | `is_bench` | TS public team card: starters first, then an "Ersatzbank" section; captain toggle only during registration with `bench_slots > 0` and not for the captain | |

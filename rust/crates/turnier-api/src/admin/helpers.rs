@@ -144,16 +144,18 @@ pub async fn ensure_team_not_locked(
     Ok(())
 }
 
-/// Wechselt oder leert den Captain eines Teams nach Mitglieder-Mutation.
-///
-/// Wählt das früheste (`joined_at`) verbleibende Mitglied als neuen Captain;
-/// fehlt eines, wird `captain_discord_id = ''`. Portiert `_reassign_or_clear_captain`.
 pub async fn reassign_or_clear_captain(
     tx: &mut sqlx::Transaction<'_, Postgres>,
     team_id: i64,
 ) -> WebResult<()> {
     let next_captain: Option<i64> = sqlx::query_scalar(
-        r#"SELECT discord_id FROM turnier."team_members" WHERE team_id = $1 ORDER BY is_bench, joined_at LIMIT 1"#,
+        r#"SELECT tm.discord_id FROM turnier."team_members" tm
+         JOIN turnier."teams" t ON t.id = tm.team_id
+         WHERE tm.team_id = $1
+         ORDER BY NOT EXISTS (SELECT 1 FROM turnier."tournament_checkins" c
+                              WHERE c.tournament_id = t.tournament_id AND c.discord_id = tm.discord_id),
+                  tm.is_bench, tm.joined_at, tm.id
+         LIMIT 1"#,
     )
     .bind(team_id)
     .fetch_optional(&mut **tx)

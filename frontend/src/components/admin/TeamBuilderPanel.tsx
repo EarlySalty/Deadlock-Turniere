@@ -521,7 +521,7 @@ export default function TeamBuilderPanel({ tournamentId, teamSize, benchSlots, t
 
   const snapshot = useMemo(() => snapshotOf(teams, signups), [teams, signups])
   const view = useMemo(() => buildView(teams, signups, edits), [teams, signups, edits])
-  const steps = useMemo(() => planSave(snapshot, edits, capacity), [snapshot, edits, capacity])
+  const steps = useMemo(() => planSave(snapshot, edits, teamSize, benchSlots), [snapshot, edits, teamSize, benchSlots])
   const captains = useMemo(() => captainChanges(view, snapshot, edits, steps), [view, snapshot, edits, steps])
   const changeCount = steps.length + captains.length
   const saving = progress !== null

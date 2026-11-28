@@ -102,8 +102,6 @@ fn validate_team_name(raw: Option<&str>) -> WebResult<String> {
     turnier_engine::check_team_name(raw.unwrap_or("")).map_err(WebError::bad_request)
 }
 
-/// Bestimmt die Rolle eines neuen Mitglieds (`captain`, wenn Team leer oder ohne
-/// Captain). Portiert die 4× duplizierte Heuristik.
 fn member_role(member_count: i64, captain_discord_id: i64, is_bench: bool) -> TeamRole {
     if !is_bench && (member_count == 0 || captain_discord_id == 0) {
         TeamRole::Captain
@@ -318,8 +316,8 @@ async fn accept_application(
     let app_discord_id_i64: i64 = application.get("discord_id");
     let app_discord_id = db::discord_id_to_string(app_discord_id_i64);
     let app_discord_name: Option<String> = application.get("discord_name");
-    let app_as_bench: bool = application.get("as_bench");
-    let bench_slots: i64 = tournament.get("bench_slots");
+    let app_as_bench: bool = application.try_get("as_bench")?;
+    let bench_slots: i64 = tournament.try_get("bench_slots")?;
     let is_bench = crate::public::helpers::reserve_seat(
         &mut *tx,
         team_id,
@@ -802,7 +800,7 @@ async fn move_member(
     let tournament = crate::public::helpers::lock_tournament_row(&mut tx, tournament_id).await?;
     ensure_participant_management_allowed(tournament.try_get("status")?)?;
     let team_size: i64 = tournament.get("team_size");
-    let bench_slots: i64 = tournament.get("bench_slots");
+    let bench_slots: i64 = tournament.try_get("bench_slots")?;
     let source_team = load_team_or_404(&mut *tx, tournament_id, from_team_id).await?;
     let target_team = load_team_or_404(&mut *tx, tournament_id, team_id).await?;
     let is_bench = crate::public::helpers::reserve_seat(
@@ -902,7 +900,7 @@ async fn assign_signup(
     let tournament = crate::public::helpers::lock_tournament_row(&mut tx, tournament_id).await?;
     ensure_participant_management_allowed(tournament.try_get("status")?)?;
     let team_size: i64 = tournament.get("team_size");
-    let bench_slots: i64 = tournament.get("bench_slots");
+    let bench_slots: i64 = tournament.try_get("bench_slots")?;
     let target_team = load_team_or_404(&mut *tx, tournament_id, team_id).await?;
     let captain: i64 = target_team.get("captain_discord_id");
     let is_bench = crate::public::helpers::reserve_seat(
@@ -1028,7 +1026,7 @@ async fn add_member(
         ));
     }
     let team_size: i64 = tournament.get("team_size");
-    let bench_slots: i64 = tournament.get("bench_slots");
+    let bench_slots: i64 = tournament.try_get("bench_slots")?;
     let target_team = load_team_or_404(&mut *tx, tournament_id, team_id).await?;
     let captain: i64 = target_team.get("captain_discord_id");
     let is_bench = crate::public::helpers::reserve_seat(

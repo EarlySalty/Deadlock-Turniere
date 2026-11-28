@@ -1438,8 +1438,13 @@ async fn sync_team_captain(
     team_id: i64,
 ) -> TournamentResult<()> {
     let members: Vec<(i64,)> = sqlx::query_as(
-        "SELECT discord_id FROM turnier.team_members WHERE team_id = $1 \
-         ORDER BY is_bench, joined_at, id",
+        "SELECT tm.discord_id FROM turnier.team_members tm \
+         JOIN turnier.teams t ON t.id = tm.team_id \
+         WHERE tm.team_id = $1 \
+         ORDER BY NOT EXISTS (SELECT 1 FROM turnier.tournament_checkins c \
+                              WHERE c.tournament_id = t.tournament_id \
+                                AND c.discord_id = tm.discord_id), \
+                  tm.is_bench, tm.joined_at, tm.id",
     )
     .bind(team_id)
     .fetch_all(&mut **tx)
