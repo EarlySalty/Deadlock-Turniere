@@ -458,7 +458,7 @@ export default function Admin() {
                         )}
                         {isPugTournament(liveDetail) && liveDetail.team_size > 1 && !user?.is_admin && (
                           <p className="rounded-lg border border-border bg-card px-4 py-3 text-sm text-muted">
-                            „Teams ausgleichen“ darf nur ein Admin. Bitte einen Admin, die Teams zu bilden, bevor du das Turnier startest.
+                            „Teams ausgleichen“ darf nur ein Admin. Du kannst die Teams selbst im Team-Builder unter „Teilnehmer“ bauen und danach das Turnier starten.
                           </p>
                         )}
                         <CheckinManager
