@@ -18,9 +18,12 @@ pub mod user;
 
 // Flache Re-Exports, damit Konsumenten `turnier_core::Tournament` statt
 // `turnier_core::tournament::Tournament` schreiben können.
-pub use bracket::{BracketMatch, BracketMiniGroup, MatchGame};
+pub use bracket::{
+    BracketMatch, BracketMiniGroup, LobbyAccess, MatchGame, NoLobbyAccess, PublicBracketMatch,
+    PublicMatchGame,
+};
 pub use enums::*;
-pub use group::{Group, GroupMatch, GroupTeam};
+pub use group::{Group, GroupMatch, GroupTeam, PublicGroup, PublicGroupMatch};
 pub use ids::{
     discord_id_to_string, is_guest_participant, is_guest_participant_id, parse_discord_id,
     parse_participant_id, DiscordIdParseError,

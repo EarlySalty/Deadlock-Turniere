@@ -97,6 +97,7 @@ pub async fn create_lobby(
         "party_id": result.get("party_id"),
         "party_code": result.get("party_code"),
         "join_code": result.get("join_code"),
+        "discord_channel_id": result.get("discord_channel_id"),
     })))
 }
 
@@ -413,5 +414,46 @@ pub async fn manual_lobby(
     .await?;
     tx.commit().await?;
 
-    Ok(Json(json!({ "success": true, "party_code": party_code })))
+    let discord_channel_id = deliver_after_manual_lobby(state, kind, tournament_id, match_id).await;
+    Ok(Json(json!({
+        "success": true,
+        "party_code": party_code,
+        "discord_channel_id": discord_channel_id,
+    })))
+}
+
+async fn deliver_after_manual_lobby(
+    state: &AppState,
+    kind: MatchKind,
+    tournament_id: i64,
+    match_id: i64,
+) -> Option<String> {
+    match state
+        .match_manager
+        .deliver_lobby_code(kind, tournament_id, match_id)
+        .await
+    {
+        Ok(channel_id) => channel_id,
+        Err(err) => {
+            tracing::error!(tournament_id, match_id, error = %err, "Lobby-Code nach manueller Lobby nicht zugestellt");
+            None
+        }
+    }
+}
+
+pub async fn deliver_lobby_code(
+    state: &AppState,
+    kind: MatchKind,
+    tournament_id: i64,
+    match_id: i64,
+) -> WebResult<Json<Value>> {
+    let discord_channel_id = state
+        .match_manager
+        .deliver_lobby_code(kind, tournament_id, match_id)
+        .await
+        .map_err(map_steam_error)?;
+    Ok(Json(json!({
+        "success": discord_channel_id.is_some(),
+        "discord_channel_id": discord_channel_id,
+    })))
 }

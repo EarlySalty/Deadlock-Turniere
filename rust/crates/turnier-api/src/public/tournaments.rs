@@ -6,7 +6,9 @@ use axum::routing::get;
 use axum::{Json, Router};
 use serde_json::{json, Value};
 
-use turnier_core::{BracketMatch, Group, Tournament, TournamentDetailPublic, TournamentStatus};
+use turnier_core::{
+    PublicBracketMatch, PublicGroup, Tournament, TournamentDetailPublic, TournamentStatus,
+};
 
 use crate::db;
 use crate::error::{WebError, WebResult};
@@ -134,7 +136,7 @@ async fn get_my_tournament_status(
 async fn get_bracket(
     State(state): State<AppState>,
     Path(tournament_id): Path<i64>,
-) -> WebResult<Json<Vec<BracketMatch>>> {
+) -> WebResult<Json<Vec<PublicBracketMatch>>> {
     let pool = &state.pool;
     let exists: Option<(i64,)> =
         sqlx::query_as(r#"SELECT id FROM turnier."tournaments" WHERE id = $1"#)
@@ -154,7 +156,7 @@ async fn get_bracket(
 async fn get_groups(
     State(state): State<AppState>,
     Path(tournament_id): Path<i64>,
-) -> WebResult<Json<Vec<Group>>> {
+) -> WebResult<Json<Vec<PublicGroup>>> {
     let pool = &state.pool;
     let exists: Option<(i64,)> =
         sqlx::query_as(r#"SELECT id FROM turnier."tournaments" WHERE id = $1"#)

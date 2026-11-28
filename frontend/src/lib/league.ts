@@ -12,10 +12,10 @@ export function leagueFinishConfirm(countsForLeaderboard: boolean): string {
   return `Turnier abschließen? Es startet kein Bracket. ${placement} Danach lassen sich keine Ergebnisse mehr ändern.`
 }
 
-export interface LeagueRound {
+export interface LeagueRound<M extends GroupMatch = GroupMatch> {
   round: number
   scheduledAt: string | null
-  matches: GroupMatch[]
+  matches: M[]
   openMatches: number
 }
 
@@ -27,8 +27,8 @@ export function isDecided(match: GroupMatch): boolean {
   return match.status === 'completed' || match.status === 'forfeit'
 }
 
-export function leagueRounds(matches: GroupMatch[]): LeagueRound[] {
-  const byRound = new Map<number, GroupMatch[]>()
+export function leagueRounds<M extends GroupMatch>(matches: M[]): LeagueRound<M>[] {
+  const byRound = new Map<number, M[]>()
   for (const match of matches) {
     const round = match.round ?? 1
     byRound.set(round, [...(byRound.get(round) ?? []), match])

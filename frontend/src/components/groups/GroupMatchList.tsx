@@ -213,11 +213,6 @@ export default function GroupMatchList({ groups, teams, league = false }: Props)
 
                               <div className="flex flex-wrap items-center gap-2">
                                 {statusChip(match)}
-                                {match.party_code && (
-                                  <span className="rounded-full border border-primary/20 bg-primary/10 px-2 py-1 text-xs font-medium text-primary">
-                                    Code {match.party_code}
-                                  </span>
-                                )}
                               </div>
                             </div>
                           </div>

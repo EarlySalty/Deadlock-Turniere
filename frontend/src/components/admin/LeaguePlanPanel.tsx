@@ -17,7 +17,7 @@ import {
   slotMinutesOf,
   toLocalInput,
 } from '@/lib/league'
-import type { Group, Team } from '@/types/tournament'
+import type { AdminGroup as Group, Team } from '@/types/tournament'
 import { pluralize } from '@/lib/countLabel'
 
 interface LeaguePlanPanelProps {
