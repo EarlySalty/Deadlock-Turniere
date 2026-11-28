@@ -7,6 +7,7 @@ import { pluralWord } from '@/lib/countLabel'
 
 interface Props extends PhaseAvailability {
   tournament: TournamentDetail
+  activePhase: AdminPhase | null
   onNavigate: (phase: AdminPhase) => void
 }
 
@@ -17,7 +18,7 @@ const STEPS = [
   { label: 'Spiele', icon: GitBranch },
 ] as const
 
-export default function AdminWorkflowPanel({ tournament, hasGroups, hasBracket, onNavigate }: Props) {
+export default function AdminWorkflowPanel({ tournament, hasGroups, hasBracket, activePhase, onNavigate }: Props) {
   const action = workflowAction(tournament, { hasGroups, hasBracket })
   const counts = teamOverview(tournament)
   const isPug = isPugTournament(tournament)
@@ -58,10 +59,12 @@ export default function AdminWorkflowPanel({ tournament, hasGroups, hasBracket, 
           <h3 className="mt-1 text-base font-semibold text-foreground">{action.title}</h3>
           <p className="mt-1 text-sm leading-relaxed text-muted">{action.description}</p>
         </div>
-        <Button variant="primary" size="sm" onClick={() => onNavigate(action.phase)}>
-          {action.button}
-          <ArrowRight size={15} />
-        </Button>
+        {activePhase !== action.phase && (
+          <Button variant="primary" size="sm" onClick={() => onNavigate(action.phase)}>
+            {action.button}
+            <ArrowRight size={15} />
+          </Button>
+        )}
       </div>
       <div className="flex flex-wrap gap-x-5 gap-y-2 border-t border-border pt-3 text-sm text-muted">
         <span><strong className="text-foreground">{counts.teams}</strong> {pluralWord(counts.teams, 'Team', 'Teams')}</span>

@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { latestActionError } from '@/lib/latestError'
+import ActionError from '@/components/ui/ActionError'
 import Card from '@/components/ui/Card'
 import Badge from '@/components/ui/Badge'
 import Button from '@/components/ui/Button'
@@ -47,17 +48,18 @@ interface TournamentManagerProps {
   onSuccessMessage?: (text: string) => void
 }
 
-const STATUS_ACTIONS: Record<string, { label: string; confirmMsg: string }> = {
-  draft: { label: 'Anmeldung starten', confirmMsg: 'Turnier-Anmeldung wirklich starten?' },
-  group_phase: { label: 'Zum Bracket', confirmMsg: 'Gruppenphase beenden und Bracket starten?' },
-  bracket: { label: 'Turnier abschließen', confirmMsg: 'Turnier wirklich abschließen?' },
-  completed: { label: 'Archivieren', confirmMsg: 'Turnier ins Archiv verschieben?' },
+const STATUS_ACTIONS: Record<string, { label: string; confirmMsg: string; done: string }> = {
+  draft: { label: 'Anmeldung starten', confirmMsg: 'Turnier-Anmeldung wirklich starten?', done: 'Die Anmeldung ist geöffnet.' },
+  group_phase: { label: 'Zum Bracket', confirmMsg: 'Gruppenphase beenden und Bracket starten?', done: 'Das Bracket ist gestartet.' },
+  bracket: { label: 'Turnier abschließen', confirmMsg: 'Turnier wirklich abschließen?', done: '' },
+  completed: { label: 'Archivieren', confirmMsg: 'Turnier ins Archiv verschieben?', done: 'Das Turnier ist archiviert.' },
 }
 
 function leagueFinishAction(countsForLeaderboard: boolean) {
   return {
     label: 'Turnier abschließen',
     confirmMsg: `${leagueFinishConfirm(countsForLeaderboard)} Das geht erst, wenn alle Spiele gewertet sind.`,
+    done: '',
   }
 }
 
@@ -127,7 +129,7 @@ export default function TournamentManager({
     generateBracketMutation.isPending
 
   const error = latestActionError([
-    detailsUpdateMutation,
+    ...(settingsOpen ? [] : [detailsUpdateMutation]),
     advanceMutation,
     openCheckinMutation,
     revertCheckinMutation,
@@ -167,7 +169,7 @@ export default function TournamentManager({
       const finishes = tournament.status === 'bracket' || (storedLeague && leagueRunning)
       advanceMutation.mutate(tournament.id, {
         onSuccess: () => {
-          setSuccessMessage(`Status auf ${action.label} verarbeitet.`)
+          setSuccessMessage(action.done)
           if (finishes) onFinished?.()
         },
       })
@@ -185,7 +187,7 @@ export default function TournamentManager({
   const handleOpenCheckin = () => {
     if (window.confirm('Check-in jetzt öffnen?')) {
       openCheckinMutation.mutate(undefined, {
-        onSuccess: () => setSuccessMessage('Check-in wurde geöffnet.'),
+        onSuccess: () => setSuccessMessage('Der Check-in ist geöffnet.'),
       })
     }
   }
@@ -304,8 +306,24 @@ export default function TournamentManager({
         </div>
         {tournament.status === 'registration' && (
           <p className="text-xs text-muted">
-            Vor dem Öffnen des Check-ins alle Teams vervollständigen und Captains kontrollieren.
+            {tournament.invite_mode === 'solo_only'
+              ? 'Nach dem Öffnen checken die Spieler ein. Die Teams bildest du danach unter „Check-in“ mit „Teams ausgleichen“.'
+              : teamCount === 0
+                ? 'Noch gibt es kein Team. Der Check-in lässt sich erst öffnen, wenn mindestens ein Team angelegt ist.'
+                : 'Vor dem Öffnen des Check-ins alle Teams vervollständigen und Captains kontrollieren.'}
           </p>
+        )}
+        {successMessage && (
+          <div role="status" className="flex items-center gap-2 rounded-lg border border-green-500/20 bg-green-500/10 p-3 text-sm text-green-400">
+            <CheckCircle2 size={16} className="shrink-0" />
+            <span>{successMessage}</span>
+          </div>
+        )}
+        {error && (
+          <div role="alert" className="flex items-center gap-2 rounded-lg border border-red-500/20 bg-red-500/10 p-3 text-sm text-red-400">
+            <AlertCircle size={16} className="shrink-0" />
+            <span>{error instanceof Error ? error.message : 'Ein Fehler ist aufgetreten'}</span>
+          </div>
         )}
       </section>
 
@@ -398,6 +416,7 @@ export default function TournamentManager({
       )}
 
 
+            <ActionError actions={[detailsUpdateMutation]} />
             <Button
               variant="primary"
               size="sm"
@@ -461,20 +480,6 @@ export default function TournamentManager({
           </div>
         </div>
       </details>
-
-      {successMessage && (
-        <div className="flex items-center gap-2 rounded-lg border border-green-500/20 bg-green-500/10 p-3 text-sm text-green-400">
-          <CheckCircle2 size={16} />
-          <span>{successMessage}</span>
-        </div>
-      )}
-
-      {error && (
-        <div className="flex items-center gap-2 rounded-lg border border-red-500/20 bg-red-500/10 p-3 text-sm text-red-400">
-          <AlertCircle size={16} />
-          <span>{error instanceof Error ? error.message : 'Ein Fehler ist aufgetreten'}</span>
-        </div>
-      )}
 
       <div className="flex flex-wrap gap-4 border-t border-border pt-4 text-xs text-muted">
         <span>

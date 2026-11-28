@@ -121,7 +121,7 @@ export default function ManualResultForm({
         )}
 
         {error && (
-          <div className="flex items-center gap-2 text-red-400 text-xs bg-red-500/10 border border-red-500/20 rounded-lg p-2">
+          <div role="alert" className="flex items-center gap-2 text-red-400 text-xs bg-red-500/10 border border-red-500/20 rounded-lg p-2">
             <AlertCircle size={14} />
             <span>{error}</span>
           </div>

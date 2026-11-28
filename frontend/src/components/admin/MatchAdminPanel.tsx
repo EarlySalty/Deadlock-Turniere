@@ -107,7 +107,9 @@ export default function MatchAdminPanel({
   const [copyFeedback, setCopyFeedback] = useState<Record<number, boolean>>({})
   const [manualCodes, setManualCodes] = useState<Record<number, string>>({})
 
-  const actionableMatches = matches.filter((match) => match.team1_id !== null && match.team2_id !== null)
+  const actionableMatches = matches
+    .filter((match) => match.team1_id !== null && match.team2_id !== null)
+    .sort((a, b) => Number(isTerminalMatch(a)) - Number(isTerminalMatch(b)))
   const touchesMiniGroup = (match: BracketMatch) =>
     match.mini_group_id !== null ||
     matches.some(
@@ -535,6 +537,12 @@ export default function MatchAdminPanel({
               </div>
             )}
 
+            {!isTerminalMatch(match) && touchesMiniGroup(match) && (
+              <p className="text-sm text-amber-200">
+                Dieses Ergebnis bestimmt die Mini-Gruppe und lässt sich nach dem Speichern nicht mehr ändern.
+              </p>
+            )}
+
             {!isTerminalMatch(match) && (
               <ManualResultForm
                 tournamentId={tournamentId}
@@ -544,7 +552,13 @@ export default function MatchAdminPanel({
               />
             )}
 
-            {isTerminalMatch(match) && allowManualOverride && (
+            {isTerminalMatch(match) && allowManualOverride && touchesMiniGroup(match) && (
+              <p className="text-sm text-muted">
+                Ergebnisse rund um die Mini-Gruppe lassen sich nachträglich nicht korrigieren.
+              </p>
+            )}
+
+            {isTerminalMatch(match) && allowManualOverride && !touchesMiniGroup(match) && (
               <ManualResultForm
                 tournamentId={tournamentId}
                 match={match}

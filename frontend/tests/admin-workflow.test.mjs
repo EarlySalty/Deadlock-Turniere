@@ -23,7 +23,8 @@ const NONE = { hasGroups: false, hasBracket: false }
 
 test('Turnierleitung bekommt in jeder Phase die passende nächste Aktion', () => {
   assert.equal(workflowAction(tournament('draft'), NONE).phase, 'setup')
-  assert.equal(workflowAction(tournament('registration'), NONE).phase, 'participants')
+  assert.equal(workflowAction(tournament('registration'), NONE).phase, 'setup')
+  assert.equal(workflowAction(tournament('registration', { invite_mode: 'always' }), NONE).phase, 'participants')
   assert.equal(workflowAction(tournament('checkin'), NONE).phase, 'checkin')
   assert.equal(workflowAction(tournament('group_phase'), { hasGroups: true, hasBracket: false }).phase, 'group_phase')
   assert.equal(workflowAction(tournament('bracket'), { hasGroups: false, hasBracket: true }).phase, 'bracket')
@@ -39,7 +40,7 @@ test('PUG folgt dem Anmeldemodus des Servers, nicht dem Namen', () => {
   assert.equal(isPugTournament(tournament('registration')), true)
   assert.equal(isPugTournament(tournament('registration', { invite_mode: 'always' })), false)
   assert.equal(isPugTournament(tournament('registration', { name: 'Community Cup', invite_mode: 'solo_only' })), true)
-  assert.match(workflowAction(tournament('registration'), NONE).description, /Captains/)
+  assert.match(workflowAction(tournament('registration'), NONE).description, /Teams ausgleichen/)
 })
 
 test('Team-Statistik zählt nur noch nicht zugeteilte Solo-Spieler', () => {

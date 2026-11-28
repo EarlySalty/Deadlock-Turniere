@@ -47,7 +47,9 @@ import BracketView from '@/components/bracket/BracketView'
 import MiniGroupPanel from '@/components/bracket/MiniGroupPanel'
 import AutoLobbyButton from '@/components/admin/AutoLobbyButton'
 import { effectiveBracketFormat } from '@/lib/bracketFormat'
-import { bracketHasResults } from '@/lib/adminWorkflow'
+import { bracketHasResults, isPugTournament } from '@/lib/adminWorkflow'
+import SoloBalancePanel from '@/components/admin/SoloBalancePanel'
+import { useAuth } from '@/hooks/useAuth'
 import {
   Archive,
   CalendarClock,
@@ -80,6 +82,8 @@ export default function Admin() {
   const [createFormKey, setCreateFormKey] = useState(0)
   const [activePhase, setActivePhase] = useState<AdminPhase | null>(null)
   const [finishedLiveId, setFinishedLiveId] = useState<number | null>(null)
+  const [liveNotice, setLiveNotice] = useState<{ tournamentId: number; text: string } | null>(null)
+  const { user } = useAuth()
   const [managerNotice, setManagerNotice] = useState<{ tournamentId: number; text: string } | null>(null)
   const deleteMutation = useDeleteTournament()
 
@@ -135,7 +139,13 @@ export default function Admin() {
   const hasBracket = Boolean(liveDetail?.bracket_matches.length)
   const liveLeague = isLeague(liveDetail?.tournament_mode)
 
-  const phaseTournamentId = useRef<number | null>(null)
+  const phaseKey = useRef<string | null>(null)
+  const topNotice =
+    liveDetail && activePhase !== 'setup' && managerNotice?.text && managerNotice.tournamentId === liveDetail.id
+      ? managerNotice.text
+      : liveDetail && liveNotice?.tournamentId === liveDetail.id
+        ? liveNotice.text
+        : ''
 
   useEffect(() => {
     if (!liveDetail) {
@@ -143,8 +153,9 @@ export default function Admin() {
       setActivePhase(null)
       return
     }
-    const switched = phaseTournamentId.current !== liveDetail.id
-    phaseTournamentId.current = liveDetail.id
+    const key = `${liveDetail.id}:${liveDetail.status}`
+    const switched = phaseKey.current !== key
+    phaseKey.current = key
     setActivePhase((current) => {
       const fallback = defaultPhaseFor(liveDetail.status, hasGroups, hasBracket)
       return switched ? fallback : current ?? fallback
@@ -291,19 +302,30 @@ export default function Admin() {
                     Abbrechen
                   </button>
                 </div>
-                <CreateTournamentForm key={createFormKey} template={createTemplate ?? undefined} />
+                <CreateTournamentForm
+                  key={createFormKey}
+                  template={createTemplate ?? undefined}
+                  onCreated={(created) => {
+                    handleSelectLive(created.id)
+                    setManagerNotice(null)
+                    setLiveNotice({
+                      tournamentId: created.id,
+                      text: `Turnier „${created.name}“ angelegt. Als Nächstes Termine und Regeln prüfen und die Anmeldung starten.`,
+                    })
+                  }}
+                />
               </section>
             ) : loadingLiveDetail && liveSelectedId ? (
               <LoadingSpinner />
             ) : liveDetail && activePhase ? (
               <>
-                {liveDetail.id === finishedLiveId && liveDetail.status === 'completed' && (
+                {topNotice && (
                   <div
                     role="status"
                     className="flex items-center gap-2 rounded-lg border border-green-500/20 bg-green-500/10 p-3 text-sm text-green-400"
                   >
-                    <Trophy size={16} />
-                    <span>Turnier abgeschlossen. Ergebnisse und Platzierungen sind gespeichert.</span>
+                    <Trophy size={16} className="shrink-0" />
+                    <span>{topNotice}</span>
                   </div>
                 )}
                 {selectedSummary && <TournamentSummaryCard tournament={selectedSummary} />}
@@ -311,6 +333,7 @@ export default function Admin() {
                   tournament={liveDetail}
                   hasGroups={hasGroups}
                   hasBracket={hasBracket}
+                  activePhase={activePhase}
                   onNavigate={setActivePhase}
                 />
                 <AdminPhaseNav
@@ -324,7 +347,8 @@ export default function Admin() {
 
                 <div className="min-w-0 space-y-5">
                     {(liveDetail.status === 'group_phase' ||
-                      liveDetail.status === 'bracket') && (
+                      liveDetail.status === 'bracket') &&
+                      (activePhase === 'group_phase' || activePhase === 'bracket') && (
                       <Leitstand tournamentId={liveDetail.id} />
                     )}
 
@@ -337,9 +361,18 @@ export default function Admin() {
                         matchCount={matchCount}
                         canChangeTournamentMode={canChangeTournamentMode}
                         bracketHasResults={bracketHasResults(liveDetail)}
-                        onFinished={() => setFinishedLiveId(liveDetail.id)}
+                        onFinished={() => {
+                          setFinishedLiveId(liveDetail.id)
+                          setLiveNotice({
+                            tournamentId: liveDetail.id,
+                            text: 'Turnier abgeschlossen. Ergebnisse und Platzierungen sind gespeichert.',
+                          })
+                        }}
                         successMessage={managerNotice?.tournamentId === liveDetail.id ? managerNotice.text : ''}
-                        onSuccessMessage={(text) => setManagerNotice({ tournamentId: liveDetail.id, text })}
+                        onSuccessMessage={(text) => {
+                          setLiveNotice(null)
+                          setManagerNotice({ tournamentId: liveDetail.id, text })
+                        }}
                       />
                     )}
 
@@ -387,12 +420,25 @@ export default function Admin() {
 
                     {activePhase === 'checkin' && liveDetail.status === 'checkin' && (
                       <ParticipantMarksContext.Provider value={participantMarks}>
+                        {isPugTournament(liveDetail) && liveDetail.team_size > 1 && user?.is_admin && (
+                          <SoloBalancePanel
+                            key={liveDetail.id}
+                            tournamentId={liveDetail.id}
+                            teamSize={liveDetail.team_size}
+                            signupCount={liveDetail.signups.length}
+                            teams={liveDetail.teams}
+                          />
+                        )}
                         <CheckinManager
                           tournamentId={liveDetail.id}
                           teamSize={liveDetail.team_size}
                           teams={liveDetail.teams}
                           signups={liveDetail.signups}
                           league={liveLeague}
+                          onStarted={(text) => {
+                            setManagerNotice(null)
+                            setLiveNotice({ tournamentId: liveDetail.id, text })
+                          }}
                         />
                       </ParticipantMarksContext.Provider>
                     )}

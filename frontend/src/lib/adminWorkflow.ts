@@ -58,16 +58,18 @@ export function workflowAction(t: TournamentDetail, { hasGroups, hasBracket }: P
         stage: 1,
         title: 'Anmeldungen prüfen und Teams bilden',
         description: isPugTournament(t)
-          ? 'Die Spieler melden sich solo an. Ordne sie unter „Teilnehmer“ per Drag-and-drop den Teams zu und lege die Captains fest. Anschließend öffnest du im Setup den Check-in.'
+          ? 'Die Spieler melden sich solo an. Öffne im Setup den Check-in. Sobald die Spieler eingecheckt sind, bildest du unter „Check-in“ mit „Teams ausgleichen“ gleich starke Teams.'
           : 'Prüfe die Solo-Anmeldungen, vervollständige die Teams und lege Captains fest. Anschließend geht es zum Check-in.',
-        button: 'Spieler und Teams verwalten',
-        phase: 'participants',
+        button: isPugTournament(t) ? 'Check-in im Setup öffnen' : 'Spieler und Teams verwalten',
+        phase: isPugTournament(t) ? 'setup' : 'participants',
       }
     case 'checkin':
       return {
         stage: 2,
         title: 'Check-in kontrollieren und abschließen',
-        description: 'Prüfe fehlende Spieler und unvollständige Teams. Über die Vorschau im Check-in kannst du das Turnier starten.',
+        description: isPugTournament(t)
+          ? 'Warte, bis die Spieler eingecheckt sind, und bilde dann mit „Teams ausgleichen“ die Teams. Über die Vorschau im Check-in startest du das Turnier.'
+          : 'Prüfe fehlende Spieler und unvollständige Teams. Über die Vorschau im Check-in kannst du das Turnier starten.',
         button: 'Zum Check-in',
         phase: 'checkin',
       }

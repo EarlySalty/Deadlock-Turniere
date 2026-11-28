@@ -13,7 +13,8 @@ export function defaultPhaseFor(
   hasGroups: boolean,
   hasBracket: boolean,
 ): AdminPhase {
-  if (status === 'draft' || status === 'registration') return 'participants'
+  if (status === 'draft') return 'setup'
+  if (status === 'registration') return 'participants'
   if (status === 'checkin') return 'checkin'
   if (status === 'group_phase') return hasGroups ? 'group_phase' : 'participants'
   if (status === 'bracket') return hasBracket ? 'bracket' : 'participants'

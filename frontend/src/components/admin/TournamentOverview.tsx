@@ -116,7 +116,7 @@ export function TournamentSummaryCard({ tournament: t }: { tournament: AdminTour
         <Fact label="Teamgröße" value={t.team_size <= 1 ? 'Einzelspieler' : `${t.team_size} Spieler`} />
         <Fact label="Teams" value={String(t.team_count)} />
         <Fact label="Spieler in Teams" value={String(t.player_count)} />
-        <Fact label="Solo-Anmeldungen" value={`${t.signup_count} (${t.open_signup_count} ohne Team)`} />
+        <Fact label="Anmeldungen" value={`${t.signup_count} (${t.open_signup_count} ohne Team)`} />
       </dl>
     </Card>
   )

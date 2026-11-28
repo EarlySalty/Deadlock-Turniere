@@ -24,6 +24,7 @@ interface CheckinManagerProps {
   teams: Team[]
   signups: TournamentSignup[]
   league?: boolean
+  onStarted?: (message: string) => void
 }
 
 interface ParticipantRow {
@@ -40,6 +41,7 @@ export default function CheckinManager({
   teams,
   signups,
   league = false,
+  onStarted,
 }: CheckinManagerProps) {
   const { data: adminCheckins, error: checkinsError } = useAdminCheckins(tournamentId)
   const deleteSignup = useDeleteAdminSignup()
@@ -103,6 +105,14 @@ export default function CheckinManager({
   const pendingBuilderChanges = pendingDrafts.here + pendingDrafts.otherTabs
   const bracketFallback = preview !== null && preview.effective_bracket_format !== preview.bracket_format
   const bracketTooSmall = preview !== null && !preview.bracket_startable
+  const openWarnings = preview?.warnings.filter((warning) => !allowedTeams[warning.team_id]).length ?? 0
+  const startBlocker = pendingBuilderChanges > 0
+    ? 'Erst die Änderungen im Team-Builder speichern.'
+    : bracketTooSmall
+      ? 'Zu wenige Teams für das Bracket.'
+      : openWarnings > 0
+        ? `${pluralize(openWarnings, 'unvollständiges Team', 'unvollständige Teams')} noch anhaken oder entfernen.`
+        : ''
 
   const removeParticipant = (row: ParticipantRow) => {
     if (row.signup_id === null) return
@@ -191,13 +201,13 @@ export default function CheckinManager({
       },
       {
         onSuccess: (result) => {
-          setFeedback(
-            league
-              ? 'Check-in abgeschlossen. Der Spielplan steht, du findest ihn unter „Spielplan“.'
-              : result.advanced_to_bracket
-                ? 'Check-in abgeschlossen und Turnier direkt ins Bracket verschoben.'
-                : 'Check-in abgeschlossen und Turnier in die Gruppenphase verschoben.'
-          )
+          const message = league
+            ? 'Check-in abgeschlossen. Der Spielplan steht, du findest ihn unter „Spielplan“.'
+            : result.advanced_to_bracket
+              ? 'Check-in abgeschlossen. Das Turnier läuft, die Matches stehen im Bracket.'
+              : 'Check-in abgeschlossen. Das Turnier läuft in der Gruppenphase.'
+          setFeedback(message)
+          onStarted?.(message)
           closePreview()
         },
       }
@@ -351,18 +361,16 @@ export default function CheckinManager({
 
       {preview && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4">
-          <div className="max-h-[90vh] w-full max-w-3xl overflow-auto rounded-xl border border-border bg-card p-4 shadow-xl sm:p-6">
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="checkin-preview-title"
+            className="max-h-[90vh] w-full max-w-3xl overflow-auto rounded-xl border border-border bg-card p-4 shadow-xl sm:p-6"
+          >
             <div className="flex items-center gap-2">
               <TriangleAlert size={18} className="text-amber-300" />
-              <h3 className="text-lg font-semibold text-foreground">Check-in Vorschau</h3>
+              <h3 id="checkin-preview-title" className="text-lg font-semibold text-foreground">Check-in Vorschau</h3>
             </div>
-
-            {error && (
-              <div role="alert" className="mt-4 flex items-start gap-2 rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-300">
-                <AlertCircle size={16} className="mt-0.5 shrink-0" />
-                <span>{error instanceof Error ? error.message : 'Check-in konnte nicht verarbeitet werden'}</span>
-              </div>
-            )}
 
             {modalFeedback && (
               <div role="status" className="mt-4 flex items-start gap-2 rounded-xl border border-green-500/20 bg-green-500/10 p-4 text-sm text-green-400">
@@ -509,7 +517,17 @@ export default function CheckinManager({
               </div>
             )}
 
-            <div className="mt-6 flex flex-wrap justify-end gap-2">
+            {error && (
+              <div role="alert" className="mt-6 flex items-start gap-2 rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-300">
+                <AlertCircle size={16} className="mt-0.5 shrink-0" />
+                <span>{error instanceof Error ? error.message : 'Check-in konnte nicht verarbeitet werden'}</span>
+              </div>
+            )}
+
+            <div className="mt-6 flex flex-wrap items-center justify-end gap-2">
+              {startBlocker && (
+                <p id="checkin-start-blocker" className="mr-auto text-sm text-amber-200">{startBlocker}</p>
+              )}
               <Button
                 variant="ghost"
                 size="sm"
@@ -518,7 +536,13 @@ export default function CheckinManager({
               >
                 Schließen
               </Button>
-              <Button variant="primary" size="sm" disabled={modalBusy || pendingBuilderChanges > 0 || bracketTooSmall} onClick={confirmStart}>
+              <Button
+                variant="primary"
+                size="sm"
+                disabled={modalBusy || startBlocker !== ''}
+                aria-describedby={startBlocker ? 'checkin-start-blocker' : undefined}
+                onClick={confirmStart}
+              >
                 {finalizeMutation.isPending ? 'Startet...' : 'Turnier jetzt starten'}
               </Button>
             </div>

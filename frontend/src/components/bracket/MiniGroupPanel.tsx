@@ -79,7 +79,7 @@ export default function MiniGroupPanel({ miniGroups, matches, teams }: MiniGroup
             if (b.wins !== a.wins) return b.wins - a.wins
             return a.losses - b.losses
           })
-          const completed = standings.every((entry) => entry.played === group.team_ids.length - 1)
+          const completed = group.team_ids.length > 0 && standings.every((entry) => entry.played === group.team_ids.length - 1)
 
           return (
             <motion.div
@@ -100,7 +100,7 @@ export default function MiniGroupPanel({ miniGroups, matches, teams }: MiniGroup
                       : 'bg-muted/15 text-muted'
                   }`}
                 >
-                  {completed ? 'abgeschlossen' : pluralize(group.team_ids.length, 'Team', 'Teams')}
+                  {completed ? 'abgeschlossen' : group.team_ids.length === 0 ? 'wartet auf Teams' : pluralize(group.team_ids.length, 'Team', 'Teams')}
                 </span>
               </div>
 

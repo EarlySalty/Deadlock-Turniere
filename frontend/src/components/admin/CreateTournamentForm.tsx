@@ -32,6 +32,7 @@ import { DEFAULT_REMINDER_OFFSETS, DEFAULT_START_REMINDER_OFFSETS, offsetsOrDefa
 
 interface CreateTournamentFormProps {
   template?: CreateTemplate
+  onCreated?: (tournament: { id: number; name: string }) => void
 }
 
 interface CreateFormDates {
@@ -72,7 +73,7 @@ function gameRulesSummary(rules: GameRulesState): string {
   return `Aktuell: ${mode} · Preset ${PRESET_LABELS[rules.preset]} · ${lobby}`
 }
 
-export default function CreateTournamentForm({ template }: CreateTournamentFormProps) {
+export default function CreateTournamentForm({ template, onCreated }: CreateTournamentFormProps) {
   const [values, setValues] = useState<CreateFormValues>(() => template?.values ?? defaultCreateValues())
   const [dates, setDates] = useState<CreateFormDates>(EMPTY_DATES)
   const [rulesOpen, setRulesOpen] = useState(false)
@@ -125,10 +126,11 @@ export default function CreateTournamentForm({ template }: CreateTournamentFormP
       },
       {
         onSuccess: (tournament) => {
-          setSuccessMsg(`Turnier "${tournament.name}" wurde erfolgreich erstellt!`)
+          setSuccessMsg(`Turnier „${tournament.name}“ angelegt.`)
           setValues(defaultCreateValues())
           setDates(EMPTY_DATES)
           setTemplateSource(null)
+          onCreated?.(tournament)
         },
       },
     )
@@ -138,7 +140,7 @@ export default function CreateTournamentForm({ template }: CreateTournamentFormP
     <Card className="sm:p-2">
       <div className="mb-5 flex items-center gap-2">
         <Trophy size={20} className="text-primary" />
-        <h2 className="text-lg font-semibold text-foreground">Neues Turnier erstellen</h2>
+        <h2 className="text-lg font-semibold text-foreground">Name, Termine und Format</h2>
       </div>
 
       {templateSource && (
@@ -203,7 +205,7 @@ export default function CreateTournamentForm({ template }: CreateTournamentFormP
         </CollapsibleSection>
 
         {createMutation.isError && (
-          <div className="flex items-center gap-2 rounded-lg border border-red-500/20 bg-red-500/10 p-3 text-sm text-red-400">
+          <div role="alert" className="flex items-center gap-2 rounded-lg border border-red-500/20 bg-red-500/10 p-3 text-sm text-red-400">
             <AlertCircle size={16} />
             <span>
               {createMutation.error instanceof Error ? createMutation.error.message : 'Fehler beim Erstellen'}
@@ -219,7 +221,7 @@ export default function CreateTournamentForm({ template }: CreateTournamentFormP
         )}
 
         {successMsg && (
-          <div className="flex items-center gap-2 rounded-lg border border-green-500/20 bg-green-500/10 p-3 text-sm text-green-400">
+          <div role="status" className="flex items-center gap-2 rounded-lg border border-green-500/20 bg-green-500/10 p-3 text-sm text-green-400">
             <CheckCircle size={16} />
             <span>{successMsg}</span>
           </div>
