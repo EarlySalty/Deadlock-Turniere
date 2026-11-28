@@ -55,5 +55,6 @@ pub async fn build_resolver(pool: Pool, config: &Config) -> SteamResult<SteamRan
         bridge,
         discord,
     )
-    .with_main_rank_roles(config.steam.main_rank_role_ids.clone()))
+    .with_main_rank_roles(config.steam.main_rank_role_ids.clone())
+    .with_discord_miss_ttl(config.steam.rank_miss_cache_seconds))
 }

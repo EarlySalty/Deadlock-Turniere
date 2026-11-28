@@ -51,6 +51,13 @@ impl RankCacheRow {
     }
 }
 
+#[derive(Debug, FromRow)]
+struct BatchRankCacheRow {
+    discord_id: i64,
+    #[sqlx(flatten)]
+    row: RankCacheRow,
+}
+
 /// L1-Eintrag: Ablaufzeitpunkt + gecachtes Profil.
 struct MemoryEntry {
     expires_at: Instant,
@@ -103,6 +110,45 @@ impl RankCache {
         let profile = row.into_profile();
         self.set_memory(discord_id, &profile);
         Ok(Some(profile))
+    }
+
+    pub async fn get_many(
+        &self,
+        discord_ids: &[String],
+    ) -> SteamResult<HashMap<String, RankProfile>> {
+        let mut found = HashMap::new();
+        let mut pending: Vec<i64> = Vec::new();
+        for discord_id in discord_ids {
+            if found.contains_key(discord_id) {
+                continue;
+            }
+            if let Some(profile) = self.get_memory(discord_id) {
+                found.insert(discord_id.clone(), profile);
+            } else if let Ok(parsed) = parse_discord_id(discord_id) {
+                pending.push(parsed);
+            }
+        }
+        if pending.is_empty() {
+            return Ok(found);
+        }
+
+        let rows: Vec<BatchRankCacheRow> = sqlx::query_as(
+            "SELECT discord_id, source, steam_id, rank, rank_tier, subrank, rank_score \
+             FROM turnier.\"rank_cache\" \
+             WHERE discord_id = ANY($1) AND cached_at > now() - ($2::bigint * interval '1 second')",
+        )
+        .bind(&pending)
+        .bind(self.ttl.as_secs() as i64)
+        .fetch_all(&self.pool)
+        .await?;
+
+        for row in rows {
+            let discord_id = row.discord_id.to_string();
+            let profile = row.row.into_profile();
+            self.set_memory(&discord_id, &profile);
+            found.insert(discord_id, profile);
+        }
+        Ok(found)
     }
 
     /// Persistiert ein Profil per UPSERT in `turnier.rank_cache` und füllt L1.

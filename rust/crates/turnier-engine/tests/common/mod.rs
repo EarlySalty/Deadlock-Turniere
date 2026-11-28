@@ -176,4 +176,11 @@ impl RankResolver for NullResolver {
     ) -> SteamResult<HashMap<String, RankProfile>> {
         Ok(HashMap::new())
     }
+
+    async fn cached_rank_profiles(
+        &self,
+        _discord_ids: &[String],
+    ) -> SteamResult<HashMap<String, RankProfile>> {
+        Ok(HashMap::new())
+    }
 }

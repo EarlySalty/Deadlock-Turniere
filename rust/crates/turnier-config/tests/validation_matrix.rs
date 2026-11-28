@@ -56,6 +56,7 @@ fn every_required_leaf_rejects_omission_and_every_leaf_rejects_wrong_type() {
                 | "network.hud_spectate_seconds"
                 | "network.hud_ready_seconds"
                 | "limits.guest_logins_per_hour"
+                | "steam.rank_miss_cache_seconds"
         ) {
             assert!(
                 parse(&missing).is_err(),
@@ -126,6 +127,7 @@ fn pool_cache_limits_and_intervals_reject_out_of_range_values() {
         ("bridge.poll_milliseconds", [0, 60001]),
         ("bridge.stale_task_milliseconds", [0, 3600001]),
         ("steam.rank_cache_seconds", [0, 604801]),
+        ("steam.rank_miss_cache_seconds", [0, 86401]),
         ("steam.subrank_role_cache_seconds", [0, 86401]),
         ("assets.heroes_cache_seconds", [0, 604801]),
         ("assets.heroes_fallback_cache_seconds", [0, 86401]),

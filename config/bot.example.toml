@@ -146,6 +146,7 @@ main_rank_role_ids = [
   1331458049637875785, 1331458087349129296,
 ]
 rank_cache_seconds = 86400
+rank_miss_cache_seconds = 900
 subrank_role_cache_seconds = 300
 
 [bridge]

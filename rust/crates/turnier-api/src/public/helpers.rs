@@ -323,17 +323,23 @@ pub async fn load_teams_for_tournament(
             .fetch_all(pool)
             .await?;
 
-    let mut teams = Vec::with_capacity(team_rows.len());
+    let mut team_members = Vec::with_capacity(team_rows.len());
     for t in team_rows {
         let member_rows = load_member_rows(pool, t.id).await?;
-        let ranks = enrich_for_ids(
-            state,
-            member_rows
-                .iter()
-                .map(|m| db::discord_id_to_string(m.discord_id))
-                .collect(),
-        )
-        .await?;
+        team_members.push((t, member_rows));
+    }
+    let ranks = enrich_for_ids(
+        state,
+        team_members
+            .iter()
+            .flat_map(|(_, rows)| rows.iter())
+            .map(|m| db::discord_id_to_string(m.discord_id))
+            .collect(),
+    )
+    .await?;
+
+    let mut teams = Vec::with_capacity(team_members.len());
+    for (t, member_rows) in team_members {
         let members = member_rows
             .into_iter()
             .map(|m| member_from_row(m, &ranks))
@@ -439,17 +445,14 @@ pub async fn load_team_response(state: &AppState, team_id: i64) -> WebResult<Tea
     })
 }
 
-/// Gebatchter Rang-Lookup für eine Menge Discord-IDs. Fehler des Resolvers
-/// degradieren still zu „kein Profil" (wie im Original `await get_player_rank_profile`,
-/// dessen Fehler dort ebenfalls nicht hart durchschlagen).
-async fn enrich_for_ids(
+pub(crate) async fn enrich_for_ids(
     state: &AppState,
     ids: Vec<String>,
 ) -> WebResult<HashMap<String, RankProfile>> {
     if ids.is_empty() {
         return Ok(HashMap::new());
     }
-    match state.rank_resolver.rank_profiles(&ids).await {
+    match state.rank_resolver.cached_rank_profiles(&ids).await {
         Ok(map) => Ok(map),
         Err(err) => {
             tracing::warn!(error = %err, "Rang-Anreicherung fehlgeschlagen, ohne Profil weiter");

@@ -7,7 +7,8 @@
 //! mehrere Discord-IDs (gegen N+1 in den Konsumenten turnier-api/turnier-engine).
 
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use turnier_core::RankProfile;
@@ -36,6 +37,11 @@ pub trait RankResolver: Send + Sync {
         &self,
         discord_ids: &[String],
     ) -> SteamResult<HashMap<String, RankProfile>>;
+
+    async fn cached_rank_profiles(
+        &self,
+        discord_ids: &[String],
+    ) -> SteamResult<HashMap<String, RankProfile>>;
 }
 
 /// Default-Implementierung des Resolvers.
@@ -48,6 +54,8 @@ pub struct SteamRankResolver {
     bridge: Option<BridgeReader>,
     discord: Option<Arc<dyn DiscordMemberClient>>,
     main_rank_role_ids: Vec<i64>,
+    discord_misses: Mutex<HashMap<String, Instant>>,
+    discord_miss_ttl: Duration,
 }
 
 impl SteamRankResolver {
@@ -62,7 +70,88 @@ impl SteamRankResolver {
             bridge,
             discord,
             main_rank_role_ids: turnier_config::SteamConfig::default().main_rank_role_ids,
+            discord_misses: Mutex::new(HashMap::new()),
+            discord_miss_ttl: Duration::from_secs(
+                turnier_config::SteamConfig::default().rank_miss_cache_seconds,
+            ),
         }
+    }
+
+    pub fn with_discord_miss_ttl(mut self, seconds: u64) -> Self {
+        self.discord_miss_ttl = Duration::from_secs(seconds);
+        self
+    }
+
+    fn discord_miss_is_fresh(&self, discord_id: &str) -> bool {
+        let Ok(mut guard) = self.discord_misses.lock() else {
+            return false;
+        };
+        match guard.get(discord_id) {
+            Some(expires_at) if *expires_at > Instant::now() => true,
+            Some(_) => {
+                guard.remove(discord_id);
+                false
+            }
+            None => false,
+        }
+    }
+
+    fn remember_discord_miss(&self, discord_id: &str) {
+        if let Ok(mut guard) = self.discord_misses.lock() {
+            guard.insert(
+                discord_id.to_string(),
+                Instant::now() + self.discord_miss_ttl,
+            );
+        }
+    }
+
+    fn lookup_ids(discord_ids: &[String]) -> Vec<String> {
+        let mut ids: Vec<String> = discord_ids
+            .iter()
+            .filter(|id| !turnier_core::is_guest_participant_id(id))
+            .cloned()
+            .collect();
+        ids.sort_unstable();
+        ids.dedup();
+        ids
+    }
+
+    async fn resolve_uncached(
+        &self,
+        discord_id: &str,
+        with_discord: bool,
+    ) -> SteamResult<Option<RankProfile>> {
+        if let Some(profile) = self.resolve_via_bridge(discord_id).await? {
+            self.cache.store(discord_id, &profile).await?;
+            return Ok(Some(profile));
+        }
+        if !with_discord || self.discord_miss_is_fresh(discord_id) {
+            return Ok(None);
+        }
+        if let Some(profile) = self.resolve_via_discord(discord_id).await? {
+            self.cache.store(discord_id, &profile).await?;
+            return Ok(Some(profile));
+        }
+        self.remember_discord_miss(discord_id);
+        Ok(None)
+    }
+
+    async fn resolve_many(
+        &self,
+        discord_ids: &[String],
+        with_discord: bool,
+    ) -> SteamResult<HashMap<String, RankProfile>> {
+        let ids = Self::lookup_ids(discord_ids);
+        let mut out = self.cache.get_many(&ids).await?;
+        for discord_id in &ids {
+            if out.contains_key(discord_id) {
+                continue;
+            }
+            if let Some(profile) = self.resolve_uncached(discord_id, with_discord).await? {
+                out.insert(discord_id.clone(), profile);
+            }
+        }
+        Ok(out)
     }
 
     pub fn with_main_rank_roles(mut self, roles: Vec<i64>) -> Self {
@@ -136,41 +225,23 @@ impl RankResolver for SteamRankResolver {
         if turnier_core::is_guest_participant_id(discord_id) {
             return Ok(None);
         }
-        // Stufe 1: Cache.
         if let Some(cached) = self.cache.get(discord_id).await? {
             return Ok(Some(cached));
         }
-
-        // Stufe 2: Steam-Bridge.
-        if let Some(profile) = self.resolve_via_bridge(discord_id).await? {
-            self.cache.store(discord_id, &profile).await?;
-            return Ok(Some(profile));
-        }
-
-        // Stufe 3: Discord-Rollen.
-        if let Some(profile) = self.resolve_via_discord(discord_id).await? {
-            self.cache.store(discord_id, &profile).await?;
-            return Ok(Some(profile));
-        }
-
-        Ok(None)
+        self.resolve_uncached(discord_id, true).await
     }
 
     async fn rank_profiles(
         &self,
         discord_ids: &[String],
     ) -> SteamResult<HashMap<String, RankProfile>> {
-        let mut out = HashMap::new();
-        for discord_id in discord_ids {
-            // Duplikate doppelt aufzulösen ist überflüssig; der Cache fängt sie
-            // ohnehin ab, aber so sparen wir auch den Cache-Roundtrip.
-            if out.contains_key(discord_id) {
-                continue;
-            }
-            if let Some(profile) = self.rank_profile(discord_id).await? {
-                out.insert(discord_id.clone(), profile);
-            }
-        }
-        Ok(out)
+        self.resolve_many(discord_ids, true).await
+    }
+
+    async fn cached_rank_profiles(
+        &self,
+        discord_ids: &[String],
+    ) -> SteamResult<HashMap<String, RankProfile>> {
+        self.resolve_many(discord_ids, false).await
     }
 }

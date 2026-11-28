@@ -11,12 +11,14 @@
 //! unabhängig kompiliert; eine spätere Konsolidierung in ein geteiltes
 //! `crate::loaders`-Modul ist möglich.
 
+use std::collections::HashMap;
+
 use chrono::{DateTime, Utc};
 use serde_json::Value;
 
 use turnier_core::{
-    BracketMatch, BracketMiniGroup, Group, GroupMatch, GroupTeam, LobbyAccess, MatchGame, Team,
-    TeamMember, TournamentSignup,
+    BracketMatch, BracketMiniGroup, Group, GroupMatch, GroupTeam, LobbyAccess, MatchGame,
+    RankProfile, Team, TeamMember, TournamentSignup,
 };
 use turnier_db::Pool;
 
@@ -92,10 +94,29 @@ const MEMBER_SELECT: &str =
                 WHERE discord_name IS NOT NULL AND discord_name != '' GROUP BY discord_id) s \
        ON s.discord_id = tm.discord_id \
      LEFT JOIN turnier.\"user_profiles\" p ON p.discord_id = tm.discord_id \
-     WHERE tm.team_id = $1 ORDER BY tm.joined_at";
+     WHERE tm.team_id = ANY($1) ORDER BY tm.team_id, tm.joined_at";
 
-/// Wandelt eine Mitglieds-Rohzeile in das DTO und reichert den Rang an.
-async fn member_from_row(state: &AppState, row: MemberRow) -> WebResult<TeamMember> {
+async fn load_member_rows(state: &AppState, team_ids: &[i64]) -> WebResult<Vec<MemberRow>> {
+    Ok(sqlx::query_as(MEMBER_SELECT)
+        .bind(team_ids)
+        .fetch_all(&state.pool)
+        .await?)
+}
+
+async fn member_ranks(
+    state: &AppState,
+    rows: &[MemberRow],
+) -> WebResult<HashMap<String, RankProfile>> {
+    crate::public::helpers::enrich_for_ids(
+        state,
+        rows.iter()
+            .map(|row| db::discord_id_to_string(row.discord_id))
+            .collect(),
+    )
+    .await
+}
+
+fn member_from_row(row: MemberRow, ranks: &HashMap<String, RankProfile>) -> WebResult<TeamMember> {
     let discord_id = db::discord_id_to_string(row.discord_id);
     let discord_name = preferred_discord_name(
         &[
@@ -106,16 +127,15 @@ async fn member_from_row(state: &AppState, row: MemberRow) -> WebResult<TeamMemb
         Some(&discord_id),
     );
 
-    // Rang-Anreicherung: Discord-first, DB-Fallback (`_enrich_rank_data`).
     let mut steam_id = row.steam_id;
     let mut rank = row.rank;
     let mut rank_score = row.rank_score;
-    if let Ok(Some(profile)) = state.rank_resolver.rank_profile(&discord_id).await {
+    if let Some(profile) = ranks.get(&discord_id) {
         if profile.steam_id.is_some() {
-            steam_id = profile.steam_id;
+            steam_id = profile.steam_id.clone();
         }
         if profile.rank.is_some() {
-            rank = profile.rank;
+            rank = profile.rank.clone();
         }
         rank_score = profile.rank_score;
     }
@@ -133,17 +153,12 @@ async fn member_from_row(state: &AppState, row: MemberRow) -> WebResult<TeamMemb
     })
 }
 
-/// Lädt die Mitglieder eines Teams (sortiert, angereichert).
 pub async fn load_team_members(state: &AppState, team_id: i64) -> WebResult<Vec<TeamMember>> {
-    let rows: Vec<MemberRow> = sqlx::query_as(MEMBER_SELECT)
-        .bind(team_id)
-        .fetch_all(&state.pool)
-        .await?;
-    let mut members = Vec::with_capacity(rows.len());
-    for row in rows {
-        members.push(member_from_row(state, row).await?);
-    }
-    Ok(members)
+    let rows = load_member_rows(state, &[team_id]).await?;
+    let ranks = member_ranks(state, &rows).await?;
+    rows.into_iter()
+        .map(|row| member_from_row(row, &ranks))
+        .collect()
 }
 
 /// Rohzeile eines Teams.
@@ -194,9 +209,18 @@ pub async fn load_teams_for_tournament(
     .bind(tournament_id)
     .fetch_all(&state.pool)
     .await?;
+    let team_ids: Vec<i64> = rows.iter().map(|row| row.id).collect();
+    let member_rows = load_member_rows(state, &team_ids).await?;
+    let ranks = member_ranks(state, &member_rows).await?;
+    let mut members_by_team: HashMap<i64, Vec<TeamMember>> = HashMap::new();
+    for member_row in member_rows {
+        let team_id = member_row.team_id;
+        let member = member_from_row(member_row, &ranks)?;
+        members_by_team.entry(team_id).or_default().push(member);
+    }
     let mut teams = Vec::with_capacity(rows.len());
     for row in rows {
-        let members = load_team_members(state, row.id).await?;
+        let members = members_by_team.remove(&row.id).unwrap_or_default();
         teams.push(Team {
             id: row.id,
             tournament_id: row.tournament_id,
@@ -512,6 +536,13 @@ pub async fn load_signups_for_tournament(
     .fetch_all(&state.pool)
     .await?;
 
+    let ranks = crate::public::helpers::enrich_for_ids(
+        state,
+        rows.iter()
+            .map(|row| db::discord_id_to_string(row.discord_id))
+            .collect(),
+    )
+    .await?;
     let mut signups = Vec::with_capacity(rows.len());
     for row in rows {
         let discord_name = preferred_discord_name(
@@ -528,12 +559,12 @@ pub async fn load_signups_for_tournament(
         let mut steam_id = row.steam_id;
         let mut rank = row.rank;
         let mut rank_score = row.rank_score;
-        if let Ok(Some(profile)) = state.rank_resolver.rank_profile(&discord_id).await {
+        if let Some(profile) = ranks.get(&discord_id) {
             if profile.steam_id.is_some() {
-                steam_id = profile.steam_id;
+                steam_id = profile.steam_id.clone();
             }
             if profile.rank.is_some() {
-                rank = profile.rank;
+                rank = profile.rank.clone();
             }
             rank_score = profile.rank_score;
         }

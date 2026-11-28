@@ -48,7 +48,13 @@ pub struct SteamConfig {
     pub discord_api_base_url: String,
     pub main_rank_role_ids: Vec<i64>,
     pub rank_cache_seconds: u64,
+    #[serde(default = "default_rank_miss_cache_seconds")]
+    pub rank_miss_cache_seconds: u64,
     pub subrank_role_cache_seconds: u64,
+}
+
+fn default_rank_miss_cache_seconds() -> u64 {
+    900
 }
 
 impl Default for SteamConfig {
@@ -69,6 +75,7 @@ impl Default for SteamConfig {
                 1331458087349129296,
             ],
             rank_cache_seconds: 86400,
+            rank_miss_cache_seconds: default_rank_miss_cache_seconds(),
             subrank_role_cache_seconds: 300,
         }
     }
@@ -89,6 +96,7 @@ impl SteamConfig {
             return Err(ConfigError::Invalid("steam.main_rank_role_ids: elf eindeutige positive IDs in Tier-Reihenfolge erforderlich"));
         }
         if !(1..=604800).contains(&self.rank_cache_seconds)
+            || !(1..=86400).contains(&self.rank_miss_cache_seconds)
             || !(1..=86400).contains(&self.subrank_role_cache_seconds)
         {
             return Err(ConfigError::Invalid(

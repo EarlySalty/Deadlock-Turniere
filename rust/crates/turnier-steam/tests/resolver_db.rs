@@ -163,3 +163,71 @@ async fn batch_lookup_dedups_and_collects() {
     assert_eq!(map.get(USER_A).unwrap().rank.as_deref(), Some("Oracle"));
     assert!(!map.contains_key(USER_B));
 }
+
+struct CountingDiscord {
+    calls: std::sync::atomic::AtomicUsize,
+    delay: std::time::Duration,
+}
+
+#[async_trait]
+impl DiscordMemberClient for CountingDiscord {
+    async fn member_role_ids(&self, _discord_id: &str) -> SteamResult<Option<Vec<String>>> {
+        self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        tokio::time::sleep(self.delay).await;
+        Ok(Some(Vec::new()))
+    }
+}
+
+#[tokio::test]
+async fn read_path_never_calls_discord_and_misses_are_remembered() {
+    let db = temp_pool().await;
+    let cached_user = "910000020000000100".to_string();
+    RankCache::new(db.pool.clone())
+        .store(
+            &cached_user,
+            &RankProfile {
+                steam_id: Some("STEAM_C".into()),
+                rank: Some("Oracle".into()),
+                rank_tier: Some(8),
+                subrank: Some(2),
+                rank_score: 8 * 6 + 2,
+                source: "steam_bridge".into(),
+            },
+        )
+        .await
+        .expect("seed cache");
+
+    let ids: Vec<String> = (0..95)
+        .map(|n| format!("9100000200000002{n:02}"))
+        .chain(std::iter::once(cached_user.clone()))
+        .collect();
+
+    let discord = Arc::new(CountingDiscord {
+        calls: std::sync::atomic::AtomicUsize::new(0),
+        delay: std::time::Duration::from_millis(20),
+    });
+    let client: Arc<dyn DiscordMemberClient> = discord.clone();
+    let resolver = SteamRankResolver::from_pool(db.pool, None, Some(client));
+    let calls = || discord.calls.load(std::sync::atomic::Ordering::SeqCst);
+
+    let started = std::time::Instant::now();
+    let read = resolver.cached_rank_profiles(&ids).await.expect("read");
+    eprintln!("cached_rank_profiles 96 ids: {:?}", started.elapsed());
+    assert_eq!(calls(), 0);
+    assert_eq!(read.len(), 1);
+    assert_eq!(
+        read.get(&cached_user).and_then(|p| p.rank.as_deref()),
+        Some("Oracle")
+    );
+
+    let started = std::time::Instant::now();
+    let first = resolver.rank_profiles(&ids).await.expect("first full");
+    eprintln!("rank_profiles 96 ids, first: {:?}", started.elapsed());
+    assert_eq!(first.len(), 1);
+    assert_eq!(calls(), 95);
+
+    let started = std::time::Instant::now();
+    resolver.rank_profiles(&ids).await.expect("second full");
+    eprintln!("rank_profiles 96 ids, repeat: {:?}", started.elapsed());
+    assert_eq!(calls(), 95);
+}
