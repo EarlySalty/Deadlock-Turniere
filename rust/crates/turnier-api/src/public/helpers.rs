@@ -672,7 +672,7 @@ pub async fn load_groups_for_tournament(pool: &Pool, tournament_id: i64) -> WebR
         let team_rows = sqlx::query(
             r#"SELECT gt.id, gt.group_id, gt.team_id, t.name AS team_name,
                     gt.wins, gt.losses, gt.points
-             FROM turnier."group_teams" gt JOIN turnier."teams" t ON gt.team_id = t.id WHERE gt.group_id = $1"#,
+             FROM turnier."group_teams" gt JOIN turnier."teams" t ON gt.team_id = t.id WHERE gt.group_id = $1 ORDER BY gt.id"#,
         )
         .bind(g.id)
         .fetch_all(pool)
@@ -687,6 +687,7 @@ pub async fn load_groups_for_tournament(pool: &Pool, tournament_id: i64) -> WebR
                 wins: row.try_get("wins")?,
                 losses: row.try_get("losses")?,
                 points: row.try_get("points")?,
+                seed_tiebreak: false,
             });
         }
 
@@ -863,6 +864,7 @@ pub fn tournament_from_row(row: &sqlx::postgres::PgRow) -> WebResult<Tournament>
         bracket_format: row.try_get("bracket_format")?,
         played_bracket_format: row.try_get("played_bracket_format")?,
         tournament_mode: row.try_get("tournament_mode")?,
+        tournament_mode_auto: row.try_get("tournament_mode_auto")?,
         tournament_game_mode: row.try_get("tournament_game_mode")?,
         auto_lobby_enabled: row.try_get("auto_lobby_enabled")?,
         created_by: db::discord_id_to_string(row.try_get("created_by")?),
@@ -922,11 +924,13 @@ pub fn build_detail_public(
         final_series_format: t.final_series_format,
         registration_start: t.registration_start,
         registration_end: t.registration_end,
+        checkin_start: t.checkin_start,
         group_phase_start: t.group_phase_start,
         bracket_start: t.bracket_start,
         bracket_format: t.bracket_format,
         played_bracket_format: t.played_bracket_format,
         tournament_mode: t.tournament_mode,
+        tournament_mode_auto: t.tournament_mode_auto,
         tournament_game_mode: t.tournament_game_mode,
         auto_lobby_enabled: t.auto_lobby_enabled,
         created_by: t.created_by,

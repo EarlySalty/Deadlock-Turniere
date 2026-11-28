@@ -147,20 +147,56 @@ async fn guest_signup_preserves_consent_and_identity_isolation() {
     let captain_token = session(&ctx.pool, CAPTAIN_ID, "Captain", &[]).await;
     let team_id = seed_team(&ctx.pool, tournament_id, "Guest team", CAPTAIN_ID).await;
     let guest_id = identities[0].as_str().unwrap();
-    let (status, team) = send_json(
+    let guest_signup_id: i64 = sqlx::query_scalar(
+        r#"SELECT id FROM turnier."tournament_signups" WHERE tournament_id = $1 AND discord_id = $2"#,
+    )
+    .bind(tournament_id)
+    .bind(id(guest_id))
+    .fetch_one(&ctx.pool)
+    .await
+    .unwrap();
+    let (status, invited) = send_json(
         &ctx.app,
         Some(&captain_token),
         Method::POST,
-        &format!("/api/tournaments/{tournament_id}/teams/{team_id}/invite/{guest_id}"),
+        &format!(
+            "/api/tournaments/{tournament_id}/teams/{team_id}/invite-by-signup/{guest_signup_id}"
+        ),
         None,
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    assert!(team["members"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|member| member["discord_name"] == "Jörg"));
+    assert_eq!(invited["status"], "invited");
+    let invite_id: i64 = sqlx::query_scalar(
+        r#"SELECT id FROM turnier."team_invitations"
+         WHERE team_id = $1 AND discord_id = $2 AND status = 'pending'"#,
+    )
+    .bind(team_id)
+    .bind(id(guest_id))
+    .fetch_one(&ctx.pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        send_json(
+            &ctx.app,
+            Some(token),
+            Method::POST,
+            &format!("/api/tournaments/{tournament_id}/invitations/{invite_id}/accept"),
+            None
+        )
+        .await
+        .0,
+        StatusCode::OK
+    );
+    let member_name: String = sqlx::query_scalar(
+        r#"SELECT discord_name FROM turnier."team_members" WHERE team_id = $1 AND discord_id = $2"#,
+    )
+    .bind(team_id)
+    .bind(id(guest_id))
+    .fetch_one(&ctx.pool)
+    .await
+    .unwrap();
+    assert_eq!(member_name, "Jörg");
     assert_eq!(
         send_json(
             &ctx.app,
@@ -1029,22 +1065,22 @@ async fn leaderboard_profile_reads_points_rank_and_history() {
     .execute(&ctx.pool)
     .await
     .expect("rank cache");
-    sqlx::query(
-        r#"INSERT INTO turnier."player_points"
-         (discord_id, total_points, tournaments_played, matches_played, matches_won,
-          best_placement, updated_at)
-         VALUES ($1, 42, 2, 5, 4, 1, now())"#,
-    )
-    .bind(id(LEADER_ID))
-    .execute(&ctx.pool)
-    .await
-    .expect("player points");
-
     let (status, profile) =
         send_json(&ctx.app, None, Method::GET, "/api/players/LeaderName", None).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(profile["rank"], "Oracle");
-    assert_eq!(profile["total_points"], 42);
+    let (status, board) = send_json(&ctx.app, None, Method::GET, "/api/leaderboard", None).await;
+    assert_eq!(status, StatusCode::OK);
+    let row = board
+        .as_array()
+        .expect("leaderboard array")
+        .iter()
+        .find(|row| row["discord_name"] == "LeaderName")
+        .expect("leader row");
+    assert_eq!(row["rank"], "Oracle");
+    assert_eq!(profile["tournaments_played"], 1);
+    assert_eq!(profile["total_points"], row["total_points"]);
+    assert_eq!(profile["best_placement"], row["best_placement"]);
     assert_eq!(
         profile["tournament_history"][0]["tournament_name"],
         "Leaderboard Cup"
@@ -1641,7 +1677,10 @@ async fn pug_finalize_formation_withdraw_and_admin_signup_contract() {
     let preview = turnier_engine::finalize_checkin(
         &ctx.pool,
         always,
-        turnier_engine::FinalizeCheckinParams::default(),
+        turnier_engine::FinalizeCheckinParams {
+            fill_from_solos: true,
+            ..Default::default()
+        },
     )
     .await
     .expect("always preview");
@@ -1665,6 +1704,7 @@ async fn pug_finalize_formation_withdraw_and_admin_signup_contract() {
         turnier_engine::FinalizeCheckinParams {
             confirm: true,
             expected_snapshot_token: Some(&preview.snapshot_token),
+            fill_from_solos: true,
             ..Default::default()
         },
     )
@@ -1676,7 +1716,10 @@ async fn pug_finalize_formation_withdraw_and_admin_signup_contract() {
     let fresh = turnier_engine::finalize_checkin(
         &ctx.pool,
         always,
-        turnier_engine::FinalizeCheckinParams::default(),
+        turnier_engine::FinalizeCheckinParams {
+            fill_from_solos: true,
+            ..Default::default()
+        },
     )
     .await
     .expect("fresh preview");
@@ -1687,6 +1730,7 @@ async fn pug_finalize_formation_withdraw_and_admin_signup_contract() {
             confirm: true,
             expected_snapshot_token: Some(&fresh.snapshot_token),
             advance_to_group_phase: true,
+            fill_from_solos: true,
             ..Default::default()
         },
     )
@@ -1726,7 +1770,10 @@ async fn pug_finalize_formation_withdraw_and_admin_signup_contract() {
     let fill_preview = turnier_engine::finalize_checkin(
         &ctx.pool,
         fill,
-        turnier_engine::FinalizeCheckinParams::default(),
+        turnier_engine::FinalizeCheckinParams {
+            fill_from_solos: true,
+            ..Default::default()
+        },
     )
     .await
     .expect("fill preview");
@@ -1741,19 +1788,28 @@ async fn pug_finalize_formation_withdraw_and_admin_signup_contract() {
         .execute(&ctx.pool)
         .await
         .expect("solo only");
-    seed_team(&ctx.pool, solo, "Orga Team", CAPTAIN_ID).await;
+    let solo_team = seed_team(&ctx.pool, solo, "Orga Team", CAPTAIN_ID).await;
     seed_balance_signups(&ctx.pool, solo).await;
     checkin_all(&ctx.pool, solo).await;
-    let solo_preview = turnier_engine::finalize_checkin(
-        &ctx.pool,
-        solo,
-        turnier_engine::FinalizeCheckinParams::default(),
-    )
-    .await
-    .expect("solo preview");
-    assert!(!solo_preview.auto_team_formation);
-    assert!(solo_preview.created_teams.is_empty());
-    assert!(solo_preview.added_players.is_empty());
+    for fill_from_solos in [false, true] {
+        let solo_preview = turnier_engine::finalize_checkin(
+            &ctx.pool,
+            solo,
+            turnier_engine::FinalizeCheckinParams {
+                fill_from_solos,
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("solo preview");
+        assert!(!solo_preview.auto_team_formation);
+        assert!(!solo_preview.can_fill_from_solos);
+        assert!(solo_preview.created_teams.is_empty());
+        assert!(solo_preview.added_players.is_empty());
+        assert_eq!(solo_preview.deleted_team_ids, vec![solo_team]);
+        assert_eq!(solo_preview.removed_players.len(), 1);
+        assert_eq!(solo_preview.remaining_solo_players.len(), 13);
+    }
 
     seed_consent(&ctx.pool, PLAYER_ID).await;
     let player = session(&ctx.pool, PLAYER_ID, "Player", &[]).await;
@@ -1892,4 +1948,188 @@ async fn pug_finalize_formation_withdraw_and_admin_signup_contract() {
             "signup_delete_admin"
         ]
     );
+}
+
+async fn seed_roster_member(pool: &Pool, tournament_id: i64, team_id: i64, discord_id: i64) {
+    sqlx::query(
+        r#"INSERT INTO turnier."team_members"
+         (team_id, discord_id, discord_name, steam_id, rank, rank_score, role, joined_at)
+         VALUES ($1, $2, $3, NULL, NULL, 0, 'member', now())"#,
+    )
+    .bind(team_id)
+    .bind(discord_id)
+    .bind(format!("Kader {discord_id}"))
+    .execute(pool)
+    .await
+    .expect("roster member");
+    sqlx::query(
+        "INSERT INTO turnier.tournament_signups (tournament_id, discord_id, discord_name, rank_score, team_id, signed_up_at) VALUES ($1, $2, $3, 0, $4, now())",
+    )
+    .bind(tournament_id)
+    .bind(discord_id)
+    .bind(format!("Kader {discord_id}"))
+    .bind(team_id)
+    .execute(pool)
+    .await
+    .expect("roster signup");
+}
+
+async fn checkin_one(pool: &Pool, tournament_id: i64, discord_id: i64) {
+    sqlx::query("INSERT INTO turnier.tournament_checkins (tournament_id, discord_id, checked_in_at) VALUES ($1, $2, now())")
+        .bind(tournament_id)
+        .bind(discord_id)
+        .execute(pool)
+        .await
+        .expect("checkin");
+}
+
+async fn roster_size(pool: &Pool, team_id: i64) -> i64 {
+    sqlx::query_scalar("SELECT count(*) FROM turnier.team_members WHERE team_id = $1")
+        .bind(team_id)
+        .fetch_one(pool)
+        .await
+        .expect("roster size")
+}
+
+#[tokio::test]
+async fn team_tournament_start_keeps_rosters_unless_fill_is_chosen() {
+    let ctx = setup().await;
+    let admin = session(&ctx.pool, ADMIN_ID, "Admin", &["admin-role", "mod-role"]).await;
+    let tournament = seed_tournament(&ctx.pool, "Team Cup", "checkin", 3).await;
+    let base = 910000000000030000_i64;
+    let mut teams = Vec::new();
+    for (index, (roster, checked_in)) in [(3_i64, 2_i64), (2, 2), (1, 0)].into_iter().enumerate() {
+        let team_id: i64 = sqlx::query_scalar(
+            "INSERT INTO turnier.teams (tournament_id, name, name_key, captain_discord_id, created_at, recruitment_status) VALUES ($1, $2, $3, $4, now(), 'open') RETURNING id",
+        )
+        .bind(tournament)
+        .bind(format!("Kader {index}"))
+        .bind(format!("kader {index}"))
+        .bind(base + index as i64 * 10)
+        .fetch_one(&ctx.pool)
+        .await
+        .expect("team");
+        for member in 0..roster {
+            let discord_id = base + index as i64 * 10 + member;
+            seed_roster_member(&ctx.pool, tournament, team_id, discord_id).await;
+            if member < checked_in {
+                checkin_one(&ctx.pool, tournament, discord_id).await;
+            }
+        }
+        teams.push(team_id);
+    }
+    for solo in 0..5_i64 {
+        let discord_id = base + 100 + solo;
+        sqlx::query("INSERT INTO turnier.tournament_signups (tournament_id, discord_id, discord_name, rank_score, signed_up_at) VALUES ($1, $2, $3, 0, now())")
+            .bind(tournament)
+            .bind(discord_id)
+            .bind(format!("Solo {solo}"))
+            .execute(&ctx.pool)
+            .await
+            .expect("solo");
+        if solo < 4 {
+            checkin_one(&ctx.pool, tournament, discord_id).await;
+        }
+    }
+    let path = format!("/api/admin/tournaments/{tournament}/finalize-checkin");
+
+    let (status, preview) =
+        send_json(&ctx.app, Some(&admin), Method::POST, &path, Some(json!({}))).await;
+    assert_eq!(status, StatusCode::OK, "{preview}");
+    assert_eq!(preview["auto_team_formation"], json!(false));
+    assert_eq!(preview["can_fill_from_solos"], json!(true));
+    assert_eq!(preview["added_players"], json!([]));
+    assert_eq!(preview["created_teams"], json!([]));
+    assert_eq!(preview["removed_players"], json!([]));
+    assert_eq!(preview["deleted_team_ids"], json!([]));
+    assert_eq!(preview["final_team_count"], json!(3));
+    let warnings: Vec<(i64, i64)> = preview["warnings"]
+        .as_array()
+        .expect("warnings")
+        .iter()
+        .map(|w| {
+            (
+                w["team_id"].as_i64().unwrap_or(0),
+                w["current"].as_i64().unwrap_or(-1),
+            )
+        })
+        .collect();
+    assert_eq!(warnings, vec![(teams[0], 2), (teams[1], 2), (teams[2], 0)]);
+    let plans = preview["team_plans"].as_array().expect("team plans");
+    assert_eq!(plans.len(), 3);
+    assert!(plans.iter().all(|p| p["outcome"] == "incomplete"));
+    assert_eq!(plans[0]["roster"].as_array().map(Vec::len), Some(3));
+    assert!(plans[0]["roster"]
+        .as_array()
+        .expect("roster")
+        .iter()
+        .all(|m| m["change"] == "stays"));
+    assert_eq!(plans[0]["roster"][2]["checked_in"], json!(false));
+    let solos = preview["solo_plans"].as_array().expect("solo plans");
+    assert_eq!(solos.len(), 5);
+    assert!(solos.iter().all(|p| p["outcome"] == "stays_solo"));
+    assert_eq!(solos.iter().filter(|p| p["checked_in"] == true).count(), 4);
+
+    let (status, fill) = send_json(
+        &ctx.app,
+        Some(&admin),
+        Method::POST,
+        &path,
+        Some(json!({"fill_from_solos": true})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{fill}");
+    assert_eq!(fill["auto_team_formation"], json!(true));
+    assert_ne!(fill["snapshot_token"], preview["snapshot_token"]);
+    assert_eq!(fill["removed_players"].as_array().map(Vec::len), Some(2));
+    assert!(fill["solo_plans"]
+        .as_array()
+        .expect("fill solo plans")
+        .iter()
+        .any(|p| p["outcome"] == "joins_team"));
+
+    let (status, mismatch) = send_json(
+        &ctx.app,
+        Some(&admin),
+        Method::POST,
+        &format!("{path}?confirm=true"),
+        Some(json!({
+            "fill_from_solos": true,
+            "snapshot_token": preview["snapshot_token"],
+            "allowed_team_ids": teams,
+        })),
+    )
+    .await;
+    assert_ne!(status, StatusCode::OK, "{mismatch}");
+
+    let (status, started) = send_json(
+        &ctx.app,
+        Some(&admin),
+        Method::POST,
+        &format!("{path}?confirm=true"),
+        Some(json!({
+            "snapshot_token": preview["snapshot_token"],
+            "allowed_team_ids": teams,
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{started}");
+    for (team_id, expected) in teams.iter().zip([3_i64, 2, 1]) {
+        assert_eq!(roster_size(&ctx.pool, *team_id).await, expected);
+    }
+    let team_count: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM turnier.teams WHERE tournament_id = $1")
+            .bind(tournament)
+            .fetch_one(&ctx.pool)
+            .await
+            .expect("team count");
+    assert_eq!(team_count, 3);
+    let unassigned: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM turnier.tournament_signups WHERE tournament_id = $1 AND team_id IS NULL",
+    )
+    .bind(tournament)
+    .fetch_one(&ctx.pool)
+    .await
+    .expect("unassigned");
+    assert_eq!(unassigned, 5);
 }

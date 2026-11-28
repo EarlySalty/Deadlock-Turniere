@@ -264,7 +264,7 @@ pub async fn load_groups_for_tournament(pool: &Pool, tournament_id: i64) -> WebR
     for g in group_rows {
         let team_rows: Vec<GroupTeamRow> = sqlx::query_as(
             r#"SELECT gt.id, gt.group_id, gt.team_id, t.name AS team_name, gt.wins, gt.losses, gt.points
-             FROM turnier."group_teams" gt JOIN turnier."teams" t ON gt.team_id = t.id WHERE gt.group_id = $1"#,
+             FROM turnier."group_teams" gt JOIN turnier."teams" t ON gt.team_id = t.id WHERE gt.group_id = $1 ORDER BY gt.id"#,
         )
         .bind(g.id)
         .fetch_all(pool)
@@ -279,6 +279,7 @@ pub async fn load_groups_for_tournament(pool: &Pool, tournament_id: i64) -> WebR
                 wins: r.wins,
                 losses: r.losses,
                 points: r.points,
+                seed_tiebreak: false,
             })
             .collect();
 

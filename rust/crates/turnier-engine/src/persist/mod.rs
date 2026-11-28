@@ -25,7 +25,8 @@ pub use bracket::{generate_bracket, generate_bracket_in_tx};
 pub use checkin::{
     assign_random_teams, build_checkin_snapshot_token, finalize_checkin, AddedPlayer, CreatedTeam,
     FinalizeCheckinParams, FinalizeCheckinResult, NoShuffle, RemovedPlayer, RngShuffler,
-    SoloPlayer, SoloShuffler, TeamWarning,
+    RosterChange, RosterEntry, SoloOutcome, SoloPlan, SoloPlayer, SoloShuffler, TeamOutcome,
+    TeamPlan, TeamWarning,
 };
 pub use groups::{
     generate_group_matches, generate_group_matches_in_tx, generate_groups, generate_groups_in_tx,
@@ -35,13 +36,16 @@ pub use league::{
     LeaguePlanSummary,
 };
 pub use mini_group_complete::complete_mini_group_round_robin;
-pub use points::{recalculate_player_points, recalculate_player_points_in_tx};
+pub use points::{
+    player_standings, recalculate_player_points, recalculate_player_points_in_tx, PlayerAggregate,
+};
 pub use rows::{
     insert_signup, insert_team, insert_team_member, lock_tournament_row, NewSignup, NewTeamMember,
 };
 pub use start_gap::{
-    acquire_tournament_schedule_lock, effective_start, ensure_start_gap, start_gap_message,
-    starts_too_close, MIN_START_GAP_HOURS, TOURNAMENT_SCHEDULE_ADVISORY_LOCK_KEY,
+    acquire_tournament_schedule_lock, candidate_starts, effective_start, ensure_start_gap,
+    mode_undecided, start_gap_message, starts_too_close, MIN_START_GAP_HOURS,
+    TOURNAMENT_SCHEDULE_ADVISORY_LOCK_KEY,
 };
 
 use serde_json::Value;

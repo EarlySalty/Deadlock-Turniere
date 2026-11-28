@@ -41,7 +41,7 @@ export const FORMAT_OPTIONS: Choice<TournamentFormat>[] = [
   {
     value: 'auto',
     label: 'Automatisch',
-    description: 'Der Server entscheidet beim Anlegen allein nach der Teamgröße: ab 16 Spielern pro Team Gruppenphase + Bracket, sonst nur Bracket.',
+    description: 'Der Server entscheidet beim Abschluss des Check-ins nach der Zahl der fertigen Teams: ab 16 Teams Gruppenphase + Bracket, sonst nur Bracket. Bis dahin steht das Turnier auf Nur Bracket.',
   },
   ...MODE_OPTIONS,
 ]

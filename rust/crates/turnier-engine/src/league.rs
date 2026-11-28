@@ -1,3 +1,5 @@
+use crate::standings::{rank_standings, Standing};
+
 pub const LEAGUE_WIN_POINTS: i64 = 2;
 pub const LEAGUE_LOSS_POINTS: i64 = -1;
 pub const DEFAULT_SLOT_MINUTES: i64 = 50;
@@ -77,8 +79,21 @@ pub fn league_table(team_ids: &[i64], games: &[LeagueGame]) -> Vec<LeagueRow> {
         .iter()
         .map(|team_id| team_row(*team_id, games))
         .collect();
-    rows.sort_by_key(|row| (std::cmp::Reverse(row.points), std::cmp::Reverse(row.wins)));
-    apply_direct_comparison(&mut rows, games);
+    let standings: Vec<Standing> = rows
+        .iter()
+        .map(|row| Standing {
+            team_id: row.team_id,
+            wins: row.wins,
+            points: row.points,
+        })
+        .collect();
+    let order = rank_standings(&standings, games);
+    rows.sort_by_key(|row| {
+        order
+            .iter()
+            .position(|ranked| ranked.team_id == row.team_id)
+            .unwrap_or(order.len())
+    });
     rows
 }
 
@@ -104,35 +119,6 @@ fn team_row(team_id: i64, games: &[LeagueGame]) -> LeagueRow {
         losses,
         points: wins * LEAGUE_WIN_POINTS + losses * LEAGUE_LOSS_POINTS,
     }
-}
-
-fn apply_direct_comparison(rows: &mut [LeagueRow], games: &[LeagueGame]) {
-    let mut start = 0;
-    while start < rows.len() {
-        let end = tied_run_end(rows, start);
-        if end - start == 2 && second_beat_first(&rows[start], &rows[start + 1], games) {
-            rows.swap(start, start + 1);
-        }
-        start = end;
-    }
-}
-
-fn tied_run_end(rows: &[LeagueRow], start: usize) -> usize {
-    let same_rank =
-        |row: &LeagueRow| row.points == rows[start].points && row.wins == rows[start].wins;
-    start
-        + rows[start..]
-            .iter()
-            .take_while(|row| same_rank(row))
-            .count()
-}
-
-fn second_beat_first(first: &LeagueRow, second: &LeagueRow, games: &[LeagueGame]) -> bool {
-    games.iter().any(|game| {
-        let same_pair = (game.team1_id == first.team_id && game.team2_id == second.team_id)
-            || (game.team1_id == second.team_id && game.team2_id == first.team_id);
-        same_pair && game.winner_id == Some(second.team_id)
-    })
 }
 
 #[cfg(test)]

@@ -22,7 +22,7 @@ export default function TournamentCasterPanel({
 }: TournamentCasterPanelProps) {
   const { data: availableCasters = [], isLoading: loadingPool, error: poolError } =
     useAvailableCasters()
-  const { data: assignedCasters = [], isLoading: loadingAssigned } =
+  const { data: assignedCasters = [], isLoading: loadingAssigned, error: assignedError } =
     useTournamentCasters(tournamentId)
   const assignCaster = useAssignTournamentCaster()
   const removeCaster = useRemoveTournamentCaster()
@@ -37,6 +37,15 @@ export default function TournamentCasterPanel({
   )
 
   const isBusy = assignCaster.isPending || removeCaster.isPending
+  const selectPlaceholder = loadingPool || loadingAssigned
+    ? 'Lade Caster...'
+    : poolError || assignedError
+      ? 'Caster konnten nicht geladen werden'
+      : availableCasters.length === 0
+        ? 'Niemand hat die Caster-Rolle'
+        : remainingCasters.length === 0
+          ? 'Alle verfügbaren Caster zugewiesen'
+          : 'Caster wählen'
 
   return (
     <Card className="space-y-4 p-5">
@@ -50,15 +59,22 @@ export default function TournamentCasterPanel({
       </p>
 
       {poolError && (
-        <div className="flex items-center gap-2 rounded-lg border border-red-500/20 bg-red-500/10 p-3 text-sm text-red-400">
+        <div role="alert" className="flex items-center gap-2 rounded-lg border border-red-500/20 bg-red-500/10 p-3 text-sm text-red-400">
           <AlertCircle size={16} />
           <span>Caster-Pool konnte nicht geladen werden: {poolError.message}</span>
         </div>
       )}
 
+      {assignedError && (
+        <div role="alert" className="flex items-center gap-2 rounded-lg border border-red-500/20 bg-red-500/10 p-3 text-sm text-red-400">
+          <AlertCircle size={16} />
+          <span>Zugewiesene Caster konnten nicht geladen werden: {assignedError.message}</span>
+        </div>
+      )}
+
       {!readOnly && (
         <div className="flex flex-wrap items-end gap-2">
-          <div className="flex flex-col gap-1">
+          <div className="flex w-full flex-col gap-1 sm:w-auto">
             <label className="text-xs text-muted" htmlFor={`caster-select-${tournamentId}`}>
               Caster aus Discord-Rolle wählen
             </label>
@@ -66,16 +82,10 @@ export default function TournamentCasterPanel({
               id={`caster-select-${tournamentId}`}
               value={selected}
               onChange={(event) => setSelected(event.target.value)}
-              className="min-w-[260px] rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
-              disabled={loadingPool || remainingCasters.length === 0}
+              className="w-full rounded-lg sm:w-auto sm:min-w-[260px] border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
+              disabled={loadingPool || loadingAssigned || Boolean(poolError) || Boolean(assignedError) || remainingCasters.length === 0}
             >
-              <option value="">
-                {loadingPool
-                  ? 'Lade Caster...'
-                  : remainingCasters.length === 0
-                    ? 'Alle verfügbaren Caster zugewiesen'
-                    : 'Caster wählen'}
-              </option>
+              <option value="">{selectPlaceholder}</option>
               {remainingCasters.map((caster) => (
                 <option key={caster.discord_id} value={caster.discord_id}>
                   {playerName(caster.display_name, caster.discord_id)}
@@ -104,10 +114,12 @@ export default function TournamentCasterPanel({
 
       <div className="space-y-2">
         <p className="text-xs font-medium uppercase tracking-wider text-muted">
-          Aktiv für dieses Turnier ({assignedCasters.length})
+          Aktiv für dieses Turnier{assignedError ? '' : ` (${assignedCasters.length})`}
         </p>
         {loadingAssigned ? (
           <p className="text-xs text-muted">Lade...</p>
+        ) : assignedError ? (
+          <p className="text-xs text-red-400">Unbekannt, die Liste konnte nicht geladen werden.</p>
         ) : assignedCasters.length === 0 ? (
           <p className="text-xs text-muted">
             Noch keine Caster eingetragen. Die Matches werden ohne Caster-Einladung

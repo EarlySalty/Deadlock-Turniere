@@ -208,15 +208,18 @@ export function useFinalizeCheckin(tournamentId: number) {
       confirm,
       allowedTeamIds,
       snapshotToken,
+      fillFromSolos,
     }: {
       confirm?: boolean
       allowedTeamIds?: number[]
       snapshotToken?: string
+      fillFromSolos: boolean
     }) => finalizeCheckin(
       tournamentId,
       Boolean(confirm),
+      fillFromSolos,
       allowedTeamIds ?? [],
-      snapshotToken
+      snapshotToken,
     ),
     onSuccess: () => {
       invalidateTournamentCaches(qc, tournamentId)
@@ -467,8 +470,8 @@ export function useLeaveLobby() {
 export function useResetMatch() {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: ({ tournamentId, matchId }: { tournamentId: number; matchId: number }) =>
-      resetMatch(tournamentId, matchId),
+    mutationFn: ({ tournamentId, matchId, force }: { tournamentId: number; matchId: number; force?: boolean }) =>
+      resetMatch(tournamentId, matchId, { force }),
     onSuccess: (_data, vars) => {
       invalidateTournamentCaches(qc, vars.tournamentId)
     },

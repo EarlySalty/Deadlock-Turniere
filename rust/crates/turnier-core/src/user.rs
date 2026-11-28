@@ -87,6 +87,7 @@ pub struct UserProfile {
 pub struct TournamentHistoryEntry {
     pub tournament_name: String,
     pub placement: Option<i64>,
+    pub placement_shared: bool,
     pub team_name: Option<String>,
 }
 
@@ -119,4 +120,5 @@ pub struct LeaderboardEntry {
     pub matches_played: i64,
     pub matches_won: i64,
     pub best_placement: Option<i64>,
+    pub best_placement_shared: bool,
 }

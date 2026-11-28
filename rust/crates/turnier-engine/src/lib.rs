@@ -24,6 +24,7 @@ pub mod error;
 pub mod league;
 pub mod mini_groups;
 pub mod points;
+pub mod standings;
 pub mod status;
 
 #[cfg(feature = "persist")]
@@ -38,25 +39,28 @@ pub use engine::groups::auto_num_groups;
 pub use engine::naming::{check_team_name, name_key, TeamNamePool, TEAM_NAME_MAX_CHARS};
 pub use engine::slots::BracketSlot;
 pub use status::{
-    determine_tournament_mode, is_valid_transition, is_valid_transition_for_mode,
-    valid_next_statuses, valid_next_statuses_for_mode, AUTO_GROUP_STAGE_THRESHOLD,
+    determine_tournament_mode, initial_tournament_mode, is_valid_transition,
+    is_valid_transition_for_mode, resolve_tournament_mode, valid_next_statuses,
+    valid_next_statuses_for_mode, AUTO_GROUP_STAGE_THRESHOLD, PROVISIONAL_AUTO_MODE,
 };
 
 // Persistenz-API.
 #[cfg(feature = "persist")]
 pub use persist::{
-    acquire_tournament_schedule_lock, effective_start, ensure_start_gap, start_gap_message,
-    starts_too_close, MIN_START_GAP_HOURS, TOURNAMENT_SCHEDULE_ADVISORY_LOCK_KEY,
+    acquire_tournament_schedule_lock, candidate_starts, effective_start, ensure_start_gap,
+    mode_undecided, start_gap_message, starts_too_close, MIN_START_GAP_HOURS,
+    TOURNAMENT_SCHEDULE_ADVISORY_LOCK_KEY,
 };
 #[cfg(feature = "persist")]
 pub use persist::{
     advance_bracket_winner, assign_random_teams, build_checkin_snapshot_token,
     complete_mini_group_round_robin, finalize_checkin, generate_bracket, generate_bracket_in_tx,
     generate_group_matches, generate_group_matches_in_tx, generate_groups, generate_groups_in_tx,
-    generate_league_plan_in_tx, league_slot_minutes_in_tx, recalculate_player_points,
-    recalculate_player_points_in_tx, reschedule_league_plan_in_tx, AddedPlayer, CreatedTeam,
-    FinalizeCheckinParams, FinalizeCheckinResult, LeaguePlanSummary, NoShuffle, RemovedPlayer,
-    RngShuffler, SoloPlayer, SoloShuffler, TeamWarning,
+    generate_league_plan_in_tx, league_slot_minutes_in_tx, player_standings,
+    recalculate_player_points, recalculate_player_points_in_tx, reschedule_league_plan_in_tx,
+    AddedPlayer, CreatedTeam, FinalizeCheckinParams, FinalizeCheckinResult, LeaguePlanSummary,
+    NoShuffle, PlayerAggregate, RemovedPlayer, RngShuffler, RosterChange, RosterEntry, SoloOutcome,
+    SoloPlan, SoloPlayer, SoloShuffler, TeamOutcome, TeamPlan, TeamWarning,
 };
 #[cfg(feature = "persist")]
 pub use persist::{

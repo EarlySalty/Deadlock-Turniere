@@ -169,7 +169,7 @@ export default function MatchEventPanel({
             </h3>
           </div>
 
-          <div className="min-w-[280px]">
+          <div className="w-full lg:w-auto lg:min-w-[280px]">
             <label className="mb-2 block text-sm font-medium text-foreground">Aktives Match</label>
             <select
               value={selectedMatch?.id ?? ''}
@@ -228,11 +228,17 @@ export default function MatchEventPanel({
           </p>
         </div>
 
+        {presetsQuery.error && (
+          <p role="alert" className="text-sm text-red-400">
+            Presets konnten nicht geladen werden: {presetsQuery.error.message}
+          </p>
+        )}
+
         <div className="grid gap-3 lg:grid-cols-2">
           {(presetsQuery.data?.presets ?? []).map((preset) => (
-            <div key={preset.key} className="rounded-xl border border-border bg-background/60 p-4">
+            <div key={preset.key} className="min-w-0 rounded-xl border border-border bg-background/60 p-4">
               <div className="flex items-start justify-between gap-3">
-                <div>
+                <div className="min-w-0">
                   <h4 className="font-semibold text-foreground">{preset.label}</h4>
                   <p className="mt-1 text-sm text-muted">{preset.description}</p>
                 </div>
@@ -243,7 +249,7 @@ export default function MatchEventPanel({
                 )}
               </div>
 
-              <div className="mt-3 text-xs text-muted">{presetConvarPreview(preset)}</div>
+              <div className="mt-3 break-all text-xs text-muted">{presetConvarPreview(preset)}</div>
 
               <div className="mt-4 flex flex-wrap gap-2">
                 <Button

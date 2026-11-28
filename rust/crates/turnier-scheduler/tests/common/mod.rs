@@ -169,7 +169,10 @@ pub async fn finalize_checkin_and_advance(
     let preview = turnier_engine::finalize_checkin(
         pool,
         tournament_id,
-        turnier_engine::FinalizeCheckinParams::default(),
+        turnier_engine::FinalizeCheckinParams {
+            fill_from_solos: true,
+            ..Default::default()
+        },
     )
     .await?;
     turnier_engine::finalize_checkin(
@@ -181,6 +184,7 @@ pub async fn finalize_checkin_and_advance(
             actor_id: None,
             expected_snapshot_token: Some(&preview.snapshot_token),
             advance_to_group_phase: true,
+            fill_from_solos: true,
         },
     )
     .await

@@ -41,6 +41,8 @@ const GAME_MODE_LABEL: Record<TournamentGameMode, string> = {
 }
 import { ApiError } from '@/api/client'
 import { bracketFormatLabel, effectiveBracketFormat } from '@/lib/bracketFormat'
+import { bracketPlacements } from '@/lib/bracketPlacements'
+import { bracketStageLabel } from '@/lib/bracketStage'
 import ReactMarkdown from 'react-markdown'
 import { playerName } from '@/lib/playerName'
 import { teamLabel, teamNameById } from '@/lib/teamName'
@@ -79,44 +81,7 @@ interface BracketRankEntry {
 }
 
 function deriveBracketPlacements(matches: BracketMatch[], teams: TeamPublic[]): BracketRankEntry[] {
-  const completed = matches.filter(
-    (m) => m.bracket_type === 'winners'
-      && (m.status === 'completed' || m.status === 'forfeit')
-      && m.winner_id !== null,
-  )
-  if (completed.length === 0) return []
-
-  const maxRound = Math.max(...completed.map((m) => m.round))
-  const entries: BracketRankEntry[] = []
-
-  for (const match of completed) {
-    const distance = maxRound - match.round
-    const winnerId = match.winner_id!
-    const loserId = match.team1_id === winnerId ? match.team2_id : match.team1_id
-
-    if (distance === 0) {
-      entries.push({ position: 1, teamId: winnerId, teamName: getTeamName(winnerId, teams), label: '1. Platz' })
-      if (loserId !== null) {
-        entries.push({ position: 2, teamId: loserId, teamName: getTeamName(loserId, teams), label: '2. Platz' })
-      }
-    } else {
-      const startPos = Math.pow(2, distance) + 1
-      const label = distance === 1 ? '3./4. Platz' : distance === 2 ? '5.–8. Platz' : '9.+ Platz'
-      if (loserId !== null) {
-        entries.push({ position: startPos, teamId: loserId, teamName: getTeamName(loserId, teams), label })
-      }
-    }
-  }
-
-  const seen = new Map<number, BracketRankEntry>()
-  for (const entry of entries) {
-    const existing = seen.get(entry.teamId)
-    if (!existing || entry.position < existing.position) {
-      seen.set(entry.teamId, entry)
-    }
-  }
-
-  return Array.from(seen.values()).sort((a, b) => a.position - b.position)
+  return bracketPlacements(matches).map((entry) => ({ ...entry, teamName: getTeamName(entry.teamId, teams) }))
 }
 
 function getSortTime(value: string | null, fallback: number): number {
@@ -125,16 +90,18 @@ function getSortTime(value: string | null, fallback: number): number {
   return Number.isNaN(parsed) ? Number.MAX_SAFE_INTEGER - fallback : parsed
 }
 
-function isCompletedMatch(status: string): boolean {
-  return status === 'completed' || status === 'forfeit'
+function tournamentChampion(tournament: TournamentDetailPublic): string | null {
+  if (!['completed', 'archived'].includes(tournament.status)) return null
+  if (isLeague(tournament.tournament_mode)) {
+    const leader = tournament.groups[0]?.teams[0]
+    return leader ? leader.team_name : null
+  }
+  const winner = bracketPlacements(tournament.bracket_matches).find((entry) => entry.position === 1)
+  return winner ? getTeamName(winner.teamId, tournament.teams) : null
 }
 
-function getBracketRoundLabel(round: number, maxRound: number): string {
-  if (maxRound <= 1) return 'Finale'
-  if (round === maxRound) return 'Finale'
-  if (round === maxRound - 1) return 'Halbfinale'
-  if (round === maxRound - 2) return 'Viertelfinale'
-  return `Runde ${round}`
+function isCompletedMatch(status: string): boolean {
+  return status === 'completed' || status === 'forfeit'
 }
 
 function buildGroupResultEntries(
@@ -161,7 +128,6 @@ function buildGroupResultEntries(
 }
 
 function buildBracketResultEntries(matches: BracketMatch[], teams: TeamPublic[]): ResultEntry[] {
-  const maxRound = matches.reduce((highest, match) => Math.max(highest, match.round), 0)
   return matches
     .filter((match) => (
       isCompletedMatch(match.status)
@@ -174,7 +140,7 @@ function buildBracketResultEntries(matches: BracketMatch[], teams: TeamPublic[])
       const loserId = match.winner_id === match.team1_id ? match.team2_id : match.team1_id
       return {
         id: `bracket-${match.id}`,
-        title: `Bracket • ${getBracketRoundLabel(match.round, maxRound)}`,
+        title: `Bracket • ${bracketStageLabel(match, matches)}`,
         winnerName,
         loserName: getTeamName(loserId, teams),
         playedAt: match.played_at,
@@ -183,7 +149,8 @@ function buildBracketResultEntries(matches: BracketMatch[], teams: TeamPublic[])
     })
 }
 
-function recruitingLabel(status: string) {
+function recruitingLabel(status: string, full: boolean) {
+  if (full) return { text: 'Voll', color: 'text-muted bg-border/30 border-border' }
   if (status === 'application') return { text: 'Bewerbung', color: 'text-amber-400 bg-amber-500/15 border-amber-500/30' }
   if (status === 'closed') return { text: 'Geschlossen', color: 'text-muted bg-border/30 border-border' }
   return { text: 'Offen', color: 'text-green-400 bg-green-500/15 border-green-500/30' }
@@ -266,6 +233,7 @@ export default function Tournament() {
   const isRegistration = tournament.status === 'registration'
   const soloSignups = tournament.signups.filter((signup) => signup.team_id === null)
   const tournamentStart = plannedTournamentStart(tournament)
+  const champion = tournamentChampion(tournament)
   const isSignupOpen = tournament.registration_open
   const isCheckinPhase = tournament.status === 'checkin'
   const soloOnly = tournament.invite_mode === 'solo_only'
@@ -275,7 +243,6 @@ export default function Tournament() {
     tournament.signups.filter((signup) => signup.team_id === null).length,
   )
 
-  // User state from status endpoint (no discord_id scanning needed)
   const userTeam = myStatus?.team_id != null
     ? tournament.teams.find((t) => t.id === myStatus.team_id) ?? null
     : null
@@ -427,6 +394,12 @@ export default function Tournament() {
           <h1 className="text-4xl md:text-5xl font-bold text-foreground font-display tracking-tight">{tournament.name}</h1>
           {tournament.description && (
             <p className="text-muted italic max-w-3xl leading-relaxed">{tournament.description}</p>
+          )}
+          {champion && (
+            <p className="flex items-center gap-2 text-lg font-bold text-primary">
+              <Trophy size={18} className="shrink-0" />
+              Turniersieger: {champion}
+            </p>
           )}
 
           <div className="flex flex-wrap items-center gap-x-8 gap-y-3 pt-4">
@@ -604,6 +577,14 @@ export default function Tournament() {
                         <p className="text-[10px] uppercase font-bold text-muted tracking-widest">Anmeldung ab</p>
                         <p className="text-lg font-bold text-foreground">
                           {new Date(tournament.registration_start).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                        </p>
+                      </div>
+                    )}
+                    {tournament.checkin_start && (
+                      <div className="space-y-2">
+                        <p className="text-[10px] uppercase font-bold text-muted tracking-widest">Check-in ab</p>
+                        <p className="text-lg font-bold text-foreground">
+                          {new Date(tournament.checkin_start).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
                         </p>
                       </div>
                     )}
@@ -855,7 +836,8 @@ export default function Tournament() {
 
                 <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
                   {tournament.teams.map((team) => {
-                    const recruiting = recruitingLabel(team.recruitment_status)
+                    const teamFull = tournament.team_size > 0 && team.members.length >= tournament.team_size
+                    const recruiting = recruitingLabel(team.recruitment_status, teamFull)
                     const isMyTeam = userTeam?.id === team.id
                     return (
                       <Card key={team.id} className={`dl-roster__team min-w-0 p-5 transition-all group ${isMyTeam ? 'border-primary/50' : ''}`}>
@@ -898,7 +880,7 @@ export default function Tournament() {
                             )}
                           </ul>
 
-                          {!isMyTeam && isSignupOpen && !soloOnly && (
+                          {!isMyTeam && isSignupOpen && !soloOnly && !teamFull && (
                             <div className="pt-2">
                                {team.recruitment_status === 'open' ? (
                                  <Button variant="secondary" size="sm" className="w-full" disabled={isMutating} onClick={() => handleJoinTeam(team)}>
