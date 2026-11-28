@@ -252,7 +252,7 @@ export default function ParticipantManager({
             value={newTeamName}
             onChange={(event) => setNewTeamName(event.target.value)}
             placeholder="Neues Team anlegen..."
-            className="flex-1 rounded-lg border border-border bg-background px-3 py-2 text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
+            className="min-w-0 flex-1 rounded-lg border border-border bg-background px-3 py-2 text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
           />
           <Button variant="primary" size="sm" disabled={isBusy || !newTeamName.trim()} onClick={handleCreateTeam}>
             <Plus size={14} />
@@ -275,7 +275,7 @@ export default function ParticipantManager({
       </Card>
 
       <div className="dl-roster grid min-w-0 items-start gap-5 xl:grid-cols-[minmax(300px,0.9fr)_minmax(0,2.1fr)]" data-testid="teilnehmer-arbeitsflaeche">
-        <section className="min-w-0 xl:sticky xl:top-20" aria-label="Solo-Spieler">
+        <section className="min-w-0 xl:sticky xl:top-20 xl:self-start xl:max-h-[calc(100vh-6rem)] xl:overflow-y-auto" aria-label="Solo-Spieler">
           <Card className="dl-roster__pool space-y-4 p-4 sm:p-5">
             <div className="flex items-center justify-between gap-3 border-b border-primary/25 pb-3">
               <div>
@@ -365,7 +365,7 @@ export default function ParticipantManager({
                   onChange={(event) =>
                     setRenameValues((current) => ({ ...current, [team.id]: event.target.value }))
                   }
-                  className="flex-1 rounded-lg border border-border bg-background px-3 py-2 text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
+                  className="min-w-0 flex-1 rounded-lg border border-border bg-background px-3 py-2 text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
                 />
                 <Button
                   variant="secondary"

@@ -424,6 +424,7 @@
   letter-spacing:.25em;
   color:#b8a785;
 }
+.draft-arena-screen--live:before{display:none;}
 .draft-arena-screen:after,.draft-waiting-screen:after{
   content:'';
   position:absolute;
@@ -448,7 +449,6 @@
   font:900 clamp(44px,5vw,75px)/1 Impact,"Arial Narrow",sans-serif;
   letter-spacing:.02em;
   font-variant-numeric:tabular-nums;
-  color:#f0dfc1;
 }
 .draft-arena-layout{align-items:start;}
 .draft-team-column{

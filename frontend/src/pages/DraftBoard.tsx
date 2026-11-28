@@ -253,7 +253,7 @@ function DraftTisch({
   const aktiverSlot2 = !istBanZug && aktivesTeam === 2 ? picks2.length : null
 
   return (
-    <div className="draft-arena-screen relative min-h-[calc(100vh-4rem)] overflow-clip">
+    <div className="draft-arena-screen draft-arena-screen--live relative min-h-[calc(100vh-4rem)] overflow-clip">
       <DraftHintergrund mitte />
       <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
         <span className="select-none text-center font-display text-4xl font-black uppercase tracking-tight text-white/[0.05] md:text-6xl">
