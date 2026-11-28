@@ -446,6 +446,7 @@ export default function GroupMatchAdminPanel({
                     key={teamId}
                     variant={isTerminal ? 'ghost' : 'secondary'}
                     size="sm"
+                    className="max-w-full wrap-anywhere"
                     disabled={isLocked}
                     onClick={() => {
                       const correction = `Ergebnis korrigieren: ${name} hat gewonnen?`

@@ -42,7 +42,7 @@ test('Comp-Finder ist im Router, Draft-Moduswechsel und der Hauptnavigation erre
   const app = read('../src/App.tsx')
   assert.match(app, /path="comp" element=\{<CompFinder \/>\}/)
   assert.match(app, /path="comp\/:code" element=\{<CompFinder \/>\}/)
-  assert.match(read('../src/pages/DraftLobbyNeu.tsx'), /<TeamModeNav \/>/)
+  assert.match(read('../src/pages/DraftLobbyNeu.tsx'), /<TeamModeNav variante="pulp" \/>/)
   assert.match(read('../src/components/layout/Header.tsx'), /label: 'Comp-Finder', path: '\/comp'/)
   assert.match(read('../src/hooks/useCompFinder.ts'), /'X-Comp-Token': options.token/)
 })

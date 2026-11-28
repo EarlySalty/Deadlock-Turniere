@@ -88,7 +88,7 @@ function MiniGroupNode({ group, teams }: { group: BracketMiniGroup; teams: TeamP
       </div>
       <ul className="divide-y divide-border">
         {group.team_ids.map((teamId) => (
-          <li key={teamId} className="truncate px-3 py-2 text-sm text-foreground">
+          <li key={teamId} className="min-w-0 truncate px-3 py-2 text-sm text-foreground" title={teamNameById(teams, teamId)}>
             {teamNameById(teams, teamId)}
           </li>
         ))}

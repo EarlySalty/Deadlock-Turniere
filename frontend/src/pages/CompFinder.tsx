@@ -196,7 +196,7 @@ function CompositionCard({ room, composition, rank, heroes }: { room: CompRoom; 
         const member = room.members[assignment.player_index]
         return <div key={assignment.player_index} className={`flex items-center gap-3 rounded-lg border p-2 ${member?.id === room.you ? 'border-primary/30 bg-primary/5' : 'border-border bg-black/10'}`}>
           <div className="h-10 w-10 shrink-0 overflow-hidden rounded-md"><Portrait hero={heroes.find(h => h.name === assignment.hero_name)} name={assignment.hero_name} /></div>
-          <div className="min-w-0 flex-1"><div className="truncate text-xs text-muted">{member?.name}{member?.id === room.you ? ' · Du' : ''}</div><div className="truncate text-sm font-semibold">{assignment.hero_name}</div></div>
+          <div className="min-w-0 flex-1"><div className="min-w-0 truncate text-xs text-muted" title={member?.name}>{member?.name}{member?.id === room.you ? ' · Du' : ''}</div><div className="min-w-0 truncate text-sm font-semibold" title={assignment.hero_name}>{assignment.hero_name}</div></div>
           <span className={`comp-priority comp-priority-${assignment.priority}`}>{assignment.priority} P.</span>
         </div>
       })}

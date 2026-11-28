@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import TeamModeNav from '@/components/draft/TeamModeNav'
 import { ArrowUpRight, ChevronLeft, ChevronRight } from 'lucide-react'
 import { useDraftRaumAnlegen } from '@/hooks/useDraftLobby'
+import { pluralize } from '@/lib/countLabel'
 
 const BANS_OPTIONEN = [0, 1, 2, 3, 4, 5, 6]
 const TIMER_OPTIONEN = [0, 30, 45, 60, 90]
@@ -91,7 +92,7 @@ export default function DraftLobbyNeu() {
 
         <section className="draft-pulp__desk" aria-label="Draft-Raum einrichten">
           <div className="draft-pulp__desk-inner">
-            <TeamModeNav />
+            <TeamModeNav variante="pulp" />
             <div className="draft-pulp__intro">
               <div className="pulp-overline">PRIVATES SCRIM · EIGENE LOBBY</div>
               <h2>{segment === 'anlegen' ? <>BEREIT FÜR<br /><em>DEN DRAFT?</em></> : <>ZURÜCK IN<br /><em>DEN KAMPF.</em></>}</h2>
@@ -114,7 +115,7 @@ export default function DraftLobbyNeu() {
                 <label className="pulp-field">
                   <span className="pulp-overline">DEIN EINLADUNGSCODE</span>
                   <input autoFocus value={beitrittsCode} onChange={(e) => setBeitrittsCode(e.target.value.toUpperCase())}
-                    maxLength={8} placeholder="XXXXXX" autoCapitalize="characters" spellCheck={false}
+                    maxLength={8} placeholder="XXXXXXXX" autoCapitalize="characters" spellCheck={false}
                     className="pulp-field__code" />
                 </label>
                 <button type="submit" disabled={beitrittsCode.trim().length < 4} className="draft-pulp__submit">
@@ -158,7 +159,7 @@ export default function DraftLobbyNeu() {
                   <ArrowUpRight aria-hidden="true" size={24} />
                 </button>
                 <p className="draft-pulp__footnote">
-                  6 gegen 6 · {bans} Bans pro Team · {timer === 0 ? 'Ohne Timer' : `${timer} Sekunden pro Zug`}<br />
+                  6 gegen 6 · {pluralize(bans, 'Ban', 'Bans')} pro Team · {timer === 0 ? 'Ohne Timer' : `${timer} Sekunden pro Zug`}<br />
                   Danach erhalten die Captains einen gemeinsamen Raum-Code.
                 </p>
               </form>

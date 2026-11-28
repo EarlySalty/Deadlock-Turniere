@@ -48,7 +48,7 @@ function ActionRow({
               {item.on_stream ? 'Stream' : 'Parallel'}
             </span>
           </div>
-          <div className="mt-0.5 truncate text-xs text-muted">{matchup}</div>
+          <div className="mt-0.5 min-w-0 truncate text-xs text-muted" title={matchup}>{matchup}</div>
 
           {item.is_no_show ? (
             <div className="mt-1.5 flex items-center gap-1.5 text-xs">

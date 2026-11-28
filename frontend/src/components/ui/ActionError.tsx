@@ -15,7 +15,7 @@ export default function ActionError({ actions, className = '' }: ActionErrorProp
       className={`flex items-start gap-2 rounded-lg border border-red-500/20 bg-red-500/10 p-3 text-sm text-red-400 ${className}`}
     >
       <AlertCircle size={16} className="mt-0.5 shrink-0" />
-      <span className="min-w-0 break-words">{error.message}</span>
+      <span className="min-w-0 wrap-anywhere">{error.message}</span>
     </div>
   )
 }

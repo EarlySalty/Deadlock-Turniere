@@ -276,7 +276,8 @@ export default function ParticipantManager({
 
       <div className="dl-roster grid min-w-0 items-start gap-5 xl:grid-cols-[minmax(300px,0.9fr)_minmax(0,2.1fr)]" data-testid="teilnehmer-arbeitsflaeche">
         <section className="min-w-0 xl:sticky xl:top-20 xl:self-start xl:max-h-[calc(100vh-6rem)] xl:overflow-y-auto" aria-label="Solo-Spieler">
-          <Card className="dl-roster__pool space-y-4 p-4 sm:p-5">
+          <div className="dl-roster__pool min-w-0 p-4 transition-all duration-300 sm:p-5">
+            <div className="relative z-10 p-5">
             <div className="flex items-center justify-between gap-3 border-b border-primary/25 pb-3">
               <div>
                 <div className="text-[11px] font-bold uppercase tracking-[0.22em] text-primary">Spielerpool</div>
@@ -296,7 +297,7 @@ export default function ParticipantManager({
               <div key={signup.id} className="rounded-xl border border-border bg-background/60 p-4">
                 <div className="flex flex-col gap-3">
                   <div className="min-w-0 space-y-1">
-                    <div className="break-words font-medium text-foreground">{playerName(signup.discord_name)}</div>
+                    <div className="wrap-anywhere font-medium text-foreground">{playerName(signup.discord_name)}</div>
                     {showDiscordIds && <div className="text-xs text-muted">{signup.discord_id}</div>}
                     <div className="text-xs text-muted">
                       {signup.rank ? `${signup.rank} · Score ${signup.rank_score}` : `Score ${signup.rank_score}`}
@@ -342,7 +343,8 @@ export default function ParticipantManager({
             ))}
           </div>
         )}
-          </Card>
+            </div>
+          </div>
         </section>
 
         <section className="min-w-0 space-y-3" aria-label="Teams und Mitglieder">
@@ -356,7 +358,8 @@ export default function ParticipantManager({
           {teams.length === 0 && <p className="rounded border border-dashed border-primary/30 p-5 text-sm text-muted">Noch keine Teams angelegt.</p>}
           <div className="grid min-w-0 gap-4 2xl:grid-cols-2">
             {teams.map((team) => (
-              <Card key={team.id} className="dl-roster__team min-w-0 space-y-4 p-4 sm:p-5">
+              <div key={team.id} className="dl-roster__team min-w-0 p-4 transition-all duration-300 sm:p-5">
+                <div className="relative z-10 p-5">
             <div className="flex flex-col gap-3">
               <div className="flex flex-col gap-2 sm:flex-row">
                 <input
@@ -413,7 +416,7 @@ export default function ParticipantManager({
                         ? <Crown size={13} aria-label="Captain" className="shrink-0 text-primary" />
                         : <Users size={13} aria-hidden="true" className="shrink-0 text-muted" />}
                       <span className="min-w-0 flex-1 truncate text-sm text-foreground" title={playerName(member.discord_name)}>{playerName(member.discord_name)}</span>
-                      <span className="max-w-[7rem] shrink-0 truncate text-[11px] text-muted" title={member.rank || 'Kein Rang'}>{member.rank || '—'}</span>
+                      <span className="max-w-[7rem] min-w-0 shrink-0 truncate text-[11px] text-muted" title={member.rank || 'Kein Rang'}>{member.rank || '—'}</span>
                     </li>
                   ))}
                   {team.members.length === 0 && <li className="text-sm text-muted">Noch keine Mitglieder.</li>}
@@ -491,7 +494,7 @@ export default function ParticipantManager({
                       <div className="flex flex-col gap-3">
                         <div className="flex items-start justify-between gap-3">
                           <div className="min-w-0">
-                            <div className="break-words font-medium text-foreground">{playerName(member.discord_name)}</div>
+                            <div className="wrap-anywhere font-medium text-foreground">{playerName(member.discord_name)}</div>
                             {showDiscordIds && <div className="text-xs text-muted">{member.discord_id}</div>}
                             <div className="text-xs text-muted">
                               {member.role === 'captain' ? 'Captain' : 'Mitglied'}
@@ -544,7 +547,8 @@ export default function ParticipantManager({
                 })}
               </div>
             )}
-              </Card>
+                </div>
+              </div>
             ))}
           </div>
         </section>

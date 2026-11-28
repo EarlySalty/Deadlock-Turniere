@@ -196,7 +196,7 @@ export default function AutomatikPanel() {
                 >
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
-                      <h4 className="truncate text-sm font-semibold text-foreground">
+                      <h4 className="min-w-0 truncate text-sm font-semibold text-foreground" title={preset.name}>
                         {preset.name}
                       </h4>
                       <div className="mt-2 flex flex-wrap gap-2 text-[11px]">
@@ -365,7 +365,7 @@ export default function AutomatikPanel() {
                   >
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
-                        <p className="truncate text-sm font-semibold text-foreground">
+                        <p className="min-w-0 truncate text-sm font-semibold text-foreground" title={preset?.name ?? proposal.config_json}>
                           {preset?.name ?? proposal.config_json}
                         </p>
                         <p className="mt-1 text-xs text-muted">
@@ -478,7 +478,7 @@ export default function AutomatikPanel() {
                       key={vote.id}
                       className="flex items-center justify-between gap-3 rounded-lg border border-border px-3 py-2 text-sm"
                     >
-                      <span className="truncate text-foreground">
+                      <span className="min-w-0 truncate text-foreground" title={vote.caster_discord_id}>
                         {vote.caster_discord_id}
                       </span>
                       <span className="text-muted">

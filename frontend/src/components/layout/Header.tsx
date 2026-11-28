@@ -44,7 +44,7 @@ export default function Header() {
               className="h-8 w-8 shrink-0"
             />
             <span className="min-w-0">
-              <span className="block truncate font-display text-sm font-bold leading-tight text-primary sm:text-lg">
+              <span className="block min-w-0 truncate font-display text-sm font-bold leading-tight text-primary sm:text-lg" title="Deutsche Deadlock Community">
                 Deutsche Deadlock Community
               </span>
               <span className="hidden text-xs font-semibold uppercase tracking-[0.12em] text-muted sm:block">
@@ -99,7 +99,7 @@ export default function Header() {
                       <User size={14} />
                     </span>
                   )}
-                  <span className="hidden max-w-32 truncate sm:block">{user.discord_name}</span>
+                  <span className="hidden min-w-0 max-w-32 truncate sm:block" title={user.discord_name}>{user.discord_name}</span>
                 </Link>
                 <button
                   onClick={logout}

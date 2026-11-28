@@ -9,13 +9,15 @@ test('die Draft-Arena zeigt den Hero-Pool im Hauptlayout statt in einer Bottom-B
   const board = quelle('../src/pages/DraftBoard.tsx')
   const hero = quelle('../src/components/draft/HeroLeiste.tsx')
   const css = quelle('../src/draft.css')
+  const pulp = quelle('../src/draft-pulp.css')
 
   assert.match(board, /lg:grid-cols-\[minmax\(180px,230px\)_minmax\(0,1fr\)_minmax\(180px,230px\)\]/)
   assert.ok(board.includes('<HeroLeiste'))
   assert.ok(hero.includes('draft-hero-panel'))
   assert.ok(hero.includes('Heldenauswahl'))
   assert.ok(!hero.includes('absolute bottom-4'))
-  assert.match(css, /minmax\(76px, 1fr\)/)
+  assert.match(pulp, /\.draft-hero-grid-v2 \{[^}]*minmax\(87px,1fr\)/)
+  assert.ok(!/minmax\(76px/.test(css + pulp))
   assert.ok(!css.includes('max-height: 180px'))
 })
 
@@ -61,4 +63,15 @@ test('die Lobby hat keine scheinbar klickbaren, funktionslosen Spielmodus-Pills'
   assert.ok(!lobby.includes('onWahl={() => {}}'))
   assert.ok(lobby.includes('Draft-Raum erstellen'))
   assert.ok(!lobby.includes('Live-Vorschau'))
+})
+
+test('die Draft-Farbvariablen spiegeln farben.ts', () => {
+  const farben = quelle('../src/components/draft/farben.ts')
+  const css = quelle('../src/draft.css')
+  const paare = { GOLD: 'gold', BLAU: 'blau', ROT: 'rot', BEREIT_GRUEN: 'gruen', TINTE: 'tinte' }
+  for (const [konstante, variable] of Object.entries(paare)) {
+    const wert = farben.match(new RegExp(`export const ${konstante} = '(#[0-9a-f]{6})'`))?.[1]
+    assert.ok(wert, konstante)
+    assert.match(css, new RegExp(`--draft-${variable}:\\s*${wert};`))
+  }
 })

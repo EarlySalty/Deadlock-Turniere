@@ -106,7 +106,7 @@ export default function Home() {
                 <Card hoverable className="p-4 border-white/5 bg-white/[0.02] hover:z-10 relative">
                   <div className="flex items-center justify-between gap-4">
                     <div className="min-w-0">
-                      <h3 className="line-clamp-2 break-words text-sm font-bold text-foreground transition-colors group-hover:text-primary">
+                      <h3 title={t.name} className="min-w-0 line-clamp-2 wrap-anywhere text-sm font-bold text-foreground transition-colors group-hover:text-primary">
                         {t.name}
                       </h3>
                       <span className="text-xs text-muted">

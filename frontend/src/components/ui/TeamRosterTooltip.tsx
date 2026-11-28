@@ -9,7 +9,6 @@ interface TeamRosterTooltipProps {
   members: TeamMemberPublic[]
   align?: 'left' | 'center' | 'right'
   disabled?: boolean
-  /** Wrapper als Block statt inline-block; nötig wenn Children volle Breite einnehmen sollen. */
   block?: boolean
 }
 
@@ -56,7 +55,7 @@ export default function TeamRosterTooltip({
 
   return (
     <span
-      className={`relative ${block ? 'block' : 'inline-block'}`}
+      className={`relative min-w-0 max-w-full ${block ? 'block' : 'inline-block'}`}
       onMouseEnter={show}
       onMouseLeave={hide}
       onFocus={show}
@@ -72,7 +71,7 @@ export default function TeamRosterTooltip({
           className={`absolute z-30 mt-2 ${alignClass} top-full w-64 rounded-lg border border-border bg-card p-3 shadow-xl shadow-black/40 text-xs text-foreground`}
         >
           <div className="flex items-center justify-between gap-2 border-b border-border/60 pb-2">
-            <span className="truncate font-semibold text-foreground">{teamName}</span>
+            <span className="min-w-0 truncate font-semibold text-foreground" title={teamName}>{teamName}</span>
             <span className="text-xs text-muted">Ø {avg}</span>
           </div>
 
@@ -80,7 +79,7 @@ export default function TeamRosterTooltip({
             {captain && (
               <li className="flex items-center gap-2">
                 <Crown size={12} className="text-amber-400 shrink-0" />
-                <span className="truncate font-medium text-foreground">
+                <span className="min-w-0 truncate font-medium text-foreground" title={playerName(captain.discord_name)}>
                   {playerName(captain.discord_name)}
                 </span>
                 {captain.rank && (
@@ -97,7 +96,7 @@ export default function TeamRosterTooltip({
                 className="flex items-center gap-2"
               >
                 <User size={12} className="text-muted shrink-0" />
-                <span className="truncate text-foreground/90">
+                <span className="min-w-0 truncate text-foreground/90" title={playerName(member.discord_name)}>
                   {playerName(member.discord_name)}
                 </span>
                 {member.rank && (

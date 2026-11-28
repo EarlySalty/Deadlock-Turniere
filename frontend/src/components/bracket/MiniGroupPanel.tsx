@@ -115,13 +115,13 @@ export default function MiniGroupPanel({ miniGroups, matches, teams }: MiniGroup
                     }`}
                   >
                     <span className="flex min-w-0 items-center gap-2">
-                      <span className="w-4 text-xs text-muted">{position + 1}.</span>
+                      <span className="w-4 shrink-0 text-xs text-muted">{position + 1}.</span>
                       <TeamRosterTooltip
                         teamName={teamLabel(entry.team?.name, entry.teamId)}
                         members={entry.team?.members ?? []}
                         align="left"
                       >
-                        <span className="cursor-help truncate underline-offset-2 hover:underline">
+                        <span className="block min-w-0 cursor-help truncate underline-offset-2 hover:underline" title={teamLabel(entry.team?.name, entry.teamId)}>
                           {teamLabel(entry.team?.name, entry.teamId)}
                         </span>
                       </TeamRosterTooltip>

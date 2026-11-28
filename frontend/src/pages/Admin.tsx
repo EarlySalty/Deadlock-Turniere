@@ -588,7 +588,7 @@ export default function Admin() {
                           onClick={() => setSelectedArchiveId(t.id)}
                           className="block w-full p-3 text-left"
                         >
-                          <div className="truncate text-sm font-medium text-foreground">
+                          <div className="min-w-0 truncate text-sm font-medium text-foreground" title={t.name}>
                             {t.name}
                           </div>
                           <div className="mt-1 flex items-center gap-2">

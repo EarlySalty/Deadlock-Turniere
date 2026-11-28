@@ -137,10 +137,10 @@ function PlayerChip({ player, selected, onSelect, compact = false }: PlayerChipP
     >
       <span className="min-w-0 flex-1">
         <span className="flex min-w-0 items-center">
-          <span className="min-w-0 break-words font-medium text-foreground">{player.name}</span>
+          <span className="min-w-0 wrap-anywhere font-medium text-foreground">{player.name}</span>
           <ParticipantMarks discordId={player.discordId} />
         </span>
-        <span className="block break-words text-xs text-muted">
+        <span className="block wrap-anywhere text-xs text-muted">
           {player.rank ?? 'Ohne Rang'}
           {compact ? '' : ` · ${formatSignupTime(player.signedUpAt)}`}
         </span>
@@ -221,7 +221,7 @@ function TeamHeader({ team, allTeams, onRename, onDiscard }: Pick<TeamCardProps,
 
   return (
     <div className="flex items-center justify-between gap-2">
-      <h4 className="min-w-0 truncate font-semibold text-foreground">
+      <h4 className="min-w-0 truncate font-semibold text-foreground" title={team.name}>
         {team.name}
         {team.serverId === null && <span className="ml-2 text-xs font-normal text-primary">neu</span>}
       </h4>

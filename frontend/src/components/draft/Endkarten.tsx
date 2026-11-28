@@ -51,7 +51,7 @@ export default function Endkarten({
                   >
                     {i + 1}
                   </span>
-                  <span className="absolute inset-x-2 bottom-2 truncate text-sm font-bold text-white">
+                  <span className="absolute inset-x-2 bottom-2 min-w-0 truncate text-sm font-bold text-white" title={pick.hero_name}>
                     {pick.hero_name}
                   </span>
                   {pick.is_auto && (

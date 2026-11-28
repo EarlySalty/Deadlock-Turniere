@@ -23,7 +23,7 @@ function PlayerList({ players }: { players: BalancePlayer[] }) {
       {players.map((player) => (
         <li key={player.signup_id} className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 py-2 text-sm">
           <div className="min-w-0">
-            <span className="break-words text-foreground">{playerName(player.discord_name)}</span>
+            <span className="wrap-anywhere text-foreground">{playerName(player.discord_name)}</span>
             {player.priority && <span className="ml-2 text-xs text-primary">Vorrang</span>}
             <p className="text-xs text-muted">{player.used_median ? 'Ohne Rang: Median' : player.rank || 'Mit Rang'}</p>
           </div>

@@ -27,14 +27,14 @@ export default function KopierKnopf({
 
   const stil =
     variante === 'gold'
-      ? 'bg-[#c8a86b] text-[#0b0b0b]'
+      ? 'bg-(--draft-gold) text-(--draft-tinte)'
       : 'border border-white/10 bg-white/[0.04] text-white/60 hover:text-white hover:border-white/25'
 
   return (
     <button
       type="button"
       onClick={kopieren}
-      className={`inline-flex shrink-0 items-center gap-1.5 rounded-lg px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.15em] transition-colors ${stil} ${pulse && !kopiert ? 'cta-pulse-gold' : ''}`}
+      className={`draft-knopf inline-flex shrink-0 items-center gap-1.5 px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.15em] transition-colors ${stil} ${pulse && !kopiert ? 'cta-pulse-gold' : ''}`}
     >
       {kopiert ? (
         <motion.span

@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useState, type CSSProperties } from 'react'
 import { Search } from 'lucide-react'
 import type { DraftHero } from '@/types/draft'
 import { heroImageUrl } from '@/hooks/draftLobbyState'
@@ -31,17 +31,21 @@ export default function HeroLeiste({
   const akzent = modus === 'ban' ? ROT : farbe
 
   return (
-    <section className="draft-hero-panel" aria-label="Heldenauswahl">
+    <section
+      className="draft-hero-panel"
+      aria-label="Heldenauswahl"
+      style={{ '--draft-akzent': akzent } as CSSProperties}
+    >
       <div className="flex flex-col gap-3 border-b border-white/10 pb-4 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex items-center gap-3">
+        <div className="flex min-w-0 items-center gap-3">
           <span
-            className="rounded border px-3 py-1.5 text-xs font-black uppercase tracking-[0.16em]"
+            className="shrink-0 rounded border px-3 py-1.5 text-xs font-black uppercase tracking-[0.16em]"
             style={{ borderColor: `${akzent}88`, color: akzent, backgroundColor: `${akzent}15` }}
           >
             {modus === 'ban' ? 'Bannen' : 'Picken'}
           </span>
           <div>
-            <h2 className="font-display text-xl font-black uppercase tracking-wide text-[#f1e9da]">
+            <h2 className="wrap-normal uppercase text-[#f1e9da]">
               Heldenauswahl
             </h2>
             <p className="text-xs text-white/55">
@@ -57,7 +61,7 @@ export default function HeroLeiste({
             onChange={(event) => setSuchtext(event.target.value)}
             placeholder="Helden suchen"
             autoComplete="off"
-            className="w-full rounded-md border border-white/20 bg-[#0b1019] py-2.5 pl-10 pr-3 text-sm text-white placeholder:text-white/50 focus-visible:border-[#c8a86b] focus-visible:outline-none"
+            className="w-full py-2.5 pl-10 pr-3 text-sm text-white placeholder:text-white/50 focus-visible:border-(--draft-gold) focus-visible:outline-none"
           />
         </label>
       </div>
@@ -83,11 +87,7 @@ export default function HeroLeiste({
               aria-pressed={gewaehlt}
               aria-label={`${held.name}${weg ? ', bereits gewählt oder gebannt' : ''}`}
               title={held.name}
-              className={`draft-hero-card group relative aspect-[4/5] overflow-hidden rounded-md border text-left transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#c8a86b] ${weg ? 'grayscale opacity-35' : ''} ${klickbar ? 'cursor-pointer hover:brightness-125' : 'cursor-default'}`}
-              style={{
-                borderColor: gewaehlt ? akzent : 'rgba(217,195,155,.22)',
-                boxShadow: gewaehlt ? `inset 0 0 0 2px ${akzent}` : undefined,
-              }}
+              className={`draft-hero-card group relative aspect-[4/5] overflow-hidden text-left transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-(--draft-gold) ${weg ? 'grayscale opacity-35' : ''} ${klickbar ? 'cursor-pointer hover:brightness-125' : 'cursor-default'}`}
             >
               {portrait ? (
                 <img src={portrait} alt="" loading="lazy" className="h-full w-full object-cover object-top" />
@@ -100,7 +100,7 @@ export default function HeroLeiste({
                 {held.name}
               </span>
               {gewaehlt && (
-                <span className="absolute inset-x-0 top-0 bg-[#c8a86b] px-1 py-1 text-center text-[10px] font-black uppercase text-[#15120e]">
+                <span className="absolute inset-x-0 top-0 bg-(--draft-gold) px-1 py-1 text-center text-[10px] font-black uppercase text-[#15120e]">
                   Ausgewählt
                 </span>
               )}

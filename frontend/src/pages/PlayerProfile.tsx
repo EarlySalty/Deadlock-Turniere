@@ -262,7 +262,7 @@ export default function PlayerProfile() {
                 <Card key={idx} className="p-4 border-white/5 bg-white/[0.01]">
                   <div className="flex items-center justify-between">
                     <div>
-                      <h3 className="break-words text-sm font-bold text-foreground">{entry.tournament_name}</h3>
+                      <h3 className="wrap-anywhere text-sm font-bold text-foreground">{entry.tournament_name}</h3>
                       {entry.team_name && <p className="text-xs text-muted uppercase tracking-widest mb-1">{entry.team_name}</p>}
                       <p className="text-xs text-muted italic">{placementLabel(entry.placement, entry.placement_shared, 'Keine Platzierung')}</p>
                     </div>

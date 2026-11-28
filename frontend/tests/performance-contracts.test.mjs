@@ -35,8 +35,7 @@ test('Seitenlayouts nutzen die Breite und überschneiden den gemeinsamen Header 
   assert.match(layout, /max-w-none px-0 py-0/)
   assert.ok(layout.includes("isDraft"))
   assert.ok(!draft.includes('-my-8'))
-  assert.ok(css.includes('width:100%'))
-  assert.ok(css.includes('overflow-x:clip'))
+  assert.match(css, /\.draft-pulp \{[^}]*width: 100%;[^}]*overflow: hidden;/)
 })
 
 

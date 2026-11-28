@@ -28,17 +28,16 @@ export default function TeamKarte({
     <motion.div
       whileHover={{ scale: 1.02 }}
       transition={{ type: 'spring', stiffness: 300, damping: 24 }}
-      className={`relative flex min-h-[160px] w-full max-w-[250px] flex-col items-center justify-center gap-4 rounded-2xl border px-6 py-6 ${
-        ready ? 'border-[#10b981] pulse-glow-ready' : ''
+      className={`draft-team-card relative flex min-h-[160px] w-full min-w-0 max-w-[250px] flex-col items-center justify-center gap-4 px-6 py-6 ${
+        ready ? 'border-(--draft-gruen) pulse-glow-ready' : ''
       }`}
       style={{
-        backgroundColor: 'rgba(255,255,255,0.02)',
         borderColor: ready ? undefined : claimed ? farbe : 'rgba(255,255,255,0.06)',
         borderStyle: claimed ? 'solid' : 'dashed',
       }}
     >
       <div
-        className="text-sm font-black uppercase tracking-tight"
+        className="max-w-full wrap-anywhere text-center text-sm font-black uppercase tracking-tight"
         style={{ color: claimed ? farbe : undefined }}
       >
         {name}
@@ -50,7 +49,7 @@ export default function TeamKarte({
           whileTap={{ scale: 0.95 }}
           onClick={onClaim}
           disabled={gesperrt}
-          className="rounded-lg border border-dashed px-5 py-2.5 text-[10px] font-bold uppercase tracking-[0.15em] transition-opacity disabled:opacity-40"
+          className="border border-dashed px-5 py-2.5 text-[10px] font-bold uppercase tracking-[0.15em] transition-opacity disabled:opacity-40"
           style={{ borderColor: farbe, color: farbe }}
         >
           Captain übernehmen
@@ -75,8 +74,8 @@ export default function TeamKarte({
               whileTap={{ scale: 0.95 }}
               onClick={onReady}
               disabled={ready || gesperrt}
-              className={`rounded-lg px-5 py-2.5 text-[11px] font-bold uppercase tracking-[0.15em] ${
-                ready ? 'bg-[#10b981] text-[#0b0b0b]' : 'bg-white text-[#0b0b0b]'
+              className={`px-5 py-2.5 text-[11px] font-bold uppercase tracking-[0.15em] ${
+                ready ? 'bg-(--draft-gruen) text-(--draft-tinte)' : 'bg-white text-(--draft-tinte)'
               }`}
             >
               Bereit
@@ -95,13 +94,13 @@ export default function TeamKarte({
       {claimed && !duBistEs && (
         <>
           <div className="flex items-center gap-1.5">
-            <span className="h-1.5 w-1.5 rounded-full bg-[#10b981]" />
+            <span className="h-1.5 w-1.5 rounded-full bg-(--draft-gruen)" />
             <span className="text-[10px] uppercase tracking-[0.15em] text-white/60">
               Captain da
             </span>
           </div>
           {ready ? (
-            <span className="text-[10px] uppercase tracking-[0.15em] text-[#10b981]">
+            <span className="text-[10px] uppercase tracking-[0.15em] text-(--draft-gruen)">
               Bereit
             </span>
           ) : (

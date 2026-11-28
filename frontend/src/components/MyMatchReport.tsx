@@ -92,7 +92,7 @@ function MatchReportRow({
         <button
           type="button"
           onClick={() => opponentId !== null && setWinnerId(opponentId)}
-          className={`rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${
+          className={`max-w-full wrap-anywhere rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${
             winnerId === opponentId
               ? 'border-primary bg-primary/15 text-primary'
               : 'border-border text-foreground/80 hover:bg-white/5'

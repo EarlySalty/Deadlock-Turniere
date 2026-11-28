@@ -1,8 +1,8 @@
 @import "tailwindcss";
 @import "./brand-tokens.css";
-@import "./draft.css";
-@import "./draft-pulp.css";
-@import "./roster-pulp.css";
+@import "./draft.css" layer(components);
+@import "./draft-pulp.css" layer(components);
+@import "./roster-pulp.css" layer(components);
 @plugin "@tailwindcss/typography";
 
 /* Turnierplattform, DDC-Marke: Patch-Schwarz + Gold
@@ -74,6 +74,15 @@ h1, h2, h3, h4, .font-display {
   letter-spacing: var(--tracking-snug);
 }
 
+@layer base {
+  html {
+    overflow-wrap: anywhere;
+  }
+  button, [role="tab"], th, nav a {
+    overflow-wrap: normal;
+  }
+}
+
 @theme inline {
   --color-background: var(--color-background);
   --color-foreground: var(--color-foreground);
@@ -117,28 +126,6 @@ h1, h2, h3, h4, .font-display {
 ::selection {
   background: color-mix(in srgb, var(--color-primary) 45%, transparent);
   color: var(--color-bg);
-}
-
-.ddc-occult-panel {
-  border: 1px solid rgba(199, 169, 108, .3);
-  border-radius: .65rem;
-  background-color: #101312;
-  background-image:
-    linear-gradient(135deg, rgba(198, 156, 88, .085), transparent 33%),
-    linear-gradient(175deg, rgba(27, 32, 37, .85), rgba(15, 17, 17, .98));
-  box-shadow: inset 0 1px rgba(255, 241, 205, .075), 0 10px 32px rgba(0, 0, 0, .28);
-}
-.ddc-occult-title {
-  font-family: Georgia, "Times New Roman", serif;
-  font-weight: 700;
-  letter-spacing: .045em;
-  text-transform: uppercase;
-}
-.ddc-occult-rule {
-  background-image: repeating-linear-gradient(
-    90deg, rgba(199, 169, 108, .55) 0 18px, transparent 18px 25px
-  );
-  height: 2px;
 }
 
 /* ── Kachel ───────────────────────────────────────────────────────────────

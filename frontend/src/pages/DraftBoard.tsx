@@ -32,7 +32,7 @@ import {
 } from '@/hooks/useDraftLobby'
 import { heroCardImageUrl, heroImageUrl, loescheClaimToken, raumUrl } from '@/hooks/draftLobbyState'
 import type { DraftHero, DraftRaumZustand } from '@/types/draft'
-import { pluralWord } from '@/lib/countLabel'
+import { pluralWord, pluralize } from '@/lib/countLabel'
 
 interface Uebergang {
   art: 'ban' | 'pick'
@@ -69,7 +69,7 @@ function Kopf({ zustand }: { zustand: DraftRaumZustand }) {
             {zug?.label ?? ''}{' '}
             <span className="text-white/25">{zug?.anteil ?? ''}</span>
           </div>
-          <div className="mt-2 text-center font-display text-xl font-black uppercase tracking-wide md:text-2xl" style={{ color: farbe }}>
+          <div className="draft-arena-heading__zug wrap-anywhere" style={{ color: farbe }}>
             {zug ? `${teamName} · ${zug.action === 'ban' ? 'Bannen' : 'Pickt'}` : ''}
           </div>
         </motion.div>
@@ -84,9 +84,7 @@ function Kopf({ zustand }: { zustand: DraftRaumZustand }) {
         </motion.div>
       )}
       {rest !== null && (
-        <div
-          className={`mt-2 font-mono text-3xl font-bold tabular-nums md:text-5xl ${rot ? 'text-[#ef4444]' : 'text-[#f1e9da]'}`}
-        >
+        <div className="draft-countdown" data-dringend={rot || undefined}>
           <span key={rest} className={`inline-block ${rot ? 'draft-shake' : ''}`}>
             {text}
           </span>
@@ -120,7 +118,7 @@ function Warteraum({
       <DraftHintergrund />
       <div className="relative z-10 mx-auto flex min-h-[calc(100vh-5rem)] max-w-3xl flex-col items-center justify-center gap-6 px-4 py-10">
         <div className="fade-in-up flex items-center gap-2 rounded-full border border-white/[0.08] bg-white/[0.03] px-4 py-1.5">
-          <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-[#10b981]" />
+          <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-(--draft-gruen)" />
           <span className="text-[10px] uppercase tracking-[0.25em] text-white/50">
             Warten auf Spieler
           </span>
@@ -130,7 +128,7 @@ function Warteraum({
           initial={{ y: 20, opacity: 0 }}
           animate={{ y: 0, opacity: 1 }}
           transition={{ duration: 0.4, ease: 'easeOut' }}
-          className="break-words text-center font-display text-4xl font-black uppercase tracking-tight md:text-6xl"
+          className="max-w-full wrap-anywhere text-center uppercase"
         >
           <span style={{ color: GOLD }}>{zustand.team1.name}</span>{' '}
           <span className="align-middle text-sm font-bold text-white/30">vs</span>{' '}
@@ -140,7 +138,7 @@ function Warteraum({
         <RaumCode code={zustand.code} />
 
         <div className="text-[9px] uppercase tracking-[0.3em] text-white/25">
-          6v6 · {zustand.bans_per_team} Bans ·{' '}
+          6v6 · {pluralize(zustand.bans_per_team, 'Ban', 'Bans')} ·{' '}
           {zustand.round_seconds > 0 ? `${zustand.round_seconds}s Timer` : 'ohne Timer'}
         </div>
 
@@ -163,8 +161,8 @@ function Warteraum({
           ))}
         </div>
 
-        {claimFehler && <p className="text-xs text-[#ef4444]">{claimFehler}</p>}
-        {aktionsFehler && <p className="text-xs text-[#ef4444]">{aktionsFehler}</p>}
+        {claimFehler && <p className="text-xs text-(--draft-rot)">{claimFehler}</p>}
+        {aktionsFehler && <p className="text-xs text-(--draft-rot)">{aktionsFehler}</p>}
 
         {beideBereit && (
           <motion.div
@@ -172,8 +170,8 @@ function Warteraum({
             animate={{ opacity: 1 }}
             className="flex items-center gap-3"
           >
-            <span className="h-10 w-10 animate-spin rounded-full border-2 border-[#10b981]/30 border-t-[#10b981]" />
-            <span className="text-xs uppercase tracking-[0.25em] text-[#10b981]">
+            <span className="h-10 w-10 animate-spin rounded-full border-2 border-(--draft-gruen)/30 border-t-(--draft-gruen)" />
+            <span className="text-xs uppercase tracking-[0.25em] text-(--draft-gruen)">
               Draft startet...
             </span>
           </motion.div>
@@ -256,17 +254,17 @@ function DraftTisch({
     <div className="draft-arena-screen draft-arena-screen--live relative min-h-[calc(100vh-4rem)] overflow-clip">
       <DraftHintergrund mitte />
       <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-        <span className="select-none text-center font-display text-4xl font-black uppercase tracking-tight text-white/[0.05] md:text-6xl">
+        <span className="max-w-full select-none wrap-anywhere text-center font-display text-4xl font-black uppercase tracking-tight text-white/[0.05] md:text-6xl">
           {zustand.team1.name}
           <span className="mx-3 text-[0.45em] align-middle">vs</span>
           {zustand.team2.name}
         </span>
       </div>
 
-      <span className="absolute left-5 top-5 z-20 max-w-[calc(50%-2.5rem)] truncate text-[11px] font-black uppercase tracking-[0.25em]" style={{ color: GOLD }}>
+      <span className="absolute left-5 top-5 z-20 min-w-0 max-w-[calc(50%-2.5rem)] truncate text-[11px] font-black uppercase tracking-[0.25em]" style={{ color: GOLD }} title={zustand.team1.name}>
         {zustand.team1.name}
       </span>
-      <span className="absolute right-5 top-5 z-20 max-w-[calc(50%-2.5rem)] truncate text-[11px] font-black uppercase tracking-[0.25em]" style={{ color: BLAU }}>
+      <span className="absolute right-5 top-5 z-20 min-w-0 max-w-[calc(50%-2.5rem)] truncate text-[11px] font-black uppercase tracking-[0.25em]" style={{ color: BLAU }} title={zustand.team2.name}>
         {zustand.team2.name}
       </span>
 
@@ -282,7 +280,7 @@ function DraftTisch({
           />
         </div>
         {aktionsFehler && (
-          <p className="mt-2 text-xs text-[#ef4444]">{aktionsFehler}</p>
+          <p className="mt-2 text-xs text-(--draft-rot)">{aktionsFehler}</p>
         )}
       </div>
 
@@ -300,7 +298,7 @@ function DraftTisch({
               role="listitem"
               title={`Schritt ${schritt.index + 1}: Team ${schritt.team} ${schritt.action === 'ban' ? 'bannt' : 'pickt'}`}
               aria-current={aktuell ? 'step' : undefined}
-              className={`min-w-[30px] flex-1 rounded-sm border py-1.5 text-center text-[11px] font-bold ${aktuell ? 'border-[#d5b573] bg-[#d5b573]/15 text-[#f1d6a1]' : fertig ? 'border-white/15 bg-white/5 text-white/50' : 'border-white/10 text-white/30'}`}
+              className={`min-w-[30px] flex-1 border text-center ${aktuell ? 'border-[#d5b573] bg-[#d5b573]/15 text-[#f1d6a1]' : fertig ? 'border-white/15 bg-white/5 text-white/50' : 'border-white/10 text-white/30'}`}
             >
               {schritt.action === 'ban' ? 'B' : 'P'}
               <span className="ml-1 text-[9px]">{schritt.team}</span>
@@ -317,7 +315,7 @@ function DraftTisch({
         <div className="order-1 col-span-2 min-w-0 lg:order-2 lg:col-span-1">
           {ausgewaehlt && zug && !uebergang && (
             <div
-              className="sticky top-20 z-30 mb-3 flex flex-wrap items-center gap-3 rounded-lg border border-[#c8a86b]/50 bg-[#181c24]/95 p-3 shadow-xl backdrop-blur-md"
+              className="sticky top-20 z-30 mb-3 flex flex-wrap items-center gap-3 rounded-lg border border-(--draft-gold)/50 bg-[#181c24]/95 p-3 shadow-xl backdrop-blur-md"
               role="status"
             >
               {heroImageUrl(ausgewaehlt.image_url) && (
@@ -327,7 +325,7 @@ function DraftTisch({
                 <div className="text-xs uppercase tracking-[0.16em] text-white/55">
                   {istBanZug ? 'Ban vorbereiten' : 'Pick vorbereiten'}
                 </div>
-                <div className="truncate text-lg font-bold text-white">{ausgewaehlt.name}</div>
+                <div className="min-w-0 truncate text-lg font-bold text-white" title={ausgewaehlt.name}>{ausgewaehlt.name}</div>
               </div>
               <button
                 type="button"
@@ -340,7 +338,7 @@ function DraftTisch({
                 type="button"
                 onClick={onBestaetigen}
                 disabled={!amZug || bestaetigtLaeuft}
-                className="rounded border border-[#c8a86b] bg-[#c8a86b] px-4 py-2 text-sm font-bold text-[#17140c] hover:brightness-110 disabled:opacity-50"
+                className="rounded border border-(--draft-gold) bg-(--draft-gold) px-4 py-2 text-sm font-bold text-[#17140c] hover:brightness-110 disabled:opacity-50"
               >
                 {bestaetigtLaeuft ? 'Wird bestätigt …' : istBanZug ? 'Ban bestätigen' : 'Pick bestätigen'}
               </button>
@@ -411,7 +409,7 @@ function Endbild({
           Draft abgeschlossen
         </motion.div>
 
-        <h1 className="break-words text-center font-display text-4xl font-black uppercase tracking-tight md:text-5xl">
+        <h1 className="max-w-full wrap-anywhere text-center font-display text-4xl font-black uppercase tracking-tight md:text-5xl">
           <motion.span
             initial={{ x: -30, opacity: 0 }}
             animate={{ x: 0, opacity: 1 }}
@@ -466,7 +464,7 @@ function Endbild({
             type="button"
             onClick={onRematch}
             disabled={rematchLaeuft}
-            className="rounded-lg bg-[#c8a86b] px-5 py-2 text-[10px] font-black uppercase tracking-[0.2em] text-[#0b0b0b] disabled:opacity-50"
+            className="rounded-lg bg-(--draft-gold) px-5 py-2 text-[10px] font-black uppercase tracking-[0.2em] text-(--draft-tinte) disabled:opacity-50"
           >
             Rematch
           </motion.button>
@@ -478,7 +476,7 @@ function Endbild({
           </Link>
         </div>
 
-        {rematchFehler && <p className="text-xs text-[#ef4444]">{rematchFehler}</p>}
+        {rematchFehler && <p className="text-xs text-(--draft-rot)">{rematchFehler}</p>}
       </div>
     </div>
   )

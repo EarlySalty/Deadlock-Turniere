@@ -704,12 +704,12 @@ export default function Tournament() {
                            </Button>
                         </div>
                      ) : userTeam ? (
-                        <div className="flex items-center justify-between p-4 rounded-lg border border-primary/20 bg-primary/5">
-                           <div className="flex items-center gap-3 text-primary">
-                              <Shield size={20} />
-                              <div>
+                        <div className="flex items-center justify-between gap-3 p-4 rounded-lg border border-primary/20 bg-primary/5">
+                           <div className="flex min-w-0 items-center gap-3 text-primary">
+                              <Shield size={20} className="shrink-0" />
+                              <div className="min-w-0">
                                 <p className="text-xs uppercase font-bold tracking-widest opacity-60 leading-none mb-1">Eingetragen mit</p>
-                                <p className="font-bold uppercase tracking-wider text-sm">{userTeam.name}</p>
+                                <p className="wrap-anywhere font-bold uppercase tracking-wider text-sm">{userTeam.name}</p>
                               </div>
                            </div>
                            <Button variant="primary" size="sm" onClick={() => setActiveTab('teams')}>
@@ -837,14 +837,14 @@ export default function Tournament() {
                       </div>
                       <div>
                         <p className="text-[10px] font-bold text-primary uppercase tracking-widest mb-1">Dein Team</p>
-                        <h3 className="text-xl font-bold uppercase tracking-tight text-foreground">{userTeam.name}</h3>
+                        <h3 className="wrap-anywhere text-xl font-bold uppercase tracking-tight text-foreground">{userTeam.name}</h3>
                       </div>
 
                       <div className="space-y-3">
                         {userTeam.members.map((m, i) => (
-                          <div key={i} className="flex items-center justify-between text-xs border-b border-white/5 pb-2 last:border-0">
-                            <span className="font-bold text-foreground uppercase tracking-wide">{playerName(m.discord_name)}</span>
-                            {m.role === 'captain' && <span className="text-[10px] text-primary font-bold uppercase">Captain</span>}
+                          <div key={i} className="flex items-center justify-between gap-2 text-xs border-b border-white/5 pb-2 last:border-0">
+                            <span className="min-w-0 wrap-anywhere font-bold text-foreground uppercase tracking-wide">{playerName(m.discord_name)}</span>
+                            {m.role === 'captain' && <span className="shrink-0 text-[10px] text-primary font-bold uppercase">Captain</span>}
                           </div>
                         ))}
                       </div>
@@ -869,7 +869,7 @@ export default function Tournament() {
 
               <div className="dl-roster__teams min-w-0 space-y-6">
                 <div className="flex items-center justify-between">
-                  <h3 className="text-sm font-bold uppercase tracking-widest text-muted">Gemeldete Teams</h3>
+                  <h3 className="uppercase">Gemeldete Teams</h3>
                   <span className="text-xs font-bold text-foreground bg-white/5 px-2 py-1 rounded-lg border border-white/5">
                     {tournament.teams.length}
                   </span>
@@ -881,11 +881,11 @@ export default function Tournament() {
                     const recruiting = recruitingLabel(team.recruitment_status, teamFull)
                     const isMyTeam = userTeam?.id === team.id
                     return (
-                      <Card key={team.id} className={`dl-roster__team min-w-0 p-5 transition-all group ${isMyTeam ? 'border-primary/50' : ''}`}>
-                        <div className="space-y-4">
+                      <div key={team.id} className="dl-roster__team group min-w-0 p-5 transition-all duration-300" data-own={isMyTeam || undefined}>
+                        <div className="relative z-10 space-y-4 p-5">
                           <div className="flex items-start justify-between gap-3">
                             <div className="min-w-0">
-                              <h4 className="dl-roster__team-name break-words group-hover:text-primary transition-colors">{team.name}</h4>
+                              <h4 className="dl-roster__team-name wrap-anywhere group-hover:text-primary transition-colors">{team.name}</h4>
                               <p className="text-[10px] text-muted font-bold uppercase mt-1">
                                 {team.members.length} / {tournament.team_size} Mitglieder
                               </p>
@@ -905,7 +905,7 @@ export default function Tournament() {
                               <li key={m.id ?? `${team.id}-${i}`} className="flex min-w-0 items-center justify-between gap-3 rounded-md bg-white/5 px-3 py-2">
                                 <span className="flex min-w-0 items-center gap-2">
                                   <User size={14} className="shrink-0 text-muted" />
-                                  <span className="min-w-0 break-words text-sm font-medium text-foreground">
+                                  <span className="min-w-0 wrap-anywhere text-sm font-medium text-foreground">
                                     {playerName(m.discord_name)}
                                   </span>
                                 </span>
@@ -935,7 +935,7 @@ export default function Tournament() {
                             </div>
                           )}
                         </div>
-                      </Card>
+                      </div>
                     )
                   })}
                 </div>
@@ -971,7 +971,7 @@ export default function Tournament() {
                       className="flex min-w-0 items-center gap-2 rounded-lg border border-border bg-card/60 px-3 py-3"
                     >
                       <User size={15} className="shrink-0 text-muted" />
-                      <span className="min-w-0 break-words text-sm font-medium text-foreground">
+                      <span className="min-w-0 wrap-anywhere text-sm font-medium text-foreground">
                         {playerName(signup.discord_name)}
                       </span>
                     </li>

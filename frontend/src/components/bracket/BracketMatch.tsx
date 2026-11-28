@@ -113,7 +113,7 @@ export default function BracketMatch({ match, teams, placeholder1, placeholder2 
         block
       >
         <div className={`flex items-center justify-between gap-2 px-3 py-2 text-sm ${team1Class}`}>
-          <span className="truncate">{team1Name}</span>
+          <span className="min-w-0 truncate" title={team1Name}>{team1Name}</span>
           {team1Won && <Trophy size={13} aria-label="Sieger" className="shrink-0" />}
         </div>
       </TeamRosterTooltip>
@@ -128,7 +128,7 @@ export default function BracketMatch({ match, teams, placeholder1, placeholder2 
         block
       >
         <div className={`flex items-center justify-between gap-2 px-3 py-2 text-sm ${team2Class}`}>
-          <span className="truncate">{team2Name}</span>
+          <span className="min-w-0 truncate" title={team2Name}>{team2Name}</span>
           {team2Won && <Trophy size={13} aria-label="Sieger" className="shrink-0" />}
         </div>
       </TeamRosterTooltip>

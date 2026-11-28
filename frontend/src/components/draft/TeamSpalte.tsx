@@ -1,3 +1,4 @@
+import type { CSSProperties } from 'react'
 import { motion } from 'framer-motion'
 import type { DraftAktion } from '@/types/draft'
 import { teamFarbe } from './farben'
@@ -19,11 +20,11 @@ export default function TeamSpalte({
   const vonLinks = team === 1
 
   return (
-    <div className="draft-team-column flex w-full min-w-0 flex-col gap-2">
-      <div
-        className="break-words border-b pb-2 font-display text-sm font-black uppercase tracking-[0.15em] md:text-base"
-        style={{ color: farbe, borderColor: `${farbe}66` }}
-      >
+    <div
+      className="draft-team-column flex w-full min-w-0 flex-col gap-2"
+      style={{ '--slot-farbe': farbe } as CSSProperties}
+    >
+      <div className="draft-team-column__name wrap-anywhere">
         {name}
       </div>
       {Array.from({ length: 6 }).map((_, i) => {
@@ -33,13 +34,10 @@ export default function TeamSpalte({
         return (
           <div
             key={i}
-            className={`draft-team-slot relative flex h-14 items-center gap-2 overflow-hidden border px-2 transition-all duration-300 lg:h-16 ${
+            data-aktiv={aktiv || undefined}
+            className={`draft-team-slot relative flex min-w-0 items-center gap-2 overflow-hidden px-2 transition-all duration-300 ${
               aktiv ? 'draft-slot-pulse' : ''
             }`}
-            style={{
-              backgroundColor: 'rgba(255,255,255,0.02)',
-              borderColor: aktiv ? farbe : 'rgba(255,255,255,0.06)',
-            }}
           >
             {!pick && (
               <span className="text-[10px] text-white/20">{i + 1}</span>
@@ -54,14 +52,15 @@ export default function TeamSpalte({
                     initial={{ opacity: 0, x: vonLinks ? -25 : 25 }}
                     animate={{ opacity: 1, x: 0 }}
                     transition={{ duration: 0.35, ease: 'easeOut' }}
-                    className="h-11 w-10 shrink-0 rounded object-cover object-top lg:h-12 lg:w-12"
+                    className="h-11 w-10 shrink-0 object-cover object-top lg:h-12 lg:w-12"
                   />
                 )}
                 <motion.span
                   initial={{ opacity: 0, y: 8 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: 0.1, duration: 0.3 }}
-                  className="truncate text-xs font-bold text-white/90 lg:text-sm"
+                  className="min-w-0 truncate text-xs font-bold text-white/90 lg:text-sm"
+                  title={pick.hero_name}
                 >
                   {pick.hero_name}
                 </motion.span>

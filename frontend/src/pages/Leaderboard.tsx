@@ -86,7 +86,7 @@ export default function Leaderboard() {
                     <td className="px-3 py-3 sm:px-6 sm:py-4">
                       <Link
                         to={`/spieler/${encodeURIComponent(entry.discord_name)}`}
-                        className="break-words font-bold text-foreground transition-colors hover:text-primary"
+                        className="wrap-anywhere font-bold text-foreground transition-colors hover:text-primary"
                       >
                         {entry.discord_name}
                       </Link>

@@ -33,9 +33,9 @@ function MatchLine({ match, teams }: { match: NowMatch; teams: TeamPublic[] }) {
   return (
     <li className="flex min-w-0 flex-col gap-1 rounded-lg border border-border bg-card px-3 py-2.5 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
       <span className="min-w-0 text-sm font-semibold text-foreground">
-        <span className="break-words">{teamNameById(teams, match.team1Id ?? 0)}</span>
-        <span className="px-1.5 font-normal text-muted">gegen</span>
-        <span className="break-words">{teamNameById(teams, match.team2Id ?? 0)}</span>
+        <span className="wrap-anywhere">{teamNameById(teams, match.team1Id ?? 0)}</span>
+        <span className="whitespace-nowrap px-1.5 font-normal text-muted">gegen</span>
+        <span className="wrap-anywhere">{teamNameById(teams, match.team2Id ?? 0)}</span>
       </span>
       <span className="flex shrink-0 flex-wrap items-center gap-x-2 text-xs text-muted">
         <span>{match.stage}</span>
