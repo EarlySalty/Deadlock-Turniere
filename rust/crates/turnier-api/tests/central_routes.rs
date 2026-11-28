@@ -2108,3 +2108,155 @@ async fn team_tournament_start_keeps_rosters_unless_fill_is_chosen() {
     .expect("unassigned");
     assert_eq!(unassigned, 5);
 }
+
+async fn seed_member(pool: &Pool, team_id: i64, discord_id: &str) {
+    sqlx::query(
+        r#"INSERT INTO turnier."team_members"
+         (team_id, discord_id, discord_name, steam_id, rank, rank_score, role, joined_at)
+         VALUES ($1, $2, $3, NULL, NULL, 0, 'member', now())"#,
+    )
+    .bind(team_id)
+    .bind(id(discord_id))
+    .bind(discord_id)
+    .execute(pool)
+    .await
+    .expect("seed member");
+}
+
+async fn bench_ids(pool: &Pool, team_id: i64) -> Vec<String> {
+    sqlx::query_scalar::<_, i64>(
+        "SELECT discord_id FROM turnier.team_members WHERE team_id = $1 AND is_bench ORDER BY discord_id",
+    )
+    .bind(team_id)
+    .fetch_all(pool)
+    .await
+    .expect("bench ids")
+    .into_iter()
+    .map(|value| value.to_string())
+    .collect()
+}
+
+#[tokio::test]
+async fn bench_conversion_swap_and_captain_change_on_a_full_team() {
+    let ctx = setup().await;
+    let admin_token = session(&ctx.pool, ADMIN_ID, "Admin", &["admin-role", "mod-role"]).await;
+    let captain_token = session(&ctx.pool, CAPTAIN_ID, "Captain", &[]).await;
+    let tournament_id = seed_tournament(&ctx.pool, "Bank", "registration", 3).await;
+    let team_id = seed_team(&ctx.pool, tournament_id, "Bankteam", CAPTAIN_ID).await;
+    seed_member(&ctx.pool, team_id, PLAYER_ID).await;
+    seed_member(&ctx.pool, team_id, INVITED_ID).await;
+    let admin_base = format!("/api/admin/tournaments/{tournament_id}");
+
+    let (status, body) = send_json(
+        &ctx.app,
+        Some(&admin_token),
+        Method::PUT,
+        &admin_base,
+        Some(json!({ "team_size": 2, "bench_slots": 1 })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    let lineup =
+        |discord_id: &str| format!("{admin_base}/teams/{team_id}/members/{discord_id}/lineup");
+    let (status, body) = send_json(
+        &ctx.app,
+        Some(&admin_token),
+        Method::PATCH,
+        &lineup(INVITED_ID),
+        Some(json!({ "is_bench": true })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(
+        bench_ids(&ctx.pool, team_id).await,
+        vec![INVITED_ID.to_string()]
+    );
+
+    let (status, _) = send_json(
+        &ctx.app,
+        Some(&admin_token),
+        Method::PATCH,
+        &lineup(INVITED_ID),
+        Some(json!({ "is_bench": false })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+
+    let (status, body) = send_json(
+        &ctx.app,
+        Some(&admin_token),
+        Method::PATCH,
+        &lineup(INVITED_ID),
+        Some(json!({ "is_bench": false, "swap_discord_id": PLAYER_ID })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(
+        bench_ids(&ctx.pool, team_id).await,
+        vec![PLAYER_ID.to_string()]
+    );
+
+    let (status, _) = send_json(
+        &ctx.app,
+        Some(&admin_token),
+        Method::PATCH,
+        &lineup(PLAYER_ID),
+        Some(json!({ "is_bench": false, "swap_discord_id": CAPTAIN_ID })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+
+    let member_row = |discord_id: &str| {
+        let pool = ctx.pool.clone();
+        let discord_id = id(discord_id);
+        async move {
+            sqlx::query_scalar::<_, i64>(
+                "SELECT id FROM turnier.team_members WHERE team_id = $1 AND discord_id = $2",
+            )
+            .bind(team_id)
+            .bind(discord_id)
+            .fetch_one(&pool)
+            .await
+            .expect("member row")
+        }
+    };
+    let (status, body) = send_json(
+        &ctx.app,
+        Some(&captain_token),
+        Method::PATCH,
+        &format!("/api/tournaments/{tournament_id}/teams/{team_id}/lineup"),
+        Some(json!({
+            "member_id": member_row(PLAYER_ID).await,
+            "is_bench": false,
+            "swap_member_id": member_row(INVITED_ID).await,
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(
+        bench_ids(&ctx.pool, team_id).await,
+        vec![INVITED_ID.to_string()]
+    );
+
+    let (status, body) = send_json(
+        &ctx.app,
+        Some(&admin_token),
+        Method::PUT,
+        &format!("{admin_base}/teams/{team_id}/captain"),
+        Some(json!({ "discord_id": INVITED_ID })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(
+        bench_ids(&ctx.pool, team_id).await,
+        vec![CAPTAIN_ID.to_string()]
+    );
+    let captain: i64 =
+        sqlx::query_scalar("SELECT captain_discord_id FROM turnier.teams WHERE id = $1")
+            .bind(team_id)
+            .fetch_one(&ctx.pool)
+            .await
+            .expect("captain");
+    assert_eq!(captain, id(INVITED_ID));
+}

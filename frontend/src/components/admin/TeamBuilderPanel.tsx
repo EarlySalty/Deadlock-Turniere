@@ -14,6 +14,7 @@ import {
   planSave,
   rebaseEdits,
   restoreTemporaryNames,
+  serverTeamKey,
   snapshotOf,
   temporaryRenames,
   type BuilderEdits,
@@ -32,6 +33,7 @@ import { pluralWord, pluralize } from '@/lib/countLabel'
 interface TeamBuilderPanelProps {
   tournamentId: number
   teamSize: number
+  benchSlots: number
   teams: Team[]
   signups: TournamentSignup[]
   canAddPlayers: boolean
@@ -175,6 +177,8 @@ function dropHandlers(accepts: boolean, onDropId: (discordId: string) => void): 
 interface TeamCardProps {
   team: BuilderTeamView
   teamSize: number
+  benchSlots: number
+  serverBench: ReadonlySet<string>
   selectedId: string | null
   allTeams: BuilderTeamView[]
   onSelect: (discordId: string) => void
@@ -289,9 +293,19 @@ function MemberSlot({
   )
 }
 
+function builderSeats(team: BuilderTeamView, teamSize: number, serverBench: ReadonlySet<string>) {
+  const keptBench = team.members.filter((m) => serverBench.has(`${team.key}|${m.discordId}`)).length
+  const others = team.members.length - keptBench
+  const starters = Math.min(others, teamSize)
+  return { starters, bench: keptBench + others - starters }
+}
+
 function TeamCard(props: TeamCardProps) {
-  const { team, teamSize, selectedId, onSelect, onPlace } = props
-  const free = Math.max(teamSize - team.members.length, 0)
+  const { team, teamSize, benchSlots, serverBench, selectedId, onSelect, onPlace } = props
+  const seats = builderSeats(team, teamSize, serverBench)
+  const starterFree = Math.max(teamSize - seats.starters, 0)
+  const benchFree = Math.max(benchSlots - seats.bench, 0)
+  const free = starterFree + benchFree
   const selectedOutside = selectedId !== null && !team.members.some((m) => m.discordId === selectedId)
   const handlers = dropHandlers(free > 0, (id) => onPlace(id, team.key))
 
@@ -299,8 +313,8 @@ function TeamCard(props: TeamCardProps) {
     <div {...handlers} className="min-w-0 space-y-3 rounded-xl border border-border bg-card/70 p-4 shadow-sm">
       <TeamHeader {...props} />
       <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted">
-        <span>{team.members.length}/{teamSize} Spieler</span>
-        <span>{free === 0 ? 'Vollständig' : `${pluralize(free, 'Platz', 'Plätze')} frei`}</span>
+        <span>{seats.starters}/{teamSize} {benchSlots > 0 ? 'Stammspieler' : 'Spieler'}{benchSlots > 0 ? ` · ${seats.bench}/${benchSlots} Ersatz` : ''}</span>
+        <span>{starterFree > 0 ? `${pluralize(starterFree, 'Platz', 'Plätze')} frei` : benchFree > 0 ? `Vollständig · ${pluralize(benchFree, 'Ersatzplatz', 'Ersatzplätze')} frei` : 'Vollständig'}</span>
       </div>
       <ul className="space-y-1.5">
         {team.members.map((player) => (
@@ -492,7 +506,12 @@ function useUnloadWarning(active: boolean) {
   }, [active])
 }
 
-export default function TeamBuilderPanel({ tournamentId, teamSize, teams, signups, canAddPlayers }: TeamBuilderPanelProps) {
+export default function TeamBuilderPanel({ tournamentId, teamSize, benchSlots, teams, signups, canAddPlayers }: TeamBuilderPanelProps) {
+  const capacity = teamSize + benchSlots
+  const serverBench = useMemo(
+    () => new Set(teams.flatMap((t) => t.members.filter((m) => m.is_bench).map((m) => `${serverTeamKey(t.id)}|${m.discord_id}`))),
+    [teams],
+  )
   const queryClient = useQueryClient()
   const [edits, setEdits] = useState<BuilderEdits>(() => readDraft(tournamentId).edits)
   const [renames, setRenames] = useState<TemporaryRename[]>(() => readDraft(tournamentId).renames)
@@ -502,7 +521,7 @@ export default function TeamBuilderPanel({ tournamentId, teamSize, teams, signup
 
   const snapshot = useMemo(() => snapshotOf(teams, signups), [teams, signups])
   const view = useMemo(() => buildView(teams, signups, edits), [teams, signups, edits])
-  const steps = useMemo(() => planSave(snapshot, edits, teamSize), [snapshot, edits, teamSize])
+  const steps = useMemo(() => planSave(snapshot, edits, capacity), [snapshot, edits, capacity])
   const captains = useMemo(() => captainChanges(view, snapshot, edits, steps), [view, snapshot, edits, steps])
   const changeCount = steps.length + captains.length
   const saving = progress !== null
@@ -548,7 +567,7 @@ export default function TeamBuilderPanel({ tournamentId, teamSize, teams, signup
     if (saving) return
     const target = view.teams.find((t) => t.key === teamKey)
     const alreadyThere = target?.members.some((m) => m.discordId === discordId) ?? false
-    if (target && !alreadyThere && target.members.length >= teamSize) {
+    if (target && !alreadyThere && target.members.length >= capacity) {
       setNotice({ tone: 'error', text: `„${target.name}“ ist schon voll.` })
       return
     }
@@ -665,6 +684,8 @@ export default function TeamBuilderPanel({ tournamentId, teamSize, teams, signup
                   key={team.key}
                   team={team}
                   teamSize={teamSize}
+                  benchSlots={benchSlots}
+                  serverBench={serverBench}
                   selectedId={selectedId}
                   allTeams={view.teams}
                   onSelect={select}

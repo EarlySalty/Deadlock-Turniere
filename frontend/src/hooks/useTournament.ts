@@ -715,8 +715,8 @@ export function useRemoveAdminTeamMember() {
 export function useSetMemberLineup(tournamentId: number) {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: ({ teamId, memberId, isBench }: { teamId: number; memberId: number; isBench: boolean }) =>
-      setMemberLineup(tournamentId, teamId, memberId, isBench),
+    mutationFn: ({ teamId, memberId, isBench, swapMemberId }: { teamId: number; memberId: number; isBench: boolean; swapMemberId?: number }) =>
+      setMemberLineup(tournamentId, teamId, memberId, isBench, swapMemberId),
     onSuccess: () => invalidateTournamentCaches(qc, tournamentId),
   })
 }
@@ -724,8 +724,8 @@ export function useSetMemberLineup(tournamentId: number) {
 export function useSetAdminMemberLineup() {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: ({ tournamentId, teamId, discordId, isBench }: { tournamentId: number; teamId: number; discordId: string; isBench: boolean }) =>
-      setAdminMemberLineup(tournamentId, teamId, discordId, isBench),
+    mutationFn: ({ tournamentId, teamId, discordId, isBench, swapDiscordId }: { tournamentId: number; teamId: number; discordId: string; isBench: boolean; swapDiscordId?: string }) =>
+      setAdminMemberLineup(tournamentId, teamId, discordId, isBench, swapDiscordId),
     onSuccess: (_data, vars) => invalidateTournamentCaches(qc, vars.tournamentId),
   })
 }

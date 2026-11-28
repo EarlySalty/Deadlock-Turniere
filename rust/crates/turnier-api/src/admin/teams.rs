@@ -571,7 +571,9 @@ async fn change_captain(
     let mut tx = state.pool.begin().await?;
     let tournament = crate::public::helpers::lock_tournament_row(&mut tx, tournament_id).await?;
     ensure_participant_management_allowed(tournament.try_get("status")?)?;
-    load_team_or_404(&mut *tx, tournament_id, team_id).await?;
+    let team_size: i64 = tournament.try_get("team_size")?;
+    let team = load_team_or_404(&mut *tx, tournament_id, team_id).await?;
+    let old_captain: i64 = team.try_get("captain_discord_id")?;
 
     let is_member: Option<bool> = sqlx::query_scalar(
         r#"SELECT is_bench FROM turnier."team_members" WHERE team_id = $1 AND discord_id = $2"#,
@@ -583,9 +585,7 @@ async fn change_captain(
     match is_member {
         None => return Err(WebError::not_found("Mitglied nicht im Team gefunden")),
         Some(true) => {
-            return Err(WebError::bad_request(
-                "Der neue Captain muss Stammspieler sein",
-            ))
+            promote_bench_captain(&mut tx, team_id, discord_id_i64, old_captain, team_size).await?
         }
         Some(false) => {}
     }
@@ -610,6 +610,41 @@ async fn change_captain(
     tx.commit().await?;
 
     Ok(Json(load_team_detail(&state, team_id).await?))
+}
+
+async fn promote_bench_captain(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    team_id: i64,
+    new_captain: i64,
+    old_captain: i64,
+    team_size: i64,
+) -> WebResult<()> {
+    let lineup = crate::public::helpers::team_lineup(&mut **tx, team_id).await?;
+    if lineup.starter_free(team_size) {
+        sqlx::query(
+            r#"UPDATE turnier."team_members" SET is_bench = false WHERE team_id = $1 AND discord_id = $2"#,
+        )
+        .bind(team_id)
+        .bind(new_captain)
+        .execute(&mut **tx)
+        .await?;
+        return Ok(());
+    }
+    let swapped = sqlx::query(
+        r#"UPDATE turnier."team_members" SET is_bench = (discord_id = $3)
+         WHERE team_id = $1 AND discord_id IN ($2, $3)"#,
+    )
+    .bind(team_id)
+    .bind(new_captain)
+    .bind(old_captain)
+    .execute(&mut **tx)
+    .await?;
+    if swapped.rows_affected() != 2 {
+        return Err(WebError::bad_request(
+            turnier_core::bench::SeatError::StartersFull.message(),
+        ));
+    }
+    Ok(())
 }
 
 /// `DELETE .../teams/{team_id}/members/{discord_id}`: Mitglied entfernen.
@@ -666,6 +701,8 @@ async fn remove_member(
 #[derive(Debug, Deserialize)]
 struct LineupBody {
     is_bench: bool,
+    #[serde(default)]
+    swap_discord_id: Option<String>,
 }
 
 async fn update_member_lineup(
@@ -681,15 +718,34 @@ async fn update_member_lineup(
     let team_size: i64 = tournament.try_get("team_size")?;
     let bench_slots: i64 = tournament.try_get("bench_slots")?;
     load_team_or_404(&mut *tx, tournament_id, team_id).await?;
-    crate::public::helpers::set_member_lineup(
-        &mut tx,
-        team_id,
-        discord_id_i64,
-        team_size,
-        bench_slots,
-        body.is_bench,
-    )
-    .await?;
+    let swap_discord_id = body
+        .swap_discord_id
+        .as_deref()
+        .map(db::parse_participant_id)
+        .transpose()?;
+    match swap_discord_id {
+        Some(partner) => {
+            crate::public::helpers::swap_member_lineup(
+                &mut tx,
+                team_id,
+                discord_id_i64,
+                partner,
+                bench_slots,
+            )
+            .await?;
+        }
+        None => {
+            crate::public::helpers::set_member_lineup(
+                &mut tx,
+                team_id,
+                discord_id_i64,
+                team_size,
+                bench_slots,
+                body.is_bench,
+            )
+            .await?;
+        }
+    }
     audit(
         &mut *tx,
         "team_member_lineup_admin",
@@ -699,6 +755,7 @@ async fn update_member_lineup(
             "team_id": team_id,
             "discord_id": db::discord_id_to_string(discord_id_i64),
             "is_bench": body.is_bench,
+            "swap_discord_id": swap_discord_id.map(db::discord_id_to_string),
         }),
     )
     .await?;

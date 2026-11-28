@@ -1383,6 +1383,41 @@ pub async fn set_member_lineup(
     Ok(())
 }
 
+pub async fn swap_member_lineup(
+    tx: &mut sqlx::Transaction<'_, Postgres>,
+    team_id: i64,
+    first_discord_id: i64,
+    second_discord_id: i64,
+    bench_slots: i64,
+) -> WebResult<()> {
+    let seats: Vec<(i64, bool, i64)> = sqlx::query_as(
+        r#"SELECT tm.discord_id, tm.is_bench, t.captain_discord_id FROM turnier."team_members" tm
+         JOIN turnier."teams" t ON t.id = tm.team_id
+         WHERE tm.team_id = $1 AND tm.discord_id = ANY($2) FOR UPDATE OF tm"#,
+    )
+    .bind(team_id)
+    .bind(vec![first_discord_id, second_discord_id])
+    .fetch_all(&mut **tx)
+    .await?;
+    let seat = |id: i64| seats.iter().find(|(discord_id, _, _)| *discord_id == id);
+    let (Some(first), Some(second)) = (seat(first_discord_id), seat(second_discord_id)) else {
+        return Err(WebError::not_found("Mitglied nicht gefunden"));
+    };
+    let captain = first.2;
+    let goes_to_bench = if first.1 { second.0 } else { first.0 };
+    bench::swap_seats(bench_slots, first.1, second.1, goes_to_bench == captain)
+        .map_err(|err| WebError::bad_request(err.message()))?;
+    sqlx::query(
+        r#"UPDATE turnier."team_members" SET is_bench = NOT is_bench
+         WHERE team_id = $1 AND discord_id = ANY($2)"#,
+    )
+    .bind(team_id)
+    .bind(vec![first_discord_id, second_discord_id])
+    .execute(&mut **tx)
+    .await?;
+    Ok(())
+}
+
 #[derive(Default, Deserialize)]
 struct BenchWish {
     #[serde(default)]

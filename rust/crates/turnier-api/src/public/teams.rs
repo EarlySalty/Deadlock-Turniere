@@ -407,6 +407,21 @@ async fn kick_team_member(
 struct LineupBody {
     member_id: i64,
     is_bench: bool,
+    #[serde(default)]
+    swap_member_id: Option<i64>,
+}
+
+async fn member_discord_id(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    team_id: i64,
+    member_id: i64,
+) -> WebResult<i64> {
+    sqlx::query_scalar("SELECT discord_id FROM turnier.team_members WHERE id = $1 AND team_id = $2")
+        .bind(member_id)
+        .bind(team_id)
+        .fetch_optional(&mut **tx)
+        .await?
+        .ok_or_else(|| WebError::not_found("Mitglied nicht gefunden"))
 }
 
 async fn update_member_lineup(
@@ -421,23 +436,31 @@ async fn update_member_lineup(
     helpers::ensure_captain_or_mod(&user, &team.captain_discord_id)?;
     helpers::ensure_player_teams_allowed(&t)?;
     helpers::ensure_team_roster_open(t.status)?;
-    let target_discord_id: i64 = sqlx::query_scalar(
-        "SELECT discord_id FROM turnier.team_members WHERE id = $1 AND team_id = $2",
-    )
-    .bind(body.member_id)
-    .bind(team_id)
-    .fetch_optional(&mut *tx)
-    .await?
-    .ok_or_else(|| WebError::not_found("Mitglied nicht gefunden"))?;
-    helpers::set_member_lineup(
-        &mut tx,
-        team_id,
-        target_discord_id,
-        t.team_size,
-        t.bench_slots,
-        body.is_bench,
-    )
-    .await?;
+    let target_discord_id = member_discord_id(&mut tx, team_id, body.member_id).await?;
+    match body.swap_member_id {
+        Some(swap_member_id) => {
+            let partner_discord_id = member_discord_id(&mut tx, team_id, swap_member_id).await?;
+            helpers::swap_member_lineup(
+                &mut tx,
+                team_id,
+                target_discord_id,
+                partner_discord_id,
+                t.bench_slots,
+            )
+            .await?;
+        }
+        None => {
+            helpers::set_member_lineup(
+                &mut tx,
+                team_id,
+                target_discord_id,
+                t.team_size,
+                t.bench_slots,
+                body.is_bench,
+            )
+            .await?;
+        }
+    }
     tx.commit().await?;
 
     Ok(Json(helpers::load_team_response(&state, team_id).await?))

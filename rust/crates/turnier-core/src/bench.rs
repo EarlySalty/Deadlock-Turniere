@@ -45,6 +45,7 @@ pub enum SeatError {
     BenchOff,
     BenchFull,
     CaptainOnBench,
+    SwapSameSeat,
 }
 
 impl SeatError {
@@ -58,6 +59,9 @@ impl SeatError {
             Self::BenchOff => "In diesem Turnier gibt es keine Ersatzplätze",
             Self::BenchFull => "Alle Ersatzplätze sind belegt",
             Self::CaptainOnBench => "Der Captain bleibt Stammspieler",
+            Self::SwapSameSeat => {
+                "Zum Tauschen braucht es einen Stammspieler und einen Ersatzspieler"
+            }
         }
     }
 }
@@ -99,6 +103,24 @@ pub fn move_seat(
     } else {
         Err(SeatError::StartersFull)
     }
+}
+
+pub fn swap_seats(
+    bench_slots: i64,
+    first_is_bench: bool,
+    second_is_bench: bool,
+    captain_goes_to_bench: bool,
+) -> Result<(), SeatError> {
+    if bench_slots <= 0 {
+        return Err(SeatError::BenchOff);
+    }
+    if first_is_bench == second_is_bench {
+        return Err(SeatError::SwapSameSeat);
+    }
+    if captain_goes_to_bench {
+        return Err(SeatError::CaptainOnBench);
+    }
+    Ok(())
 }
 
 fn bench_seat(lineup: Lineup, bench_slots: i64) -> Result<(), SeatError> {
@@ -209,5 +231,23 @@ mod tests {
         assert!(check_bench_slots(BENCH_SLOTS_MAX).is_ok());
         assert!(check_bench_slots(-1).is_err());
         assert!(check_bench_slots(BENCH_SLOTS_MAX + 1).is_err());
+    }
+
+    #[test]
+    fn swap_needs_one_starter_one_bench_and_keeps_the_captain_on_the_field() {
+        assert_eq!(swap_seats(1, true, false, false), Ok(()));
+        assert_eq!(swap_seats(0, true, false, false), Err(SeatError::BenchOff));
+        assert_eq!(
+            swap_seats(1, true, true, false),
+            Err(SeatError::SwapSameSeat)
+        );
+        assert_eq!(
+            swap_seats(1, false, false, false),
+            Err(SeatError::SwapSameSeat)
+        );
+        assert_eq!(
+            swap_seats(1, true, false, true),
+            Err(SeatError::CaptainOnBench)
+        );
     }
 }

@@ -169,6 +169,14 @@ export default function ParticipantManager({
     )
   }
 
+  const handleSwap = (teamId: number, member: TeamMember, partnerDiscordId: string) => {
+    if (!partnerDiscordId) return
+    lineupMutation.mutate(
+      { tournamentId, teamId, discordId: member.discord_id, isBench: false, swapDiscordId: partnerDiscordId },
+      { onSuccess: () => setFeedback('Spieler wurden getauscht.') }
+    )
+  }
+
   const handleLineup = (teamId: number, member: TeamMember) => {
     lineupMutation.mutate(
       { tournamentId, teamId, discordId: member.discord_id, isBench: !member.is_bench },
@@ -447,7 +455,7 @@ export default function ParticipantManager({
                     onChange={(event) => handleChangeCaptain(team.id, event.target.value)}
                     className="rounded-lg border border-border bg-card px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
                   >
-                    {team.members.map((member) => (
+                    {team.members.filter((member) => !member.is_bench).map((member) => (
                       <option key={member.discord_id} value={member.discord_id}>
                         {playerName(member.discord_name)}
                       </option>
@@ -493,7 +501,7 @@ export default function ParticipantManager({
                           </Button>
                         </div>
 
-                        {benchSlots > 0 && member.role !== 'captain' && (
+                        {benchSlots > 0 && member.role !== 'captain' && !(member.is_bench && starterCount(team.members) >= teamSize) && (
                           <Button
                             variant="ghost"
                             size="sm"
@@ -503,6 +511,23 @@ export default function ParticipantManager({
                           >
                             {member.is_bench ? 'In die Startaufstellung' : 'Auf die Ersatzbank'}
                           </Button>
+                        )}
+
+                        {benchSlots > 0 && member.is_bench && starterCount(team.members) >= teamSize && (
+                          <select
+                            value=""
+                            disabled={isBusy}
+                            aria-label={`${playerName(member.discord_name)} einwechseln`}
+                            onChange={(event) => handleSwap(team.id, member, event.target.value)}
+                            className="self-start rounded-lg border border-border bg-card px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
+                          >
+                            <option value="">Tauschen mit …</option>
+                            {team.members.filter((starter) => !starter.is_bench && starter.role !== 'captain').map((starter) => (
+                              <option key={starter.discord_id} value={starter.discord_id}>
+                                {playerName(starter.discord_name)}
+                              </option>
+                            ))}
+                          </select>
                         )}
 
                         {availableTargets.length > 0 && (

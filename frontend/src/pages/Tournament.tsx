@@ -11,7 +11,7 @@ import {
   useMyInvitations, useAcceptInvitation, useRejectInvitation, useApplyToTeam,
   useConsent, useSetMemberLineup,
 } from '@/hooks/useTournament'
-import { benchFreeLabel, lineupOf, teamFormatLabel } from '@/lib/lineup'
+import { benchFreeLabel, lineupOf, starterCount, teamFormatLabel } from '@/lib/lineup'
 import { useAuth } from '@/hooks/useAuth'
 import { latestActionError } from '@/lib/latestError'
 import Card from '@/components/ui/Card'
@@ -285,6 +285,8 @@ export default function Tournament() {
   const userHasSoloSignup = userSignupId !== null && !myStatus?.team_id
   const isUserCaptain = myStatus?.is_captain ?? false
   const benchSlots = tournament.bench_slots ?? 0
+  const canEditLineup = isUserCaptain && isRegistration && benchSlots > 0 && !soloOnly
+  const userStartersFull = userTeam != null && starterCount(userTeam.members) >= tournament.team_size
   const isUserRegistered = Boolean(userTeam || userHasSoloSignup)
   const hasCheckedIn = myStatus?.is_checked_in ?? false
 
@@ -849,7 +851,7 @@ export default function Tournament() {
                             <span className="flex shrink-0 items-center gap-2">
                               {m.role === 'captain' && <span className="text-[10px] text-primary font-bold uppercase">Captain</span>}
                               {m.is_bench && <span className="text-[10px] text-muted font-bold uppercase">Ersatz</span>}
-                              {isUserCaptain && isRegistration && benchSlots > 0 && m.role !== 'captain' && m.id != null && (
+                              {canEditLineup && m.role !== 'captain' && m.id != null && !(m.is_bench && userStartersFull) && (
                                 <button
                                   type="button"
                                   className="rounded border border-white/10 px-2 py-0.5 text-[10px] font-bold uppercase text-muted hover:text-foreground disabled:opacity-50"
@@ -858,6 +860,23 @@ export default function Tournament() {
                                 >
                                   {m.is_bench ? 'In die Startaufstellung' : 'Auf die Ersatzbank'}
                                 </button>
+                              )}
+                              {canEditLineup && m.is_bench && userStartersFull && m.id != null && (
+                                <select
+                                  value=""
+                                  disabled={isMutating}
+                                  aria-label={`${playerName(m.discord_name)} einwechseln`}
+                                  className="rounded border border-white/10 bg-card px-2 py-0.5 text-[10px] font-bold uppercase text-muted"
+                                  onChange={(event) => {
+                                    const partner = Number(event.target.value)
+                                    if (partner) lineupMutation.mutate({ teamId: userTeam.id, memberId: m.id as number, isBench: false, swapMemberId: partner })
+                                  }}
+                                >
+                                  <option value="">Tauschen mit …</option>
+                                  {userTeam.members.filter((s) => !s.is_bench && s.role !== 'captain' && s.id != null).map((s) => (
+                                    <option key={s.id} value={s.id as number}>{playerName(s.discord_name)}</option>
+                                  ))}
+                                </select>
                               )}
                             </span>
                           </div>

@@ -7,7 +7,7 @@ use common::{
 };
 use std::collections::HashSet;
 use turnier_db::Pool;
-use turnier_engine::{finalize_checkin, FinalizeCheckinParams, TeamOutcome};
+use turnier_engine::{finalize_checkin, FinalizeCheckinParams, RosterChange, TeamOutcome};
 
 async fn enable_bench(pool: &Pool, tournament_id: i64, bench_slots: i64) {
     sqlx::query("UPDATE turnier.tournaments SET bench_slots = $2 WHERE id = $1")
@@ -194,4 +194,52 @@ async fn lineup_move_invalidates_the_preview_token() {
         .await
         .expect("second preview");
     assert_ne!(preview.snapshot_token, after.snapshot_token);
+}
+
+#[tokio::test]
+async fn fill_mode_keeps_a_team_whose_checked_in_bench_remains() {
+    let db = temp_pool().await;
+    let pool = db.pool();
+    let tournament_id = checkin_tournament(pool, 6).await;
+    let (kept_id, kept_bench) = seat_team(pool, tournament_id, "Bank da", 1_000, 0, true).await;
+    let (gone_id, gone_bench) = seat_team(pool, tournament_id, "Bank weg", 2_000, 0, false).await;
+
+    let preview = finalize_checkin(
+        pool,
+        tournament_id,
+        FinalizeCheckinParams {
+            fill_from_solos: true,
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("preview");
+
+    let kept = preview
+        .team_plans
+        .iter()
+        .find(|p| p.team_id == kept_id)
+        .expect("kept plan");
+    assert_eq!(kept.outcome, TeamOutcome::Incomplete);
+    assert!(kept
+        .roster
+        .iter()
+        .any(|r| r.discord_id == kept_bench.to_string() && r.change == RosterChange::Stays));
+
+    let gone = preview
+        .team_plans
+        .iter()
+        .find(|p| p.team_id == gone_id)
+        .expect("gone plan");
+    assert_eq!(gone.outcome, TeamOutcome::Deleted);
+    assert!(gone
+        .roster
+        .iter()
+        .all(|r| r.change == RosterChange::Removed));
+    let removed: Vec<String> = preview
+        .removed_players
+        .iter()
+        .map(|p| p.discord_id.clone())
+        .collect();
+    assert_eq!(removed, vec![gone_bench.to_string()]);
 }

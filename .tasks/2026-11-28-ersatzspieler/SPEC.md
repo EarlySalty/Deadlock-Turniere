@@ -44,7 +44,9 @@ separate flag, so "enabled with limit 0" cannot exist.
 | starter leaves while bench has players | leave/kick | no automatic promotion; captain or admin moves a bench player |
 | captain moves the last non-captain starter to bench | lineup | allowed if bench has room; team then has 1 starter and is incomplete |
 | captain to bench (self or by admin) | lineup | 400 "Der Captain bleibt Stammspieler" |
-| change captain to a bench member | admin captain change | 400 "Der neue Captain muss Stammspieler sein" |
+| change captain to a bench member | admin captain change, team builder | starters free: the new captain becomes a starter; starters full: the new captain swaps seats with the old captain, so the captain is always a starter |
+| swap a bench player with a starter | lineup with `swap_member_id` (captain) or `swap_discord_id` (admin) | counts unchanged, works on a full team; 400 "Zum Tauschen braucht es einen Stammspieler und einen Ersatzspieler" for two players on the same seat, 400 "Der Captain bleibt Stammspieler" if the captain would go to the bench, 400 "In diesem Turnier gibt es keine Ersatzplätze" with `bench_slots = 0` |
+| lineup in a `solo_only` tournament | captain | buttons hidden (backend answers 403); admin path stays |
 | lineup move to starter with starters full | lineup | 400 "Alle Stammplätze sind belegt" |
 | lineup move to the current seat | lineup | no-op, returns the team |
 | lineup move outside the roster window | lineup | captain: only during registration (same gate as kick); admin: same statuses as other admin team edits |
@@ -61,7 +63,7 @@ separate flag, so "enabled with limit 0" cannot exist.
   - removal of members without check-in: starters only; bench members stay.
   - fill from the solo pool: until starters reach `team_size`; pool players become starters.
   - `ready`: checked-in starters (keep rosters) or kept starters (fill mode).
-  - delete rule: a team with no kept starters is deleted (its bench members go back to solo).
+  - delete rule (fill mode): a team is deleted only when it has no kept starters and none of its members checked in; its remaining bench members are then listed and removed like every other removed player. A team whose checked-in bench player is the only one left stays and is filled from the pool.
   - snapshot token includes `is_bench`, so a lineup move invalidates a stale preview.
   - preview roster shows the bench flag.
 - Admin workflow "incomplete teams": starters against `team_size`.
@@ -92,9 +94,9 @@ separate flag, so "enabled with limit 0" cannot exist.
 
 - `POST /api/tournaments/{t}/teams/{team}/join` body optional `{ "as_bench": bool }`.
 - `POST /api/tournaments/{t}/teams/{team}/apply` body adds `as_bench`; application DTO shows it.
-- New `PATCH /api/tournaments/{t}/teams/{team}/lineup` `{ "member_id": i64, "is_bench": bool }` (captain or mod; public member DTOs carry no discord_id, so the member row id addresses the seat).
+- New `PATCH /api/tournaments/{t}/teams/{team}/lineup` `{ "member_id": i64, "is_bench": bool, "swap_member_id"?: i64 }` (captain or mod; public member DTOs carry no discord_id, so the member row id addresses the seat).
 - Join and apply bodies are parsed from raw bytes: an empty body (the current frontend sends JSON content type without a body) means `as_bench = false`, malformed JSON is 400.
-- New `PATCH /api/admin/tournaments/{t}/teams/{team}/members/{discord_id}/lineup` `{ "is_bench": bool }`.
+- New `PATCH /api/admin/tournaments/{t}/teams/{team}/members/{discord_id}/lineup` `{ "is_bench": bool, "swap_discord_id"?: string }` (with a swap partner both seats flip, `is_bench` is ignored).
 - Tournament create/update accept `bench_slots`; tournament and public detail DTOs return it.
 - Member DTOs (`TeamMember`, `TeamMemberPublic`) return `is_bench`.
 

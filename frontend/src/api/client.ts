@@ -125,9 +125,9 @@ export const joinTeam = (tournamentId: number, teamId: number, asBench = false) 
     method: 'POST', body: JSON.stringify({ as_bench: asBench }),
   })
 
-export const setMemberLineup = (tournamentId: number, teamId: number, memberId: number, isBench: boolean) =>
+export const setMemberLineup = (tournamentId: number, teamId: number, memberId: number, isBench: boolean, swapMemberId?: number) =>
   request<void>(`/tournaments/${tournamentId}/teams/${teamId}/lineup`, {
-    method: 'PATCH', body: JSON.stringify({ member_id: memberId, is_bench: isBench }),
+    method: 'PATCH', body: JSON.stringify({ member_id: memberId, is_bench: isBench, swap_member_id: swapMemberId ?? null }),
   })
 
 // Admin
@@ -444,10 +444,10 @@ export const removeAdminTeamMember = (tournamentId: number, teamId: number, disc
     method: 'DELETE',
   })
 
-export const setAdminMemberLineup = (tournamentId: number, teamId: number, discordId: string, isBench: boolean) =>
+export const setAdminMemberLineup = (tournamentId: number, teamId: number, discordId: string, isBench: boolean, swapDiscordId?: string) =>
   request<Team>(`/admin/tournaments/${tournamentId}/teams/${teamId}/members/${discordId}/lineup`, {
     method: 'PATCH',
-    body: JSON.stringify({ is_bench: isBench }),
+    body: JSON.stringify({ is_bench: isBench, swap_discord_id: swapDiscordId ?? null }),
   })
 
 export const moveAdminTeamMember = (tournamentId: number, targetTeamId: number, data: TeamMoveRequest) =>

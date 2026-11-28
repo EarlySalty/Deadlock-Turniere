@@ -1057,7 +1057,22 @@ pub async fn finalize_checkin(
             .count() as i64;
         let starters = starter_count(kept);
         let ready = if keep_rosters { checked_in } else { starters };
-        let outcome = if !keep_rosters && starters == 0 {
+        let anyone_checked_in = kept.iter().any(|m| checked_in_ids.contains(&m.discord_id));
+        let deleted = !keep_rosters && starters == 0 && !anyone_checked_in;
+        let kept: &[MemberData] = if deleted {
+            for member in kept {
+                removed_members.push(RemovedPlayer {
+                    team_id: *team_id,
+                    team_name: team_name_by_id[team_id].clone(),
+                    discord_id: discord_id_to_string(member.discord_id),
+                    discord_name: member.discord_name.clone(),
+                });
+            }
+            &[]
+        } else {
+            kept
+        };
+        let outcome = if deleted {
             deleted_team_ids.push(*team_id);
             TeamOutcome::Deleted
         } else if ready < team_size {
