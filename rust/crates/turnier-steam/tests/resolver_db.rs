@@ -210,24 +210,113 @@ async fn read_path_never_calls_discord_and_misses_are_remembered() {
     let resolver = SteamRankResolver::from_pool(db.pool, None, Some(client));
     let calls = || discord.calls.load(std::sync::atomic::Ordering::SeqCst);
 
-    let started = std::time::Instant::now();
+    let first = resolver.rank_profiles(&ids).await.expect("first full");
+    assert_eq!(first.len(), 1);
+    assert_eq!(calls(), 95);
+
+    resolver.rank_profiles(&ids).await.expect("second full");
+    assert_eq!(calls(), 95);
+
     let read = resolver.cached_rank_profiles(&ids).await.expect("read");
-    eprintln!("cached_rank_profiles 96 ids: {:?}", started.elapsed());
-    assert_eq!(calls(), 0);
     assert_eq!(read.len(), 1);
     assert_eq!(
         read.get(&cached_user).and_then(|p| p.rank.as_deref()),
         Some("Oracle")
     );
-
-    let started = std::time::Instant::now();
-    let first = resolver.rank_profiles(&ids).await.expect("first full");
-    eprintln!("rank_profiles 96 ids, first: {:?}", started.elapsed());
-    assert_eq!(first.len(), 1);
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
     assert_eq!(calls(), 95);
+}
 
-    let started = std::time::Instant::now();
-    resolver.rank_profiles(&ids).await.expect("second full");
-    eprintln!("rank_profiles 96 ids, repeat: {:?}", started.elapsed());
-    assert_eq!(calls(), 95);
+struct GatedDiscord {
+    calls: std::sync::atomic::AtomicUsize,
+    gate: tokio::sync::Semaphore,
+    roles: Vec<String>,
+}
+
+#[async_trait]
+impl DiscordMemberClient for GatedDiscord {
+    async fn member_role_ids(&self, _discord_id: &str) -> SteamResult<Option<Vec<String>>> {
+        self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let _open = self.gate.acquire().await;
+        Ok(Some(self.roles.clone()))
+    }
+}
+
+async fn wait_until(mut done: impl FnMut() -> bool) {
+    for _ in 0..200 {
+        if done() {
+            return;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    assert!(done(), "condition not reached in time");
+}
+
+#[tokio::test]
+async fn read_path_serves_stale_rank_and_queues_one_refresh() {
+    const STALE_USER: &str = "910000020000000300";
+
+    let db = temp_pool().await;
+    sqlx::query(
+        "INSERT INTO turnier.\"rank_cache\" \
+         (discord_id, source, steam_id, rank, rank_tier, subrank, rank_score, cached_at) \
+         VALUES ($1, 'discord_role', NULL, 'Oracle', 8, 3, 51, now() - interval '25 hours')",
+    )
+    .bind(id(STALE_USER))
+    .execute(&db.pool)
+    .await
+    .expect("insert expired");
+
+    let discord = Arc::new(GatedDiscord {
+        calls: std::sync::atomic::AtomicUsize::new(0),
+        gate: tokio::sync::Semaphore::new(0),
+        roles: vec!["1331457949654319114".to_string()],
+    });
+    let client: Arc<dyn DiscordMemberClient> = discord.clone();
+    let resolver = SteamRankResolver::from_pool(db.pool.clone(), None, Some(client));
+    let calls = || discord.calls.load(std::sync::atomic::Ordering::SeqCst);
+    let ids = vec![STALE_USER.to_string(), STALE_USER.to_string()];
+
+    let read = tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        resolver.cached_rank_profiles(&ids),
+    )
+    .await
+    .expect("read must not wait for Discord")
+    .expect("read");
+    assert_eq!(calls(), 0);
+    assert_eq!(
+        read.get(STALE_USER).and_then(|p| p.rank.as_deref()),
+        Some("Oracle")
+    );
+
+    let again = resolver
+        .cached_rank_profiles(&ids)
+        .await
+        .expect("read again");
+    assert_eq!(
+        again.get(STALE_USER).and_then(|p| p.rank.as_deref()),
+        Some("Oracle")
+    );
+    wait_until(|| calls() == 1).await;
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    assert_eq!(calls(), 1);
+
+    discord.gate.add_permits(1);
+    let cache = RankCache::new(db.pool);
+    for _ in 0..200 {
+        if cache.get(STALE_USER).await.expect("get").is_some() {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    let fresh = resolver
+        .cached_rank_profiles(&ids)
+        .await
+        .expect("fresh read");
+    assert_eq!(
+        fresh.get(STALE_USER).and_then(|p| p.rank.as_deref()),
+        Some("Archon")
+    );
+    assert_eq!(calls(), 1);
 }

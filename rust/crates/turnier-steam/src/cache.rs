@@ -54,8 +54,15 @@ impl RankCacheRow {
 #[derive(Debug, FromRow)]
 struct BatchRankCacheRow {
     discord_id: i64,
+    fresh: bool,
     #[sqlx(flatten)]
     row: RankCacheRow,
+}
+
+#[derive(Debug, Clone)]
+pub struct CachedRank {
+    pub profile: RankProfile,
+    pub fresh: bool,
 }
 
 /// L1-Eintrag: Ablaufzeitpunkt + gecachtes Profil.
@@ -112,10 +119,10 @@ impl RankCache {
         Ok(Some(profile))
     }
 
-    pub async fn get_many(
+    pub async fn lookup_many(
         &self,
         discord_ids: &[String],
-    ) -> SteamResult<HashMap<String, RankProfile>> {
+    ) -> SteamResult<HashMap<String, CachedRank>> {
         let mut found = HashMap::new();
         let mut pending: Vec<i64> = Vec::new();
         for discord_id in discord_ids {
@@ -123,7 +130,13 @@ impl RankCache {
                 continue;
             }
             if let Some(profile) = self.get_memory(discord_id) {
-                found.insert(discord_id.clone(), profile);
+                found.insert(
+                    discord_id.clone(),
+                    CachedRank {
+                        profile,
+                        fresh: true,
+                    },
+                );
             } else if let Ok(parsed) = parse_discord_id(discord_id) {
                 pending.push(parsed);
             }
@@ -133,9 +146,9 @@ impl RankCache {
         }
 
         let rows: Vec<BatchRankCacheRow> = sqlx::query_as(
-            "SELECT discord_id, source, steam_id, rank, rank_tier, subrank, rank_score \
-             FROM turnier.\"rank_cache\" \
-             WHERE discord_id = ANY($1) AND cached_at > now() - ($2::bigint * interval '1 second')",
+            "SELECT discord_id, source, steam_id, rank, rank_tier, subrank, rank_score, \
+             cached_at > now() - ($2::bigint * interval '1 second') AS fresh \
+             FROM turnier.\"rank_cache\" WHERE discord_id = ANY($1)",
         )
         .bind(&pending)
         .bind(self.ttl.as_secs() as i64)
@@ -145,8 +158,16 @@ impl RankCache {
         for row in rows {
             let discord_id = row.discord_id.to_string();
             let profile = row.row.into_profile();
-            self.set_memory(&discord_id, &profile);
-            found.insert(discord_id, profile);
+            if row.fresh {
+                self.set_memory(&discord_id, &profile);
+            }
+            found.insert(
+                discord_id,
+                CachedRank {
+                    profile,
+                    fresh: row.fresh,
+                },
+            );
         }
         Ok(found)
     }

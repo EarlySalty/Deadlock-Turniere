@@ -28,7 +28,7 @@ use turnier_config::Config;
 use turnier_db::Pool;
 
 pub use bridge::{BridgeReader, SteamLink};
-pub use cache::{RankCache, RANK_CACHE_TTL_SECONDS};
+pub use cache::{CachedRank, RankCache, RANK_CACHE_TTL_SECONDS};
 pub use discord::{DiscordMemberClient, ReqwestDiscordClient};
 pub use error::{SteamError, SteamResult};
 pub use rank::{
