@@ -31,6 +31,8 @@ import {
   submitSeriesGameResult,
   reportMatchResult, fetchActionItems, confirmResultReport, rejectResultReport,
   setMatchStreamFlag,
+  deliverMatchLobbyCode,
+  deliverGroupMatchLobbyCode,
 } from '@/api/client'
 import type {
   ManualResult, TeamMoveRequest, TournamentCreate, TournamentUpdate,
@@ -1113,5 +1115,19 @@ export function useSubmitSeriesGameResult(tournamentId: number, matchId: number)
       durationS?: number
     }) => submitSeriesGameResult(tournamentId, matchId, gameNumber, winnerTeam, durationS),
     onSuccess: () => invalidateTournamentCaches(qc, tournamentId),
+  })
+}
+
+export function useDeliverMatchLobbyCode() {
+  return useMutation({
+    mutationFn: ({ tournamentId, matchId }: { tournamentId: number; matchId: number }) =>
+      deliverMatchLobbyCode(tournamentId, matchId),
+  })
+}
+
+export function useDeliverGroupMatchLobbyCode() {
+  return useMutation({
+    mutationFn: ({ tournamentId, matchId }: { tournamentId: number; matchId: number }) =>
+      deliverGroupMatchLobbyCode(tournamentId, matchId),
   })
 }

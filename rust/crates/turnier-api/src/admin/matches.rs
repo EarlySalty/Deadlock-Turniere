@@ -66,6 +66,10 @@ pub fn router() -> Router<AppState> {
             post(manual_lobby),
         )
         .route(
+            "/api/admin/tournaments/{tournament_id}/matches/{match_id}/deliver-lobby-code",
+            post(deliver_lobby_code),
+        )
+        .route(
             "/api/admin/tournaments/{tournament_id}/matches/{match_id}/event-presets",
             get(event_presets),
         )
@@ -660,4 +664,12 @@ fn map_bracket_result_error(err: MatchError) -> WebError {
         MatchError::State(msg) | MatchError::Invalid(msg) => WebError::bad_request(msg),
         other => other.into(),
     }
+}
+
+async fn deliver_lobby_code(
+    State(state): State<AppState>,
+    _mod: ModUser,
+    Path((tournament_id, match_id)): Path<(i64, i64)>,
+) -> WebResult<Json<Value>> {
+    steam_ops::deliver_lobby_code(&state, MatchKind::Bracket, tournament_id, match_id).await
 }

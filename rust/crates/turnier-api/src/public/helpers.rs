@@ -14,9 +14,10 @@ use serde_json::Value;
 use sqlx::{Postgres, Row};
 
 use turnier_core::{
-    BracketMatch, BracketMiniGroup, Group, GroupMatch, GroupTeam, InviteMode, RankProfile,
-    RecruitmentStatus, Team, TeamMember, TeamMemberPublic, TeamPublic, TeamRole, Tournament,
-    TournamentDetailPublic, TournamentSignup, TournamentSignupPublic, UserSession,
+    BracketMiniGroup, GroupTeam, InviteMode, NoLobbyAccess, PublicBracketMatch, PublicGroup,
+    PublicGroupMatch, RankProfile, RecruitmentStatus, Team, TeamMember, TeamMemberPublic,
+    TeamPublic, TeamRole, Tournament, TournamentDetailPublic, TournamentSignup,
+    TournamentSignupPublic, UserSession,
 };
 use turnier_db::Pool;
 
@@ -605,7 +606,10 @@ pub async fn load_signups_public(
 
 /// Lädt alle Gruppen eines Turniers inkl. Tabellen und Matches.
 /// Entspricht `_load_groups_for_tournament` (routes.py:207).
-pub async fn load_groups_for_tournament(pool: &Pool, tournament_id: i64) -> WebResult<Vec<Group>> {
+pub async fn load_groups_for_tournament(
+    pool: &Pool,
+    tournament_id: i64,
+) -> WebResult<Vec<PublicGroup>> {
     #[derive(sqlx::FromRow)]
     struct GroupStammRow {
         id: i64,
@@ -646,8 +650,8 @@ pub async fn load_groups_for_tournament(pool: &Pool, tournament_id: i64) -> WebR
         }
 
         let match_rows = sqlx::query(
-            r#"SELECT id, group_id, team1_id, team2_id, winner_id, status, steam_party_id,
-                    party_code, deadlock_match_id, match_duration_s, match_stats,
+            r#"SELECT id, group_id, team1_id, team2_id, winner_id, status,
+                    deadlock_match_id, match_duration_s, match_stats,
                     hero_assignments, scheduled_at, played_at
              FROM turnier."group_matches" WHERE group_id = $1"#,
         )
@@ -656,15 +660,14 @@ pub async fn load_groups_for_tournament(pool: &Pool, tournament_id: i64) -> WebR
         .await?;
         let mut matches = Vec::with_capacity(match_rows.len());
         for row in match_rows {
-            matches.push(GroupMatch {
+            matches.push(PublicGroupMatch {
                 id: row.try_get("id")?,
                 group_id: row.try_get("group_id")?,
                 team1_id: row.try_get("team1_id")?,
                 team2_id: row.try_get("team2_id")?,
                 winner_id: row.try_get("winner_id")?,
                 status: row.try_get("status")?,
-                steam_party_id: row.try_get("steam_party_id")?,
-                party_code: row.try_get("party_code")?,
+                lobby: NoLobbyAccess {},
                 deadlock_match_id: row.try_get("deadlock_match_id")?,
                 match_duration_s: row.try_get("match_duration_s")?,
                 match_stats: db::json_to_wire(row.try_get("match_stats")?),
@@ -675,7 +678,7 @@ pub async fn load_groups_for_tournament(pool: &Pool, tournament_id: i64) -> WebR
             });
         }
 
-        groups.push(Group {
+        groups.push(PublicGroup {
             id: g.id,
             tournament_id: g.tournament_id,
             name: g.name,
@@ -690,9 +693,16 @@ pub async fn load_groups_for_tournament(pool: &Pool, tournament_id: i64) -> WebR
 
 /// Lädt alle Bracket-Matches eines Turniers. Entspricht `_load_bracket_matches`
 /// (routes.py:239). `series_wins_*`/`games` defaulten wie im Pydantic-Modell.
-pub async fn load_bracket_matches(pool: &Pool, tournament_id: i64) -> WebResult<Vec<BracketMatch>> {
+pub async fn load_bracket_matches(
+    pool: &Pool,
+    tournament_id: i64,
+) -> WebResult<Vec<PublicBracketMatch>> {
     let rows = sqlx::query(
-        r#"SELECT * FROM turnier."bracket_matches" WHERE tournament_id = $1 ORDER BY round, position"#,
+        r#"SELECT id, tournament_id, round, position, bracket_type, mini_group_id, team1_id,
+                team2_id, winner_id, status, source_match1_id, source_match2_id,
+                loser_to_match_id, loser_to_slot, deadlock_match_id, match_duration_s,
+                match_stats, hero_assignments, scheduled_at, on_stream, played_at
+         FROM turnier."bracket_matches" WHERE tournament_id = $1 ORDER BY round, position"#,
     )
     .bind(tournament_id)
     .fetch_all(pool)
@@ -700,7 +710,7 @@ pub async fn load_bracket_matches(pool: &Pool, tournament_id: i64) -> WebResult<
 
     let mut out = Vec::with_capacity(rows.len());
     for row in rows {
-        out.push(BracketMatch {
+        out.push(PublicBracketMatch {
             id: row.try_get("id")?,
             tournament_id: row.try_get("tournament_id")?,
             round: row.try_get("round")?,
@@ -715,8 +725,7 @@ pub async fn load_bracket_matches(pool: &Pool, tournament_id: i64) -> WebResult<
             source_match2_id: row.try_get("source_match2_id")?,
             loser_to_match_id: row.try_get("loser_to_match_id")?,
             loser_to_slot: row.try_get("loser_to_slot")?,
-            steam_party_id: row.try_get("steam_party_id")?,
-            party_code: row.try_get("party_code")?,
+            lobby: NoLobbyAccess {},
             deadlock_match_id: row.try_get("deadlock_match_id")?,
             match_duration_s: row.try_get("match_duration_s")?,
             match_stats: db::json_to_wire(row.try_get("match_stats")?),
@@ -861,8 +870,8 @@ pub async fn list_tournament_dtos(pool: &Pool, where_order: &str) -> WebResult<V
 pub fn build_detail_public(
     t: Tournament,
     teams: Vec<TeamPublic>,
-    groups: Vec<Group>,
-    bracket_matches: Vec<BracketMatch>,
+    groups: Vec<PublicGroup>,
+    bracket_matches: Vec<PublicBracketMatch>,
     mini_groups: Vec<BracketMiniGroup>,
     signups: Vec<TournamentSignupPublic>,
 ) -> TournamentDetailPublic {
@@ -1643,7 +1652,177 @@ pub fn parse_recruitment_status(raw: &str) -> WebResult<RecruitmentStatus> {
 
 #[cfg(test)]
 mod tests {
-    use super::{duplicate_name_ids, holds_name, name_taken_by_other, participant_name_key};
+    use super::{
+        build_detail_public, duplicate_name_ids, holds_name, name_taken_by_other,
+        participant_name_key,
+    };
+    use serde_json::Value;
+    use turnier_core::{
+        BracketFormat, BracketMatch, BracketType, GroupMatch, InviteMode, LobbyAccess, MatchGame,
+        MatchStatus, NoLobbyAccess, PublicGroup, Tournament, TournamentGameMode, TournamentMode,
+        TournamentStatus,
+    };
+
+    const LOBBY_KEYS: [&str; 2] = ["party_code", "steam_party_id"];
+
+    fn tournament() -> Tournament {
+        Tournament {
+            id: 8,
+            name: "Cup".into(),
+            status: TournamentStatus::Bracket,
+            registration_open: false,
+            replacements_open: true,
+            description: None,
+            team_size: 6,
+            series_format: 3,
+            final_series_format: None,
+            registration_start: None,
+            registration_end: None,
+            checkin_start: None,
+            group_phase_start: None,
+            bracket_start: None,
+            bracket_format: BracketFormat::SingleElimination,
+            played_bracket_format: None,
+            tournament_mode: TournamentMode::GroupStage,
+            tournament_mode_auto: true,
+            tournament_game_mode: TournamentGameMode::Standard,
+            auto_lobby_enabled: true,
+            created_by: "1".into(),
+            created_at: "2026-11-28T00:00:00Z".into(),
+            updated_at: "2026-11-28T00:00:00Z".into(),
+            invite_mode: InviteMode::Always,
+            invite_window_start: None,
+            invite_window_end: None,
+            lobby_settings: None,
+            exclude_from_leaderboard: false,
+            reminder_offsets: Vec::new(),
+            start_reminder_offsets: Vec::new(),
+            match_objective: "auto".into(),
+            no_show_grace_minutes: 10,
+            rules: None,
+            is_test: false,
+        }
+    }
+
+    fn game<L>(lobby: L) -> MatchGame<L> {
+        MatchGame {
+            id: 1,
+            bracket_match_id: 1,
+            game_number: 1,
+            status: "lobby_created".into(),
+            lobby,
+            deadlock_match_id: None,
+            winner_team: None,
+            duration_s: None,
+            match_stats: None,
+            created_at: "2026-11-28T00:00:00Z".into(),
+            completed_at: None,
+        }
+    }
+
+    fn bracket_match<L: Clone>(lobby: L) -> BracketMatch<L> {
+        BracketMatch {
+            id: 1,
+            tournament_id: 8,
+            round: 1,
+            position: 0,
+            bracket_type: BracketType::Winners,
+            mini_group_id: None,
+            team1_id: Some(1),
+            team2_id: Some(2),
+            winner_id: None,
+            status: MatchStatus::LobbyCreated,
+            source_match1_id: None,
+            source_match2_id: None,
+            loser_to_match_id: None,
+            loser_to_slot: None,
+            lobby: lobby.clone(),
+            deadlock_match_id: None,
+            match_duration_s: None,
+            match_stats: None,
+            hero_assignments: None,
+            series_wins_team1: 0,
+            series_wins_team2: 0,
+            games: vec![game(lobby)],
+            scheduled_at: None,
+            on_stream: false,
+            played_at: None,
+        }
+    }
+
+    fn group_match<L>(lobby: L) -> GroupMatch<L> {
+        GroupMatch {
+            id: 2,
+            group_id: 1,
+            team1_id: 1,
+            team2_id: 2,
+            winner_id: None,
+            status: MatchStatus::LobbyCreated,
+            lobby,
+            deadlock_match_id: None,
+            match_duration_s: None,
+            match_stats: None,
+            hero_assignments: None,
+            scheduled_at: None,
+            played_at: None,
+            round: None,
+        }
+    }
+
+    fn lobby_keys(value: &Value, found: &mut Vec<String>) {
+        match value {
+            Value::Object(map) => {
+                for (key, child) in map {
+                    if LOBBY_KEYS.contains(&key.as_str()) {
+                        found.push(key.clone());
+                    }
+                    lobby_keys(child, found);
+                }
+            }
+            Value::Array(items) => items.iter().for_each(|item| lobby_keys(item, found)),
+            _ => {}
+        }
+    }
+
+    #[test]
+    fn public_detail_never_serializes_lobby_codes() {
+        let groups = vec![PublicGroup {
+            id: 1,
+            tournament_id: 8,
+            name: "A".into(),
+            seeding_order: 0,
+            teams: Vec::new(),
+            matches: vec![group_match(NoLobbyAccess {})],
+        }];
+        let detail = build_detail_public(
+            tournament(),
+            Vec::new(),
+            groups,
+            vec![bracket_match(NoLobbyAccess {})],
+            Vec::new(),
+            Vec::new(),
+        );
+        let json = serde_json::to_value(&detail).expect("public detail serializes");
+        assert_eq!(json["bracket_matches"][0]["games"][0]["game_number"], 1);
+        assert_eq!(json["groups"][0]["matches"][0]["id"], 2);
+        let mut found = Vec::new();
+        lobby_keys(&json, &mut found);
+        assert!(found.is_empty(), "public detail leaks {found:?}");
+    }
+
+    #[test]
+    fn admin_matches_keep_lobby_codes() {
+        let lobby = LobbyAccess {
+            steam_party_id: Some("123".into()),
+            party_code: Some("ABCDE".into()),
+        };
+        let bracket = serde_json::to_value(bracket_match(lobby.clone())).expect("serializes");
+        let group = serde_json::to_value(group_match(lobby)).expect("serializes");
+        for value in [&bracket, &bracket["games"][0], &group] {
+            assert_eq!(value["party_code"], "ABCDE");
+            assert_eq!(value["steam_party_id"], "123");
+        }
+    }
 
     #[test]
     fn registered_guest_keeps_name_after_same_named_discord_signup() {

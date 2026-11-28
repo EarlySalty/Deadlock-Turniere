@@ -6,7 +6,7 @@ import {
   useApplyMatchEventPreset,
   useMatchEventPresets,
 } from '@/hooks/useTournament'
-import type { BracketMatch, MatchEventPreset, Team } from '@/types/tournament'
+import type { AdminBracketMatch as BracketMatch, MatchEventPreset, Team } from '@/types/tournament'
 import {
   AlertCircle,
   CheckCircle2,
