@@ -27,7 +27,7 @@ Es gibt daher **keine Grundlage**, Rangliste und Turnierliste pauschal mit zusä
 ### Datenzugriffe
 
 - Die bestehenden Team-Roster-Optimierungen laden öffentliche Mitglieder/Bewerbungen gebündelt.
-- **Spielerprofil:** Identität, Avatar, User-Profil, Rank-Cache und Punkte werden nun über einen einzelnen parametrisierten SQL-Join abgefragt. Die Turnierhistorie folgt in einem zweiten SQL-Request. Damit **2 statt 6 Roundtrips pro Profil**, ohne Änderung an JSON-Struktur, anonymen Zugriffen oder gespeicherten Rangdaten.
+- **Spielerprofil:** Identität, Avatar, User-Profil und Rank-Cache kommen aus einer parametrisierten SQL-Abfrage. Die Punkte stammen aus `player_standings`, der einzigen Ranglisten-Aggregation, die alle Spieler berechnet und dann den einen Eintrag liefert. Die Turnierhistorie folgt in einer eigenen Abfrage. Pro Profil laufen damit drei Abfragen plus die volle Ranglisten-Aggregation, ohne Änderung an JSON-Struktur, anonymen Zugriffen oder gespeicherten Rangdaten.
 - Der Profil-Integrationstest prüft weiterhin Rank, Punkte und Historie und wurde um einen Nutzer ohne Profil/Punkte sowie um 404-Semantik ergänzt. Der Test ist **mit zentralen Migrationen auf einer isolierten, temporären PostgreSQL-16-Datenbank erfolgreich ausgeführt (1/1)**. Für die Migrationen war eine fehlende, nur in dieser Wegwerf-Instanz angelegte NOLOGIN-Rolle `deadlock` nötig.
 
 ### Weitere Integrationssuite: offener Befund
@@ -91,4 +91,4 @@ Zusätzlich nur für die **HTML-Fallback-Antwort** `Cache-Control: no-cache, mus
 - **Akzeptabel:** p95 unter 300 ms bei den komplexen Routen unter der vereinbarten Last.
 - **Nicht als dieselbe Zahl zusammenrechnen:** Rust-Verarbeitungszeit, Caddy/TLS-Aufbau, Client-Netz und Browser-Interaktion.
 - Vor Produktiv-Rollout: Staging-Rust mit separater, repräsentativer SQL-Testdatenbank, 1/4/8/16-Client-Vergleich, echte eingeloggte Admin-Ansicht und externe Browser-Messung.
-- **PR #34 bleibt ungemerged**. Kein Wechsel des Stacks, keine Produktionstests mit ungebremster Last, keine Änderung an live laufenden Diensten.
+- Kein Wechsel des Stacks, keine Produktionstests mit ungebremster Last, keine Änderung an live laufenden Diensten.

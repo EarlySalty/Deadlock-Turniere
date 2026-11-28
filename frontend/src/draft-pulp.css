@@ -418,7 +418,7 @@
   position:absolute;
   z-index:1;
   left:clamp(24px,5vw,100px);
-  top:48px;
+  top:22px;
   pointer-events:none;
   font:800 10px/1 ui-monospace,monospace;
   letter-spacing:.25em;

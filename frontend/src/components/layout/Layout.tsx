@@ -1,6 +1,7 @@
 import { Suspense } from 'react'
 import { Outlet, useLocation } from 'react-router-dom'
 import Header from './Header'
+import RouteErrorBoundary from './RouteErrorBoundary'
 
 export default function Layout() {
   const { pathname } = useLocation()
@@ -13,9 +14,11 @@ export default function Layout() {
     <div className="min-h-screen bg-background text-foreground">
       <Header />
       <main id="main-content" className={`mx-auto w-full ${width}`}>
+        <RouteErrorBoundary key={pathname}>
         <Suspense fallback={<div role="status" className="mx-auto max-w-7xl px-6 py-12 text-sm text-muted">Ansicht wird geladen …</div>}>
           <Outlet />
         </Suspense>
+        </RouteErrorBoundary>
       </main>
     </div>
   )
