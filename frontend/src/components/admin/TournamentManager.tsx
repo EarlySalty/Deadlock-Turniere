@@ -46,7 +46,7 @@ interface TournamentManagerProps {
   bracketHasResults?: boolean
   openBracketMatches?: number
   onFinished?: () => void
-  onArchived?: (tournament: Tournament) => void
+  onRemoved?: (notice: string) => void
   successMessage?: string
   onSuccessMessage?: (text: string) => void
 }
@@ -91,7 +91,7 @@ export default function TournamentManager({
   bracketHasResults = false,
   openBracketMatches = 0,
   onFinished,
-  onArchived,
+  onRemoved,
   successMessage = '',
   onSuccessMessage,
 }: TournamentManagerProps) {
@@ -181,7 +181,7 @@ export default function TournamentManager({
     advanceMutation.mutate(tournament.id, {
       onSuccess: () => {
         setArchiveConfirmOpen(false)
-        onArchived?.(tournament)
+        onRemoved?.(`Turnier „${tournament.name}“ ist archiviert. Du findest es jetzt unter „${tournament.is_test ? 'Test-Modus' : 'Archiv'}“.`)
       },
     })
   }
@@ -249,7 +249,7 @@ export default function TournamentManager({
       deleteMutation.mutate(tournament.id, {
         onSuccess: () => {
           setDeleteConfirmationId(null)
-          setSuccessMessage('Turnier wurde gelöscht.')
+          onRemoved?.(`Turnier „${tournament.name}“ wurde gelöscht.`)
         },
         onError: () => {
           setDeleteConfirmationId(null)

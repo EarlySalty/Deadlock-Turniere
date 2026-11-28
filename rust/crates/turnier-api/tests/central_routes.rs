@@ -2153,6 +2153,24 @@ async fn open_checkin_needs_teams_except_for_solo_only_signups() {
         .await
         .expect("status");
     assert_eq!(status, "checkin");
+
+    let duel = seed_tournament(&ctx.pool, "1v1 ohne Teams", "registration", 1).await;
+    sqlx::query("UPDATE turnier.tournaments SET invite_mode = 'solo_only' WHERE id = $1")
+        .bind(duel)
+        .execute(&ctx.pool)
+        .await
+        .expect("solo only");
+    seed_balance_signups(&ctx.pool, duel).await;
+    let (refused, body) = open(duel).await;
+    assert_eq!(refused, StatusCode::BAD_REQUEST, "{body}");
+    assert!(
+        body.to_string()
+            .contains("Solo-Spieler automatisch zuweisen"),
+        "{body}"
+    );
+    seed_team(&ctx.pool, duel, "Einzelkämpfer", CAPTAIN_ID).await;
+    let (opened, body) = open(duel).await;
+    assert_eq!(opened, StatusCode::OK, "{body}");
 }
 
 #[tokio::test]

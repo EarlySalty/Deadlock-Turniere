@@ -750,10 +750,16 @@ async fn open_checkin(
         }
         let solo_only =
             existing.try_get::<Option<InviteMode>, _>("invite_mode")? == Some(InviteMode::SoloOnly);
-        let (participants, message) = if solo_only {
+        let team_size: i64 = existing.try_get("team_size")?;
+        let (participants, message) = if solo_only && team_size > 1 {
             (
                 r#"SELECT COUNT(*) FROM turnier."tournament_signups" WHERE tournament_id = $1"#,
                 "Check-in kann erst geöffnet werden, wenn mindestens eine Anmeldung existiert",
+            )
+        } else if solo_only {
+            (
+                r#"SELECT COUNT(*) FROM turnier."teams" WHERE tournament_id = $1"#,
+                "Bei 1v1 braucht jeder Spieler vor dem Check-in ein eigenes Team. Nutze „Solo-Spieler automatisch zuweisen“.",
             )
         } else {
             (

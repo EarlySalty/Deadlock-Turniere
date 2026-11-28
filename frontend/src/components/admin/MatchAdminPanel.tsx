@@ -27,6 +27,7 @@ import {
   Swords,
 } from 'lucide-react'
 import { teamNameById } from '@/lib/teamName'
+import { reachesMiniGroup } from '@/lib/miniGroupReach'
 import { LOBBY_CODE_NOT_DELIVERED, lobbyDeliveryMessage, lobbyResendMessage } from '@/lib/lobbyDelivery'
 
 interface MatchAdminPanelProps {
@@ -114,13 +115,7 @@ export default function MatchAdminPanel({
   const actionableMatches = matches
     .filter((match) => match.team1_id !== null && match.team2_id !== null)
     .sort((a, b) => Number(isTerminalMatch(a)) - Number(isTerminalMatch(b)))
-  const touchesMiniGroup = (match: BracketMatch) =>
-    match.mini_group_id !== null ||
-    matches.some(
-      (other) =>
-        other.mini_group_id !== null &&
-        (other.source_match1_id === match.id || other.source_match2_id === match.id),
-    )
+  const touchesMiniGroup = (match: BracketMatch) => reachesMiniGroup(match, matches)
 
   if (actionableMatches.length === 0) {
     return (
