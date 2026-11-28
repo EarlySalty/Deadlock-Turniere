@@ -49,15 +49,6 @@
   position:relative;
   border-top:4px solid #659b9b!important;
 }
-.dl-roster__team:before{
-  position:absolute;
-  right:12px;
-  top:11px;
-  content:'✦';
-  font:30px Georgia,serif;
-  color:rgba(192,177,141,.2);
-  pointer-events:none;
-}
 .dl-roster__team-name{
   font:900 clamp(20px,2.5vw,29px)/1.1 Impact,"Arial Narrow",sans-serif;
   letter-spacing:.04em;

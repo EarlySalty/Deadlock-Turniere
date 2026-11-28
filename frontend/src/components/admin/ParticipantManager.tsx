@@ -457,14 +457,14 @@ export default function ParticipantManager({
 
               {team.members.length > 0 && (
                 <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-                  <div className="flex items-center gap-2 text-sm text-muted">
+                  <div className="flex shrink-0 items-center gap-2 text-sm text-muted">
                     <Crown size={14} />
                     <span>Captain wechseln</span>
                   </div>
                   <select
                     value={team.captain_discord_id}
                     onChange={(event) => handleChangeCaptain(team.id, event.target.value)}
-                    className="rounded-lg border border-border bg-card px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
+                    className="w-full min-w-0 sm:flex-1 rounded-lg border border-border bg-card px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
                   >
                     {team.members.map((member) => (
                       <option key={member.discord_id} value={member.discord_id}>

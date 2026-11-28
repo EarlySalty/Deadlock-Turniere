@@ -116,7 +116,7 @@ function Warteraum({
   const beideBereit = zustand.team1.ready && zustand.team2.ready
 
   return (
-    <div className="draft-waiting-screen relative -my-8 min-h-[calc(100vh-5rem)] overflow-hidden">
+    <div className="draft-waiting-screen relative min-h-[calc(100vh-4rem)] overflow-clip">
       <DraftHintergrund />
       <div className="relative z-10 mx-auto flex min-h-[calc(100vh-5rem)] max-w-3xl flex-col items-center justify-center gap-6 px-4 py-10">
         <div className="fade-in-up flex items-center gap-2 rounded-full border border-white/[0.08] bg-white/[0.03] px-4 py-1.5">
@@ -253,7 +253,7 @@ function DraftTisch({
   const aktiverSlot2 = !istBanZug && aktivesTeam === 2 ? picks2.length : null
 
   return (
-    <div className="draft-arena-screen relative -my-8 min-h-[calc(100vh-5rem)] overflow-hidden">
+    <div className="draft-arena-screen relative min-h-[calc(100vh-4rem)] overflow-clip">
       <DraftHintergrund mitte />
       <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
         <span className="select-none text-center font-display text-4xl font-black uppercase tracking-tight text-white/[0.05] md:text-6xl">
@@ -317,7 +317,7 @@ function DraftTisch({
         <div className="order-1 col-span-2 min-w-0 lg:order-2 lg:col-span-1">
           {ausgewaehlt && zug && !uebergang && (
             <div
-              className="sticky top-3 z-30 mb-3 flex flex-wrap items-center gap-3 rounded-lg border border-[#c8a86b]/50 bg-[#181c24]/95 p-3 shadow-xl backdrop-blur-md"
+              className="sticky top-20 z-30 mb-3 flex flex-wrap items-center gap-3 rounded-lg border border-[#c8a86b]/50 bg-[#181c24]/95 p-3 shadow-xl backdrop-blur-md"
               role="status"
             >
               {heroImageUrl(ausgewaehlt.image_url) && (
@@ -399,7 +399,7 @@ function Endbild({
   const picks2 = zustand.actions.filter((a) => a.action_type === 'pick' && a.team_slot === 2)
 
   return (
-    <div className="draft-arena-screen relative -my-8 min-h-[calc(100vh-5rem)] overflow-hidden">
+    <div className="draft-arena-screen relative min-h-[calc(100vh-4rem)] overflow-clip">
       <DraftHintergrund />
       <div className="relative z-10 mx-auto flex max-w-6xl flex-col items-center gap-6 px-4 py-10">
         <motion.div
