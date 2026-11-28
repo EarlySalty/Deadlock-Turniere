@@ -72,6 +72,29 @@ const MODE_TABS: { key: AdminMode; label: string; icon: typeof Trophy }[] = [
   { key: 'observer', label: 'Observer', icon: Crosshair },
 ]
 
+type AdminNotice = { tournamentId: number; text: string; writtenAt: number; status: string | null }
+
+function newNotice(tournamentId: number, text: string): AdminNotice {
+  return { tournamentId, text, writtenAt: Date.now(), status: null }
+}
+
+function noticeText(notice: AdminNotice | null, detail: { id: number; status: string } | undefined): string {
+  if (!notice || !detail || notice.tournamentId !== detail.id) return ''
+  return notice.status === null || notice.status === detail.status ? notice.text : ''
+}
+
+function settleNotice(
+  notice: AdminNotice | null,
+  detail: { id: number; status: string } | undefined,
+  detailUpdatedAt: number,
+): AdminNotice | null {
+  if (!notice || !detail || notice.tournamentId !== detail.id) return notice
+  if (notice.status === null) {
+    return detailUpdatedAt > notice.writtenAt ? { ...notice, status: detail.status } : notice
+  }
+  return notice.status === detail.status ? notice : null
+}
+
 export default function Admin() {
   const { data: tournaments, isLoading, isError: tournamentsError, refetch: refetchTournaments } = useAdminTournaments()
   const [adminMode, setAdminMode] = useState<AdminMode>('live')
@@ -82,9 +105,9 @@ export default function Admin() {
   const [createFormKey, setCreateFormKey] = useState(0)
   const [activePhase, setActivePhase] = useState<AdminPhase | null>(null)
   const [finishedLiveId, setFinishedLiveId] = useState<number | null>(null)
-  const [liveNotice, setLiveNotice] = useState<{ tournamentId: number; text: string } | null>(null)
+  const [liveNotice, setLiveNotice] = useState<AdminNotice | null>(null)
   const { user } = useAuth()
-  const [managerNotice, setManagerNotice] = useState<{ tournamentId: number; text: string } | null>(null)
+  const [managerNotice, setManagerNotice] = useState<AdminNotice | null>(null)
   const deleteMutation = useDeleteTournament()
 
   const liveTournaments = useMemo(
@@ -122,6 +145,7 @@ export default function Admin() {
     isLoading: loadingLiveDetail,
     error: liveDetailError,
     refetch: refetchLiveDetail,
+    dataUpdatedAt: liveDetailUpdatedAt,
   } = useAdminTournament(adminMode === 'live' && liveSelectedId ? liveSelectedId : 0)
 
   const { data: archiveDetail, isLoading: loadingArchiveDetail } = useAdminTournament(
@@ -140,12 +164,14 @@ export default function Admin() {
   const liveLeague = isLeague(liveDetail?.tournament_mode)
 
   const phaseKey = useRef<string | null>(null)
+  const liveManagerNotice = noticeText(managerNotice, liveDetail)
   const topNotice =
-    liveDetail && activePhase !== 'setup' && managerNotice?.text && managerNotice.tournamentId === liveDetail.id
-      ? managerNotice.text
-      : liveDetail && liveNotice?.tournamentId === liveDetail.id
-        ? liveNotice.text
-        : ''
+    activePhase !== 'setup' && liveManagerNotice ? liveManagerNotice : noticeText(liveNotice, liveDetail)
+
+  const settledLiveNotice = settleNotice(liveNotice, liveDetail, liveDetailUpdatedAt)
+  if (settledLiveNotice !== liveNotice) setLiveNotice(settledLiveNotice)
+  const settledManagerNotice = settleNotice(managerNotice, liveDetail, liveDetailUpdatedAt)
+  if (settledManagerNotice !== managerNotice) setManagerNotice(settledManagerNotice)
 
   useEffect(() => {
     if (!liveDetail) {
@@ -308,10 +334,12 @@ export default function Admin() {
                   onCreated={(created) => {
                     handleSelectLive(created.id)
                     setManagerNotice(null)
-                    setLiveNotice({
-                      tournamentId: created.id,
-                      text: `Turnier „${created.name}“ angelegt. Als Nächstes Termine und Regeln prüfen und die Anmeldung starten.`,
-                    })
+                    setLiveNotice(
+                      newNotice(
+                        created.id,
+                        `Turnier „${created.name}“ angelegt. Als Nächstes Termine und Regeln prüfen und die Anmeldung starten.`,
+                      ),
+                    )
                   }}
                 />
               </section>
@@ -363,15 +391,14 @@ export default function Admin() {
                         bracketHasResults={bracketHasResults(liveDetail)}
                         onFinished={() => {
                           setFinishedLiveId(liveDetail.id)
-                          setLiveNotice({
-                            tournamentId: liveDetail.id,
-                            text: 'Turnier abgeschlossen. Ergebnisse und Platzierungen sind gespeichert.',
-                          })
+                          setLiveNotice(
+                            newNotice(liveDetail.id, 'Turnier abgeschlossen. Ergebnisse und Platzierungen sind gespeichert.'),
+                          )
                         }}
-                        successMessage={managerNotice?.tournamentId === liveDetail.id ? managerNotice.text : ''}
+                        successMessage={liveManagerNotice}
                         onSuccessMessage={(text) => {
                           setLiveNotice(null)
-                          setManagerNotice({ tournamentId: liveDetail.id, text })
+                          setManagerNotice(newNotice(liveDetail.id, text))
                         }}
                       />
                     )}
@@ -442,7 +469,7 @@ export default function Admin() {
                           league={liveLeague}
                           onStatusChanged={(text) => {
                             setManagerNotice(null)
-                            setLiveNotice({ tournamentId: liveDetail.id, text })
+                            setLiveNotice(newNotice(liveDetail.id, text))
                           }}
                         />
                       </ParticipantMarksContext.Provider>
