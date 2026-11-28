@@ -12,7 +12,7 @@ use serde_json::{json, Value};
 use sqlx::{Postgres, QueryBuilder, Row};
 
 use turnier_core::{
-    AdminTournamentSummary, LobbySettingsPreset, Patch, Tournament, TournamentCreate,
+    AdminTournamentSummary, InviteMode, LobbySettingsPreset, Patch, Tournament, TournamentCreate,
     TournamentDetail, TournamentMode, TournamentStatus, TournamentUpdate,
 };
 use turnier_engine::league::DEFAULT_SLOT_MINUTES;
@@ -716,15 +716,25 @@ async fn open_checkin(
                 "Check-in kann nur aus der Anmeldung geöffnet werden",
             ));
         }
-        let count: i64 =
-            sqlx::query_scalar(r#"SELECT COUNT(*) FROM turnier."teams" WHERE tournament_id = $1"#)
-                .bind(tournament_id)
-                .fetch_one(&state.pool)
-                .await?;
-        if count == 0 {
-            return Err(WebError::bad_request(
+        let solo_only =
+            existing.try_get::<Option<InviteMode>, _>("invite_mode")? == Some(InviteMode::SoloOnly);
+        let (participants, message) = if solo_only {
+            (
+                r#"SELECT COUNT(*) FROM turnier."tournament_signups" WHERE tournament_id = $1"#,
+                "Check-in kann erst geöffnet werden, wenn mindestens eine Anmeldung existiert",
+            )
+        } else {
+            (
+                r#"SELECT COUNT(*) FROM turnier."teams" WHERE tournament_id = $1"#,
                 "Check-in kann erst geöffnet werden, wenn mindestens ein Team existiert",
-            ));
+            )
+        };
+        let count: i64 = sqlx::query_scalar(participants)
+            .bind(tournament_id)
+            .fetch_one(&state.pool)
+            .await?;
+        if count == 0 {
+            return Err(WebError::bad_request(message));
         }
     }
 

@@ -2107,3 +2107,50 @@ async fn team_tournament_start_keeps_rosters_unless_fill_is_chosen() {
     .expect("unassigned");
     assert_eq!(unassigned, 5);
 }
+
+#[tokio::test]
+async fn open_checkin_needs_teams_except_for_solo_only_signups() {
+    let ctx = setup().await;
+    let token = session(&ctx.pool, ADMIN_ID, "Admin", &["admin-role", "mod-role"]).await;
+    let open = |tournament_id: i64| {
+        let app = ctx.app.clone();
+        let token = token.clone();
+        async move {
+            send_json(
+                &app,
+                Some(&token),
+                Method::POST,
+                &format!("/api/admin/tournaments/{tournament_id}/open-checkin"),
+                None,
+            )
+            .await
+        }
+    };
+    let team_cup = seed_tournament(&ctx.pool, "Teamcup ohne Teams", "registration", 6).await;
+    seed_balance_signups(&ctx.pool, team_cup).await;
+    assert_eq!(open(team_cup).await.0, StatusCode::BAD_REQUEST);
+
+    let solo_empty = seed_tournament(&ctx.pool, "PUG ohne Anmeldung", "registration", 6).await;
+    sqlx::query("UPDATE turnier.tournaments SET invite_mode = 'solo_only' WHERE id = $1")
+        .bind(solo_empty)
+        .execute(&ctx.pool)
+        .await
+        .expect("solo only");
+    assert_eq!(open(solo_empty).await.0, StatusCode::BAD_REQUEST);
+
+    let pug = seed_tournament(&ctx.pool, "PUG mit Anmeldungen", "registration", 6).await;
+    sqlx::query("UPDATE turnier.tournaments SET invite_mode = 'solo_only' WHERE id = $1")
+        .bind(pug)
+        .execute(&ctx.pool)
+        .await
+        .expect("solo only");
+    seed_balance_signups(&ctx.pool, pug).await;
+    let (opened, body) = open(pug).await;
+    assert_eq!(opened, StatusCode::OK, "{body}");
+    let status: String = sqlx::query_scalar("SELECT status FROM turnier.tournaments WHERE id = $1")
+        .bind(pug)
+        .fetch_one(&ctx.pool)
+        .await
+        .expect("status");
+    assert_eq!(status, "checkin");
+}
