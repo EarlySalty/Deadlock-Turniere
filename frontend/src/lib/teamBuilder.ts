@@ -38,10 +38,10 @@ export interface ServerSnapshot {
     captainId: string | null
     members: string[]
     bench: string[]
-    joinOrder: string[]
   }[]
   pool: { discordId: string; signupId: number }[]
   checkedIn: string[]
+  joinRanks: Record<string, number>
 }
 
 export interface BuilderContext {
@@ -89,10 +89,19 @@ function playersFromServer(teams: Team[], signups: TournamentSignup[]): Map<stri
   return players
 }
 
-function joinOrderOf(team: Team): string[] {
-  return [...team.members]
+function joinRanksOf(teams: Team[]): Record<string, number> {
+  const ordered = teams
+    .flatMap((team) => team.members)
     .sort((a, b) => a.joined_at.localeCompare(b.joined_at) || (a.id ?? 0) - (b.id ?? 0))
-    .map((m) => m.discord_id)
+  return Object.fromEntries(ordered.map((m, index) => [m.discord_id, index]))
+}
+
+function newJoinerRank(snapshot: ServerSnapshot, order: number): number {
+  return Object.keys(snapshot.joinRanks).length + order
+}
+
+function joinRankOf(snapshot: ServerSnapshot, discordId: string, order: number): number {
+  return snapshot.joinRanks[discordId] ?? newJoinerRank(snapshot, order)
 }
 
 export function snapshotOf(teams: Team[], signups: TournamentSignup[], checkedIn: string[] = []): ServerSnapshot {
@@ -107,12 +116,12 @@ export function snapshotOf(teams: Team[], signups: TournamentSignup[], checkedIn
         : null,
       members: team.members.map((m) => m.discord_id),
       bench: team.members.filter((m) => m.is_bench).map((m) => m.discord_id),
-      joinOrder: joinOrderOf(team),
     })),
     pool: signups
       .filter((signup) => signup.team_id === null && !members.has(signup.discord_id))
       .map((signup) => ({ discordId: signup.discord_id, signupId: signup.id })),
     checkedIn,
+    joinRanks: joinRanksOf(teams),
   }
 }
 
@@ -164,7 +173,8 @@ function viewCandidates(key: string, memberIds: string[], snapshot: ServerSnapsh
   const stays = (id: string) => server?.members.includes(id) ?? false
   const stayingBench = new Set((server?.bench ?? []).filter((id) => memberIds.includes(id)))
   let starters = memberIds.filter((id) => stays(id) && !stayingBench.has(id)).length
-  return memberIds.map((id, joinRank) => {
+  return memberIds.map((id, order) => {
+    const joinRank = joinRankOf(snapshot, id, order)
     if (stays(id)) return { discordId: id, bench: stayingBench.has(id), joinRank }
     const bench = starters >= teamSize
     if (!bench) starters += 1
@@ -434,6 +444,7 @@ interface Simulation {
   checkedIn: Set<string>
   teamSize: number
   joins: number
+  snapshot: ServerSnapshot
 }
 
 function starterCount(team: SimulatedTeam): number {
@@ -449,25 +460,31 @@ function leaveTeam(sim: Simulation, team: SimulatedTeam | undefined, discordId: 
   if (captain) captain.bench = false
 }
 
-function joinTeam(sim: Simulation, team: SimulatedTeam | undefined, discordId: string) {
+function joinTeam(sim: Simulation, team: SimulatedTeam | undefined, discordId: string, joinRank: number) {
   if (!team) return
   const bench = starterCount(team) >= sim.teamSize
   if (!bench && (team.members.length === 0 || team.captain === null)) team.captain = discordId
+  team.members.push({ discordId, bench, joinRank })
+}
+
+function newJoin(sim: Simulation): number {
   sim.joins += 1
-  team.members.push({ discordId, bench, joinRank: sim.joins })
+  return newJoinerRank(sim.snapshot, sim.joins)
 }
 
 function simulateStep(sim: Simulation, step: SaveStep) {
   if (step.kind === 'remove') leaveTeam(sim, sim.teams.get(step.teamKey), step.discordId)
   if (step.kind === 'move') leaveTeam(sim, sim.teams.get(step.fromKey), step.discordId)
-  if (step.kind === 'move' || step.kind === 'assign') joinTeam(sim, sim.teams.get(step.teamKey), step.discordId)
+  if (step.kind === 'move') {
+    joinTeam(sim, sim.teams.get(step.teamKey), step.discordId, joinRankOf(sim.snapshot, step.discordId, newJoin(sim)))
+  }
+  if (step.kind === 'assign') joinTeam(sim, sim.teams.get(step.teamKey), step.discordId, newJoin(sim))
 }
 
-function simulatedTeam(team: ServerSnapshot['teams'][number]): SimulatedTeam {
+function simulatedTeam(snapshot: ServerSnapshot, team: ServerSnapshot['teams'][number]): SimulatedTeam {
   const bench = new Set(team.bench)
-  const rank = (id: string) => team.joinOrder.indexOf(id) - team.joinOrder.length
   return {
-    members: team.members.map((id) => ({ discordId: id, bench: bench.has(id), joinRank: rank(id) })),
+    members: team.members.map((id) => ({ discordId: id, bench: bench.has(id), joinRank: joinRankOf(snapshot, id, 0) })),
     captain: team.captainId,
   }
 }
@@ -478,9 +495,9 @@ export function captainsAfterSteps(
   steps: SaveStep[],
   teamSize: number,
 ): Map<string, string | null> {
-  const teams = new Map<string, SimulatedTeam>(snapshot.teams.map((team) => [team.key, simulatedTeam(team)]))
+  const teams = new Map<string, SimulatedTeam>(snapshot.teams.map((team) => [team.key, simulatedTeam(snapshot, team)]))
   for (const team of edits.newTeams) teams.set(team.key, { members: [], captain: null })
-  const sim: Simulation = { teams, checkedIn: new Set(snapshot.checkedIn), teamSize, joins: 0 }
+  const sim: Simulation = { teams, checkedIn: new Set(snapshot.checkedIn), teamSize, joins: 0, snapshot }
   for (const step of steps) simulateStep(sim, step)
   return new Map([...teams].map(([key, team]) => [key, team.captain]))
 }

@@ -211,3 +211,23 @@ test('Ein Ersatzspieler wird in einem Team ohne Captain nicht zum Captain', () =
   assert.deepEqual(steps.map((s) => `${s.kind}:${s.discordId}`), ['assign:x'])
   assert.equal(captainsAfterSteps(snapshot, EMPTY_EDITS, steps, 2).get('s1'), null)
 })
+
+test('Ein aus einem anderen Team verschobener Spieler behält seinen Beitrittszeitpunkt für die Captain-Wahl', () => {
+  const alpha = {
+    ...team(1, []),
+    captain_discord_id: 'a',
+    members: [{ ...joined('a', '2026-11-01T09:00:00Z'), role: 'captain' }, joined('x', '2026-11-01T10:00:00Z')],
+  }
+  const beta = {
+    ...team(2, []),
+    captain_discord_id: 'c',
+    members: [{ ...joined('c', '2026-11-01T09:30:00Z'), role: 'captain' }, joined('m', '2026-11-01T10:05:00Z')],
+  }
+  const edits = { ...EMPTY_EDITS, placements: { x: 's2', c: 's1' } }
+  const snapshot = snapshotOf([alpha, beta], [])
+  const steps = planSave(snapshot, edits, 6)
+  assert.equal(captainsAfterSteps(snapshot, edits, steps, 6).get('s2'), 'x')
+  const view = buildView([alpha, beta], [], edits, { teamSize: 6 })
+  assert.equal(view.teams[1].captainId, 'x')
+  assert.deepEqual(captainChanges(view, snapshot, edits, steps, 6), [])
+})
