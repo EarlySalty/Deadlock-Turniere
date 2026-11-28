@@ -143,13 +143,18 @@ export const revertCheckin = (id: number) =>
 export const finalizeCheckin = (
   id: number,
   confirm: boolean,
+  fillFromSolos: boolean,
   allowedTeamIds: number[] = [],
   snapshotToken?: string,
 ) => request<FinalizeCheckinResult>(
   `/admin/tournaments/${id}/finalize-checkin${confirm ? '?confirm=true' : ''}`,
   {
     method: 'POST',
-    body: JSON.stringify({ allowed_team_ids: allowedTeamIds, snapshot_token: snapshotToken }),
+    body: JSON.stringify({
+      allowed_team_ids: allowedTeamIds,
+      snapshot_token: snapshotToken,
+      fill_from_solos: fillFromSolos,
+    }),
   }
 )
 
@@ -204,10 +209,11 @@ export const leaveLobby = (tournamentId: number, matchId: number) =>
     method: 'POST',
   })
 
-export const resetMatch = (tournamentId: number, matchId: number) =>
-  request<{ success: boolean }>(`/admin/tournaments/${tournamentId}/matches/${matchId}/reset`, {
-    method: 'POST',
-  })
+export const resetMatch = (tournamentId: number, matchId: number, options?: { force?: boolean }) =>
+  request<{ success: boolean }>(
+    `/admin/tournaments/${tournamentId}/matches/${matchId}/reset${options?.force ? '?force=true' : ''}`,
+    { method: 'POST' },
+  )
 
 export const setManualMatchLobby = (
   tournamentId: number,

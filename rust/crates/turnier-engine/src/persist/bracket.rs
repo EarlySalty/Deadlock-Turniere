@@ -18,6 +18,8 @@ use crate::engine::seeding::{
 };
 use crate::engine::slots::BracketSlot;
 use crate::error::{TournamentError, TournamentResult};
+use crate::league::LeagueGame;
+use crate::standings::{rank_standings, Standing};
 
 use super::double_elim::build_double_elimination_bracket;
 use super::{clear_bracket_tree, insert_bracket_match};
@@ -42,6 +44,46 @@ pub async fn generate_bracket(pool: &Pool<Postgres>, tournament_id: i64) -> Tour
     let match_count = generate_bracket_in_tx(&mut tx, tournament_id).await?;
     tx.commit().await?;
     Ok(match_count)
+}
+
+async fn ranked_group_standings(
+    tx: &mut Transaction<'_, Postgres>,
+    group_id: i64,
+) -> TournamentResult<Vec<Standing>> {
+    let rows: Vec<(i64, i64, i64)> = sqlx::query_as(
+        "SELECT team_id, wins, points FROM turnier.group_teams WHERE group_id = $1 ORDER BY id",
+    )
+    .bind(group_id)
+    .fetch_all(&mut **tx)
+    .await?;
+    let seeded: Vec<Standing> = rows
+        .into_iter()
+        .map(|(team_id, wins, points)| Standing {
+            team_id,
+            wins,
+            points,
+        })
+        .collect();
+    let games: Vec<(i64, i64, Option<i64>)> = sqlx::query_as(
+        "SELECT team1_id, team2_id, winner_id FROM turnier.group_matches \
+         WHERE group_id = $1 AND status = 'completed'",
+    )
+    .bind(group_id)
+    .fetch_all(&mut **tx)
+    .await?;
+    let games: Vec<LeagueGame> = games
+        .into_iter()
+        .map(|(team1_id, team2_id, winner_id)| LeagueGame {
+            team1_id,
+            team2_id,
+            winner_id,
+        })
+        .collect();
+    let ranked = rank_standings(&seeded, &games);
+    Ok(ranked
+        .iter()
+        .filter_map(|row| seeded.iter().find(|s| s.team_id == row.team_id).copied())
+        .collect())
 }
 
 /// Transaktionsfähige Variante von [`generate_bracket`].
@@ -74,15 +116,16 @@ pub async fn generate_bracket_in_tx(
     let mut qualified: Vec<Qualifier> = Vec::new();
     let mut grouped_qualifiers: Vec<Vec<Qualifier>> = Vec::new();
     for (group_id,) in &group_ids {
-        let standings: Vec<(i64, i64, i64, i64)> = sqlx::query_as(
-            "SELECT team_id, wins, losses, points FROM turnier.group_teams \
-             WHERE group_id = $1 ORDER BY points DESC, wins DESC, id ASC, team_id ASC",
-        )
-        .bind(group_id)
-        .fetch_all(&mut **tx)
-        .await?;
+        let standings = ranked_group_standings(tx, *group_id).await?;
         let mut group_qs: Vec<Qualifier> = Vec::new();
-        for (rank_pos, (team_id, wins, _losses, points)) in standings
+        for (
+            rank_pos,
+            Standing {
+                team_id,
+                wins,
+                points,
+            },
+        ) in standings
             .iter()
             .take(crate::engine::groups::QUALIFIERS_PER_GROUP)
             .enumerate()

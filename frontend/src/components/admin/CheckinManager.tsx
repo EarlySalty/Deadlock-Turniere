@@ -1,10 +1,12 @@
 import { useMemo, useState } from 'react'
 import ParticipantMarks from '@/components/admin/ParticipantMarks'
+import CheckinStartPlan from '@/components/admin/CheckinStartPlan'
 import Card from '@/components/ui/Card'
 import Button from '@/components/ui/Button'
-import { useAdminCheckin, useAdminCheckins, useDeleteAdminSignup, useFinalizeCheckin, useRevertCheckin } from '@/hooks/useTournament'
+import { useAdminCheckin, useAdminCheckins, useDeleteAdminSignup, useDeleteAdminTeam, useFinalizeCheckin, useRevertCheckin } from '@/hooks/useTournament'
 import { usePendingDraftChanges } from '@/components/admin/teamBuilderDrafts'
 import { latestActionError } from '@/lib/latestError'
+import { keepsRosters } from '@/lib/checkinMode'
 import { bracketFormatLabel } from '@/lib/bracketFormat'
 import { pluralWord, pluralize } from '@/lib/countLabel'
 import type {
@@ -44,10 +46,13 @@ export default function CheckinManager({
   const adminCheckin = useAdminCheckin(tournamentId)
   const finalizeMutation = useFinalizeCheckin(tournamentId)
   const revertMutation = useRevertCheckin(tournamentId)
+  const deleteTeam = useDeleteAdminTeam()
 
   const [preview, setPreview] = useState<FinalizeCheckinResult | null>(null)
   const [allowedTeams, setAllowedTeams] = useState<Record<number, boolean>>({})
   const [feedback, setFeedback] = useState('')
+  const [modalFeedback, setModalFeedback] = useState('')
+  const [pendingCheckins, setPendingCheckins] = useState<ReadonlySet<string>>(new Set())
 
   const checkedInIds = useMemo(
     () => new Set((adminCheckins ?? []).map((entry) => entry.discord_id)),
@@ -89,11 +94,11 @@ export default function CheckinManager({
     })
   }, [checkedInIds, signups, teams])
 
-
-  const error = latestActionError([finalizeMutation, revertMutation, deleteSignup, adminCheckin]) ?? checkinsError
+  const error = latestActionError([finalizeMutation, revertMutation, deleteSignup, adminCheckin, deleteTeam]) ?? checkinsError
   const checkinsKnown = adminCheckins !== undefined
   const checkedInCount = participants.filter((row) => checkedInIds.has(row.discord_id)).length
-  const isBusy = finalizeMutation.isPending || revertMutation.isPending || deleteSignup.isPending || adminCheckin.isPending
+  const isBusy = finalizeMutation.isPending || revertMutation.isPending || deleteSignup.isPending || deleteTeam.isPending
+  const modalBusy = isBusy || pendingCheckins.size > 0
   const pendingDrafts = usePendingDraftChanges(tournamentId, preview !== null)
   const pendingBuilderChanges = pendingDrafts.here + pendingDrafts.otherTabs
   const bracketFallback = preview !== null && preview.effective_bracket_format !== preview.bracket_format
@@ -109,26 +114,66 @@ export default function CheckinManager({
     )
   }
 
-  const checkinParticipant = (row: ParticipantRow) => {
-    setFeedback('')
-    adminCheckin.mutate(row.discord_id, {
-      onSuccess: () => setFeedback(`${playerName(row.discord_name)} ist eingecheckt.`),
+  const setCheckinPending = (discordId: string, pending: boolean) => {
+    setPendingCheckins((current) => {
+      const next = new Set(current)
+      if (pending) next.add(discordId)
+      else next.delete(discordId)
+      return next
     })
   }
 
-  const runPreview = () => {
+  const checkinParticipant = async (row: ParticipantRow) => {
     setFeedback('')
+    setCheckinPending(row.discord_id, true)
+    try {
+      await adminCheckin.mutateAsync(row.discord_id)
+      setFeedback(`${playerName(row.discord_name)} ist eingecheckt.`)
+    } catch {
+      return
+    } finally {
+      setCheckinPending(row.discord_id, false)
+    }
+  }
+
+  const runPreview = (fill: boolean) => {
+    const previousMode = preview?.auto_team_formation
+    setFeedback('')
+    setModalFeedback('')
     finalizeMutation.mutate(
-      { confirm: false, allowedTeamIds: [] },
+      { confirm: false, allowedTeamIds: [], fillFromSolos: fill },
       {
         onSuccess: (result) => {
+          const modeChanged = previousMode !== undefined && previousMode !== result.auto_team_formation
           setPreview(result)
-          setAllowedTeams(
-            Object.fromEntries(result.warnings.map((warning) => [warning.team_id, false]))
+          setAllowedTeams((current) =>
+            Object.fromEntries(
+              result.warnings.map((warning) => [warning.team_id, modeChanged ? false : (current[warning.team_id] ?? false)])
+            )
           )
         },
       }
     )
+  }
+
+  const removeIncompleteTeam = (teamId: number, teamName: string) => {
+    if (!preview) return
+    const fill = preview.auto_team_formation
+    if (!window.confirm(`${teamName} entfernen? Das Team wird gelöscht, die Spieler landen als Einzelanmeldungen in der Solo-Liste.`)) return
+    deleteTeam.mutate(
+      { tournamentId, teamId },
+      {
+        onSuccess: () => {
+          runPreview(fill)
+          setModalFeedback(`${teamName} wurde entfernt. Die Vorschau ist aktualisiert.`)
+        },
+      },
+    )
+  }
+
+  const closePreview = () => {
+    setPreview(null)
+    setModalFeedback('')
   }
 
   const confirmStart = () => {
@@ -142,6 +187,7 @@ export default function CheckinManager({
         confirm: true,
         allowedTeamIds,
         snapshotToken: preview.snapshot_token,
+        fillFromSolos: preview.auto_team_formation,
       },
       {
         onSuccess: (result) => {
@@ -152,7 +198,7 @@ export default function CheckinManager({
                 ? 'Check-in abgeschlossen und Turnier direkt ins Bracket verschoben.'
                 : 'Check-in abgeschlossen und Turnier in die Gruppenphase verschoben.'
           )
-          setPreview(null)
+          closePreview()
         },
       }
     )
@@ -208,15 +254,15 @@ export default function CheckinManager({
           </div>
         )}
 
-        {error && (
-          <div className="flex items-center gap-2 rounded-lg border border-red-500/20 bg-red-500/10 p-3 text-sm text-red-400">
+        {error && !preview && (
+          <div role="alert" className="flex items-center gap-2 rounded-lg border border-red-500/20 bg-red-500/10 p-3 text-sm text-red-400">
             <AlertCircle size={16} />
             <span>{error instanceof Error ? error.message : 'Check-in konnte nicht verarbeitet werden'}</span>
           </div>
         )}
 
         <div className="flex flex-wrap gap-2">
-          <Button variant="primary" size="sm" disabled={isBusy} onClick={runPreview}>
+          <Button variant="primary" size="sm" disabled={isBusy} onClick={() => runPreview(false)}>
             {finalizeMutation.isPending ? 'Prüft...' : 'Check-in abschließen & Teams bereinigen'}
           </Button>
           <Button variant="danger" size="sm" disabled={isBusy} onClick={handleRevert}>
@@ -225,7 +271,7 @@ export default function CheckinManager({
         </div>
       </Card>
 
-      <Card className="p-6">
+      <Card className="p-4 sm:p-6">
         <div className="mb-4">
           <h3 className="text-base font-semibold text-foreground">Teilnehmerstatus</h3>
           <p className="mt-1 text-sm text-muted">Fehlende Spieler werden zuerst angezeigt.</p>
@@ -239,7 +285,7 @@ export default function CheckinManager({
               <thead>
                 <tr className="border-b border-border text-left text-muted">
                   <th className="px-3 py-2 font-medium">Spieler</th>
-                  <th className="px-3 py-2 font-medium">Team</th>
+                  <th className="hidden px-3 py-2 font-medium sm:table-cell">Team</th>
                   <th className="px-3 py-2 font-medium">Status</th>
                   <th className="px-3 py-2 font-medium"><span className="sr-only">Aktion</span></th>
                 </tr>
@@ -252,8 +298,9 @@ export default function CheckinManager({
                       <td className="px-3 py-2 text-foreground">
                         {playerName(row.discord_name)}
                         <ParticipantMarks discordId={row.discord_id} />
+                        <div className="text-xs text-muted sm:hidden">{row.team_name}</div>
                       </td>
-                      <td className="px-3 py-2 text-muted">{row.team_name}</td>
+                      <td className="hidden px-3 py-2 text-muted sm:table-cell">{row.team_name}</td>
                       <td className="px-3 py-2">
                         <span
                           className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium ${
@@ -271,8 +318,8 @@ export default function CheckinManager({
                         {checkinsKnown && !checkedIn && (
                           <button
                             type="button"
-                            disabled={isBusy}
-                            onClick={() => checkinParticipant(row)}
+                            disabled={isBusy || pendingCheckins.has(row.discord_id)}
+                            onClick={() => void checkinParticipant(row)}
                             aria-label={`${playerName(row.discord_name)} einchecken`}
                             title="Einchecken"
                             className="rounded p-1.5 text-muted hover:bg-green-500/10 hover:text-green-400 disabled:opacity-50"
@@ -304,17 +351,39 @@ export default function CheckinManager({
 
       {preview && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4">
-          <div className="max-h-[90vh] w-full max-w-3xl overflow-auto rounded-xl border border-border bg-card p-6 shadow-xl">
+          <div className="max-h-[90vh] w-full max-w-3xl overflow-auto rounded-xl border border-border bg-card p-4 shadow-xl sm:p-6">
             <div className="flex items-center gap-2">
               <TriangleAlert size={18} className="text-amber-300" />
               <h3 className="text-lg font-semibold text-foreground">Check-in Vorschau</h3>
             </div>
+
+            {error && (
+              <div role="alert" className="mt-4 flex items-start gap-2 rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-300">
+                <AlertCircle size={16} className="mt-0.5 shrink-0" />
+                <span>{error instanceof Error ? error.message : 'Check-in konnte nicht verarbeitet werden'}</span>
+              </div>
+            )}
+
+            {modalFeedback && (
+              <div role="status" className="mt-4 flex items-start gap-2 rounded-xl border border-green-500/20 bg-green-500/10 p-4 text-sm text-green-400">
+                <CheckCircle2 size={16} className="mt-0.5 shrink-0" />
+                <span>{modalFeedback}</span>
+              </div>
+            )}
 
             {pendingBuilderChanges > 0 && (
               <div role="alert" className="mt-4 rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-300">
                 Im Team-Builder {pluralWord(pendingBuilderChanges, 'ist', 'sind')} {pluralize(pendingBuilderChanges, 'Änderung', 'Änderungen')} noch nicht gespeichert
                 {pendingDrafts.otherTabs > 0 ? `, davon ${pendingDrafts.otherTabs} in einem anderen Tab dieses Browsers` : ''}.
                 Speichere sie unter „Teilnehmer“, sonst startet das Turnier ohne sie.
+              </div>
+            )}
+
+            {preview.tournament_mode_auto && preview.tournament_mode !== 'league' && preview.bracket_startable && (
+              <div className="mt-4 rounded-xl border border-border bg-background/60 p-4 text-sm text-foreground">
+                Turniermodus Automatisch: Mit {pluralize(preview.final_team_count, 'Team', 'Teams')}{' '}
+                {preview.tournament_mode === 'group_stage' ? 'gibt es eine Gruppenphase mit anschließendem Bracket.' : 'geht es direkt ins Bracket.'}{' '}
+                Ab {preview.auto_group_stage_threshold} Teams gibt es eine Gruppenphase, darunter nur das Bracket.
               </div>
             )}
 
@@ -344,33 +413,27 @@ export default function CheckinManager({
               </div>
             </div>
 
-            {preview.removed_players.length > 0 && (
-              <div className="mt-5 space-y-2">
-                <h4 className="text-base font-semibold text-foreground">Ohne Check-in, fliegen aus ihrem Team</h4>
-                <ul className="space-y-1 text-sm text-foreground">
-                  {preview.removed_players.map((player) => (
-                    <li key={`${player.team_id}-${player.discord_id}`}>
-                      {playerName(player.discord_name)} <span className="text-muted">aus {player.team_name}</span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
+            {preview.can_fill_from_solos && (
+              <label className="mt-5 flex items-start gap-3 rounded-xl border border-border bg-background/60 p-4">
+                <input
+                  type="checkbox"
+                  checked={preview.auto_team_formation}
+                  disabled={modalBusy}
+                  onChange={(event) => runPreview(event.target.checked)}
+                  className="mt-1"
+                />
+                <span className="text-sm text-foreground">
+                  <span className="font-semibold">Teams aus Solo-Spielern auffüllen und neue Teams bilden</span>
+                  <span className="mt-1 block text-muted">
+                    Aus: Jedes Team startet mit seinem Kader, Solo-Spieler bleiben ohne Team. An: Spieler ohne Check-in
+                    fliegen aus ihrem Team, freie Plätze werden mit eingecheckten Solo-Spielern gefüllt und aus dem Rest
+                    entstehen neue Teams.
+                  </span>
+                </span>
+              </label>
             )}
 
-            {preview.added_players.some((player) => player.source === 'solo_pool') && (
-              <div className="mt-5 space-y-2">
-                <h4 className="text-base font-semibold text-foreground">Auffüllen aus der Solo-Liste</h4>
-                <ul className="space-y-1 text-sm text-foreground">
-                  {preview.added_players
-                    .filter((player) => player.source === 'solo_pool')
-                    .map((player) => (
-                      <li key={`${player.team_id}-${player.discord_id}`}>
-                        {playerName(player.discord_name)} <span className="text-muted">kommt zu {player.team_name}</span>
-                      </li>
-                    ))}
-                </ul>
-              </div>
-            )}
+            <CheckinStartPlan preview={preview} />
 
             {preview.created_teams.length > 0 && (
               <div className="mt-5 space-y-3">
@@ -400,26 +463,44 @@ export default function CheckinManager({
             {preview.warnings.length > 0 ? (
               <div className="mt-5 space-y-3">
                 <h4 className="text-base font-semibold text-foreground">Unvollständige Teams</h4>
+                <p className="text-sm text-muted">
+                  {keepsRosters(preview)
+                    ? 'Hakst du ein Team an, startet es mit seinem Kader, obwohl nicht alle eingecheckt sind.'
+                    : 'Hakst du ein Team an, startet es mit den eingecheckten Spielern in Unterzahl.'}{' '}
+                  Ohne Haken lässt sich das Turnier nicht starten, bis du das Team anhakst oder entfernst.
+                </p>
                 {preview.warnings.map((warning) => (
-                  <label
+                  <div
                     key={warning.team_id}
-                    className="flex items-start gap-3 rounded-xl border border-amber-500/20 bg-amber-500/10 p-4"
+                    className="flex flex-col gap-3 rounded-xl border border-amber-500/20 bg-amber-500/10 p-4 sm:flex-row sm:items-start sm:justify-between"
                   >
-                    <input
-                      type="checkbox"
-                      checked={allowedTeams[warning.team_id] ?? false}
-                      onChange={(event) =>
-                        setAllowedTeams((current) => ({
-                          ...current,
-                          [warning.team_id]: event.target.checked,
-                        }))
-                      }
-                      className="mt-1"
-                    />
-                    <span className="text-sm text-foreground">
-                      {warning.team_name} hat {warning.current}/{warning.required} Spieler und darf trotzdem starten.
-                    </span>
-                  </label>
+                    <label className="flex items-start gap-3">
+                      <input
+                        type="checkbox"
+                        checked={allowedTeams[warning.team_id] ?? false}
+                        onChange={(event) =>
+                          setAllowedTeams((current) => ({
+                            ...current,
+                            [warning.team_id]: event.target.checked,
+                          }))
+                        }
+                        className="mt-1"
+                      />
+                      <span className="text-sm text-foreground">
+                        {keepsRosters(preview)
+                          ? `${warning.team_name} trotzdem starten lassen (${warning.current} von ${warning.required} eingecheckt)`
+                          : `${warning.team_name} in Unterzahl starten lassen (${warning.current} von ${warning.required} Spielern)`}
+                      </span>
+                    </label>
+                    <Button
+                      variant="danger"
+                      size="sm"
+                      disabled={modalBusy}
+                      onClick={() => removeIncompleteTeam(warning.team_id, warning.team_name)}
+                    >
+                      {deleteTeam.isPending && deleteTeam.variables?.teamId === warning.team_id ? 'Entfernt...' : 'Team entfernen'}
+                    </Button>
+                  </div>
                 ))}
               </div>
             ) : (
@@ -428,37 +509,16 @@ export default function CheckinManager({
               </div>
             )}
 
-            {preview.remaining_solo_players.length > 0 && (
-              <div className="mt-5 rounded-xl border border-border bg-background/60 p-4">
-                <h4 className="text-base font-semibold text-foreground">Übrig gebliebene Solo-Spieler</h4>
-                <p className="mt-1 text-sm text-muted">
-                  {preview.auto_team_formation
-                    ? 'Diese Spieler konnten nicht mehr zu einem vollständigen Team zusammengefasst werden und spielen nicht mit.'
-                    : 'Diese Spieler sind in keinem Team und spielen nicht mit. Im PUG-Modus bildet das Tool keine Teams automatisch.'}
-                </p>
-                <div className="mt-3 flex flex-wrap gap-2">
-                  {preview.remaining_solo_players.map((player) => (
-                    <span
-                      key={player.discord_id}
-                      className="rounded-full bg-card px-3 py-1 text-xs text-foreground"
-                    >
-                      {playerName(player.discord_name)}
-                    </span>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            <div className="mt-6 flex justify-end gap-2">
+            <div className="mt-6 flex flex-wrap justify-end gap-2">
               <Button
                 variant="ghost"
                 size="sm"
-                disabled={isBusy}
-                onClick={() => setPreview(null)}
+                disabled={modalBusy}
+                onClick={closePreview}
               >
                 Schließen
               </Button>
-              <Button variant="primary" size="sm" disabled={isBusy || pendingBuilderChanges > 0 || bracketTooSmall} onClick={confirmStart}>
+              <Button variant="primary" size="sm" disabled={modalBusy || pendingBuilderChanges > 0 || bracketTooSmall} onClick={confirmStart}>
                 {finalizeMutation.isPending ? 'Startet...' : 'Turnier jetzt starten'}
               </Button>
             </div>

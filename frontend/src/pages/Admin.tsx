@@ -47,6 +47,7 @@ import BracketView from '@/components/bracket/BracketView'
 import MiniGroupPanel from '@/components/bracket/MiniGroupPanel'
 import AutoLobbyButton from '@/components/admin/AutoLobbyButton'
 import { effectiveBracketFormat } from '@/lib/bracketFormat'
+import { bracketHasResults } from '@/lib/adminWorkflow'
 import {
   Archive,
   CalendarClock,
@@ -78,16 +79,20 @@ export default function Admin() {
   const [createTemplate, setCreateTemplate] = useState<CreateTemplate | null>(null)
   const [createFormKey, setCreateFormKey] = useState(0)
   const [activePhase, setActivePhase] = useState<AdminPhase | null>(null)
+  const [finishedLiveId, setFinishedLiveId] = useState<number | null>(null)
+  const [managerNotice, setManagerNotice] = useState<{ tournamentId: number; text: string } | null>(null)
   const deleteMutation = useDeleteTournament()
 
   const liveTournaments = useMemo(
     () =>
       sortByStart(
-        (tournaments ?? []).filter((t) =>
-          ['draft', 'registration', 'checkin', 'group_phase', 'bracket'].includes(t.status),
+        (tournaments ?? []).filter(
+          (t) =>
+            ['draft', 'registration', 'checkin', 'group_phase', 'bracket'].includes(t.status) ||
+            (t.id === finishedLiveId && t.status === 'completed'),
         ),
       ).sort((a, b) => Number(a.is_test) - Number(b.is_test)),
-    [tournaments],
+    [tournaments, finishedLiveId],
   )
   const archivedTournaments = useMemo(
     () =>
@@ -183,8 +188,9 @@ export default function Admin() {
       )
     : false
   const allowManualOverride = liveDetail
-    ? ['completed', 'archived'].includes(liveDetail.status)
+    ? ['bracket', 'completed', 'archived'].includes(liveDetail.status)
     : false
+  const allowResultReset = liveDetail?.status === 'bracket'
   const currentBracketMatchId =
     liveDetail?.bracket_matches.find(
       (m) => !['completed', 'forfeit', 'cancelled'].includes(m.status),
@@ -258,7 +264,7 @@ export default function Admin() {
       </div>
 
       {adminMode === 'live' && (
-        <div className="grid min-w-0 gap-6 xl:grid-cols-[260px_minmax(0,1fr)]">
+        <div className="grid min-w-0 grid-cols-1 gap-6 xl:grid-cols-[260px_minmax(0,1fr)]">
           <aside className="xl:sticky xl:top-20 xl:self-start xl:max-h-[calc(100vh-6rem)] xl:overflow-y-auto">
             <TournamentSidebar
               tournaments={liveTournaments}
@@ -305,6 +311,15 @@ export default function Admin() {
               </section>
             ) : liveDetail && activePhase ? (
               <>
+                {liveDetail.id === finishedLiveId && liveDetail.status === 'completed' && (
+                  <div
+                    role="status"
+                    className="flex items-center gap-2 rounded-lg border border-green-500/20 bg-green-500/10 p-3 text-sm text-green-400"
+                  >
+                    <Trophy size={16} />
+                    <span>Turnier abgeschlossen. Ergebnisse und Platzierungen sind gespeichert.</span>
+                  </div>
+                )}
                 {selectedSummary && <TournamentSummaryCard tournament={selectedSummary} />}
                 <AdminWorkflowPanel
                   tournament={liveDetail}
@@ -335,6 +350,10 @@ export default function Admin() {
                         playerCount={playerCount}
                         matchCount={matchCount}
                         canChangeTournamentMode={canChangeTournamentMode}
+                        bracketHasResults={bracketHasResults(liveDetail)}
+                        onFinished={() => setFinishedLiveId(liveDetail.id)}
+                        successMessage={managerNotice?.tournamentId === liveDetail.id ? managerNotice.text : ''}
+                        onSuccessMessage={(text) => setManagerNotice({ tournamentId: liveDetail.id, text })}
                       />
                     )}
 
@@ -425,7 +444,7 @@ export default function Admin() {
                             nachtragen.
                           </p>
                         </header>
-                        <GroupStandings groups={liveDetail.groups} teams={liveDetail.teams} />
+                        <GroupStandings groups={liveDetail.groups} teams={liveDetail.teams} admin />
                         <GroupMatchAdminPanel
                           tournamentId={liveDetail.id}
                           groups={liveDetail.groups}
@@ -467,6 +486,7 @@ export default function Admin() {
                           teams={liveDetail.teams}
                           onRefresh={() => void refetchLiveDetail()}
                           allowManualOverride={allowManualOverride}
+                          allowResultReset={allowResultReset}
                         />
                         <details className="rounded-xl border border-border bg-card">
                           <summary className="cursor-pointer px-4 py-3 text-sm font-medium text-foreground/85">

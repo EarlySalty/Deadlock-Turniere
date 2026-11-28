@@ -100,9 +100,16 @@ async fn finalize_checkin_keeps_manual_name_and_uses_captain_name_for_new_team()
         insert_checkin(pool, tournament_id, discord_id).await;
     }
 
-    let preview = finalize_checkin(pool, tournament_id, FinalizeCheckinParams::default())
-        .await
-        .expect("dry run");
+    let preview = finalize_checkin(
+        pool,
+        tournament_id,
+        FinalizeCheckinParams {
+            fill_from_solos: true,
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("dry run");
     finalize_checkin(
         pool,
         tournament_id,
@@ -112,6 +119,7 @@ async fn finalize_checkin_keeps_manual_name_and_uses_captain_name_for_new_team()
             actor_id: None,
             expected_snapshot_token: Some(&preview.snapshot_token),
             advance_to_group_phase: false,
+            fill_from_solos: true,
         },
     )
     .await
@@ -160,9 +168,16 @@ async fn finalize_checkin_rolls_back_team_creation_when_audit_fails() {
         insert_checkin(pool, tournament_id, discord_id).await;
     }
 
-    let preview = finalize_checkin(pool, tournament_id, FinalizeCheckinParams::default())
-        .await
-        .expect("dry run");
+    let preview = finalize_checkin(
+        pool,
+        tournament_id,
+        FinalizeCheckinParams {
+            fill_from_solos: true,
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("dry run");
 
     let err = finalize_checkin(
         pool,
@@ -173,6 +188,7 @@ async fn finalize_checkin_rolls_back_team_creation_when_audit_fails() {
             actor_id: Some("not-a-discord-id"),
             expected_snapshot_token: Some(&preview.snapshot_token),
             advance_to_group_phase: false,
+            fill_from_solos: true,
         },
     )
     .await

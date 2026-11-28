@@ -156,6 +156,55 @@ async fn routine_slot_erzeugt_nur_einen_offenen_vorschlag() {
     assert_eq!(tournament_count, 0);
 }
 
+#[tokio::test]
+async fn routine_draft_refresh_makes_the_preset_mode_explicit() {
+    let db = test_pool().await.expect("central test pool");
+    let pool = db.pool();
+    let preset = presets::create(
+        pool,
+        &NewPreset {
+            name: "Routine Cup".to_string(),
+            category: Category::Fun,
+            config: preset_config(),
+            active: true,
+            created_by: CREATOR.to_string(),
+        },
+    )
+    .await
+    .expect("create preset");
+    let plan = RoutineTournamentPlan {
+        registration_start: utc("2026-07-11T18:01:00Z"),
+        registration_end: utc("2026-07-18T17:30:00Z"),
+        checkin_start: utc("2026-07-18T17:30:00Z"),
+        event_start: utc("2026-07-18T18:00:00Z"),
+        bracket_start: utc("2026-07-18T21:00:00Z"),
+    };
+    let created = ensure_committed(pool, &preset, &plan)
+        .await
+        .expect("create draft");
+    sqlx::query(
+        "UPDATE turnier.tournaments SET tournament_mode = 'bracket_only', \
+         tournament_mode_auto = true WHERE id = $1",
+    )
+    .bind(created.id)
+    .execute(pool)
+    .await
+    .expect("switch draft to auto");
+
+    ensure_committed(pool, &preset, &plan)
+        .await
+        .expect("refresh draft");
+
+    let mode: (String, bool) = sqlx::query_as(
+        "SELECT tournament_mode::text, tournament_mode_auto FROM turnier.tournaments WHERE id = $1",
+    )
+    .bind(created.id)
+    .fetch_one(pool)
+    .await
+    .expect("load mode");
+    assert_eq!(mode, ("group_stage".to_string(), false));
+}
+
 async fn insert_tournament(pool: &Pool, name: &str, status: &str) -> i64 {
     sqlx::query_scalar(
         "INSERT INTO turnier.tournaments \

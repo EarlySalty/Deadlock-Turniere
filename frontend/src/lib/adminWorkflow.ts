@@ -33,6 +33,16 @@ export interface PhaseAvailability {
   hasBracket: boolean
 }
 
+const TERMINAL_MATCH_STATUSES = ['completed', 'forfeit', 'cancelled']
+
+export function bracketFinished(t: Pick<TournamentDetail, 'bracket_matches'>): boolean {
+  return t.bracket_matches.length > 0 && t.bracket_matches.every((match) => TERMINAL_MATCH_STATUSES.includes(match.status))
+}
+
+export function bracketHasResults(t: Pick<TournamentDetail, 'bracket_matches'>): boolean {
+  return t.bracket_matches.some((match) => match.winner_id !== null || TERMINAL_MATCH_STATUSES.includes(match.status))
+}
+
 export function workflowAction(t: TournamentDetail, { hasGroups, hasBracket }: PhaseAvailability): WorkflowAction {
   switch (t.status) {
     case 'draft':
@@ -72,6 +82,15 @@ export function workflowAction(t: TournamentDetail, { hasGroups, hasBracket }: P
         phase: hasGroups ? 'group_phase' : 'setup',
       }
     case 'bracket':
+      if (bracketFinished(t)) {
+        return {
+          stage: 3,
+          title: 'Turnier abschließen',
+          description: 'Alle Bracket-Matches haben ein Ergebnis. Prüfe den Endstand und schließe das Turnier im Setup über „Turnier abschließen“ ab.',
+          button: 'Zum Abschluss',
+          phase: 'setup',
+        }
+      }
       return {
         stage: 3,
         title: 'Bracket und Ergebnisse verwalten',

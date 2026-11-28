@@ -144,7 +144,8 @@ pub async fn ensure_routine_tournament(
                  bracket_start = $8, bracket_format = $9, invite_mode = $10, \
                  tournament_mode = $11, series_format = $12, reminder_offsets = $13, \
                  tournament_game_mode = $14, rules = $15, final_series_format = $16, \
-                 match_objective = $17, start_reminder_offsets = $18, updated_at = now() \
+                 match_objective = $17, start_reminder_offsets = $18, \
+                 tournament_mode_auto = false, updated_at = now() \
                  WHERE id = $19 AND status = 'draft'",
             )
             .bind(&preset.name)

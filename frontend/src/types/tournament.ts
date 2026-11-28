@@ -55,6 +55,7 @@ export interface Tournament {
   bracket_format: BracketFormat
   played_bracket_format?: BracketFormat | null
   tournament_mode: TournamentMode
+  tournament_mode_auto: boolean
   tournament_game_mode: TournamentGameMode
   auto_lobby_enabled: boolean
   invite_mode: InviteMode
@@ -213,8 +214,35 @@ export interface FinalizeCheckinPlayerChange {
   source?: 'solo_pool' | 'new_team'
 }
 
+export interface FinalizeCheckinRosterEntry {
+  discord_id: string
+  discord_name: string | null
+  checked_in: boolean
+  change: 'stays' | 'removed' | 'added'
+}
+
+export interface FinalizeCheckinTeamPlan {
+  team_id: number
+  team_name: string
+  checked_in: number
+  required: number
+  outcome: 'complete' | 'incomplete' | 'deleted'
+  roster: FinalizeCheckinRosterEntry[]
+}
+
+export interface FinalizeCheckinSoloPlan {
+  discord_id: string
+  discord_name: string | null
+  checked_in: boolean
+  outcome: 'joins_team' | 'new_team' | 'stays_solo'
+  team_name: string | null
+}
+
 export interface FinalizeCheckinResult {
   warnings: FinalizeCheckinWarning[]
+  team_plans: FinalizeCheckinTeamPlan[]
+  solo_plans: FinalizeCheckinSoloPlan[]
+  can_fill_from_solos: boolean
   removed_players: FinalizeCheckinPlayerChange[]
   added_players: FinalizeCheckinPlayerChange[]
   created_teams: {
@@ -227,6 +255,10 @@ export interface FinalizeCheckinResult {
   effective_bracket_format: BracketFormat
   double_elimination_rule: string
   bracket_entrants: number | null
+  final_team_count: number
+  tournament_mode: TournamentMode
+  tournament_mode_auto: boolean
+  auto_group_stage_threshold: number
   bracket_startable: boolean
   min_bracket_entrants: number
   deleted_team_ids: number[]
@@ -275,6 +307,7 @@ export interface GroupTeam {
   wins: number
   losses: number
   points: number
+  seed_tiebreak: boolean
 }
 
 export interface BracketMatch {
@@ -356,7 +389,7 @@ export interface TournamentUpdate {
   status?: TournamentStatus
   team_size?: number
   bracket_format?: BracketFormat
-  force_tournament_mode?: TournamentMode
+  force_tournament_mode?: TournamentMode | null
   tournament_game_mode?: TournamentGameMode
   auto_lobby_enabled?: boolean
   series_format?: 1 | 3 | 5
@@ -779,6 +812,7 @@ export interface LeaderboardEntry {
   matches_played: number
   matches_won: number
   best_placement: number | null
+  best_placement_shared: boolean
 }
 
 // --- Player Profile ---
@@ -786,6 +820,7 @@ export interface LeaderboardEntry {
 export interface TournamentHistoryEntry {
   tournament_name: string
   placement: number | null
+  placement_shared: boolean
   team_name: string | null
 }
 

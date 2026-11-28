@@ -20,8 +20,8 @@ import GameRulesFields from './settings/GameRulesFields'
 import SpecialSettingsFields from './settings/SpecialSettingsFields'
 import { SettingsSection, SubHeading } from './settings/SettingsSection'
 import { BasicsFields, DateFields, MatchFormatFields, ReminderFields } from './settings/StandardFields'
-import { buildUpdatePayload, editDateEntries, initialEditState, type EditForm } from './settings/editForm'
-import { MODE_OPTIONS } from './settings/options'
+import { autoFormatSelectable, buildUpdatePayload, editDateEntries, initialEditState, type EditForm } from './settings/editForm'
+import { FORMAT_OPTIONS } from './settings/options'
 import {
   AlertCircle,
   ArrowRight,
@@ -41,6 +41,10 @@ interface TournamentManagerProps {
   playerCount: number
   matchCount: number
   canChangeTournamentMode: boolean
+  bracketHasResults?: boolean
+  onFinished?: () => void
+  successMessage?: string
+  onSuccessMessage?: (text: string) => void
 }
 
 const STATUS_ACTIONS: Record<string, { label: string; confirmMsg: string }> = {
@@ -79,6 +83,10 @@ export default function TournamentManager({
   playerCount,
   matchCount,
   canChangeTournamentMode,
+  bracketHasResults = false,
+  onFinished,
+  successMessage = '',
+  onSuccessMessage,
 }: TournamentManagerProps) {
   const detailsUpdateMutation = useUpdateTournament()
   const advanceMutation = useAdvanceTournament()
@@ -97,7 +105,7 @@ export default function TournamentManager({
   const [customJsonError, setCustomJsonError] = useState('')
   const [setupTab, setSetupTab] = useState<SetupTab>(() => lastSetupTab.get(tournament.id) ?? 'settings')
   const [settingsOpen, setSettingsOpen] = useState(false)
-  const [successMessage, setSuccessMessage] = useState('')
+  const setSuccessMessage = (text: string) => onSuccessMessage?.(text)
   const [deleteConfirmationId, setDeleteConfirmationId] = useState<number | null>(null)
   const deleteConfirmed = deleteConfirmationId === tournament.id
 
@@ -156,8 +164,12 @@ export default function TournamentManager({
   const handleAdvance = () => {
     if (!action) return
     if (window.confirm(action.confirmMsg)) {
+      const finishes = tournament.status === 'bracket' || (storedLeague && leagueRunning)
       advanceMutation.mutate(tournament.id, {
-        onSuccess: () => setSuccessMessage(`Status auf ${action.label} verarbeitet.`),
+        onSuccess: () => {
+          setSuccessMessage(`Status auf ${action.label} verarbeitet.`)
+          if (finishes) onFinished?.()
+        },
       })
     }
   }
@@ -340,11 +352,14 @@ export default function TournamentManager({
               <ChoiceCards
                 name="admin-tournament-mode"
                 legend="Turniermodus"
-                options={MODE_OPTIONS}
+                options={FORMAT_OPTIONS}
                 value={form.tournamentMode}
                 onChange={(tournamentMode) => update({ tournamentMode })}
                 disabled={modeLocked}
-                isOptionDisabled={(mode) => mode === 'league' && leagueRunning && !storedLeague}
+                isOptionDisabled={(mode) =>
+                  (mode === 'league' && leagueRunning && !storedLeague) ||
+                  (mode === 'auto' && !autoFormatSelectable(tournament))
+                }
                 hint={
                   league
                     ? 'Festlegen geht bis zum Abschluss des Check-ins.'
@@ -402,7 +417,7 @@ export default function TournamentManager({
         </summary>
         <div className="space-y-3 border-t border-border p-4">
           <p className="text-sm text-muted">
-            Diese Aktionen können Teams oder Turnierdaten verändern. Für einen normalen PUG-Ablauf sind sie meist nicht nötig.
+            Diese Aktionen können Teams oder Turnierdaten verändern. Für einen normalen Turnierablauf sind sie meist nicht nötig.
           </p>
           <div className="flex flex-wrap gap-2">
             {tournament.status === 'registration' && (
@@ -417,7 +432,7 @@ export default function TournamentManager({
                 {generateGroupsMutation.isPending ? 'Generiert...' : 'Gruppen neu generieren'}
               </Button>
             )}
-            {tournament.status === 'bracket' && (
+            {tournament.status === 'bracket' && !bracketHasResults && (
               <Button variant="secondary" size="sm" disabled={isLoading} onClick={handleGenerateBracket}>
                 <GitBranch size={14} />
                 {generateBracketMutation.isPending ? 'Generiert...' : 'Bracket neu generieren'}

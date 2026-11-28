@@ -9,9 +9,10 @@ interface Props {
   groups: Group[]
   teams?: TeamPublic[]
   league?: boolean
+  admin?: boolean
 }
 
-export default function GroupStandings({ groups, teams = [], league = false }: Props) {
+export default function GroupStandings({ groups, teams = [], league = false, admin = false }: Props) {
   if (groups.length === 0) {
     return (
       <Card className="p-6 text-center">
@@ -33,13 +34,6 @@ export default function GroupStandings({ groups, teams = [], league = false }: P
   return (
     <div className={`grid grid-cols-1 gap-4 ${league ? '' : 'lg:grid-cols-2'}`}>
       {groups.map((group, groupIndex) => {
-        const sortedTeams = league
-          ? group.teams
-          : [...group.teams].sort((a, b) => {
-              if (b.points !== a.points) return b.points - a.points
-              return b.wins - a.wins
-            })
-
         return (
           <motion.div
             key={group.id}
@@ -64,7 +58,7 @@ export default function GroupStandings({ groups, teams = [], league = false }: P
                     </tr>
                   </thead>
                   <tbody>
-                    {sortedTeams.map((team, index) => {
+                    {group.teams.map((team, index) => {
                       const isQualified = !league && index < 2
                       const fullTeam = teamById.get(team.team_id)
                       return (
@@ -99,6 +93,11 @@ export default function GroupStandings({ groups, teams = [], league = false }: P
                                 {team.team_name}
                               </span>
                             </TeamRosterTooltip>
+                            {admin && team.seed_tiebreak && (
+                              <span className="mt-0.5 block text-xs text-amber-200">
+                                Gleichstand, Reihenfolge nach Setzliste
+                              </span>
+                            )}
                           </td>
                           <td className="text-center px-4 py-2.5 text-muted">
                             {team.wins}

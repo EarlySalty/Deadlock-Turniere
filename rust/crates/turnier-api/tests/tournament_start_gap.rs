@@ -286,3 +286,65 @@ async fn rundenplan_verschieben_haelt_den_startabstand() {
         (Some(late), Some(late))
     );
 }
+
+#[tokio::test]
+async fn auto_mode_does_not_read_team_size_as_team_count() {
+    let app = app().await;
+    let mut payload = form_payload("Großteam-Cup", evening());
+    payload["team_size"] = json!(16);
+    let (status, created) = app
+        .call(Method::POST, "/api/admin/tournaments", payload)
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    assert_eq!(created["tournament_mode"], "bracket_only");
+    assert_eq!(created["tournament_mode_auto"], true);
+    let id = created["id"].as_i64().expect("id");
+    let uri = format!("/api/admin/tournaments/{id}");
+
+    let (status, detail) = app.call(Method::GET, &uri, Value::Null).await;
+    assert_eq!(status, StatusCode::OK, "{detail}");
+    assert_eq!(detail["tournament_mode_auto"], true);
+
+    let (status, explicit) = app
+        .call(
+            Method::PUT,
+            &uri,
+            json!({ "force_tournament_mode": "group_stage" }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{explicit}");
+    assert_eq!(explicit["tournament_mode"], "group_stage");
+    assert_eq!(explicit["tournament_mode_auto"], false);
+
+    let (status, untouched) = app
+        .call(Method::PUT, &uri, json!({ "description": "neu" }))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{untouched}");
+    assert_eq!(untouched["tournament_mode"], "group_stage");
+    assert_eq!(untouched["tournament_mode_auto"], false);
+
+    let (status, auto) = app
+        .call(Method::PUT, &uri, json!({ "force_tournament_mode": null }))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{auto}");
+    assert_eq!(auto["tournament_mode"], "bracket_only");
+    assert_eq!(auto["tournament_mode_auto"], true);
+}
+
+#[tokio::test]
+async fn undecided_auto_mode_keeps_the_gap_to_its_group_start() {
+    let app = app().await;
+    let (status, neighbour) = app
+        .create("Nachbar", evening() + Duration::hours(1), false)
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{neighbour}");
+
+    let mut payload = form_payload("Automatik-Cup", evening() - Duration::hours(1));
+    payload["group_phase_start"] = json!(evening().to_rfc3339());
+    payload["bracket_start"] = json!((evening() + Duration::hours(6)).to_rfc3339());
+    let (status, body) = app
+        .call(Method::POST, "/api/admin/tournaments", payload)
+        .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert!(detail(&body).contains("Nachbar"));
+}

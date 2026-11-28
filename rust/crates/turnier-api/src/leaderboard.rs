@@ -1,11 +1,16 @@
 //! Leaderboard-Router: öffentliche Rangliste + Spielerprofil (portiert
 //! `tournament/leaderboard_routes.py`). Beide Endpunkte sind ohne Login erreichbar.
 
+use std::cmp::Ordering;
+use std::collections::HashMap;
+
 use axum::extract::{Path, State};
 use axum::routing::get;
 use axum::{Json, Router};
 
 use turnier_core::{LeaderboardEntry, PlayerProfile, TournamentHistoryEntry};
+
+use turnier_engine::{player_standings, PlayerAggregate};
 
 use crate::db;
 use crate::error::{WebError, WebResult};
@@ -18,56 +23,71 @@ pub fn router() -> Router<AppState> {
         .route("/api/players/{discord_name}", get(get_player_profile))
 }
 
-/// Eine Zeile der Leaderboard-Query.
 #[derive(sqlx::FromRow)]
-struct LeaderboardRow {
+struct PlayerLabelRow {
     discord_id: i64,
-    total_points: i64,
-    tournaments_played: i64,
-    matches_played: i64,
-    matches_won: i64,
-    best_placement: Option<i64>,
     discord_name: Option<String>,
     rank: Option<String>,
 }
 
-/// `GET /api/leaderboard`: globale Rangliste nach Punkten.
 async fn get_leaderboard(State(state): State<AppState>) -> WebResult<Json<Vec<LeaderboardEntry>>> {
-    let rows: Vec<LeaderboardRow> = sqlx::query_as(
-        r#"SELECT pp.discord_id, pp.total_points, pp.tournaments_played,
-                pp.matches_played, pp.matches_won, pp.best_placement,
-                COALESCE(NULLIF(s.discord_name, ''), NULL) AS discord_name,
-                rc.rank
-         FROM turnier."player_points" pp
+    let mut standings: Vec<(i64, PlayerAggregate)> =
+        player_standings(&state.pool).await?.into_iter().collect();
+    standings.sort_by(|(a_id, a), (b_id, b)| {
+        b.total_points
+            .cmp(&a.total_points)
+            .then_with(|| placement_order(a.best_placement, b.best_placement))
+            .then_with(|| a_id.cmp(b_id))
+    });
+    let ids: Vec<i64> = standings.iter().map(|(id, _)| *id).collect();
+    let labels: HashMap<i64, PlayerLabelRow> = sqlx::query_as::<_, PlayerLabelRow>(
+        r#"SELECT ids.discord_id, s.discord_name, rc.rank
+         FROM UNNEST($1::bigint[]) AS ids(discord_id)
          LEFT JOIN (
              SELECT discord_id, MAX(discord_name) AS discord_name
              FROM turnier."sessions"
              WHERE discord_name IS NOT NULL AND discord_name != ''
              GROUP BY discord_id
-         ) s ON s.discord_id = pp.discord_id
-         LEFT JOIN turnier."rank_cache" rc ON rc.discord_id = pp.discord_id
-         ORDER BY pp.total_points DESC, pp.best_placement ASC NULLS LAST"#,
+         ) s ON s.discord_id = ids.discord_id
+         LEFT JOIN turnier."rank_cache" rc ON rc.discord_id = ids.discord_id"#,
     )
+    .bind(&ids)
     .fetch_all(&state.pool)
-    .await?;
+    .await?
+    .into_iter()
+    .map(|row| (row.discord_id, row))
+    .collect();
 
-    let entries = rows
+    let entries = standings
         .into_iter()
         .enumerate()
-        .map(|(index, row)| LeaderboardEntry {
-            rank_position: index as i64 + 1,
-            discord_name: row
-                .discord_name
-                .unwrap_or_else(|| db::discord_id_to_string(row.discord_id)),
-            rank: row.rank,
-            total_points: row.total_points,
-            tournaments_played: row.tournaments_played,
-            matches_played: row.matches_played,
-            matches_won: row.matches_won,
-            best_placement: row.best_placement,
+        .map(|(index, (discord_id, agg))| {
+            let label = labels.get(&discord_id);
+            LeaderboardEntry {
+                rank_position: index as i64 + 1,
+                discord_name: label
+                    .and_then(|l| l.discord_name.clone())
+                    .unwrap_or_else(|| db::discord_id_to_string(discord_id)),
+                rank: label.and_then(|l| l.rank.clone()),
+                total_points: agg.total_points,
+                tournaments_played: agg.tournaments_played,
+                matches_played: agg.matches_played,
+                matches_won: agg.matches_won,
+                best_placement: agg.best_placement,
+                best_placement_shared: agg.best_placement_shared,
+            }
         })
         .collect();
     Ok(Json(entries))
+}
+
+fn placement_order(a: Option<i64>, b: Option<i64>) -> Ordering {
+    match (a, b) {
+        (Some(a), Some(b)) => a.cmp(&b),
+        (Some(_), None) => Ordering::Less,
+        (None, Some(_)) => Ordering::Greater,
+        (None, None) => Ordering::Equal,
+    }
 }
 
 #[derive(sqlx::FromRow)]
@@ -77,11 +97,6 @@ struct ProfileHeadRow {
     bio: Option<String>,
     avatar_filename: Option<String>,
     rank: Option<String>,
-    total_points: i64,
-    tournaments_played: i64,
-    matches_played: i64,
-    matches_won: i64,
-    best_placement: Option<i64>,
 }
 
 /// Ein Eintrag der Turnier-Historie.
@@ -106,12 +121,7 @@ async fn get_player_profile(
     let head: ProfileHeadRow = sqlx::query_as(
         r#"SELECT avatar.discord_avatar,
                   profile.display_name, profile.bio, profile.avatar_filename,
-                  ranks.rank,
-                  COALESCE(points.total_points, 0)::bigint AS total_points,
-                  COALESCE(points.tournaments_played, 0)::bigint AS tournaments_played,
-                  COALESCE(points.matches_played, 0)::bigint AS matches_played,
-                  COALESCE(points.matches_won, 0)::bigint AS matches_won,
-                  points.best_placement
+                  ranks.rank
            FROM (SELECT $1::bigint AS discord_id) identity
            LEFT JOIN LATERAL (
                 SELECT discord_avatar FROM turnier."sessions"
@@ -121,13 +131,16 @@ async fn get_player_profile(
            LEFT JOIN turnier."user_profiles" profile
              ON profile.discord_id = identity.discord_id
            LEFT JOIN turnier."rank_cache" ranks
-             ON ranks.discord_id = identity.discord_id
-           LEFT JOIN turnier."player_points" points
-             ON points.discord_id = identity.discord_id"#,
+             ON ranks.discord_id = identity.discord_id"#,
     )
     .bind(discord_id)
     .fetch_one(pool)
     .await?;
+
+    let points = player_standings(pool)
+        .await?
+        .remove(&discord_id)
+        .unwrap_or_default();
 
     let history: Vec<HistoryRow> = sqlx::query_as(
         r#"SELECT t.name AS tournament_name, teams.name AS team_name
@@ -144,6 +157,7 @@ async fn get_player_profile(
         .map(|h| TournamentHistoryEntry {
             tournament_name: h.tournament_name,
             placement: None,
+            placement_shared: false,
             team_name: h.team_name,
         })
         .collect();
@@ -157,12 +171,12 @@ async fn get_player_profile(
         rank: head.rank,
         // 1:1 erhaltener Original-Bug: rank_score bekommt matches_won (siehe
         // docs/known-issues.md KI-W01), nicht den echten Rang-Score.
-        rank_score: head.matches_won,
-        tournaments_played: head.tournaments_played,
-        matches_played: head.matches_played,
-        matches_won: head.matches_won,
-        best_placement: head.best_placement,
-        total_points: head.total_points,
+        rank_score: points.matches_won,
+        tournaments_played: points.tournaments_played,
+        matches_played: points.matches_played,
+        matches_won: points.matches_won,
+        best_placement: points.best_placement,
+        total_points: points.total_points,
         tournament_history,
     }))
 }

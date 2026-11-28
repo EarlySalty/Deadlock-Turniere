@@ -141,12 +141,13 @@ pub async fn record_game_result(
         .filter(|r| r.get::<Option<i64>, _>("winner_team") == Some(2))
         .count() as i64;
 
-    // Serien-Format ermitteln (Finale → final_series_format, sonst series_format).
     let fmt_row = sqlx::query(
         "SELECT t.series_format AS series_format, t.final_series_format AS final_series_format, \
                 bm.bracket_type AS bracket_type, bm.round AS round, \
                 (SELECT MAX(round) FROM turnier.bracket_matches \
-                 WHERE tournament_id = t.id AND bracket_type = 'winners') AS max_winners_round \
+                 WHERE tournament_id = t.id AND bracket_type = 'winners') AS max_winners_round, \
+                EXISTS(SELECT 1 FROM turnier.bracket_matches \
+                 WHERE tournament_id = t.id AND bracket_type = 'grand_final') AS has_grand_final \
          FROM turnier.tournaments t \
          JOIN turnier.bracket_matches bm ON bm.tournament_id = t.id \
          WHERE bm.id = $1",
@@ -159,12 +160,10 @@ pub async fn record_game_result(
         let bracket_type: String = row.get("bracket_type");
         let round: i64 = row.get("round");
         let max_winners_round: Option<i64> = row.get("max_winners_round");
-        let is_final = bracket_type == "grand_final"
-            || (bracket_type == "winners" && Some(round) == max_winners_round);
+        let has_grand_final: bool = row.get("has_grand_final");
         let final_fmt: Option<i64> = row.get("final_series_format");
-        // Bug-preserved: kein Null-Guard auf series_format (NOT NULL DEFAULT 1).
         let base_fmt: i64 = row.get("series_format");
-        if is_final {
+        if uses_final_series_format(&bracket_type, round, max_winners_round, has_grand_final) {
             final_fmt.unwrap_or(base_fmt)
         } else {
             base_fmt
@@ -234,6 +233,19 @@ pub async fn get_series_games(
         .collect())
 }
 
+pub fn uses_final_series_format(
+    bracket_type: &str,
+    round: i64,
+    max_winners_round: Option<i64>,
+    has_grand_final: bool,
+) -> bool {
+    match bracket_type {
+        "grand_final" => true,
+        "winners" => !has_grand_final && Some(round) == max_winners_round,
+        _ => false,
+    }
+}
+
 /// Berechnet `wins_needed` aus dem Serien-Format (`format / 2 + 1`).
 /// Ausgelagert für DB-freie Unit-Tests.
 pub fn wins_needed(series_format: i64) -> i64 {
@@ -289,5 +301,21 @@ mod tests {
         assert_eq!(wins_needed(3), 2); // Bo3
         assert_eq!(wins_needed(5), 3); // Bo5
         assert_eq!(wins_needed(7), 4); // Bo7
+    }
+
+    #[test]
+    fn double_elimination_final_format_only_for_grand_final_and_reset() {
+        assert!(!uses_final_series_format("winners", 2, Some(2), true));
+        assert!(uses_final_series_format("grand_final", 3, Some(2), true));
+        assert!(uses_final_series_format("grand_final", 4, Some(2), true));
+        assert!(!uses_final_series_format("losers", 4, Some(2), true));
+        assert!(!uses_final_series_format("winners", 1, Some(2), true));
+    }
+
+    #[test]
+    fn single_elimination_final_format_for_last_winners_round() {
+        assert!(uses_final_series_format("winners", 3, Some(3), false));
+        assert!(!uses_final_series_format("winners", 2, Some(3), false));
+        assert!(!uses_final_series_format("winners", 1, None, false));
     }
 }

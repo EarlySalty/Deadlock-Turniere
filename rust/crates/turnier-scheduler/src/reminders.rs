@@ -15,12 +15,12 @@
 use chrono::{DateTime, Duration, Utc};
 use serde_json::Value;
 
-use turnier_core::{discord_id_to_string, now_utc, TournamentMode};
+use turnier_core::{discord_id_to_string, now_utc, TournamentMode, TournamentStatus};
 use turnier_db::{dynamic_sql::ReminderDedupeTable, Pool};
 use turnier_discord::{DiscordNotifier, NotificationEvent};
 use turnier_match::league::current_round_match_ids;
 
-use crate::start_gap::effective_start;
+use crate::start_gap::{candidate_starts, mode_undecided};
 use crate::time::{is_within_configured_window, offset_label, parse_reminder_offsets_with_default};
 
 /// Lädt alle Teilnehmer-Discord-IDs eines Turniers: Solo-Signups UNION
@@ -69,7 +69,9 @@ struct RegistrationReminderRow {
 struct StartReminderRow {
     id: i64,
     name: String,
+    status: TournamentStatus,
     tournament_mode: TournamentMode,
+    tournament_mode_auto: bool,
     registration_end: Option<DateTime<Utc>>,
     group_phase_start: Option<DateTime<Utc>>,
     bracket_start: Option<DateTime<Utc>>,
@@ -87,12 +89,15 @@ struct MatchReminderRow {
 }
 
 fn tournament_start_value(row: &StartReminderRow) -> Option<DateTime<Utc>> {
-    effective_start(
+    candidate_starts(
         row.tournament_mode,
+        mode_undecided(row.tournament_mode, row.tournament_mode_auto, row.status),
         row.group_phase_start,
         row.bracket_start,
         row.registration_end,
     )
+    .first()
+    .copied()
 }
 
 /// Registrierungs-Reminder an Profile mit `notify_registration_reminder = 1`, vor
@@ -203,8 +208,9 @@ pub async fn check_and_send_start_reminders_with_config(
     settings: &turnier_config::SchedulerConfig,
 ) -> sqlx::Result<()> {
     let rows: Vec<StartReminderRow> = sqlx::query_as(
-        "SELECT id, name, tournament_mode, registration_end, group_phase_start, bracket_start, \
-                start_reminder_offsets, is_test FROM turnier.tournaments \
+        "SELECT id, name, status, tournament_mode, tournament_mode_auto, registration_end, \
+                group_phase_start, bracket_start, start_reminder_offsets, is_test \
+         FROM turnier.tournaments \
          WHERE status IN ('registration', 'checkin') ORDER BY id",
     )
     .fetch_all(pool)
@@ -469,7 +475,9 @@ mod tests {
         StartReminderRow {
             id: 1,
             name: "T".into(),
+            status: TournamentStatus::Registration,
             tournament_mode: mode,
+            tournament_mode_auto: false,
             registration_end: None,
             group_phase_start: group.map(utc),
             bracket_start: bracket.map(utc),
@@ -544,5 +552,18 @@ mod tests {
             tournament_start_value(&explicit),
             Some(utc("2026-11-14T19:00:00"))
         );
+    }
+
+    #[test]
+    fn undecided_auto_mode_reminds_for_the_earliest_start() {
+        let mut r = srow(
+            TournamentMode::BracketOnly,
+            Some("2026-06-14T10:00:00"),
+            Some("2026-06-14T12:00:00"),
+        );
+        r.tournament_mode_auto = true;
+        assert_eq!(tournament_start_value(&r), Some(utc("2026-06-14T10:00:00")));
+        r.status = TournamentStatus::Bracket;
+        assert_eq!(tournament_start_value(&r), Some(utc("2026-06-14T12:00:00")));
     }
 }

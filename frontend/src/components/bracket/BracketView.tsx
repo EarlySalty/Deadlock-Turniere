@@ -3,6 +3,7 @@ import { GitBranch } from 'lucide-react'
 import { useMemo } from 'react'
 import Card from '@/components/ui/Card'
 import BracketMatch from './BracketMatch'
+import { bracketStageLabel } from '@/lib/bracketStage'
 import type { BracketFormat, BracketMatch as BracketMatchType, TeamPublic } from '@/types/tournament'
 
 interface Props {
@@ -17,45 +18,6 @@ interface SlotPlaceholders {
 }
 type PlaceholderMap = Map<number, SlotPlaceholders>
 
-function getWinnerRoundLabel(round: number, maxRound: number): string {
-  if (round === maxRound) return 'Finale'
-  if (round === maxRound - 1) return 'Halbfinale'
-  if (round === maxRound - 2) return 'Viertelfinale'
-  return `Runde ${round}`
-}
-
-function getLoserRoundLabel(round: number, maxRound: number, minRound: number): string {
-  if (round === maxRound) return 'LB Finale'
-  const idx = round - minRound + 1
-  return `LB Runde ${idx}`
-}
-
-function getGrandFinalLabel(round: number, gfRounds: number[]): string {
-  const sorted = [...gfRounds].sort((a, b) => a - b)
-  if (sorted.length >= 2 && round === sorted[1]) return 'Bracket Reset (nur bei LB-Sieg)'
-  return 'Grand Final'
-}
-
-function describeStage(match: BracketMatchType, allMatches: BracketMatchType[]): string {
-  if (match.bracket_type === 'winners') {
-    const winners = allMatches.filter((m) => m.bracket_type === 'winners')
-    const maxR = Math.max(...winners.map((m) => m.round))
-    if (match.round === maxR) return 'WB-Finale'
-    if (match.round === maxR - 1) return 'WB-Halbfinale'
-    if (match.round === maxR - 2) return 'WB-Viertelfinale'
-    return `WB R${match.round}`
-  }
-  if (match.bracket_type === 'losers') {
-    const losers = allMatches.filter((m) => m.bracket_type === 'losers')
-    const maxR = Math.max(...losers.map((m) => m.round))
-    if (match.round === maxR) return 'LB-Finale'
-    const minR = Math.min(...losers.map((m) => m.round))
-    const idx = match.round - minR + 1
-    return `LB R${idx}`
-  }
-  return 'Grand Final'
-}
-
 function computePlaceholder(
   match: BracketMatchType,
   slot: 1 | 2,
@@ -65,15 +27,14 @@ function computePlaceholder(
   if (sourceMatchId !== null && sourceMatchId !== undefined) {
     const source = allMatches.find((m) => m.id === sourceMatchId)
     if (source) {
-      return `Sieger ${describeStage(source, allMatches)}`
+      return `Sieger ${bracketStageLabel(source, allMatches)}`
     }
   }
-  // Loser-Drop: ein anderes Match routet seinen Verlierer in diesen Slot
   const loserSource = allMatches.find(
     (m) => m.loser_to_match_id === match.id && m.loser_to_slot === slot,
   )
   if (loserSource) {
-    return `Verlierer ${describeStage(loserSource, allMatches)}`
+    return `Verlierer ${bracketStageLabel(loserSource, allMatches)}`
   }
   return null
 }
@@ -92,11 +53,11 @@ function buildPlaceholderMap(allMatches: BracketMatchType[]): PlaceholderMap {
 interface BracketColumnsProps {
   matches: BracketMatchType[]
   teams: TeamPublic[]
-  roundLabel: (round: number, maxRound: number, minRound: number) => string
+  allMatches: BracketMatchType[]
   placeholders: PlaceholderMap
 }
 
-function BracketColumns({ matches, teams, roundLabel, placeholders }: BracketColumnsProps) {
+function BracketColumns({ matches, teams, allMatches, placeholders }: BracketColumnsProps) {
   const roundsMap = new Map<number, BracketMatchType[]>()
   for (const match of matches) {
     const existing = roundsMap.get(match.round) ?? []
@@ -112,7 +73,6 @@ function BracketColumns({ matches, teams, roundLabel, placeholders }: BracketCol
     }))
 
   const maxRound = Math.max(...rounds.map((r) => r.round))
-  const minRound = Math.min(...rounds.map((r) => r.round))
 
   return (
     <div className="overflow-x-auto pb-4">
@@ -126,7 +86,7 @@ function BracketColumns({ matches, teams, roundLabel, placeholders }: BracketCol
               className="mb-4"
             >
               <span className="text-xs font-semibold text-muted uppercase tracking-wider">
-                {roundLabel(roundData.round, maxRound, minRound)}
+                {bracketStageLabel(roundData.matches[0], allMatches)}
               </span>
             </motion.div>
 
@@ -199,14 +159,12 @@ export default function BracketView({ matches, teams, format }: Props) {
         <BracketColumns
           matches={winners.length > 0 ? winners : matches}
           teams={teams}
-          roundLabel={getWinnerRoundLabel}
+          allMatches={matches}
           placeholders={placeholders}
         />
       </div>
     )
   }
-
-  const gfRounds = grandFinal.map((m) => m.round)
 
   return (
     <div className="space-y-8">
@@ -217,7 +175,7 @@ export default function BracketView({ matches, teams, format }: Props) {
         <BracketColumns
           matches={winners}
           teams={teams}
-          roundLabel={getWinnerRoundLabel}
+          allMatches={matches}
           placeholders={placeholders}
         />
       </section>
@@ -230,7 +188,7 @@ export default function BracketView({ matches, teams, format }: Props) {
           <BracketColumns
             matches={losers}
             teams={teams}
-            roundLabel={getLoserRoundLabel}
+            allMatches={matches}
             placeholders={placeholders}
           />
         </section>
@@ -244,7 +202,7 @@ export default function BracketView({ matches, teams, format }: Props) {
           <BracketColumns
             matches={grandFinal}
             teams={teams}
-            roundLabel={(round) => getGrandFinalLabel(round, gfRounds)}
+            allMatches={matches}
             placeholders={placeholders}
           />
         </section>

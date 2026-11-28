@@ -15,6 +15,7 @@ pub struct GroupTeam {
     pub wins: i64,
     pub losses: i64,
     pub points: i64,
+    pub seed_tiebreak: bool,
 }
 
 /// Ein Match innerhalb der Gruppenphase.
