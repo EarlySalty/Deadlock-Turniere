@@ -12,7 +12,7 @@ import {
   useSetMatchStreamFlag,
   useStartMatch,
 } from '@/hooks/useTournament'
-import type { BracketMatch, MatchGame, Team } from '@/types/tournament'
+import type { AdminBracketMatch as BracketMatch, AdminMatchGame as MatchGame, Team } from '@/types/tournament'
 import {
   AlertCircle,
   Copy,

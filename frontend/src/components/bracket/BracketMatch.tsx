@@ -1,5 +1,5 @@
 import { motion } from 'framer-motion'
-import { CheckCircle2, Circle, Loader2, Key, Trophy } from 'lucide-react'
+import { CheckCircle2, Circle, Loader2, Trophy } from 'lucide-react'
 import TeamRosterTooltip from '@/components/ui/TeamRosterTooltip'
 import type { BracketMatch as BracketMatchType, TeamPublic } from '@/types/tournament'
 import { teamLabel } from '@/lib/teamName'
@@ -101,12 +101,6 @@ export default function BracketMatch({ match, teams, placeholder1, placeholder2 
           <span className="flex items-center gap-1 text-xs text-success">
             <CheckCircle2 size={12} />
             {statusLabel}
-          </span>
-        )}
-        {match.party_code && (
-          <span className="flex items-center gap-1 text-xs text-muted ml-auto">
-            <Key size={12} />
-            {match.party_code}
           </span>
         )}
       </div>

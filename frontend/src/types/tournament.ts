@@ -121,8 +121,8 @@ export interface TournamentSignup {
 
 export interface TournamentDetail extends Tournament {
   teams: Team[]
-  groups: Group[]
-  bracket_matches: BracketMatch[]
+  groups: AdminGroup[]
+  bracket_matches: AdminBracketMatch[]
   mini_groups: BracketMiniGroup[]
   signups: TournamentSignup[]
   guest_ids: string[]
@@ -283,8 +283,6 @@ export interface GroupMatch {
   team2_id: number
   winner_id: number | null
   status: MatchStatus
-  steam_party_id: string | null
-  party_code: string | null
   deadlock_match_id: string | null
   match_duration_s: number | null
   match_stats: string | null
@@ -319,8 +317,6 @@ export interface BracketMatch {
   team2_id: number | null
   winner_id: number | null
   status: MatchStatus
-  steam_party_id: string | null
-  party_code: string | null
   deadlock_match_id: string | null
   match_duration_s: number | null
   match_stats: string | null
@@ -343,14 +339,29 @@ export interface MatchGame {
   bracket_match_id: number
   game_number: number
   status: 'pending' | 'lobby_created' | 'in_progress' | 'completed' | 'cancelled'
-  steam_party_id: string | null
-  party_code: string | null
   deadlock_match_id: string | null
   winner_team: 1 | 2 | null
   duration_s: number | null
   match_stats: string | null
   created_at: string
   completed_at: string | null
+}
+
+export interface LobbyAccess {
+  steam_party_id: string | null
+  party_code: string | null
+}
+
+export type AdminMatchGame = MatchGame & LobbyAccess
+
+export interface AdminBracketMatch extends Omit<BracketMatch, 'games'>, LobbyAccess {
+  games: AdminMatchGame[]
+}
+
+export type AdminGroupMatch = GroupMatch & LobbyAccess
+
+export interface AdminGroup extends Omit<Group, 'matches'> {
+  matches: AdminGroupMatch[]
 }
 
 // --- Create/Update ---

@@ -11,7 +11,7 @@ import {
   useSubmitMatchResult,
 } from '@/hooks/useTournament'
 import { formatRoundTime, leagueRounds } from '@/lib/league'
-import type { Group, GroupMatch, Team } from '@/types/tournament'
+import type { AdminGroup as Group, AdminGroupMatch as GroupMatch, Team } from '@/types/tournament'
 import {
   AlertCircle,
   CheckCircle2,

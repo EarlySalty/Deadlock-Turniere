@@ -8,10 +8,10 @@ use turnier_match::league::tournament_is_league;
 
 use crate::error::WebResult;
 
-pub async fn apply_league_view(
+pub async fn apply_league_view<L>(
     pool: &Pool,
     tournament_id: i64,
-    groups: &mut [Group],
+    groups: &mut [Group<L>],
 ) -> WebResult<()> {
     let league = tournament_is_league(pool, tournament_id).await?;
     for group in groups.iter_mut() {
@@ -23,7 +23,7 @@ pub async fn apply_league_view(
     Ok(())
 }
 
-fn rank_group_teams(group: &mut Group) {
+fn rank_group_teams<L>(group: &mut Group<L>) {
     group.teams.sort_by_key(|team| team.id);
     let standings: Vec<Standing> = group
         .teams
@@ -49,7 +49,7 @@ fn rank_group_teams(group: &mut Group) {
     }
 }
 
-fn assign_rounds(matches: &mut [GroupMatch]) {
+fn assign_rounds<L>(matches: &mut [GroupMatch<L>]) {
     matches.sort_by(|a, b| a.scheduled_at.cmp(&b.scheduled_at).then(a.id.cmp(&b.id)));
     let times: BTreeSet<Option<String>> = matches.iter().map(|m| m.scheduled_at.clone()).collect();
     for game in matches.iter_mut() {
@@ -60,7 +60,7 @@ fn assign_rounds(matches: &mut [GroupMatch]) {
     }
 }
 
-fn completed_game(game: &GroupMatch) -> Option<LeagueGame> {
+fn completed_game<L>(game: &GroupMatch<L>) -> Option<LeagueGame> {
     (game.status == MatchStatus::Completed).then_some(LeagueGame {
         team1_id: game.team1_id,
         team2_id: game.team2_id,
