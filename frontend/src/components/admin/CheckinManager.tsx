@@ -231,71 +231,78 @@ export default function CheckinManager({
 
   return (
     <section className="space-y-4">
-      <Card className="p-6 space-y-4">
-        <div className="flex items-center gap-2">
-          <ClipboardCheck size={18} className="text-primary" />
-          <h2 className="text-lg font-semibold text-foreground">Check-in verwalten</h2>
-        </div>
-        <p className="text-sm text-muted">
-          Der Check-in endet nicht von selbst. Wenn alle da sind, schließt du ihn hier mit „Check-in abschließen“ ab.
-        </p>
-
-        <div className="grid gap-3 md:grid-cols-3">
-          <div className="rounded-xl border border-border bg-background/60 p-4">
-            <div className="text-sm text-muted">Registriert</div>
-            <div className="mt-1 text-2xl font-semibold text-foreground">
-              {participants.length}
+      <Card>
+        <div className="space-y-6">
+          <div className="space-y-1.5">
+            <div className="flex items-center gap-2">
+              <ClipboardCheck size={18} className="text-primary" />
+              <h2 className="text-lg font-semibold text-foreground">Check-in verwalten</h2>
             </div>
+            <p className="text-sm text-muted">
+              Der Check-in endet nicht von selbst. Wenn alle da sind, schließt du ihn hier mit „Check-in abschließen“ ab.
+            </p>
           </div>
-          <div className="rounded-xl border border-border bg-background/60 p-4">
-            <div className="text-sm text-muted">Eingecheckt</div>
-            <div className="mt-1 text-2xl font-semibold text-green-400">
-              {checkinsKnown ? checkedInCount : '…'}
+
+          <dl className="grid grid-cols-3 gap-3">
+            <div className="rounded-xl border border-border bg-background/60 px-4 py-3">
+              <dt className="text-xs text-muted sm:text-sm">Registriert</dt>
+              <dd className="mt-1 text-2xl font-semibold tabular-nums text-foreground">{participants.length}</dd>
             </div>
-          </div>
-          <div className="rounded-xl border border-border bg-background/60 p-4">
-            <div className="text-sm text-muted">Teamgröße</div>
-            <div className="mt-1 text-2xl font-semibold text-foreground">{teamSize}</div>
-          </div>
-        </div>
+            <div className="rounded-xl border border-border bg-background/60 px-4 py-3">
+              <dt className="text-xs text-muted sm:text-sm">Eingecheckt</dt>
+              <dd className="mt-1 text-2xl font-semibold tabular-nums text-green-400">
+                {checkinsKnown ? checkedInCount : '…'}
+              </dd>
+            </div>
+            <div className="rounded-xl border border-border bg-background/60 px-4 py-3">
+              <dt className="text-xs text-muted sm:text-sm">Teamgröße</dt>
+              <dd className="mt-1 text-2xl font-semibold tabular-nums text-foreground">{teamSize}</dd>
+            </div>
+          </dl>
 
-        {feedback && (
-          <div className="flex items-center gap-2 rounded-lg border border-green-500/20 bg-green-500/10 p-3 text-sm text-green-400">
-            <CheckCircle2 size={16} />
-            <span>{feedback}</span>
+          {feedback && (
+            <div className="flex items-center gap-2 rounded-lg border border-green-500/20 bg-green-500/10 p-3 text-sm text-green-400">
+              <CheckCircle2 size={16} />
+              <span>{feedback}</span>
+            </div>
+          )}
+
+          {error && !preview && (
+            <div role="alert" className="flex items-center gap-2 rounded-lg border border-red-500/20 bg-red-500/10 p-3 text-sm text-red-400">
+              <AlertCircle size={16} />
+              <span>{error instanceof Error ? error.message : 'Check-in konnte nicht verarbeitet werden'}</span>
+            </div>
+          )}
+
+          <div className="flex flex-col gap-3 rounded-xl border border-primary/30 bg-primary/5 p-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="space-y-0.5">
+              <p className="text-sm font-medium text-foreground">Alle da?</p>
+              <p className="text-xs text-muted">Du siehst vorher eine Vorschau, welche Teams bereinigt werden.</p>
+            </div>
+            <Button variant="primary" size="md" className="shrink-0" disabled={isBusy} onClick={() => runPreview(false)}>
+              {finalizeMutation.isPending ? 'Prüft...' : 'Check-in abschließen & Teams bereinigen'}
+            </Button>
           </div>
-        )}
 
-        {error && !preview && (
-          <div role="alert" className="flex items-center gap-2 rounded-lg border border-red-500/20 bg-red-500/10 p-3 text-sm text-red-400">
-            <AlertCircle size={16} />
-            <span>{error instanceof Error ? error.message : 'Check-in konnte nicht verarbeitet werden'}</span>
+          <div className="flex flex-col gap-3 border-t border-border pt-5 sm:flex-row sm:items-center sm:justify-between">
+            <div className="space-y-0.5">
+              <p className="text-sm font-medium text-foreground">Zurück zur Anmeldung</p>
+              <p className="text-xs text-muted">Alle bisherigen Check-ins werden gelöscht.</p>
+            </div>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="shrink-0 border border-red-500/40 text-red-400 hover:bg-red-500/10"
+              disabled={isBusy}
+              onClick={handleRevert}
+            >
+              {revertMutation.isPending ? 'Setzt zurück...' : 'Check-in zurücksetzen'}
+            </Button>
           </div>
-        )}
-
-        <div className="flex flex-wrap gap-2">
-          <Button variant="primary" size="sm" disabled={isBusy} onClick={() => runPreview(false)}>
-            {finalizeMutation.isPending ? 'Prüft...' : 'Check-in abschließen & Teams bereinigen'}
-          </Button>
-        </div>
-
-        <div className="flex flex-col gap-3 border-t border-border pt-4 sm:flex-row sm:items-center sm:justify-between">
-          <p className="text-xs text-muted">
-            Zurück zur Anmeldung: Alle bisherigen Check-ins werden gelöscht.
-          </p>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="shrink-0 border border-red-500/40 text-red-400 hover:bg-red-500/10"
-            disabled={isBusy}
-            onClick={handleRevert}
-          >
-            {revertMutation.isPending ? 'Setzt zurück...' : 'Check-in zurücksetzen'}
-          </Button>
         </div>
       </Card>
 
-      <Card className="p-4 sm:p-6">
+      <Card>
         <div className="mb-4">
           <h3 className="text-base font-semibold text-foreground">Teilnehmerstatus</h3>
           <p className="mt-1 text-sm text-muted">Fehlende Spieler werden zuerst angezeigt.</p>

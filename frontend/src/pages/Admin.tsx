@@ -309,8 +309,8 @@ export default function Admin() {
       </div>
 
       {adminMode === 'live' && (
-        <div className="grid min-w-0 grid-cols-1 gap-6 xl:grid-cols-[260px_minmax(0,1fr)]">
-          <aside className="xl:sticky xl:top-20 xl:self-start xl:max-h-[calc(100vh-6rem)] xl:overflow-y-auto">
+        <div className="grid min-w-0 grid-cols-1 gap-6 lg:grid-cols-[300px_minmax(0,1fr)]">
+          <aside className="lg:sticky lg:top-20 lg:self-start lg:max-h-[calc(100vh-6rem)] lg:overflow-y-auto">
             <TournamentSidebar
               tournaments={liveTournaments}
               selectedId={liveSelectedId}

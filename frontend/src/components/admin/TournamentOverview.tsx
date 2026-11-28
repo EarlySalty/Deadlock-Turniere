@@ -49,39 +49,46 @@ interface SidebarProps {
 
 export function TournamentSidebar({ tournaments, selectedId, creating, onSelect, onCreate }: SidebarProps) {
   return (
-    <Card className="space-y-4 p-4">
-      <CreateEntry active={creating} onCreate={onCreate} />
-      <div className="space-y-2 border-t border-border pt-4">
-        <h2 className="text-xs font-semibold uppercase tracking-wider text-muted">
-          Geplant und laufend ({tournaments.length})
-        </h2>
-        {tournaments.length === 0 ? (
-          <p className="text-xs text-muted">Noch nichts geplant.</p>
-        ) : (
-          <ul className="space-y-1.5">
-            {tournaments.map((t) => (
-              <li key={t.id}>
-                <button
-                  type="button"
-                  onClick={() => onSelect(t.id)}
-                  aria-current={!creating && selectedId === t.id}
-                  className={`w-full rounded-lg border px-3 py-2 text-left transition-colors ${
-                    !creating && selectedId === t.id
-                      ? 'border-primary/60 bg-primary/10'
-                      : 'border-border hover:bg-card-hover'
-                  }`}
-                >
-                  <span className="block truncate text-sm font-medium text-foreground">{t.name}</span>
-                  <span className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1">
-                    <Badge status={t.status} mode={t.tournament_mode} />
-                    {t.is_test && <TestBadge />}
-                    <span className="text-[11px] text-muted">Start {formatDate(tournamentStart(t))}</span>
-                  </span>
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
+    <Card>
+      <div className="space-y-4">
+        <CreateEntry active={creating} onCreate={onCreate} />
+        <div className="space-y-3 border-t border-border pt-4">
+          <h2 className="text-xs font-semibold uppercase tracking-wider text-muted">
+            Geplant und laufend ({tournaments.length})
+          </h2>
+          {tournaments.length === 0 ? (
+            <p className="text-xs text-muted">Noch nichts geplant.</p>
+          ) : (
+            <ul className="space-y-2">
+              {tournaments.map((t) => (
+                <li key={t.id}>
+                  <button
+                    type="button"
+                    onClick={() => onSelect(t.id)}
+                    aria-current={!creating && selectedId === t.id}
+                    className={`w-full rounded-lg border px-3 py-2.5 text-left transition-colors ${
+                      !creating && selectedId === t.id
+                        ? 'border-primary/60 bg-primary/10'
+                        : 'border-border hover:bg-card-hover'
+                    }`}
+                  >
+                    <span className="line-clamp-2 break-words text-sm font-medium leading-snug text-foreground" title={t.name}>{t.name}</span>
+                    <span className="mt-2 flex items-center justify-between gap-2">
+                      <span className="flex min-w-0 items-center gap-1.5">
+                        <Badge status={t.status} mode={t.tournament_mode} />
+                        {t.is_test && <TestBadge />}
+                      </span>
+                      <span className="flex shrink-0 items-center gap-1 text-xs tabular-nums text-muted">
+                        <CalendarDays size={12} />
+                        {formatDate(tournamentStart(t))}
+                      </span>
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
       </div>
     </Card>
   )
@@ -102,22 +109,24 @@ function Fact({ label, value }: { label: string; value: string }) {
 
 export function TournamentSummaryCard({ tournament: t }: { tournament: AdminTournamentSummary }) {
   return (
-    <Card className="space-y-4 p-5">
-      <div className="flex flex-wrap items-center gap-3">
-        <Trophy size={20} className="shrink-0 text-primary" />
-        <h2 className="min-w-0 flex-1 break-words text-xl font-bold text-foreground">{t.name}</h2>
-        <Badge status={t.status} mode={t.tournament_mode} />
-        {t.is_test && <TestBadge />}
+    <Card>
+      <div className="space-y-4">
+        <div className="flex flex-wrap items-center gap-3">
+          <Trophy size={20} className="shrink-0 text-primary" />
+          <h2 className="min-w-0 flex-1 break-words text-xl font-bold text-foreground">{t.name}</h2>
+          <Badge status={t.status} mode={t.tournament_mode} />
+          {t.is_test && <TestBadge />}
+        </div>
+        <dl className="grid grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-4">
+          <Fact label="Anmeldung bis" value={formatDate(t.registration_end)} />
+          <Fact label="Check-in ab" value={formatDate(t.checkin_start)} />
+          <Fact label="Start" value={formatDate(tournamentStart(t))} />
+          <Fact label="Teamgröße" value={t.team_size <= 1 ? 'Einzelspieler' : `${t.team_size} Spieler`} />
+          <Fact label="Teams" value={String(t.team_count)} />
+          <Fact label="Spieler in Teams" value={String(t.player_count)} />
+          <Fact label="Anmeldungen" value={`${t.signup_count} (${t.open_signup_count} ohne Team)`} />
+        </dl>
       </div>
-      <dl className="grid grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-4">
-        <Fact label="Anmeldung bis" value={formatDate(t.registration_end)} />
-        <Fact label="Check-in ab" value={formatDate(t.checkin_start)} />
-        <Fact label="Start" value={formatDate(tournamentStart(t))} />
-        <Fact label="Teamgröße" value={t.team_size <= 1 ? 'Einzelspieler' : `${t.team_size} Spieler`} />
-        <Fact label="Teams" value={String(t.team_count)} />
-        <Fact label="Spieler in Teams" value={String(t.player_count)} />
-        <Fact label="Anmeldungen" value={`${t.signup_count} (${t.open_signup_count} ohne Team)`} />
-      </dl>
     </Card>
   )
 }
