@@ -413,7 +413,7 @@
   color:#eee3cb;
 }
 .draft-arena-screen:before,.draft-waiting-screen:before{
-  content:'THE CITY NEVER SLEEPS';
+  content:'DIE STADT SCHLÄFT NIE';
   position:absolute;
   z-index:1;
   left:clamp(24px,5vw,100px);

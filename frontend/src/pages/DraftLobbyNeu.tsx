@@ -77,15 +77,15 @@ export default function DraftLobbyNeu() {
           </div>
           <div className="draft-pulp__poster-head">
             <div className="draft-pulp__seal" aria-hidden="true">✶</div>
-            <span className="draft-pulp__poster-kicker">THE DEUTSCHE DEADLOCK COMMUNITY PRESENTS</span>
-            <h1><span>THE</span><strong>DRAFT</strong></h1>
+            <span className="draft-pulp__poster-kicker">DIE DEUTSCHE DEADLOCK COMMUNITY PRÄSENTIERT</span>
+            <h1><span>DER</span><strong>DRAFT</strong></h1>
             <span className="draft-pulp__rule" />
             <p className="draft-pulp__tagline">Zwei Seiten. Zwölf Helden.<br />Eine Nacht, die alles entscheidet.</p>
           </div>
           <div className="draft-pulp__poster-footer" aria-hidden="true">
-            <span>THE CITY NEVER SLEEPS</span>
+            <span>DIE STADT SCHLÄFT NIE</span>
             <span className="draft-pulp__poster-sigil">✦</span>
-            <span>THE GODS ARE WATCHING</span>
+            <span>DIE GÖTTER SEHEN ZU</span>
           </div>
         </section>
 
@@ -93,7 +93,7 @@ export default function DraftLobbyNeu() {
           <div className="draft-pulp__desk-inner">
             <TeamModeNav />
             <div className="draft-pulp__intro">
-              <div className="pulp-overline">PRIVATE SCRIM / CUSTOM GAME</div>
+              <div className="pulp-overline">PRIVATES SCRIM · EIGENE LOBBY</div>
               <h2>{segment === 'anlegen' ? <>BEREIT FÜR<br /><em>DEN DRAFT?</em></> : <>ZURÜCK IN<br /><em>DEN KAMPF.</em></>}</h2>
               <p>{segment === 'anlegen'
                 ? 'Stelle die Regeln auf, gib beiden Seiten einen Namen und eröffne die Auswahl. Der Raum gehört den Captains.'
@@ -140,7 +140,7 @@ export default function DraftLobbyNeu() {
 
                 <div className="draft-pulp__configuration">
                   <div className="draft-pulp__format">
-                    <span className="pulp-overline">MATCH FORMAT</span>
+                    <span className="pulp-overline">SPIELFORMAT</span>
                     <strong>6 <span>VS</span> 6</strong>
                     <span className="draft-pulp__hint">Standard · 12 Picks</span>
                   </div>

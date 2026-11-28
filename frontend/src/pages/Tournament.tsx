@@ -748,9 +748,9 @@ export default function Tournament() {
         {activeTab === 'teams' && (
           <div className="dl-roster space-y-8">
             <div className="dl-roster__masthead">
-              <span>NEW YORK CITY / TOURNAMENT REGISTRY</span>
+              <span>{tournament.name}</span>
               <h2>TEAMS <em>&</em> SPIELER</h2>
-              <p>Jede Crew. Jeder Name. Auf einen Blick.</p>
+              <p>Jedes Team. Jeder Name. Auf einen Blick.</p>
             </div>
             <div className={`grid min-w-0 gap-6 ${userTeam || (isSignupOpen && !soloOnly && isLoggedIn && !userHasSoloSignup) ? 'xl:grid-cols-[minmax(14rem,260px)_minmax(0,1fr)]' : ''}`}>
               {(userTeam || (isSignupOpen && !soloOnly && isLoggedIn && !userHasSoloSignup)) && <div className="space-y-6">
