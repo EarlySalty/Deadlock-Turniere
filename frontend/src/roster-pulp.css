@@ -21,6 +21,8 @@
   pointer-events:none;
 }
 .dl-roster__masthead>span {
+  display: block;
+  overflow-wrap: anywhere;
   font: 800 11px/1.2 ui-monospace,monospace;
   color:#d5be96;
   letter-spacing:.2em;

@@ -342,7 +342,7 @@ function DraftTisch({
                 disabled={!amZug || bestaetigtLaeuft}
                 className="rounded border border-[#c8a86b] bg-[#c8a86b] px-4 py-2 text-sm font-bold text-[#17140c] hover:brightness-110 disabled:opacity-50"
               >
-                {bestaetigtLaeuft ? 'Wird bestätigt…' : istBanZug ? 'Ban bestätigen' : 'Pick bestätigen'}
+                {bestaetigtLaeuft ? 'Wird bestätigt …' : istBanZug ? 'Ban bestätigen' : 'Pick bestätigen'}
               </button>
             </div>
           )}
