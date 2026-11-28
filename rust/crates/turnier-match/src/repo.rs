@@ -343,9 +343,6 @@ pub async fn is_test_tournament(pool: &Pool, tournament_id: i64) -> MatchResult<
     Ok(row.map(|r| r.get::<bool, _>("is_test")).unwrap_or(false))
 }
 
-/// Lädt die Teilnehmer beider Teams in stabiler Reihenfolge
-/// (`ORDER BY t.id, tm.is_bench, tm.joined_at, tm.id`). Kein Team gesetzt → leere Liste.
-/// Entspricht `_load_match_participants`.
 pub async fn load_participants(pool: &Pool, m: &MatchRow) -> MatchResult<Vec<Participant>> {
     let team_ids: Vec<i64> = [m.team1_id, m.team2_id].into_iter().flatten().collect();
     if team_ids.is_empty() {
