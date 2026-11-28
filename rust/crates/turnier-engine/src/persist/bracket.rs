@@ -39,6 +39,13 @@ struct Qualifier {
 /// Portiert `generate_bracket(tournament_id, bracket_format)`: Das übergebene
 /// `bracket_format`-Argument wird (wie im Original) ignoriert und stattdessen aus
 /// der `tournaments`-Zeile gelesen.
+pub async fn generate_bracket(pool: &Pool<Postgres>, tournament_id: i64) -> TournamentResult<i64> {
+    let mut tx = pool.begin().await?;
+    let match_count = generate_bracket_in_tx(&mut tx, tournament_id).await?;
+    tx.commit().await?;
+    Ok(match_count)
+}
+
 async fn ranked_group_standings(
     tx: &mut Transaction<'_, Postgres>,
     group_id: i64,
@@ -77,13 +84,6 @@ async fn ranked_group_standings(
         .iter()
         .filter_map(|row| seeded.iter().find(|s| s.team_id == row.team_id).copied())
         .collect())
-}
-
-pub async fn generate_bracket(pool: &Pool<Postgres>, tournament_id: i64) -> TournamentResult<i64> {
-    let mut tx = pool.begin().await?;
-    let match_count = generate_bracket_in_tx(&mut tx, tournament_id).await?;
-    tx.commit().await?;
-    Ok(match_count)
 }
 
 /// Transaktionsfähige Variante von [`generate_bracket`].

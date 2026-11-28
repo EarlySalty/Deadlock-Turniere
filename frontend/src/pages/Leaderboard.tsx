@@ -6,7 +6,6 @@ import Card from '@/components/ui/Card'
 import LoadingSpinner from '@/components/ui/LoadingSpinner'
 import { placementLabel } from '@/lib/bracketPlacements'
 
-
 function RankMedal({ position }: { position: number }) {
   if (position === 1) return <Trophy size={20} className="text-primary shadow-[var(--glow-primary)]" />
   if (position === 2) return <Medal size={20} className="text-slate-300" />
