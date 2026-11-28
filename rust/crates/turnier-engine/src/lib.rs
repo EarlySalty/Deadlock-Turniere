@@ -58,7 +58,8 @@ pub use persist::{
     generate_league_plan_in_tx, league_slot_minutes_in_tx, recalculate_player_points,
     recalculate_player_points_in_tx, reschedule_league_plan_in_tx, AddedPlayer, CreatedTeam,
     FinalizeCheckinParams, FinalizeCheckinResult, LeaguePlanSummary, NoShuffle, RemovedPlayer,
-    RngShuffler, SoloPlayer, SoloShuffler, TeamWarning,
+    RngShuffler, RosterChange, RosterEntry, SoloOutcome, SoloPlan, SoloPlayer, SoloShuffler,
+    TeamOutcome, TeamPlan, TeamWarning,
 };
 #[cfg(feature = "persist")]
 pub use persist::{

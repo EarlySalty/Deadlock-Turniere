@@ -25,7 +25,8 @@ pub use bracket::{generate_bracket, generate_bracket_in_tx};
 pub use checkin::{
     assign_random_teams, build_checkin_snapshot_token, finalize_checkin, AddedPlayer, CreatedTeam,
     FinalizeCheckinParams, FinalizeCheckinResult, NoShuffle, RemovedPlayer, RngShuffler,
-    SoloPlayer, SoloShuffler, TeamWarning,
+    RosterChange, RosterEntry, SoloOutcome, SoloPlan, SoloPlayer, SoloShuffler, TeamOutcome,
+    TeamPlan, TeamWarning,
 };
 pub use groups::{
     generate_group_matches, generate_group_matches_in_tx, generate_groups, generate_groups_in_tx,

@@ -145,11 +145,16 @@ export const finalizeCheckin = (
   confirm: boolean,
   allowedTeamIds: number[] = [],
   snapshotToken?: string,
+  fillFromSolos = false,
 ) => request<FinalizeCheckinResult>(
   `/admin/tournaments/${id}/finalize-checkin${confirm ? '?confirm=true' : ''}`,
   {
     method: 'POST',
-    body: JSON.stringify({ allowed_team_ids: allowedTeamIds, snapshot_token: snapshotToken }),
+    body: JSON.stringify({
+      allowed_team_ids: allowedTeamIds,
+      snapshot_token: snapshotToken,
+      fill_from_solos: fillFromSolos,
+    }),
   }
 )
 

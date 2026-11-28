@@ -116,6 +116,8 @@ struct FinalizeBody {
     allowed_team_ids: Option<Vec<Value>>,
     #[serde(default)]
     snapshot_token: Option<String>,
+    #[serde(default)]
+    fill_from_solos: bool,
 }
 
 pub(crate) async fn finalize_checkin_and_plan_lobbies(
@@ -175,6 +177,7 @@ async fn finalize_checkin_route(
             actor_id: Some(&user.discord_id),
             expected_snapshot_token: snapshot_token.as_deref(),
             advance_to_group_phase: query.confirm,
+            fill_from_solos: body.fill_from_solos,
         },
     )
     .await?;
@@ -207,7 +210,28 @@ async fn finalize_checkin_route(
                 "discord_name": m.discord_name,
             })).collect::<Vec<_>>(),
         })).collect::<Vec<_>>(),
+        "team_plans": result.team_plans.iter().map(|t| json!({
+            "team_id": t.team_id,
+            "team_name": t.team_name,
+            "checked_in": t.checked_in,
+            "required": t.required,
+            "outcome": t.outcome.as_str(),
+            "roster": t.roster.iter().map(|m| json!({
+                "discord_id": m.discord_id,
+                "discord_name": m.discord_name,
+                "checked_in": m.checked_in,
+                "change": m.change.as_str(),
+            })).collect::<Vec<_>>(),
+        })).collect::<Vec<_>>(),
+        "solo_plans": result.solo_plans.iter().map(|p| json!({
+            "discord_id": p.discord_id,
+            "discord_name": p.discord_name,
+            "checked_in": p.checked_in,
+            "outcome": p.outcome.as_str(),
+            "team_name": p.team_name,
+        })).collect::<Vec<_>>(),
         "auto_team_formation": result.auto_team_formation,
+        "can_fill_from_solos": result.can_fill_from_solos,
         "bracket_format": result.bracket_format,
         "effective_bracket_format": result.effective_bracket_format,
         "double_elimination_rule": turnier_engine::engine::double_elim::DOUBLE_ELIMINATION_RULE,

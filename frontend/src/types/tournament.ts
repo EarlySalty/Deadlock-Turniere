@@ -214,8 +214,35 @@ export interface FinalizeCheckinPlayerChange {
   source?: 'solo_pool' | 'new_team'
 }
 
+export interface FinalizeCheckinRosterEntry {
+  discord_id: string
+  discord_name: string | null
+  checked_in: boolean
+  change: 'stays' | 'removed' | 'added'
+}
+
+export interface FinalizeCheckinTeamPlan {
+  team_id: number
+  team_name: string
+  checked_in: number
+  required: number
+  outcome: 'complete' | 'incomplete' | 'deleted'
+  roster: FinalizeCheckinRosterEntry[]
+}
+
+export interface FinalizeCheckinSoloPlan {
+  discord_id: string
+  discord_name: string | null
+  checked_in: boolean
+  outcome: 'joins_team' | 'new_team' | 'stays_solo'
+  team_name: string | null
+}
+
 export interface FinalizeCheckinResult {
   warnings: FinalizeCheckinWarning[]
+  team_plans: FinalizeCheckinTeamPlan[]
+  solo_plans: FinalizeCheckinSoloPlan[]
+  can_fill_from_solos: boolean
   removed_players: FinalizeCheckinPlayerChange[]
   added_players: FinalizeCheckinPlayerChange[]
   created_teams: {

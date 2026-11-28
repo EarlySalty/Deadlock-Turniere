@@ -498,7 +498,10 @@ pub struct FinalizeCheckinResult {
     pub created_teams: Vec<CreatedTeam>,
     pub deleted_team_ids: Vec<i64>,
     pub remaining_solo_players: Vec<SoloPlayer>,
+    pub team_plans: Vec<TeamPlan>,
+    pub solo_plans: Vec<SoloPlan>,
     pub auto_team_formation: bool,
+    pub can_fill_from_solos: bool,
     pub bracket_format: BracketFormat,
     pub effective_bracket_format: BracketFormat,
     pub bracket_entrants: Option<usize>,
@@ -546,6 +549,153 @@ pub struct CreatedTeam {
 pub struct SoloPlayer {
     pub discord_id: String,
     pub discord_name: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RosterChange {
+    Stays,
+    Removed,
+    Added,
+}
+
+impl RosterChange {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Stays => "stays",
+            Self::Removed => "removed",
+            Self::Added => "added",
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct RosterEntry {
+    pub discord_id: String,
+    pub discord_name: Option<String>,
+    pub checked_in: bool,
+    pub change: RosterChange,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TeamOutcome {
+    Complete,
+    Incomplete,
+    Deleted,
+}
+
+impl TeamOutcome {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Complete => "complete",
+            Self::Incomplete => "incomplete",
+            Self::Deleted => "deleted",
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct TeamPlan {
+    pub team_id: i64,
+    pub team_name: String,
+    pub roster: Vec<RosterEntry>,
+    pub checked_in: i64,
+    pub required: i64,
+    pub outcome: TeamOutcome,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SoloOutcome {
+    JoinsTeam,
+    NewTeam,
+    StaysSolo,
+}
+
+impl SoloOutcome {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::JoinsTeam => "joins_team",
+            Self::NewTeam => "new_team",
+            Self::StaysSolo => "stays_solo",
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct SoloPlan {
+    pub discord_id: String,
+    pub discord_name: Option<String>,
+    pub checked_in: bool,
+    pub outcome: SoloOutcome,
+    pub team_name: Option<String>,
+}
+
+fn solo_plans(
+    signup_iter_order: &[i64],
+    signups_by_discord: &HashMap<i64, SignupData>,
+    checked_in_ids: &HashSet<i64>,
+    added_players: &[AddedPlayer],
+) -> Vec<SoloPlan> {
+    signup_iter_order
+        .iter()
+        .filter_map(|discord_id| signups_by_discord.get(discord_id))
+        .filter(|signup| signup.team_id.is_none())
+        .map(|signup| {
+            let id = discord_id_to_string(signup.discord_id);
+            let added = added_players.iter().find(|p| p.discord_id == id);
+            let outcome = match added.map(|p| p.source) {
+                Some("solo_pool") => SoloOutcome::JoinsTeam,
+                Some(_) => SoloOutcome::NewTeam,
+                None => SoloOutcome::StaysSolo,
+            };
+            SoloPlan {
+                discord_id: id,
+                discord_name: signup.discord_name.clone(),
+                checked_in: checked_in_ids.contains(&signup.discord_id),
+                outcome,
+                team_name: added.map(|p| p.team_name.clone()),
+            }
+        })
+        .collect()
+}
+
+fn team_roster(
+    original: &[MemberData],
+    kept: &[MemberData],
+    checked_in_ids: &HashSet<i64>,
+) -> Vec<RosterEntry> {
+    let kept_ids: HashSet<i64> = kept.iter().map(|m| m.discord_id).collect();
+    let original_ids: HashSet<i64> = original.iter().map(|m| m.discord_id).collect();
+    let current = original.iter().map(|m| {
+        let change = if kept_ids.contains(&m.discord_id) {
+            RosterChange::Stays
+        } else {
+            RosterChange::Removed
+        };
+        (m, change)
+    });
+    let added = kept
+        .iter()
+        .filter(|m| !original_ids.contains(&m.discord_id))
+        .map(|m| (m, RosterChange::Added));
+    current
+        .chain(added)
+        .map(|(m, change)| RosterEntry {
+            discord_id: discord_id_to_string(m.discord_id),
+            discord_name: m.discord_name.clone(),
+            checked_in: checked_in_ids.contains(&m.discord_id),
+            change,
+        })
+        .collect()
+}
+
+fn snapshot_token_for_formation(base: String, fill_from_solos: bool) -> String {
+    if !fill_from_solos {
+        return base;
+    }
+    let mut hasher = Sha256::new();
+    hasher.update(base.as_bytes());
+    hasher.update(b":fill_from_solos");
+    hasher.finalize_hex()
 }
 
 async fn store_resolved_mode(
@@ -636,6 +786,7 @@ pub struct FinalizeCheckinParams<'a> {
     pub actor_id: Option<&'a str>,
     pub expected_snapshot_token: Option<&'a str>,
     pub advance_to_group_phase: bool,
+    pub fill_from_solos: bool,
 }
 
 /// Dry-Run/Confirm-Bereinigung der Teams nach Turnier-Check-ins. Portiert
@@ -664,7 +815,14 @@ pub async fn finalize_checkin(
         ));
     }
 
-    let snapshot_token = snapshot_token_in_tx(&mut tx, tournament_id, tournament.status).await?;
+    let can_fill_from_solos = tournament.invite_mode != InviteMode::SoloOnly;
+    let auto_team_formation = can_fill_from_solos && params.fill_from_solos;
+    let keep_rosters = can_fill_from_solos && !params.fill_from_solos;
+
+    let snapshot_token = snapshot_token_for_formation(
+        snapshot_token_in_tx(&mut tx, tournament_id, tournament.status).await?,
+        auto_team_formation,
+    );
     if params.confirm {
         match params.expected_snapshot_token {
             None => {
@@ -773,7 +931,7 @@ pub async fn finalize_checkin(
         let members = team_states.get(team_id).cloned().unwrap_or_default();
         let mut kept: Vec<MemberData> = Vec::new();
         for member in members {
-            if checked_in_ids.contains(&member.discord_id) {
+            if keep_rosters || checked_in_ids.contains(&member.discord_id) {
                 kept.push(member);
             } else {
                 removed_members.push(RemovedPlayer {
@@ -825,7 +983,6 @@ pub async fn finalize_checkin(
     let mut added_players: Vec<AddedPlayer> = Vec::new();
     let mut created_teams: Vec<CreatedTeamPlan> = Vec::new();
     let mut affected_team_ids: HashSet<i64> = HashSet::new();
-    let auto_team_formation = tournament.invite_mode != InviteMode::SoloOnly;
 
     // Unvollständige bestehende Teams aus dem Pool auffüllen.
     for team_id in &team_order {
@@ -858,7 +1015,7 @@ pub async fn finalize_checkin(
             .await?;
     let mut name_pool = TeamNamePool::new(existing_keys.into_iter().map(|(k,)| k));
     while auto_team_formation && pool.len() >= team_size as usize {
-        let chunk: Vec<SignupData> = (0..team_size).map(|_| pool.pop_front().unwrap()).collect();
+        let chunk: Vec<SignupData> = pool.drain(..team_size as usize).collect();
         let captain_name = captain_team_name(&mut tx, tournament_id, chunk[0].discord_id).await?;
         let team_name = name_pool.from_captain(captain_name.as_deref());
         for signup in &chunk {
@@ -881,21 +1038,52 @@ pub async fn finalize_checkin(
     // Warnungen + zu löschende leere Teams.
     let mut warnings: Vec<TeamWarning> = Vec::new();
     let mut deleted_team_ids: Vec<i64> = Vec::new();
+    let mut team_plans: Vec<TeamPlan> = Vec::new();
     for team_id in &team_order {
-        let member_count = team_states.get(team_id).map(|m| m.len()).unwrap_or(0) as i64;
-        if member_count == 0 {
+        let original = members_by_team
+            .get(team_id)
+            .map(Vec::as_slice)
+            .unwrap_or(&[]);
+        let kept = team_states.get(team_id).map(Vec::as_slice).unwrap_or(&[]);
+        let checked_in = kept
+            .iter()
+            .filter(|m| checked_in_ids.contains(&m.discord_id))
+            .count() as i64;
+        let member_count = kept.len() as i64;
+        let ready = if keep_rosters {
+            checked_in
+        } else {
+            member_count
+        };
+        let outcome = if !keep_rosters && member_count == 0 {
             deleted_team_ids.push(*team_id);
-            continue;
-        }
-        if member_count < team_size {
+            TeamOutcome::Deleted
+        } else if ready < team_size {
             warnings.push(TeamWarning {
                 team_id: *team_id,
                 team_name: team_name_by_id[team_id].clone(),
-                current: member_count,
+                current: ready,
                 required: team_size,
             });
-        }
+            TeamOutcome::Incomplete
+        } else {
+            TeamOutcome::Complete
+        };
+        team_plans.push(TeamPlan {
+            team_id: *team_id,
+            team_name: team_name_by_id[team_id].clone(),
+            roster: team_roster(original, kept, &checked_in_ids),
+            checked_in,
+            required: team_size,
+            outcome,
+        });
     }
+    let solo_plans = solo_plans(
+        &signup_iter_order,
+        &signups_by_discord,
+        &checked_in_ids,
+        &added_players,
+    );
 
     let final_team_count =
         team_order.len().saturating_sub(deleted_team_ids.len()) + created_teams.len();
@@ -1146,6 +1334,8 @@ pub async fn finalize_checkin(
                 "discord_ids": t.members.iter().map(|m| discord_id_to_string(m.discord_id)).collect::<Vec<_>>(),
             })).collect::<Vec<_>>(),
             "auto_team_formation": auto_team_formation,
+            "fill_from_solos": params.fill_from_solos,
+            "kept_rosters": keep_rosters,
             "effective_bracket_format": effective_bracket_format,
             "tournament_mode": tournament_mode,
             "tournament_mode_auto": tournament.tournament_mode_auto,
@@ -1185,7 +1375,10 @@ pub async fn finalize_checkin(
                 discord_name: s.discord_name.clone(),
             })
             .collect(),
+        team_plans,
+        solo_plans,
         auto_team_formation,
+        can_fill_from_solos,
         bracket_format: tournament.bracket_format,
         effective_bracket_format,
         bracket_entrants,

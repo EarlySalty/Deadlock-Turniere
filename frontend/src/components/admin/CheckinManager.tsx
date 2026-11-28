@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
 import ParticipantMarks from '@/components/admin/ParticipantMarks'
+import CheckinStartPlan from '@/components/admin/CheckinStartPlan'
 import Card from '@/components/ui/Card'
 import Button from '@/components/ui/Button'
 import { useAdminCheckin, useAdminCheckins, useDeleteAdminSignup, useDeleteAdminTeam, useFinalizeCheckin, useRevertCheckin } from '@/hooks/useTournament'
@@ -48,6 +49,7 @@ export default function CheckinManager({
 
   const [preview, setPreview] = useState<FinalizeCheckinResult | null>(null)
   const [allowedTeams, setAllowedTeams] = useState<Record<number, boolean>>({})
+  const [fillFromSolos, setFillFromSolos] = useState(false)
   const [feedback, setFeedback] = useState('')
   const [modalFeedback, setModalFeedback] = useState('')
   const [pendingCheckins, setPendingCheckins] = useState<ReadonlySet<string>>(new Set())
@@ -97,9 +99,6 @@ export default function CheckinManager({
   const checkedInCount = participants.filter((row) => checkedInIds.has(row.discord_id)).length
   const isBusy = finalizeMutation.isPending || revertMutation.isPending || deleteSignup.isPending || deleteTeam.isPending
   const modalBusy = isBusy || pendingCheckins.size > 0
-  const deletedTeamNames = (preview?.deleted_team_ids ?? []).map(
-    (teamId) => teams.find((team) => team.id === teamId)?.name ?? `Team #${teamId}`,
-  )
   const pendingDrafts = usePendingDraftChanges(tournamentId, preview !== null)
   const pendingBuilderChanges = pendingDrafts.here + pendingDrafts.otherTabs
   const bracketFallback = preview !== null && preview.effective_bracket_format !== preview.bracket_format
@@ -137,11 +136,11 @@ export default function CheckinManager({
     }
   }
 
-  const runPreview = () => {
+  const runPreview = (fill: boolean = fillFromSolos) => {
     setFeedback('')
     setModalFeedback('')
     finalizeMutation.mutate(
-      { confirm: false, allowedTeamIds: [] },
+      { confirm: false, allowedTeamIds: [], fillFromSolos: fill },
       {
         onSuccess: (result) => {
           setPreview(result)
@@ -169,6 +168,12 @@ export default function CheckinManager({
   const closePreview = () => {
     setPreview(null)
     setModalFeedback('')
+    setFillFromSolos(false)
+  }
+
+  const toggleFillFromSolos = (next: boolean) => {
+    setFillFromSolos(next)
+    runPreview(next)
   }
 
   const confirmStart = () => {
@@ -182,6 +187,7 @@ export default function CheckinManager({
         confirm: true,
         allowedTeamIds,
         snapshotToken: preview.snapshot_token,
+        fillFromSolos: preview.auto_team_formation,
       },
       {
         onSuccess: (result) => {
@@ -256,7 +262,7 @@ export default function CheckinManager({
         )}
 
         <div className="flex flex-wrap gap-2">
-          <Button variant="primary" size="sm" disabled={isBusy} onClick={runPreview}>
+          <Button variant="primary" size="sm" disabled={isBusy} onClick={() => runPreview(false)}>
             {finalizeMutation.isPending ? 'Prüft...' : 'Check-in abschließen & Teams bereinigen'}
           </Button>
           <Button variant="danger" size="sm" disabled={isBusy} onClick={handleRevert}>
@@ -407,45 +413,27 @@ export default function CheckinManager({
               </div>
             </div>
 
-            {deletedTeamNames.length > 0 && (
-              <div className="mt-5 space-y-2">
-                <h4 className="text-base font-semibold text-foreground">Werden beim Start gelöscht</h4>
-                <p className="text-sm text-muted">Aus diesen Teams hat niemand eingecheckt. Sie spielen nicht mit.</p>
-                <ul className="space-y-1 text-sm text-foreground">
-                  {deletedTeamNames.map((name, index) => (
-                    <li key={preview.deleted_team_ids[index]}>{name}</li>
-                  ))}
-                </ul>
-              </div>
+            {preview.can_fill_from_solos && (
+              <label className="mt-5 flex items-start gap-3 rounded-xl border border-border bg-background/60 p-4">
+                <input
+                  type="checkbox"
+                  checked={fillFromSolos}
+                  disabled={modalBusy}
+                  onChange={(event) => toggleFillFromSolos(event.target.checked)}
+                  className="mt-1"
+                />
+                <span className="text-sm text-foreground">
+                  <span className="font-semibold">Teams aus Solo-Spielern auffüllen und neue Teams bilden</span>
+                  <span className="mt-1 block text-muted">
+                    Aus: Jedes Team startet mit seinem Kader, Solo-Spieler bleiben ohne Team. An: Spieler ohne Check-in
+                    fliegen aus ihrem Team, freie Plätze werden mit eingecheckten Solo-Spielern gefüllt und aus dem Rest
+                    entstehen neue Teams.
+                  </span>
+                </span>
+              </label>
             )}
 
-            {preview.removed_players.length > 0 && (
-              <div className="mt-5 space-y-2">
-                <h4 className="text-base font-semibold text-foreground">Ohne Check-in, fliegen aus ihrem Team</h4>
-                <ul className="space-y-1 text-sm text-foreground">
-                  {preview.removed_players.map((player) => (
-                    <li key={`${player.team_id}-${player.discord_id}`}>
-                      {playerName(player.discord_name)} <span className="text-muted">aus {player.team_name}</span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-
-            {preview.added_players.some((player) => player.source === 'solo_pool') && (
-              <div className="mt-5 space-y-2">
-                <h4 className="text-base font-semibold text-foreground">Auffüllen aus der Solo-Liste</h4>
-                <ul className="space-y-1 text-sm text-foreground">
-                  {preview.added_players
-                    .filter((player) => player.source === 'solo_pool')
-                    .map((player) => (
-                      <li key={`${player.team_id}-${player.discord_id}`}>
-                        {playerName(player.discord_name)} <span className="text-muted">kommt zu {player.team_name}</span>
-                      </li>
-                    ))}
-                </ul>
-              </div>
-            )}
+            <CheckinStartPlan preview={preview} />
 
             {preview.created_teams.length > 0 && (
               <div className="mt-5 space-y-3">
@@ -476,8 +464,10 @@ export default function CheckinManager({
               <div className="mt-5 space-y-3">
                 <h4 className="text-base font-semibold text-foreground">Unvollständige Teams</h4>
                 <p className="text-sm text-muted">
-                  Hakst du ein Team an, startet es mit den eingecheckten Spielern in Unterzahl. Ohne Haken lässt sich das
-                  Turnier nicht starten, bis du das Team anhakst oder entfernst.
+                  {preview.auto_team_formation || !preview.can_fill_from_solos
+                    ? 'Hakst du ein Team an, startet es mit den eingecheckten Spielern in Unterzahl.'
+                    : 'Hakst du ein Team an, startet es mit seinem Kader, obwohl nicht alle eingecheckt sind.'}{' '}
+                  Ohne Haken lässt sich das Turnier nicht starten, bis du das Team anhakst oder entfernst.
                 </p>
                 {preview.warnings.map((warning) => (
                   <div
@@ -497,7 +487,9 @@ export default function CheckinManager({
                         className="mt-1"
                       />
                       <span className="text-sm text-foreground">
-                        {warning.team_name} in Unterzahl starten lassen ({warning.current} von {warning.required} Spielern)
+                        {preview.auto_team_formation || !preview.can_fill_from_solos
+                          ? `${warning.team_name} in Unterzahl starten lassen (${warning.current} von ${warning.required} Spielern)`
+                          : `${warning.team_name} trotzdem starten lassen (${warning.current} von ${warning.required} eingecheckt)`}
                       </span>
                     </label>
                     <Button
@@ -514,27 +506,6 @@ export default function CheckinManager({
             ) : (
               <div className="mt-5 rounded-xl border border-green-500/20 bg-green-500/10 p-4 text-sm text-green-400">
                 Keine unvollständigen Teams erkannt.
-              </div>
-            )}
-
-            {preview.remaining_solo_players.length > 0 && (
-              <div className="mt-5 rounded-xl border border-border bg-background/60 p-4">
-                <h4 className="text-base font-semibold text-foreground">Übrig gebliebene Solo-Spieler</h4>
-                <p className="mt-1 text-sm text-muted">
-                  {preview.auto_team_formation
-                    ? 'Diese Spieler konnten nicht mehr zu einem vollständigen Team zusammengefasst werden und spielen nicht mit.'
-                    : 'Diese Spieler sind in keinem Team und spielen nicht mit. Im PUG-Modus bildet das Tool keine Teams automatisch.'}
-                </p>
-                <div className="mt-3 flex flex-wrap gap-2">
-                  {preview.remaining_solo_players.map((player) => (
-                    <span
-                      key={player.discord_id}
-                      className="rounded-full bg-card px-3 py-1 text-xs text-foreground"
-                    >
-                      {playerName(player.discord_name)}
-                    </span>
-                  ))}
-                </div>
               </div>
             )}
 

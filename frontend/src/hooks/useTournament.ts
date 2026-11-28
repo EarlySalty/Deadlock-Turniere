@@ -190,15 +190,18 @@ export function useFinalizeCheckin(tournamentId: number) {
       confirm,
       allowedTeamIds,
       snapshotToken,
+      fillFromSolos,
     }: {
       confirm?: boolean
       allowedTeamIds?: number[]
       snapshotToken?: string
+      fillFromSolos?: boolean
     }) => finalizeCheckin(
       tournamentId,
       Boolean(confirm),
       allowedTeamIds ?? [],
-      snapshotToken
+      snapshotToken,
+      Boolean(fillFromSolos),
     ),
     onSuccess: () => {
       invalidateTournamentCaches(qc, tournamentId)
