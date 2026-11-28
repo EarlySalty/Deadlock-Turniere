@@ -269,7 +269,7 @@ export default function PlayerProfile() {
                     <div>
                       <h3 className="font-bold text-sm uppercase tracking-tight text-foreground">{entry.tournament_name}</h3>
                       {entry.team_name && <p className="text-[10px] text-muted uppercase tracking-widest mb-1">{entry.team_name}</p>}
-                      <p className="text-[10px] text-muted italic">{placementLabel(entry.placement, 'Keine Platzierung')}</p>
+                      <p className="text-[10px] text-muted italic">{placementLabel(entry.placement, entry.placement_shared, 'Keine Platzierung')}</p>
                     </div>
                     <ArrowUpRight size={14} className="text-muted" />
                   </div>

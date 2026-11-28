@@ -118,7 +118,7 @@ export default function Leaderboard() {
                       {entry.matches_won}
                     </td>
                     <td className="px-6 py-4 text-right text-muted hidden lg:table-cell text-[10px] uppercase font-bold tracking-wider">
-                      {placementLabel(entry.best_placement, '-')}
+                      {placementLabel(entry.best_placement, entry.best_placement_shared, '-')}
                     </td>
                     <td className="px-6 py-4 text-right">
                       <Link to={`/spieler/${encodeURIComponent(entry.discord_name)}`}>

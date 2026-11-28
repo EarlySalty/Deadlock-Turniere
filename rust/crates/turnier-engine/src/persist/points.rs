@@ -53,6 +53,7 @@ impl MatchesPlayed {
 
 struct TournamentResults {
     placements: HashMap<i64, i64>,
+    bracket_format: Option<BracketFormat>,
     wins: HashMap<i64, i64>,
     matches_played: MatchesPlayed,
 }
@@ -83,6 +84,7 @@ async fn bracket_results(
     let placement_matches = without_non_decisive_grand_finals(&matches, decisive_round);
     Ok(TournamentResults {
         placements: team_placements(&placement_matches, format),
+        bracket_format: Some(format),
         wins: team_wins(&matches),
         matches_played: MatchesPlayed::TournamentWide(matches.len() as i64),
     })
@@ -161,6 +163,7 @@ async fn league_results(
             .enumerate()
             .map(|(index, row)| (row.team_id, index as i64 + 1))
             .collect(),
+        bracket_format: None,
         wins: table.iter().map(|row| (row.team_id, row.wins)).collect(),
         matches_played: MatchesPlayed::PerTeam(games_per_team(&games)),
     })
@@ -174,6 +177,65 @@ fn games_per_team(games: &[LeagueGame]) -> HashMap<i64, i64> {
     counts
 }
 
+async fn player_aggregates(
+    tx: &mut Transaction<'_, Postgres>,
+) -> TournamentResult<HashMap<i64, PlayerAggregate>> {
+    let tournaments: Vec<(i64, TournamentMode)> = sqlx::query_as(
+        "SELECT id, tournament_mode FROM turnier.tournaments \
+         WHERE status = 'completed' AND exclude_from_leaderboard = false \
+         ORDER BY id",
+    )
+    .fetch_all(&mut **tx)
+    .await?;
+
+    let mut aggregates: HashMap<i64, PlayerAggregate> = HashMap::new();
+
+    for (tid, mode) in &tournaments {
+        let results = if *mode == TournamentMode::League {
+            league_results(tx, *tid).await?
+        } else {
+            bracket_results(tx, *tid).await?
+        };
+
+        let participants: Vec<(i64, i64)> = sqlx::query_as(
+            "SELECT tm.discord_id, t.id FROM turnier.team_members tm \
+             JOIN turnier.teams t ON tm.team_id = t.id \
+             WHERE t.tournament_id = $1 ORDER BY t.id, tm.joined_at, tm.id",
+        )
+        .bind(tid)
+        .fetch_all(&mut **tx)
+        .await?;
+
+        for (discord_id, team_id) in participants {
+            if turnier_core::is_guest_participant(discord_id) {
+                continue;
+            }
+            let contribution = contribution_for_team(
+                team_id,
+                &results.placements,
+                results.bracket_format,
+                &results.wins,
+                results.matches_played.for_team(team_id),
+            );
+            aggregates.entry(discord_id).or_default().add(contribution);
+        }
+    }
+    Ok(aggregates)
+}
+
+pub async fn shared_best_placement_players(
+    pool: &Pool<Postgres>,
+) -> TournamentResult<std::collections::HashSet<i64>> {
+    let mut tx = pool.begin().await?;
+    let aggregates = player_aggregates(&mut tx).await?;
+    tx.rollback().await?;
+    Ok(aggregates
+        .into_iter()
+        .filter(|(_, agg)| agg.best_placement_shared)
+        .map(|(discord_id, _)| discord_id)
+        .collect())
+}
+
 /// Aggregierter Stand eines Spielers über alle gewerteten Turniere.
 #[derive(Default)]
 struct PlayerAggregate {
@@ -182,6 +244,7 @@ struct PlayerAggregate {
     matches_played: i64,
     matches_won: i64,
     best_placement: Option<i64>,
+    best_placement_shared: bool,
 }
 
 impl PlayerAggregate {
@@ -190,11 +253,16 @@ impl PlayerAggregate {
         self.tournaments_played += 1;
         self.matches_played += c.matches_played;
         self.matches_won += c.matches_won;
-        self.best_placement = match (self.best_placement, c.placement) {
-            (Some(a), Some(b)) => Some(a.min(b)),
-            (Some(a), None) => Some(a),
-            (None, b) => b,
+        let (best, shared) = match (self.best_placement, c.placement) {
+            (Some(a), Some(b)) if b < a => (Some(b), c.placement_shared),
+            (Some(a), Some(b)) if b == a => {
+                (Some(a), self.best_placement_shared && c.placement_shared)
+            }
+            (Some(a), _) => (Some(a), self.best_placement_shared),
+            (None, b) => (b, c.placement_shared),
         };
+        self.best_placement = best;
+        self.best_placement_shared = shared;
     }
 }
 
@@ -224,51 +292,8 @@ pub async fn recalculate_player_points_in_tx(
         .execute(&mut **tx)
         .await?;
 
-    // Alle gewerteten Turniere: abgeschlossen UND nicht von der Rangliste
-    // ausgeschlossen (der Original-Caller filtert exclude_from_leaderboard vor
-    // dem Recalc; hier zentral).
-    let tournaments: Vec<(i64, TournamentMode)> = sqlx::query_as(
-        "SELECT id, tournament_mode FROM turnier.tournaments \
-         WHERE status = 'completed' AND exclude_from_leaderboard = false \
-         ORDER BY id",
-    )
-    .fetch_all(&mut **tx)
-    .await?;
+    let aggregates = player_aggregates(tx).await?;
 
-    let mut aggregates: HashMap<i64, PlayerAggregate> = HashMap::new();
-
-    for (tid, mode) in &tournaments {
-        let results = if *mode == TournamentMode::League {
-            league_results(tx, *tid).await?
-        } else {
-            bracket_results(tx, *tid).await?
-        };
-
-        // Teilnehmer: Mitglieder aller Teams dieses Turniers.
-        let participants: Vec<(i64, i64)> = sqlx::query_as(
-            "SELECT tm.discord_id, t.id FROM turnier.team_members tm \
-             JOIN turnier.teams t ON tm.team_id = t.id \
-             WHERE t.tournament_id = $1 ORDER BY t.id, tm.joined_at, tm.id",
-        )
-        .bind(tid)
-        .fetch_all(&mut **tx)
-        .await?;
-
-        for (discord_id, team_id) in participants {
-            if turnier_core::is_guest_participant(discord_id) {
-                continue;
-            }
-            let contribution = contribution_for_team(
-                team_id,
-                &results.placements,
-                &results.wins,
-                results.matches_played.for_team(team_id),
-            );
-            aggregates.entry(discord_id).or_default().add(contribution);
-        }
-    }
-
-    // Tabelle vollständig neu schreiben (idempotent).
     let now = now_utc();
     sqlx::query("DELETE FROM turnier.player_points")
         .execute(&mut **tx)
@@ -291,4 +316,53 @@ pub async fn recalculate_player_points_in_tx(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn placed(placement: Option<i64>, placement_shared: bool) -> PointsContribution {
+        PointsContribution {
+            points: 1,
+            matches_played: 1,
+            matches_won: 0,
+            placement,
+            placement_shared,
+        }
+    }
+
+    fn best_after(contributions: &[PointsContribution]) -> (Option<i64>, bool) {
+        let mut agg = PlayerAggregate::default();
+        for c in contributions {
+            agg.add(*c);
+        }
+        (agg.best_placement, agg.best_placement_shared)
+    }
+
+    #[test]
+    fn best_placement_keeps_shared_flag_of_its_tournament() {
+        assert_eq!(best_after(&[placed(Some(3), true)]), (Some(3), true));
+        assert_eq!(
+            best_after(&[placed(Some(3), true), placed(Some(4), false)]),
+            (Some(3), true)
+        );
+        assert_eq!(
+            best_after(&[placed(Some(3), true), placed(Some(3), false)]),
+            (Some(3), false)
+        );
+        assert_eq!(
+            best_after(&[placed(Some(3), true), placed(Some(2), false)]),
+            (Some(2), false)
+        );
+        assert_eq!(
+            best_after(&[
+                placed(None, false),
+                placed(Some(3), true),
+                placed(None, false)
+            ]),
+            (Some(3), true)
+        );
+        assert_eq!(best_after(&[placed(None, false)]), (None, false));
+    }
 }

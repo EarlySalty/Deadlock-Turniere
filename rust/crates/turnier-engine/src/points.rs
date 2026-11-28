@@ -20,6 +20,7 @@ pub struct PointsContribution {
     pub matches_played: i64,
     pub matches_won: i64,
     pub placement: Option<i64>,
+    pub placement_shared: bool,
 }
 
 fn placement_points(placement: i64) -> i64 {
@@ -97,6 +98,10 @@ fn double_elimination_placements(matches: &[CompletedMatch]) -> HashMap<i64, i64
     placements
 }
 
+pub fn placement_is_shared(format: BracketFormat, placement: Option<i64>) -> bool {
+    format == BracketFormat::SingleElimination && placement == Some(3)
+}
+
 pub fn team_wins(matches: &[CompletedMatch]) -> HashMap<i64, i64> {
     let mut wins: HashMap<i64, i64> = HashMap::new();
     for m in matches {
@@ -110,6 +115,7 @@ pub fn team_wins(matches: &[CompletedMatch]) -> HashMap<i64, i64> {
 pub fn contribution_for_team(
     team_id: i64,
     placements: &HashMap<i64, i64>,
+    bracket_format: Option<BracketFormat>,
     wins: &HashMap<i64, i64>,
     matches_played: i64,
 ) -> PointsContribution {
@@ -127,6 +133,7 @@ pub fn contribution_for_team(
         matches_played,
         matches_won: team_win_count,
         placement,
+        placement_shared: bracket_format.is_some_and(|f| placement_is_shared(f, placement)),
     }
 }
 
@@ -159,17 +166,55 @@ mod tests {
         let matches = vec![m(2, 1, 2, 1), m(1, 1, 3, 1), m(1, 2, 4, 2)];
         let pl = team_placements(&matches, BracketFormat::SingleElimination);
         let w = team_wins(&matches);
-        let c1 = contribution_for_team(1, &pl, &w, matches.len() as i64);
+        let c1 = contribution_for_team(
+            1,
+            &pl,
+            Some(BracketFormat::SingleElimination),
+            &w,
+            matches.len() as i64,
+        );
         assert_eq!(c1.points, 12);
         assert_eq!(c1.matches_won, 2);
         assert_eq!(c1.placement, Some(1));
-        let c4 = contribution_for_team(4, &pl, &w, matches.len() as i64);
+        let c4 = contribution_for_team(
+            4,
+            &pl,
+            Some(BracketFormat::SingleElimination),
+            &w,
+            matches.len() as i64,
+        );
         assert_eq!(c4.points, 4);
         assert_eq!(c4.matches_played, 3);
         assert_eq!(c4.placement, Some(3));
-        let c_none = contribution_for_team(999, &pl, &w, matches.len() as i64);
+        assert!(c4.placement_shared);
+        assert!(!c1.placement_shared);
+        let c_none = contribution_for_team(
+            999,
+            &pl,
+            Some(BracketFormat::SingleElimination),
+            &w,
+            matches.len() as i64,
+        );
         assert_eq!(c_none.points, 1);
         assert_eq!(c_none.placement, None);
+        assert!(!c_none.placement_shared);
+    }
+
+    #[test]
+    fn double_elimination_third_place_is_exact() {
+        assert!(!placement_is_shared(
+            BracketFormat::DoubleElimination,
+            Some(3)
+        ));
+        assert!(!placement_is_shared(
+            BracketFormat::DoubleElimination,
+            Some(4)
+        ));
+        assert!(!placement_is_shared(
+            BracketFormat::SingleElimination,
+            Some(2)
+        ));
+        assert!(!placement_is_shared(BracketFormat::SingleElimination, None));
     }
 
     #[test]
@@ -177,7 +222,7 @@ mod tests {
         let mut wins = HashMap::new();
         wins.insert(9i64, 3i64);
         let pl = HashMap::new();
-        let c = contribution_for_team(9, &pl, &wins, 5);
+        let c = contribution_for_team(9, &pl, None, &wins, 5);
         assert_eq!(c.points, 2);
     }
 }

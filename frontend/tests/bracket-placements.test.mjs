@@ -77,11 +77,19 @@ test('Double Elimination: offener Reset vergibt noch keinen Titel', () => {
   ])
 })
 
-test('Ranglisten-Platzierung: Platz 3 gilt auch für geteilte Halbfinal-Verlierer', () => {
-  assert.equal(placementLabel(1, '-'), '1. Platz')
-  assert.equal(placementLabel(3, '-'), '3./4. Platz')
-  assert.equal(placementLabel(4, '-'), '4. Platz')
-  assert.equal(placementLabel(null, '-'), '-')
-  assert.equal(placementLabel(undefined, 'Keine Platzierung'), 'Keine Platzierung')
-  assert.equal(placementLabel(0, '-'), '-')
+test('Ranglisten-Platzierung folgt dem Format des Turniers', () => {
+  const shared = places([
+    match('winners', 1, 1, 2, 1),
+    match('winners', 1, 3, 4, 3),
+    match('winners', 2, 1, 3, 1),
+  ]).find(([team]) => team === 2)[2]
+  assert.equal(placementLabel(3, true, '-'), shared)
+  assert.equal(placementLabel(3, false, '-'), '3. Platz')
+  assert.equal(placementLabel(4, false, '-'), '4. Platz')
+  assert.equal(placementLabel(1, false, '-'), '1. Platz')
+  assert.equal(placementLabel(2, true, '-'), '2. Platz')
+  assert.equal(placementLabel(3, undefined, '-'), '3. Platz')
+  assert.equal(placementLabel(null, true, '-'), '-')
+  assert.equal(placementLabel(undefined, false, 'Keine Platzierung'), 'Keine Platzierung')
+  assert.equal(placementLabel(0, true, '-'), '-')
 })

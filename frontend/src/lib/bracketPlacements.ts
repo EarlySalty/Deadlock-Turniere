@@ -7,6 +7,8 @@ export interface BracketPlacement {
   label: string
 }
 
+const SHARED_THIRD_LABEL = '3./4. Platz'
+
 type PlacementMatch = Pick<BracketMatch, 'round' | 'bracket_type' | 'team1_id' | 'team2_id' | 'winner_id' | 'status'>
 
 function isDecided(match: PlacementMatch): boolean {
@@ -47,7 +49,7 @@ function singleEliminationPlacements(matches: PlacementMatch[]): BracketPlacemen
       }
     } else {
       const startPos = Math.pow(2, distance) + 1
-      const label = distance === 1 ? '3./4. Platz' : distance === 2 ? '5.–8. Platz' : '9.+ Platz'
+      const label = distance === 1 ? SHARED_THIRD_LABEL : distance === 2 ? '5.–8. Platz' : '9.+ Platz'
       if (loserId !== null) {
         entries.push({ position: startPos, teamId: loserId, label })
       }
@@ -61,9 +63,9 @@ function rangeLabel(start: number, size: number): string {
   return size <= 1 ? `${start}. Platz` : `${start}.–${start + size - 1}. Platz`
 }
 
-export function placementLabel(placement: number | null | undefined, fallback: string): string {
+export function placementLabel(placement: number | null | undefined, shared: boolean | undefined, fallback: string): string {
   if (placement === null || placement === undefined || !Number.isInteger(placement) || placement < 1) return fallback
-  if (placement === 3) return '3./4. Platz'
+  if (shared === true && placement === 3) return SHARED_THIRD_LABEL
   return rangeLabel(placement, 1)
 }
 

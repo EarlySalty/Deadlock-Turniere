@@ -812,6 +812,7 @@ export interface LeaderboardEntry {
   matches_played: number
   matches_won: number
   best_placement: number | null
+  best_placement_shared: boolean
 }
 
 // --- Player Profile ---
@@ -819,6 +820,7 @@ export interface LeaderboardEntry {
 export interface TournamentHistoryEntry {
   tournament_name: string
   placement: number | null
+  placement_shared: boolean
   team_name: string | null
 }
 
@@ -833,6 +835,7 @@ export interface PlayerProfile {
   matches_played: number
   matches_won: number
   best_placement: number | null
+  best_placement_shared: boolean
   total_points: number
   tournament_history: TournamentHistoryEntry[]
 }

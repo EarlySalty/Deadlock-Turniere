@@ -57,10 +57,10 @@ pub use persist::{
     complete_mini_group_round_robin, finalize_checkin, generate_bracket, generate_bracket_in_tx,
     generate_group_matches, generate_group_matches_in_tx, generate_groups, generate_groups_in_tx,
     generate_league_plan_in_tx, league_slot_minutes_in_tx, recalculate_player_points,
-    recalculate_player_points_in_tx, reschedule_league_plan_in_tx, AddedPlayer, CreatedTeam,
-    FinalizeCheckinParams, FinalizeCheckinResult, LeaguePlanSummary, NoShuffle, RemovedPlayer,
-    RngShuffler, RosterChange, RosterEntry, SoloOutcome, SoloPlan, SoloPlayer, SoloShuffler,
-    TeamOutcome, TeamPlan, TeamWarning,
+    recalculate_player_points_in_tx, reschedule_league_plan_in_tx, shared_best_placement_players,
+    AddedPlayer, CreatedTeam, FinalizeCheckinParams, FinalizeCheckinResult, LeaguePlanSummary,
+    NoShuffle, RemovedPlayer, RngShuffler, RosterChange, RosterEntry, SoloOutcome, SoloPlan,
+    SoloPlayer, SoloShuffler, TeamOutcome, TeamPlan, TeamWarning,
 };
 #[cfg(feature = "persist")]
 pub use persist::{

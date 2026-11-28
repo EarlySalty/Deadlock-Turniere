@@ -115,7 +115,10 @@ neu, frühere Double-Elimination-Turniere ändern sich beim nächsten Abschluss.
 Bei Single Elimination bekommen alle Halbfinal-Verlierer Platz 3, der Schlüssel
 `PLACEMENT_POINTS[4]` wird dort nie getroffen. Double Elimination nutzt ihn seit
 KI-T01 für den Verlierer des Losers-Halbfinales, der Eintrag (4, 3) darf nicht
-entfernt werden. Single Elimination 1:1 erhalten.
+entfernt werden. Single Elimination 1:1 erhalten. Weil derselbe Wert 3 bei
+Single Elimination geteilt und bei Double Elimination und Liga exakt ist,
+liefern Rangliste und Spielerprofil `best_placement_shared` bzw.
+`placement_shared` mit; die Anzeige schreibt nur bei `true` „3./4. Platz“.
 
 ### KI-T03 [erhalten]: `matches_played` zählt global statt teambezogen
 Ein Spieler bekommt alle abgeschlossenen Bracket-Matches gezählt, nicht nur die

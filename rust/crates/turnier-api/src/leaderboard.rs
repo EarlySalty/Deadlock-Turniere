@@ -7,6 +7,8 @@ use axum::{Json, Router};
 
 use turnier_core::{LeaderboardEntry, PlayerProfile, TournamentHistoryEntry};
 
+use turnier_engine::shared_best_placement_players;
+
 use crate::db;
 use crate::error::{WebError, WebResult};
 use crate::state::AppState;
@@ -50,6 +52,7 @@ async fn get_leaderboard(State(state): State<AppState>) -> WebResult<Json<Vec<Le
     )
     .fetch_all(&state.pool)
     .await?;
+    let shared = shared_best_placement_players(&state.pool).await?;
 
     let entries = rows
         .into_iter()
@@ -65,6 +68,7 @@ async fn get_leaderboard(State(state): State<AppState>) -> WebResult<Json<Vec<Le
             matches_played: row.matches_played,
             matches_won: row.matches_won,
             best_placement: row.best_placement,
+            best_placement_shared: shared.contains(&row.discord_id),
         })
         .collect();
     Ok(Json(entries))
@@ -147,6 +151,7 @@ async fn get_player_profile(
         .map(|h| TournamentHistoryEntry {
             tournament_name: h.tournament_name,
             placement: None,
+            placement_shared: false,
             team_name: h.team_name,
         })
         .collect();
@@ -165,6 +170,9 @@ async fn get_player_profile(
         matches_played: points.matches_played,
         matches_won: points.matches_won,
         best_placement: points.best_placement,
+        best_placement_shared: shared_best_placement_players(pool)
+            .await?
+            .contains(&discord_id),
         total_points: points.total_points,
         tournament_history,
     }))
