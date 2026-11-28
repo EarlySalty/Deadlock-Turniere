@@ -501,7 +501,7 @@ export default function ParticipantManager({
                           </Button>
                         </div>
 
-                        {benchSlots > 0 && member.role !== 'captain' && !(member.is_bench && starterCount(team.members) >= teamSize) && (
+                        {benchSlots > 0 && member.role !== 'captain' && (member.is_bench ? starterCount(team.members) < teamSize : team.members.length - starterCount(team.members) < benchSlots) && (
                           <Button
                             variant="ghost"
                             size="sm"

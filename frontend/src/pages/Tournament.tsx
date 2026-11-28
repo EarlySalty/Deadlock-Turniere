@@ -287,6 +287,7 @@ export default function Tournament() {
   const benchSlots = tournament.bench_slots ?? 0
   const canEditLineup = isUserCaptain && isRegistration && benchSlots > 0 && !soloOnly
   const userStartersFull = userTeam != null && starterCount(userTeam.members) >= tournament.team_size
+  const userBenchFull = userTeam != null && userTeam.members.length - starterCount(userTeam.members) >= benchSlots
   const isUserRegistered = Boolean(userTeam || userHasSoloSignup)
   const hasCheckedIn = myStatus?.is_checked_in ?? false
 
@@ -851,7 +852,7 @@ export default function Tournament() {
                             <span className="flex shrink-0 items-center gap-2">
                               {m.role === 'captain' && <span className="text-[10px] text-primary font-bold uppercase">Captain</span>}
                               {m.is_bench && <span className="text-[10px] text-muted font-bold uppercase">Ersatz</span>}
-                              {canEditLineup && m.role !== 'captain' && m.id != null && !(m.is_bench && userStartersFull) && (
+                              {canEditLineup && m.role !== 'captain' && m.id != null && (m.is_bench ? !userStartersFull : !userBenchFull) && (
                                 <button
                                   type="button"
                                   className="rounded border border-white/10 px-2 py-0.5 text-[10px] font-bold uppercase text-muted hover:text-foreground disabled:opacity-50"
