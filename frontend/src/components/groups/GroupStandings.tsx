@@ -52,9 +52,9 @@ export default function GroupStandings({ groups, teams = [], league = false, adm
                     <tr className="border-b border-border text-muted">
                       <th className="text-left px-4 py-2 w-10">#</th>
                       <th className="text-left px-4 py-2">Team</th>
-                      <th className="text-center px-4 py-2">S</th>
-                      <th className="text-center px-4 py-2">N</th>
-                      <th className="text-center px-4 py-2">Pkt</th>
+                      <th className="text-center px-4 py-2"><abbr title="Siege" className="no-underline">S</abbr></th>
+                      <th className="text-center px-4 py-2"><abbr title="Niederlagen" className="no-underline">N</abbr></th>
+                      <th className="text-center px-4 py-2"><abbr title="Punkte" className="no-underline">Pkt</abbr></th>
                     </tr>
                   </thead>
                   <tbody>
@@ -65,7 +65,7 @@ export default function GroupStandings({ groups, teams = [], league = false, adm
                         <tr
                           key={team.team_id}
                           className={`border-b border-border/50 last:border-0 ${
-                            isQualified ? 'bg-success/5' : ''
+                            isQualified ? 'bg-success/10' : ''
                           }`}
                         >
                           <td className="px-4 py-2.5">
@@ -120,8 +120,13 @@ export default function GroupStandings({ groups, teams = [], league = false, adm
                   </tbody>
                 </table>
               </div>
-              {league && (
+              {league ? (
                 <p className="border-t border-border px-5 py-3 text-xs text-muted">{LEAGUE_SCORING_TEXT}</p>
+              ) : (
+                <p className="flex items-center gap-2 border-t border-border px-5 py-3 text-xs text-muted">
+                  <span aria-hidden="true" className="h-3 w-3 shrink-0 rounded-sm border border-success/40 bg-success/10" />
+                  Platz 1 und 2 ziehen ins Bracket ein.
+                </p>
               )}
             </Card>
           </motion.div>

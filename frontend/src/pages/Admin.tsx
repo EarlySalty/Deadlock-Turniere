@@ -465,6 +465,7 @@ export default function Admin() {
                           matches={liveDetail.bracket_matches}
                           teams={liveDetail.teams}
                           format={effectiveBracketFormat(liveDetail)}
+                          miniGroups={liveDetail.mini_groups}
                         />
                         <MatchAdminPanel
                           tournamentId={liveDetail.id}

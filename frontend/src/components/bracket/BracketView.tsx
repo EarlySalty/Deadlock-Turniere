@@ -4,12 +4,13 @@ import { useMemo } from 'react'
 import Card from '@/components/ui/Card'
 import BracketMatch from './BracketMatch'
 import { bracketStageLabel } from '@/lib/bracketStage'
-import type { BracketFormat, BracketMatch as BracketMatchType, TeamPublic } from '@/types/tournament'
+import type { BracketFormat, BracketMatch as BracketMatchType, BracketMiniGroup, TeamPublic } from '@/types/tournament'
 
 interface Props {
   matches: BracketMatchType[]
   teams: TeamPublic[]
   format: BracketFormat
+  miniGroups?: BracketMiniGroup[]
 }
 
 interface SlotPlaceholders {
@@ -22,7 +23,10 @@ function computePlaceholder(
   match: BracketMatchType,
   slot: 1 | 2,
   allMatches: BracketMatchType[],
+  miniGroups: BracketMiniGroup[],
 ): string | null {
+  const group = miniGroups.find((entry) => entry.advances_to_match_id === match.id && entry.advances_to_slot === slot)
+  if (group) return `Sieger Runde ${group.round} · Slot ${group.position + 1}`
   const sourceMatchId = slot === 1 ? match.source_match1_id : match.source_match2_id
   if (sourceMatchId !== null && sourceMatchId !== undefined) {
     const source = allMatches.find((m) => m.id === sourceMatchId)
@@ -39,12 +43,12 @@ function computePlaceholder(
   return null
 }
 
-function buildPlaceholderMap(allMatches: BracketMatchType[]): PlaceholderMap {
+function buildPlaceholderMap(allMatches: BracketMatchType[], miniGroups: BracketMiniGroup[]): PlaceholderMap {
   const map: PlaceholderMap = new Map()
   for (const match of allMatches) {
     map.set(match.id, {
-      p1: computePlaceholder(match, 1, allMatches),
-      p2: computePlaceholder(match, 2, allMatches),
+      p1: computePlaceholder(match, 1, allMatches, miniGroups),
+      p2: computePlaceholder(match, 2, allMatches, miniGroups),
     })
   }
   return map
@@ -75,6 +79,10 @@ function BracketColumns({ matches, teams, allMatches, placeholders }: BracketCol
   const maxRound = Math.max(...rounds.map((r) => r.round))
 
   return (
+    <div className="space-y-2">
+    {rounds.length > 1 && (
+      <p className="text-xs text-muted sm:hidden">Seitlich wischen, um alle {rounds.length} Runden zu sehen.</p>
+    )}
     <div className="overflow-x-auto pb-4">
       <div className="inline-flex gap-0 min-w-max">
         {rounds.map((roundData, roundIndex) => (
@@ -85,7 +93,7 @@ function BracketColumns({ matches, teams, allMatches, placeholders }: BracketCol
               transition={{ delay: roundIndex * 0.1 }}
               className="mb-4"
             >
-              <span className="text-xs font-semibold text-muted uppercase tracking-wider">
+              <span className="text-xs font-semibold text-foreground uppercase tracking-wider">
                 {bracketStageLabel(roundData.matches[0], allMatches)}
               </span>
             </motion.div>
@@ -111,7 +119,7 @@ function BracketColumns({ matches, teams, allMatches, placeholders }: BracketCol
                     }}
                   >
                     {roundIndex > 0 && (
-                      <div className="w-6 border-t-2 border-border/40" />
+                      <div className="w-6 border-t-2 border-border-strong" />
                     )}
 
                     <BracketMatch
@@ -122,7 +130,7 @@ function BracketColumns({ matches, teams, allMatches, placeholders }: BracketCol
                     />
 
                     {roundData.round < maxRound && (
-                      <div className="w-6 border-t-2 border-border/40" />
+                      <div className="w-6 border-t-2 border-border-strong" />
                     )}
                   </div>
                 )
@@ -132,11 +140,17 @@ function BracketColumns({ matches, teams, allMatches, placeholders }: BracketCol
         ))}
       </div>
     </div>
+    </div>
   )
 }
 
-export default function BracketView({ matches, teams, format }: Props) {
-  const placeholders = useMemo(() => buildPlaceholderMap(matches), [matches])
+function isUnplayedFiller(match: BracketMatchType): boolean {
+  return match.status === 'cancelled' && match.team1_id === null && match.team2_id === null
+}
+
+export default function BracketView({ matches: allMatches, teams, format, miniGroups = [] }: Props) {
+  const placeholders = useMemo(() => buildPlaceholderMap(allMatches, miniGroups), [allMatches, miniGroups])
+  const matches = allMatches.filter((match) => match.mini_group_id === null && !isUnplayedFiller(match))
 
   if (matches.length === 0) {
     return (
@@ -159,7 +173,7 @@ export default function BracketView({ matches, teams, format }: Props) {
         <BracketColumns
           matches={winners.length > 0 ? winners : matches}
           teams={teams}
-          allMatches={matches}
+          allMatches={allMatches}
           placeholders={placeholders}
         />
       </div>
@@ -175,7 +189,7 @@ export default function BracketView({ matches, teams, format }: Props) {
         <BracketColumns
           matches={winners}
           teams={teams}
-          allMatches={matches}
+          allMatches={allMatches}
           placeholders={placeholders}
         />
       </section>
@@ -188,7 +202,7 @@ export default function BracketView({ matches, teams, format }: Props) {
           <BracketColumns
             matches={losers}
             teams={teams}
-            allMatches={matches}
+            allMatches={allMatches}
             placeholders={placeholders}
           />
         </section>
@@ -202,7 +216,7 @@ export default function BracketView({ matches, teams, format }: Props) {
           <BracketColumns
             matches={grandFinal}
             teams={teams}
-            allMatches={matches}
+            allMatches={allMatches}
             placeholders={placeholders}
           />
         </section>

@@ -1,8 +1,9 @@
 import { motion } from 'framer-motion'
-import { CheckCircle2, Circle, Loader2, Key } from 'lucide-react'
+import { CheckCircle2, Circle, Loader2, Key, Trophy } from 'lucide-react'
 import TeamRosterTooltip from '@/components/ui/TeamRosterTooltip'
 import type { BracketMatch as BracketMatchType, TeamPublic } from '@/types/tournament'
 import { teamLabel } from '@/lib/teamName'
+import { whenLabel } from '@/lib/whenLabel'
 
 interface Props {
   match: BracketMatchType
@@ -24,7 +25,7 @@ function slotLabel(
 ): string {
   if (teamId === null) {
     if (isCompleted) return 'Freilos'
-    return placeholder ?? 'TBD'
+    return placeholder ?? 'Offen'
   }
   return teamLabel(team?.name, teamId)
 }
@@ -43,6 +44,7 @@ export default function BracketMatch({ match, teams, placeholder1, placeholder2 
           ? 'Abgeschlossen'
           : 'Ausstehend'
 
+  const scheduled = whenLabel(match.scheduled_at)
   const team1 = findTeam(match.team1_id, teams)
   const team2 = findTeam(match.team2_id, teams)
   const team1Name = slotLabel(team1, match.team1_id, isCompleted, placeholder1)
@@ -57,21 +59,21 @@ export default function BracketMatch({ match, teams, placeholder1, placeholder2 
   const hasWinner = match.winner_id !== null
 
   const team1Class = team1IsPlaceholder
-    ? 'text-muted/70 italic text-xs'
+    ? 'text-muted italic text-xs'
     : team1IsBye
       ? 'text-muted italic'
       : team1Won
-        ? 'font-bold text-green-400 bg-green-500/10'
+        ? 'font-bold text-primary bg-primary-soft'
         : hasWinner
           ? 'text-muted'
           : 'text-foreground'
 
   const team2Class = team2IsPlaceholder
-    ? 'text-muted/70 italic text-xs'
+    ? 'text-muted italic text-xs'
     : team2IsBye
       ? 'text-muted italic'
       : team2Won
-        ? 'font-bold text-green-400 bg-green-500/10'
+        ? 'font-bold text-primary bg-primary-soft'
         : hasWinner
           ? 'text-muted'
           : 'text-foreground'
@@ -80,37 +82,35 @@ export default function BracketMatch({ match, teams, placeholder1, placeholder2 
     <motion.div
       initial={{ opacity: 0, scale: 0.95 }}
       animate={{ opacity: 1, scale: 1 }}
-      className="w-[200px] bg-card border border-border rounded-lg overflow-hidden shadow-sm flex-shrink-0"
+      className="w-[210px] bg-card border border-border rounded-lg overflow-hidden shadow-sm flex-shrink-0"
     >
-      {/* Status indicator */}
       <div className="flex items-center justify-between px-2.5 py-1 bg-card border-b border-border/50">
         {isPending && (
-          <span className="flex items-center gap-1 text-[10px] text-muted">
-            <Circle size={8} />
-            {statusLabel}
+          <span className="flex items-center gap-1 text-xs text-muted">
+            <Circle size={12} />
+            {scheduled ?? statusLabel}
           </span>
         )}
         {isLive && (
-          <span className="flex items-center gap-1 text-[10px] text-success">
-            <Loader2 size={8} className="animate-spin" />
+          <span className="flex items-center gap-1 text-xs text-success">
+            <Loader2 size={12} className="animate-spin" />
             {statusLabel}
           </span>
         )}
         {isCompleted && (
-          <span className="flex items-center gap-1 text-[10px] text-success">
-            <CheckCircle2 size={8} />
+          <span className="flex items-center gap-1 text-xs text-success">
+            <CheckCircle2 size={12} />
             {statusLabel}
           </span>
         )}
         {match.party_code && (
-          <span className="flex items-center gap-1 text-[10px] text-muted ml-auto">
-            <Key size={8} />
+          <span className="flex items-center gap-1 text-xs text-muted ml-auto">
+            <Key size={12} />
             {match.party_code}
           </span>
         )}
       </div>
 
-      {/* Team 1 */}
       <TeamRosterTooltip
         teamName={team1Name}
         members={team1?.members ?? []}
@@ -118,15 +118,14 @@ export default function BracketMatch({ match, teams, placeholder1, placeholder2 
         disabled={team1IsBye || team1IsPlaceholder}
         block
       >
-        <div className={`px-3 py-2 text-sm truncate ${team1Class}`}>
-          {team1Name}
+        <div className={`flex items-center justify-between gap-2 px-3 py-2 text-sm ${team1Class}`}>
+          <span className="truncate">{team1Name}</span>
+          {team1Won && <Trophy size={13} aria-label="Sieger" className="shrink-0" />}
         </div>
       </TeamRosterTooltip>
 
-      {/* Divider */}
       <div className="border-t border-border/50" />
 
-      {/* Team 2 */}
       <TeamRosterTooltip
         teamName={team2Name}
         members={team2?.members ?? []}
@@ -134,8 +133,9 @@ export default function BracketMatch({ match, teams, placeholder1, placeholder2 
         disabled={team2IsBye || team2IsPlaceholder}
         block
       >
-        <div className={`px-3 py-2 text-sm truncate ${team2Class}`}>
-          {team2Name}
+        <div className={`flex items-center justify-between gap-2 px-3 py-2 text-sm ${team2Class}`}>
+          <span className="truncate">{team2Name}</span>
+          {team2Won && <Trophy size={13} aria-label="Sieger" className="shrink-0" />}
         </div>
       </TeamRosterTooltip>
     </motion.div>

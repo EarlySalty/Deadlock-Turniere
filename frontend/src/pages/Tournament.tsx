@@ -3,7 +3,7 @@ import { pluralize, registrationSummary } from '@/lib/countLabel'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { loginGuest } from '@/api/client'
 import type { FormEvent } from 'react'
-import { useParams } from 'react-router-dom'
+import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import {
   useTournament, useMyTournamentStatus, useCreateTeam, useJoinTeam, useSignupSolo,
@@ -26,6 +26,8 @@ import BracketView from '@/components/bracket/BracketView'
 import MiniGroupPanel from '@/components/bracket/MiniGroupPanel'
 import MyMatchReport from '@/components/MyMatchReport'
 import LoginButton from '@/components/auth/LoginButton'
+import LiveNow from '@/components/tournament/LiveNow'
+import { whenLabel } from '@/lib/whenLabel'
 import {
   Trophy, Users, LayoutGrid, GitBranch, Shield, X, Info, Book,
   ScrollText, CheckCircle2, ClipboardCheck, Mail, BarChart2, User,
@@ -48,6 +50,18 @@ import { playerName } from '@/lib/playerName'
 import { teamLabel, teamNameById } from '@/lib/teamName'
 
 type Tab = 'übersicht' | 'kodex' | 'gruppen' | 'bracket' | 'teams' | 'ergebnisse' | 'rangliste'
+
+const TAB_KEYS: Tab[] = ['übersicht', 'kodex', 'gruppen', 'bracket', 'teams', 'ergebnisse', 'rangliste']
+
+function isTab(value: string | null): value is Tab {
+  return value !== null && (TAB_KEYS as string[]).includes(value)
+}
+
+function defaultTab(status: string | undefined): Tab {
+  if (status === 'bracket') return 'bracket'
+  if (status === 'group_phase') return 'gruppen'
+  return 'übersicht'
+}
 
 const ALL_TABS: { key: Tab; label: string; icon: typeof Trophy }[] = [
   { key: 'übersicht', label: 'Übersicht', icon: Trophy },
@@ -82,6 +96,11 @@ interface BracketRankEntry {
 
 function deriveBracketPlacements(matches: BracketMatch[], teams: TeamPublic[]): BracketRankEntry[] {
   return bracketPlacements(matches).map((entry) => ({ ...entry, teamName: getTeamName(entry.teamId, teams) }))
+}
+
+function playedTime(entry: ResultEntry): number {
+  const parsed = entry.playedAt ? Date.parse(entry.playedAt) : Number.NaN
+  return Number.isNaN(parsed) ? 0 : parsed
 }
 
 function getSortTime(value: string | null, fallback: number): number {
@@ -140,7 +159,7 @@ function buildBracketResultEntries(matches: BracketMatch[], teams: TeamPublic[])
       const loserId = match.winner_id === match.team1_id ? match.team2_id : match.team1_id
       return {
         id: `bracket-${match.id}`,
-        title: `Bracket • ${bracketStageLabel(match, matches)}`,
+        title: bracketStageLabel(match, matches),
         winnerName,
         loserName: getTeamName(loserId, teams),
         playedAt: match.played_at,
@@ -178,7 +197,8 @@ export default function Tournament() {
       setShowConsentModal(true)
     },
   })
-  const [selectedTab, setActiveTab] = useState<Tab>('übersicht')
+  const [searchParams, setSearchParams] = useSearchParams()
+  const [descriptionOpen, setDescriptionOpen] = useState(false)
   const [showCreateTeam, setShowCreateTeam] = useState(false)
   const [teamName, setTeamName] = useState('')
   const [successMsg, setSuccessMsg] = useState<string | null>(null)
@@ -217,19 +237,32 @@ export default function Tournament() {
     .filter((tab) => !league || tab.key !== 'bracket')
     .filter((tab) => !bracketOnly || tab.key !== 'gruppen')
     .map((tab) => (league && tab.key === 'gruppen' ? { ...tab, label: 'Tabelle' } : tab))
+  const tabParam = searchParams.get('tab')
+  const selectedTab = isTab(tabParam) ? tabParam : defaultTab(tournament?.status)
   const activeTab = availableTabs.some((tab) => tab.key === selectedTab)
     ? selectedTab
     : 'übersicht'
+  const setActiveTab = (tab: Tab) => {
+    setSearchParams((params) => {
+      const next = new URLSearchParams(params)
+      next.set('tab', tab)
+      return next
+    }, { replace: true })
+  }
 
   if (isLoading) return <LoadingSpinner />
   if (!tournament) {
     return (
-      <Card className="text-center py-20 opacity-60">
-        <p className="text-muted italic">Dieses Turnier wurde nicht gefunden.</p>
+      <Card className="space-y-4 py-20 text-center">
+        <p className="text-muted">Dieses Turnier wurde nicht gefunden.</p>
+        <Link to="/" className="inline-block text-sm font-semibold text-primary underline-offset-4 hover:underline">
+          Zurück zu den Turnieren
+        </Link>
       </Card>
     )
   }
 
+  const descriptionLong = (tournament.description?.length ?? 0) > 180 || (tournament.description ?? '').includes('\n')
   const isRegistration = tournament.status === 'registration'
   const soloSignups = tournament.signups.filter((signup) => signup.team_id === null)
   const tournamentStart = plannedTournamentStart(tournament)
@@ -256,7 +289,7 @@ export default function Tournament() {
     ? [
         ...buildGroupResultEntries(tournament.groups, tournament.teams),
         ...buildBracketResultEntries(tournament.bracket_matches, tournament.teams),
-      ].sort((left, right) => left.sortTime - right.sortTime || left.id.localeCompare(right.id))
+      ].sort((left, right) => playedTime(right) - playedTime(left) || right.id.localeCompare(left.id))
     : []
 
   const isMutating =
@@ -284,7 +317,6 @@ export default function Tournament() {
   const actionErrors =
     latestError instanceof Error && latestError.message !== 'CONSENT_REQUIRED' ? [latestError.message] : []
 
-  // Consent-aware action wrapper
   const withConsent = (action: () => void) => {
     if (!isLoggedIn) return
     if (consent?.has_consent) {
@@ -363,9 +395,8 @@ export default function Tournament() {
     <motion.div
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
-      className="space-y-8 pb-20"
+      className="space-y-6 pb-20 sm:space-y-8"
     >
-      {/* Consent Modal */}
       {showConsentModal && (
         <ConsentModal
           onAccepted={() => {
@@ -379,8 +410,7 @@ export default function Tournament() {
         />
       )}
 
-      {/* Hero Header */}
-      <section className="relative overflow-hidden rounded-lg border-b border-white/5 pb-12">
+      <section className="relative overflow-hidden rounded-lg border-b border-white/5 pb-6 sm:pb-12">
         <div className="absolute top-0 right-0 p-4">
           <Badge status={tournament.status} mode={tournament.tournament_mode} className="scale-110" />
         </div>
@@ -389,11 +419,26 @@ export default function Tournament() {
              <div className="p-2 rounded-lg bg-primary/10 border border-primary/20">
                 <Trophy size={20} className="text-primary" />
              </div>
-             <p className="text-[10px] font-bold text-primary uppercase tracking-[0.3em]">Turnier</p>
+             <p className="text-xs font-semibold text-primary uppercase tracking-[0.12em]">Turnier</p>
           </div>
-          <h1 className="text-4xl md:text-5xl font-bold text-foreground font-display tracking-tight">{tournament.name}</h1>
+          <h1 className="text-3xl sm:text-4xl md:text-5xl font-bold text-foreground font-display tracking-tight">{tournament.name}</h1>
           {tournament.description && (
-            <p className="text-muted italic max-w-3xl leading-relaxed">{tournament.description}</p>
+            <div className="max-w-3xl">
+              <p id="turnier-beschreibung" className={`whitespace-pre-line leading-relaxed text-muted ${descriptionOpen ? '' : 'max-h-[4.875rem] overflow-hidden'}`}>
+                {tournament.description}
+              </p>
+              {descriptionLong && (
+                <button
+                  type="button"
+                  onClick={() => setDescriptionOpen((open) => !open)}
+                  aria-expanded={descriptionOpen}
+                  aria-controls="turnier-beschreibung"
+                  className="mt-2 text-sm font-semibold text-primary underline-offset-4 hover:underline"
+                >
+                  {descriptionOpen ? 'Weniger anzeigen' : 'Mehr anzeigen'}
+                </button>
+              )}
+            </div>
           )}
           {champion && (
             <p className="flex items-center gap-2 text-lg font-bold text-primary">
@@ -402,22 +447,22 @@ export default function Tournament() {
             </p>
           )}
 
-          <div className="flex flex-wrap items-center gap-x-8 gap-y-3 pt-4">
+          <div className="flex flex-wrap items-center gap-x-8 gap-y-3 pt-2 sm:pt-4">
             <div className="space-y-1">
-              <p className="text-[10px] uppercase font-bold text-muted tracking-widest">Team-Format</p>
+              <p className="text-xs uppercase font-bold text-muted tracking-widest">Team-Format</p>
               <p className="text-sm font-bold text-foreground uppercase">{tournament.team_size} gegen {tournament.team_size}</p>
             </div>
             <div className="space-y-1">
-              <p className="text-[10px] uppercase font-bold text-muted tracking-widest">Anmeldungen</p>
+              <p className="text-xs uppercase font-bold text-muted tracking-widest">Anmeldungen</p>
               <p className="text-sm font-bold text-foreground uppercase">{registrationLabel}</p>
             </div>
             <div className="space-y-1">
-              <p className="text-[10px] uppercase font-bold text-muted tracking-widest">Format</p>
+              <p className="text-xs uppercase font-bold text-muted tracking-widest">Format</p>
               <p className="text-sm font-bold text-foreground uppercase">{league ? LEAGUE_LABEL : formatLabel}</p>
             </div>
             {tournament.tournament_game_mode !== 'standard' && (
               <div className="space-y-1">
-                <p className="text-[10px] uppercase font-bold text-primary tracking-widest">Modus</p>
+                <p className="text-xs uppercase font-bold text-primary tracking-widest">Modus</p>
                 <p className="text-sm font-bold text-primary uppercase">{GAME_MODE_LABEL[tournament.tournament_game_mode]}</p>
               </div>
             )}
@@ -425,14 +470,12 @@ export default function Tournament() {
         </div>
       </section>
 
-      {/* Action Banner Group */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 gap-4 empty:hidden md:grid-cols-2">
         {actionErrors.map((message, index) => (
           <p key={`${index}-${message}`} role="alert" className="md:col-span-2 rounded-lg border border-red-500/20 bg-red-500/10 p-4 text-sm text-red-400">
             {message}
           </p>
         ))}
-        {/* Success message */}
         {successMsg && (
           <motion.div
             initial={{ height: 0, opacity: 0 }}
@@ -444,7 +487,6 @@ export default function Tournament() {
           </motion.div>
         )}
 
-        {/* Checkin Banner */}
         {isCheckinPhase && (
           <Card className={`p-6 border-amber-500/20 bg-amber-500/5 ${!hasCheckedIn ? 'animate-pulse' : ''}`}>
             <div className="flex flex-col gap-4">
@@ -477,7 +519,6 @@ export default function Tournament() {
           </Card>
         )}
 
-        {/* Offene Einladungen */}
         {isLoggedIn && !myStatus?.team_id && myInvitations && myInvitations.length > 0 && (
           <Card className="p-6 border-primary/20 bg-primary/5">
             <div className="space-y-4">
@@ -491,12 +532,12 @@ export default function Tournament() {
                     <div>
                       <p className="text-sm font-bold text-foreground uppercase tracking-wide">{teamLabel(invite.team_name, invite.team_id)}</p>
                       {invite.expires_at && (
-                        <p className="text-[10px] text-muted italic">
+                        <p className="text-xs text-muted italic">
                           Ablauf: {new Date(invite.expires_at).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })}
                         </p>
                       )}
                       {soloOnly && (
-                        <p className="text-[10px] text-muted">In diesem Turnier gibt es nur Solo-Anmeldungen, Einladungen können nicht angenommen werden.</p>
+                        <p className="text-xs text-muted">In diesem Turnier gibt es nur Solo-Anmeldungen, Einladungen können nicht angenommen werden.</p>
                       )}
                     </div>
                     <div className="flex gap-2">
@@ -527,16 +568,25 @@ export default function Tournament() {
         )}
       </div>
 
-      {/* Immersive Tabs */}
-      <div className="flex border-b border-white/5 gap-2 overflow-x-auto pb-px">
+      <LiveNow
+        tournament={tournament}
+        start={tournamentStart}
+        onOpenBracket={availableTabs.some((tab) => tab.key === 'bracket') && activeTab !== 'bracket' ? () => setActiveTab('bracket') : undefined}
+      />
+
+      <div className="relative">
+      <div role="tablist" aria-label="Turnierbereiche" className="flex gap-1 overflow-x-auto border-b border-white/5 pb-px pr-8 sm:pr-0">
         {availableTabs.map((tab) => {
           const Icon = tab.icon
           const isActive = activeTab === tab.key
           return (
             <button
               key={tab.key}
+              type="button"
+              role="tab"
+              aria-selected={isActive}
               onClick={() => setActiveTab(tab.key)}
-              className={`flex items-center gap-2 px-6 py-4 text-[10px] font-bold uppercase tracking-[0.2em] transition-all relative ${
+              className={`relative flex shrink-0 items-center gap-2 whitespace-nowrap px-3 py-3 text-[13px] font-semibold transition-colors sm:px-5 sm:py-4 ${
                 isActive
                   ? 'text-primary'
                   : 'text-muted hover:text-foreground hover:bg-white/5'
@@ -554,8 +604,9 @@ export default function Tournament() {
           )
         })}
       </div>
+      <div aria-hidden="true" className="pointer-events-none absolute inset-y-0 right-0 w-10 bg-gradient-to-l from-background to-transparent sm:hidden" />
+      </div>
 
-      {/* Tab Content */}
       <motion.div
         key={activeTab}
         initial={{ opacity: 0, y: 5 }}
@@ -574,25 +625,25 @@ export default function Tournament() {
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-8">
                     {tournament.registration_start && (
                       <div className="space-y-2">
-                        <p className="text-[10px] uppercase font-bold text-muted tracking-widest">Anmeldung ab</p>
+                        <p className="text-xs uppercase font-bold text-muted tracking-widest">Anmeldung ab</p>
                         <p className="text-lg font-bold text-foreground">
-                          {new Date(tournament.registration_start).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                          {whenLabel(tournament.registration_start)}
                         </p>
                       </div>
                     )}
                     {tournament.checkin_start && (
                       <div className="space-y-2">
-                        <p className="text-[10px] uppercase font-bold text-muted tracking-widest">Check-in ab</p>
+                        <p className="text-xs uppercase font-bold text-muted tracking-widest">Check-in ab</p>
                         <p className="text-lg font-bold text-foreground">
-                          {new Date(tournament.checkin_start).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                          {whenLabel(tournament.checkin_start)}
                         </p>
                       </div>
                     )}
                     {tournamentStart && (
                       <div className="space-y-2">
-                        <p className="text-[10px] uppercase font-bold text-primary tracking-widest">Turnierbeginn</p>
+                        <p className="text-xs uppercase font-bold text-primary tracking-widest">Turnierbeginn</p>
                         <p className="text-lg font-bold text-primary">
-                          {new Date(tournamentStart).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                          {whenLabel(tournamentStart)}
                         </p>
                       </div>
                     )}
@@ -667,7 +718,7 @@ export default function Tournament() {
                            <div className="flex items-center gap-3 text-primary">
                               <Shield size={20} />
                               <div>
-                                <p className="text-[10px] uppercase font-bold tracking-widest opacity-60 leading-none mb-1">Eingetragen mit</p>
+                                <p className="text-xs uppercase font-bold tracking-widest opacity-60 leading-none mb-1">Eingetragen mit</p>
                                 <p className="font-bold uppercase tracking-wider text-sm">{userTeam.name}</p>
                               </div>
                            </div>
@@ -686,25 +737,25 @@ export default function Tournament() {
                   <div className="space-y-4">
                     {soloOnly && (
                        <div className="space-y-1">
-                          <p className="text-[10px] uppercase font-bold text-primary tracking-widest">PUG</p>
+                          <p className="text-xs uppercase font-bold text-primary tracking-widest">PUG</p>
                           <p className="text-xs text-foreground italic">Nur Solo-Anmeldung. Die Teams stellt das Orga-Team zusammen.</p>
                        </div>
                     )}
                     {tournament.invite_mode === 'window' && (
                        <div className="space-y-1">
-                          <p className="text-[10px] uppercase font-bold text-amber-500 tracking-widest">Einladungsfenster</p>
+                          <p className="text-xs uppercase font-bold text-amber-500 tracking-widest">Einladungsfenster</p>
                           <p className="text-xs text-foreground italic">Nur zu bestimmten Zeiten offen.</p>
                        </div>
                     )}
                     <div className="space-y-1">
-                       <p className="text-[10px] uppercase font-bold text-muted tracking-widest">Fairplay</p>
+                       <p className="text-xs uppercase font-bold text-muted tracking-widest">Fairplay</p>
                        <p className="text-xs text-foreground italic">Unsportlichkeit führt zum Ausschluss.</p>
                     </div>
                     {tournament.rules && (
                        <div className="pt-4 border-t border-white/5">
                           <button
                             onClick={() => setActiveTab('kodex')}
-                            className="flex items-center gap-2 text-[10px] font-bold text-primary uppercase tracking-widest hover:text-primary-hover transition-colors"
+                            className="flex items-center gap-2 text-left text-sm font-semibold text-primary hover:text-primary-hover transition-colors"
                           >
                             <Book size={14} />
                             Vollständiges Regelwerk lesen
@@ -955,6 +1006,7 @@ export default function Tournament() {
                 myTeamId={myStatus.team_id}
               />
             )}
+            <BracketView matches={tournament.bracket_matches} teams={tournament.teams} format={effectiveBracketFormat(tournament)} miniGroups={tournament.mini_groups} />
             {tournament.mini_groups.length > 0 && (
               <MiniGroupPanel
                 miniGroups={tournament.mini_groups}
@@ -962,7 +1014,6 @@ export default function Tournament() {
                 teams={tournament.teams}
               />
             )}
-            <BracketView matches={tournament.bracket_matches} teams={tournament.teams} format={effectiveBracketFormat(tournament)} />
           </div>
         )}
 
@@ -990,17 +1041,17 @@ export default function Tournament() {
                     <Card key={entry.id} className="hover:border-white/20 transition-all group">
                       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                         <div className="space-y-1">
-                          <p className="text-[10px] uppercase font-bold text-primary tracking-widest">{entry.title}</p>
-                          <div className="flex items-center gap-2 text-foreground font-bold">
-                            <span className="text-green-400 uppercase tracking-wide">{entry.winnerName}</span>
+                          <p className="text-xs uppercase font-bold text-primary tracking-widest">{entry.title}</p>
+                          <div className="flex flex-wrap items-center gap-x-2 text-foreground font-bold">
+                            <span className="text-primary">{entry.winnerName}</span>
                             <span className="text-muted font-normal text-xs uppercase">Besiegt</span>
-                            <span className="text-muted uppercase tracking-wide">{entry.loserName}</span>
+                            <span className="text-muted">{entry.loserName}</span>
                           </div>
                         </div>
-                        <div className="text-[10px] text-muted font-bold uppercase tracking-widest">
+                        <div className="text-xs text-muted font-semibold">
                           {entry.playedAt
-                            ? new Date(entry.playedAt).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
-                            : 'Unbekannte Zeit'}
+                            ? new Date(entry.playedAt).toLocaleString('de-DE', { weekday: 'short', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+                            : 'Zeit unbekannt'}
                         </div>
                       </div>
                     </Card>
@@ -1012,7 +1063,6 @@ export default function Tournament() {
         )}
       </motion.div>
 
-      {/* Confirmation Modal: Team wechseln */}
       {pendingJoinTeam && userTeam && (
         <div className="fixed inset-0 bg-background/90 backdrop-blur-sm flex items-center justify-center z-[100]">
           <motion.div
@@ -1072,9 +1122,9 @@ function TournamentRangliste({ tournament }: { tournament: TournamentDetailPubli
             <table className="w-full text-sm">
               <thead>
                 <tr className="bg-white/5 text-left border-b border-white/10">
-                  <th className="px-6 py-4 font-bold uppercase tracking-widest text-muted text-[10px] w-20 text-center">Rang</th>
-                  <th className="px-6 py-4 font-bold uppercase tracking-widest text-muted text-[10px]">Team</th>
-                  <th className="px-6 py-4 font-bold uppercase tracking-widest text-muted text-[10px] text-right">Resultat</th>
+                  <th className="px-3 py-3 sm:px-6 sm:py-4 font-bold uppercase tracking-widest text-muted text-xs w-20 text-center">Rang</th>
+                  <th className="px-3 py-3 sm:px-6 sm:py-4 font-bold uppercase tracking-widest text-muted text-xs">Team</th>
+                  <th className="px-3 py-3 sm:px-6 sm:py-4 font-bold uppercase tracking-widest text-muted text-xs text-right">Resultat</th>
                 </tr>
               </thead>
               <tbody>
@@ -1085,12 +1135,12 @@ function TournamentRangliste({ tournament }: { tournament: TournamentDetailPubli
                       entry.position === 1 ? 'bg-primary/5' : ''
                     }`}
                   >
-                    <td className="px-6 py-4 text-center">
+                    <td className="px-3 py-3 sm:px-6 sm:py-4 text-center">
                        {entry.position === 1 ? <Trophy size={18} className="text-primary mx-auto" /> : <span className="font-bold text-muted">{entry.position}</span>}
                     </td>
-                    <td className="px-6 py-4 font-bold text-foreground uppercase tracking-wide">{entry.teamName}</td>
-                    <td className="px-6 py-4 text-right">
-                      <span className="text-[10px] px-2 py-0.5 rounded-lg border border-primary/20 text-primary font-bold uppercase tracking-widest bg-primary/5">
+                    <td className="px-3 py-3 sm:px-6 sm:py-4 font-bold text-foreground uppercase tracking-wide">{entry.teamName}</td>
+                    <td className="px-3 py-3 sm:px-6 sm:py-4 text-right">
+                      <span className="whitespace-nowrap text-xs px-2 py-0.5 rounded-lg border border-primary/20 text-primary font-bold uppercase tracking-widest bg-primary/5">
                         {entry.label}
                       </span>
                     </td>
@@ -1112,24 +1162,24 @@ function TournamentRangliste({ tournament }: { tournament: TournamentDetailPubli
             <table className="w-full text-sm">
               <thead>
                 <tr className="bg-white/5 text-left border-b border-white/10">
-                  <th className="px-6 py-4 font-bold uppercase tracking-widest text-muted text-[10px] w-20 text-center">#</th>
-                  <th className="px-6 py-4 font-bold uppercase tracking-widest text-muted text-[10px]">Team</th>
-                  <th className="px-6 py-4 font-bold uppercase tracking-widest text-muted text-[10px] text-center">S</th>
-                  <th className="px-6 py-4 font-bold uppercase tracking-widest text-muted text-[10px] text-center">N</th>
-                  <th className="px-6 py-4 font-bold uppercase tracking-widest text-muted text-[10px] text-right">Pkt</th>
+                  <th className="px-3 py-3 sm:px-6 sm:py-4 font-bold uppercase tracking-widest text-muted text-xs w-20 text-center">#</th>
+                  <th className="px-3 py-3 sm:px-6 sm:py-4 font-bold uppercase tracking-widest text-muted text-xs">Team</th>
+                  <th className="px-3 py-3 sm:px-6 sm:py-4 font-bold uppercase tracking-widest text-muted text-xs text-center">S</th>
+                  <th className="px-3 py-3 sm:px-6 sm:py-4 font-bold uppercase tracking-widest text-muted text-xs text-center">N</th>
+                  <th className="px-3 py-3 sm:px-6 sm:py-4 font-bold uppercase tracking-widest text-muted text-xs text-right">Pkt</th>
                 </tr>
               </thead>
               <tbody>
                 {rankedTeams
                   .map((team, idx) => (
                     <tr key={`${team.team_id}-${team.groupName}`} className="border-b border-white/5 last:border-0 hover:bg-white/[0.02] transition-colors">
-                      <td className="px-6 py-4 text-center text-muted font-bold">
+                      <td className="px-3 py-3 sm:px-6 sm:py-4 text-center text-muted font-bold">
                         {league && finished && idx === 0 ? <Trophy size={18} className="text-primary mx-auto" /> : idx + 1}
                       </td>
-                      <td className="px-6 py-4 font-bold text-foreground uppercase tracking-wide">{team.team_name}</td>
-                      <td className="px-6 py-4 text-center text-muted font-medium">{team.wins}</td>
-                      <td className="px-6 py-4 text-center text-muted font-medium">{team.losses}</td>
-                      <td className="px-6 py-4 text-right font-bold text-primary">{team.points}</td>
+                      <td className="px-3 py-3 sm:px-6 sm:py-4 font-bold text-foreground uppercase tracking-wide">{team.team_name}</td>
+                      <td className="px-3 py-3 sm:px-6 sm:py-4 text-center text-muted font-medium">{team.wins}</td>
+                      <td className="px-3 py-3 sm:px-6 sm:py-4 text-center text-muted font-medium">{team.losses}</td>
+                      <td className="px-3 py-3 sm:px-6 sm:py-4 text-right font-bold text-primary">{team.points}</td>
                     </tr>
                   ))}
               </tbody>

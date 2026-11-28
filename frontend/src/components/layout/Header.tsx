@@ -44,10 +44,10 @@ export default function Header() {
               className="h-8 w-8 shrink-0"
             />
             <span className="min-w-0">
-              <span className="block truncate bg-gradient-to-r from-primary to-accent bg-clip-text font-display text-sm font-bold leading-tight text-transparent sm:text-lg">
+              <span className="block truncate font-display text-sm font-bold leading-tight text-primary sm:text-lg">
                 Deutsche Deadlock Community
               </span>
-              <span className="hidden text-[10px] font-bold uppercase tracking-[0.22em] text-muted sm:block">
+              <span className="hidden text-xs font-semibold uppercase tracking-[0.12em] text-muted sm:block">
                 Turniere
               </span>
             </span>
@@ -111,7 +111,10 @@ export default function Header() {
                 </button>
               </>
             ) : (
-              <LoginButton className="hidden sm:inline-flex" />
+              <>
+                <LoginButton className="inline-flex sm:hidden" label="Anmelden" />
+                <LoginButton className="hidden sm:inline-flex" />
+              </>
             )}
 
             <button
@@ -131,7 +134,6 @@ export default function Header() {
       {menuOpen && (
         <nav id="turnier-mobile-navigation" className="border-t border-border bg-background/95 lg:hidden" aria-label="Turnier-Navigation mobil">
           <div className="mx-auto flex max-w-7xl flex-col gap-1 px-4 py-3 sm:px-6">
-            {!isLoggedIn && <LoginButton className="mb-2 justify-center sm:hidden" />}
             {navItems.map((item) => {
               const Icon = item.icon
               const isActive = location.pathname === item.path || (item.path !== '/' && location.pathname.startsWith(`${item.path}/`)) || (item.path !== '/' && location.pathname.startsWith(`${item.path}/`))

@@ -85,7 +85,7 @@ function buildRounds(group: Group): RoundEntry[] {
 function statusChip(match: GroupMatch) {
   if (match.status === 'completed' || match.status === 'forfeit') {
     return (
-      <span className="inline-flex items-center gap-1 rounded-full border border-green-500/20 bg-green-500/10 px-2 py-1 text-[11px] font-medium text-green-400">
+      <span className="inline-flex items-center gap-1 rounded-full border border-green-500/20 bg-green-500/10 px-2 py-1 text-xs font-medium text-green-400">
         <CheckCircle2 size={12} />
         Fertig
       </span>
@@ -93,7 +93,7 @@ function statusChip(match: GroupMatch) {
   }
   if (match.status === 'lobby_created') {
     return (
-      <span className="inline-flex items-center gap-1 rounded-full border border-sky-500/20 bg-sky-500/10 px-2 py-1 text-[11px] font-medium text-sky-300">
+      <span className="inline-flex items-center gap-1 rounded-full border border-sky-500/20 bg-sky-500/10 px-2 py-1 text-xs font-medium text-sky-300">
         <KeyRound size={12} />
         Lobby offen
       </span>
@@ -101,14 +101,14 @@ function statusChip(match: GroupMatch) {
   }
   if (match.status === 'in_progress') {
     return (
-      <span className="inline-flex items-center gap-1 rounded-full border border-amber-500/20 bg-amber-500/10 px-2 py-1 text-[11px] font-medium text-amber-300">
+      <span className="inline-flex items-center gap-1 rounded-full border border-amber-500/20 bg-amber-500/10 px-2 py-1 text-xs font-medium text-amber-300">
         <Radio size={12} />
         Läuft
       </span>
     )
   }
   return (
-    <span className="inline-flex items-center gap-1 rounded-full border border-border bg-background px-2 py-1 text-[11px] font-medium text-muted">
+    <span className="inline-flex items-center gap-1 rounded-full border border-border bg-background px-2 py-1 text-xs font-medium text-muted">
       <Clock size={12} />
       Ausstehend
     </span>
@@ -214,7 +214,7 @@ export default function GroupMatchList({ groups, teams, league = false }: Props)
                               <div className="flex flex-wrap items-center gap-2">
                                 {statusChip(match)}
                                 {match.party_code && (
-                                  <span className="rounded-full border border-primary/20 bg-primary/10 px-2 py-1 text-[11px] font-medium text-primary">
+                                  <span className="rounded-full border border-primary/20 bg-primary/10 px-2 py-1 text-xs font-medium text-primary">
                                     Code {match.party_code}
                                   </span>
                                 )}

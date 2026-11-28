@@ -13,12 +13,15 @@ function startTime(t: Tournament): number {
   return Number.isFinite(start) ? start : Number.POSITIVE_INFINITY
 }
 
-function byStart(a: Tournament, b: Tournament): number {
-  return startTime(a) - startTime(b) || a.id - b.id
+function distanceFrom(now: number) {
+  return (t: Tournament) => Math.abs(startTime(t) - now)
 }
 
-export function groupHomeTournaments(tournaments: Tournament[]) {
-  const open = tournaments.filter((t) => OPEN_STATUSES.has(t.status)).sort(byStart)
+export function groupHomeTournaments(tournaments: Tournament[], now: number = Date.now()) {
+  const distance = distanceFrom(now)
+  const open = tournaments
+    .filter((t) => OPEN_STATUSES.has(t.status))
+    .sort((a, b) => distance(a) - distance(b) || a.id - b.id)
   const past = tournaments
     .filter((t) => FINISHED_STATUSES.has(t.status))
     .sort((a, b) => time(b.updated_at) - time(a.updated_at) || b.id - a.id)

@@ -2,6 +2,7 @@ import { motion } from 'framer-motion'
 import { Users2, ArrowRight } from 'lucide-react'
 import Card from '@/components/ui/Card'
 import TeamRosterTooltip from '@/components/ui/TeamRosterTooltip'
+import BracketMatchCard from './BracketMatch'
 import type { BracketMatch, BracketMiniGroup, TeamPublic } from '@/types/tournament'
 import { pluralize } from '@/lib/countLabel'
 import { teamLabel } from '@/lib/teamName'
@@ -62,7 +63,7 @@ export default function MiniGroupPanel({ miniGroups, matches, teams }: MiniGroup
         <Users2 size={18} className="mt-0.5 shrink-0 text-primary" />
         <div>
           <h3 className="text-sm font-semibold text-foreground">
-            Mini-Round-Robin Slots
+            Mini-Runden: jeder gegen jeden
           </h3>
           <p className="mt-1 text-xs text-muted">
             Wenn die Teamzahl nicht 1:1 aufteilbar ist, spielen die Teams in einem Slot jeder gegen
@@ -71,7 +72,7 @@ export default function MiniGroupPanel({ miniGroups, matches, teams }: MiniGroup
         </div>
       </header>
 
-      <div className="grid gap-3 md:grid-cols-2">
+      <div className="grid grid-cols-1 gap-3">
         {miniGroups.map((group, index) => {
           const standings = calcStandings(group, matches, teams)
           const sorted = [...standings].sort((a, b) => {
@@ -86,14 +87,14 @@ export default function MiniGroupPanel({ miniGroups, matches, teams }: MiniGroup
               initial={{ opacity: 0, y: 8 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: index * 0.05 }}
-              className="rounded-lg border border-border bg-card-hover/40 p-3"
+              className="min-w-0 rounded-lg border border-border bg-card-hover/40 p-3"
             >
               <div className="mb-2 flex items-center justify-between text-xs">
                 <span className="font-medium text-foreground">
                   Runde {group.round} · Slot {group.position + 1}
                 </span>
                 <span
-                  className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${
+                  className={`rounded-full px-2 py-0.5 text-xs font-medium ${
                     completed
                       ? 'bg-success/15 text-success'
                       : 'bg-muted/15 text-muted'
@@ -107,14 +108,14 @@ export default function MiniGroupPanel({ miniGroups, matches, teams }: MiniGroup
                 {sorted.map((entry, position) => (
                   <li
                     key={entry.teamId}
-                    className={`flex items-center justify-between rounded px-2 py-1.5 text-xs ${
+                    className={`flex flex-wrap items-center justify-between gap-x-2 gap-y-0.5 rounded px-2 py-1.5 text-xs ${
                       completed && position === 0
                         ? 'bg-success/10 font-semibold text-success'
                         : 'text-foreground'
                     }`}
                   >
                     <span className="flex min-w-0 items-center gap-2">
-                      <span className="w-4 text-[10px] text-muted">{position + 1}.</span>
+                      <span className="w-4 text-xs text-muted">{position + 1}.</span>
                       <TeamRosterTooltip
                         teamName={teamLabel(entry.team?.name, entry.teamId)}
                         members={entry.team?.members ?? []}
@@ -125,16 +126,25 @@ export default function MiniGroupPanel({ miniGroups, matches, teams }: MiniGroup
                         </span>
                       </TeamRosterTooltip>
                     </span>
-                    <span className="ml-2 shrink-0 text-[10px] text-muted">
-                      {entry.wins}S / {entry.losses}N
+                    <span className="shrink-0 text-xs text-muted">
+                      {pluralize(entry.wins, 'Sieg', 'Siege')}, {pluralize(entry.losses, 'Niederlage', 'Niederlagen')}
                     </span>
                   </li>
                 ))}
               </ul>
 
+              <div className="mt-3 flex flex-wrap gap-2">
+                {group.match_ids
+                  .map((id) => matches.find((match) => match.id === id))
+                  .filter((match): match is BracketMatch => Boolean(match))
+                  .map((match) => (
+                    <BracketMatchCard key={match.id} match={match} teams={teams} />
+                  ))}
+              </div>
+
               {group.advances_to_match_id && (
-                <div className="mt-3 flex items-center gap-1.5 border-t border-border/60 pt-2 text-[10px] text-muted">
-                  <ArrowRight size={10} />
+                <div className="mt-3 flex items-center gap-1.5 border-t border-border/60 pt-2 text-xs text-muted">
+                  <ArrowRight size={12} />
                   Sieger rückt in nächste Runde auf
                 </div>
               )}
