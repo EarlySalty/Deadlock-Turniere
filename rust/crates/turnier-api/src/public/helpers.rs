@@ -1767,6 +1767,7 @@ mod tests {
             replacements_open: true,
             description: None,
             team_size: 6,
+            bench_slots: 0,
             series_format: 3,
             final_series_format: None,
             registration_start: None,
