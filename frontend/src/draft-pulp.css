@@ -370,7 +370,7 @@
 @media (max-width:840px){
   .draft-pulp__layout{grid-template-columns:1fr;}
   .draft-pulp__poster{min-height:430px;border-right:0;border-bottom:5px solid #b69b73;}
-  .draft-pulp__poster-head{padding-top:38px;}
+  .draft-pulp__poster-head{padding-top:38px;padding-bottom:72px;}
   .draft-pulp__poster h1 span{font-size:65px;}
   .draft-pulp__poster h1 strong{font-size:clamp(90px,19vw,150px);}
   .draft-pulp__art{inset:10% 0 0;opacity:.65;}
@@ -403,6 +403,7 @@
   .pulp-overline{font-size:9px;}
   .draft-pulp__desk-foot{left:32px;right:32px;font-size:8px;}
   .draft-pulp__sequence p{font-size:11px;}
+  .draft-arena-screen:before,.draft-waiting-screen:before{display:none;}
   .draft-pulp__sequence p span{margin:0 3px;}
 }
 .draft-arena-screen,.draft-waiting-screen{
@@ -417,7 +418,7 @@
   position:absolute;
   z-index:1;
   left:clamp(24px,5vw,100px);
-  top:22px;
+  top:48px;
   pointer-events:none;
   font:800 10px/1 ui-monospace,monospace;
   letter-spacing:.25em;
