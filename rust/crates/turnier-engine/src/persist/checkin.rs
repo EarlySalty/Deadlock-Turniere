@@ -1452,7 +1452,8 @@ async fn sync_team_captain(
         .await?;
     if let Some(captain_id) = captain_id {
         sqlx::query(
-            "UPDATE turnier.team_members SET role = 'captain' WHERE team_id = $1 AND discord_id = $2",
+            "UPDATE turnier.team_members SET role = 'captain', is_bench = false \
+             WHERE team_id = $1 AND discord_id = $2",
         )
         .bind(team_id)
         .bind(captain_id)

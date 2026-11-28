@@ -46,6 +46,7 @@ separate flag, so "enabled with limit 0" cannot exist.
 | captain to bench (self or by admin) | lineup | 400 "Der Captain bleibt Stammspieler" |
 | change captain to a bench member | admin captain change, team builder | starters free: the new captain becomes a starter; starters full: the new captain swaps seats with the old captain, so the captain is always a starter |
 | swap a bench player with a starter | lineup with `swap_member_id` (captain) or `swap_discord_id` (admin) | counts unchanged, works on a full team; 400 "Zum Tauschen braucht es einen Stammspieler und einen Ersatzspieler" for two players on the same seat, 400 "Der Captain bleibt Stammspieler" if the captain would go to the bench, 400 "In diesem Turnier gibt es keine Ersatzplätze" with `bench_slots = 0` |
+| check-in keeps a team whose only remaining member is a bench player | finalize confirm, `sync_team_captain` | the new captain is set to a starter (`is_bench = false`), like the admin captain reassignment |
 | lineup in a `solo_only` tournament | captain | buttons hidden (backend answers 403); admin path stays |
 | lineup move to starter with starters full | lineup | 400 "Alle Stammplätze sind belegt" |
 | lineup move to the current seat | lineup | no-op, returns the team |

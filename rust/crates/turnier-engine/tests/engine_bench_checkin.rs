@@ -243,3 +243,62 @@ async fn fill_mode_keeps_a_team_whose_checked_in_bench_remains() {
         .collect();
     assert_eq!(removed, vec![gone_bench.to_string()]);
 }
+
+#[tokio::test]
+async fn kept_bench_only_team_gets_a_starting_captain() {
+    let db = temp_pool().await;
+    let pool = db.pool();
+    let tournament_id = checkin_tournament(pool, 6).await;
+    let (team_id, bench_id) = seat_team(pool, tournament_id, "Nur Bank", 1_000, 0, true).await;
+    let absent = 900;
+    insert_team_member(pool, team_id, absent, "Abwesend", "captain", 0).await;
+    insert_signup(pool, tournament_id, absent, "Abwesend", Some(team_id), 0).await;
+    sqlx::query("UPDATE turnier.teams SET captain_discord_id = $2 WHERE id = $1")
+        .bind(team_id)
+        .bind(absent)
+        .execute(pool)
+        .await
+        .expect("absent captain");
+
+    let preview = finalize_checkin(
+        pool,
+        tournament_id,
+        FinalizeCheckinParams {
+            fill_from_solos: true,
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("preview");
+
+    finalize_checkin(
+        pool,
+        tournament_id,
+        FinalizeCheckinParams {
+            confirm: true,
+            allowed_team_ids: HashSet::from([team_id]),
+            actor_id: None,
+            expected_snapshot_token: Some(&preview.snapshot_token),
+            advance_to_group_phase: false,
+            fill_from_solos: true,
+        },
+    )
+    .await
+    .expect("confirm");
+
+    let members: Vec<(i64, String, bool)> = sqlx::query_as(
+        "SELECT discord_id, role, is_bench FROM turnier.team_members WHERE team_id = $1",
+    )
+    .bind(team_id)
+    .fetch_all(pool)
+    .await
+    .expect("members");
+    assert_eq!(members, vec![(bench_id, "captain".to_string(), false)]);
+    let captain: i64 =
+        sqlx::query_scalar("SELECT captain_discord_id FROM turnier.teams WHERE id = $1")
+            .bind(team_id)
+            .fetch_one(pool)
+            .await
+            .expect("captain");
+    assert_eq!(captain, bench_id);
+}
