@@ -143,9 +143,9 @@ export const revertCheckin = (id: number) =>
 export const finalizeCheckin = (
   id: number,
   confirm: boolean,
+  fillFromSolos: boolean,
   allowedTeamIds: number[] = [],
   snapshotToken?: string,
-  fillFromSolos = false,
 ) => request<FinalizeCheckinResult>(
   `/admin/tournaments/${id}/finalize-checkin${confirm ? '?confirm=true' : ''}`,
   {

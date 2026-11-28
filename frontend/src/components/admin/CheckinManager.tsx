@@ -136,7 +136,7 @@ export default function CheckinManager({
     }
   }
 
-  const runPreview = (fill: boolean = preview?.auto_team_formation ?? false) => {
+  const runPreview = (fill: boolean) => {
     const previousMode = preview?.auto_team_formation
     setFeedback('')
     setModalFeedback('')
@@ -157,12 +157,14 @@ export default function CheckinManager({
   }
 
   const removeIncompleteTeam = (teamId: number, teamName: string) => {
+    if (!preview) return
+    const fill = preview.auto_team_formation
     if (!window.confirm(`${teamName} entfernen? Das Team wird gelöscht, die Spieler landen als Einzelanmeldungen in der Solo-Liste.`)) return
     deleteTeam.mutate(
       { tournamentId, teamId },
       {
         onSuccess: () => {
-          runPreview()
+          runPreview(fill)
           setModalFeedback(`${teamName} wurde entfernt. Die Vorschau ist aktualisiert.`)
         },
       },
