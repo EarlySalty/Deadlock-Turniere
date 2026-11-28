@@ -430,7 +430,7 @@ export default function Admin() {
                             nachtragen.
                           </p>
                         </header>
-                        <GroupStandings groups={liveDetail.groups} teams={liveDetail.teams} />
+                        <GroupStandings groups={liveDetail.groups} teams={liveDetail.teams} admin />
                         <GroupMatchAdminPanel
                           tournamentId={liveDetail.id}
                           groups={liveDetail.groups}

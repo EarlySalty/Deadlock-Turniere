@@ -307,6 +307,7 @@ export interface GroupTeam {
   wins: number
   losses: number
   points: number
+  seed_tiebreak: boolean
 }
 
 export interface BracketMatch {

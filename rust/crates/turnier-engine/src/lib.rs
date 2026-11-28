@@ -24,6 +24,7 @@ pub mod error;
 pub mod league;
 pub mod mini_groups;
 pub mod points;
+pub mod standings;
 pub mod status;
 
 #[cfg(feature = "persist")]

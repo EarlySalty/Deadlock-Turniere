@@ -2,7 +2,8 @@ use std::collections::BTreeSet;
 
 use turnier_core::{Group, GroupMatch, MatchStatus};
 use turnier_db::Pool;
-use turnier_engine::league::{league_table, LeagueGame};
+use turnier_engine::league::LeagueGame;
+use turnier_engine::standings::{rank_standings, Standing};
 use turnier_match::league::tournament_is_league;
 
 use crate::error::WebResult;
@@ -12,27 +13,40 @@ pub async fn apply_league_view(
     tournament_id: i64,
     groups: &mut [Group],
 ) -> WebResult<()> {
-    if tournament_is_league(pool, tournament_id).await? {
-        groups.iter_mut().for_each(arrange_league_group);
+    let league = tournament_is_league(pool, tournament_id).await?;
+    for group in groups.iter_mut() {
+        if league {
+            assign_rounds(&mut group.matches);
+        }
+        rank_group_teams(group);
     }
     Ok(())
 }
 
-fn arrange_league_group(group: &mut Group) {
-    assign_rounds(&mut group.matches);
+fn rank_group_teams(group: &mut Group) {
     group.teams.sort_by_key(|team| team.id);
-    let team_ids: Vec<i64> = group.teams.iter().map(|team| team.team_id).collect();
-    let games: Vec<LeagueGame> = group.matches.iter().filter_map(completed_game).collect();
-    let order: Vec<i64> = league_table(&team_ids, &games)
-        .into_iter()
-        .map(|row| row.team_id)
+    let standings: Vec<Standing> = group
+        .teams
+        .iter()
+        .map(|team| Standing {
+            team_id: team.team_id,
+            wins: team.wins,
+            points: team.points,
+        })
         .collect();
+    let games: Vec<LeagueGame> = group.matches.iter().filter_map(completed_game).collect();
+    let ranked = rank_standings(&standings, &games);
     group.teams.sort_by_key(|team| {
-        order
+        ranked
             .iter()
-            .position(|team_id| *team_id == team.team_id)
-            .unwrap_or(order.len())
+            .position(|row| row.team_id == team.team_id)
+            .unwrap_or(ranked.len())
     });
+    for team in group.teams.iter_mut() {
+        team.seed_tiebreak = ranked
+            .iter()
+            .any(|row| row.team_id == team.team_id && row.seed_tiebreak);
+    }
 }
 
 fn assign_rounds(matches: &mut [GroupMatch]) {
