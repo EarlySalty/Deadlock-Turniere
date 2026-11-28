@@ -4,14 +4,8 @@ import { Trophy, Medal, Star, ArrowUpRight } from 'lucide-react'
 import { useLeaderboard } from '@/hooks/useTournament'
 import Card from '@/components/ui/Card'
 import LoadingSpinner from '@/components/ui/LoadingSpinner'
+import { placementLabel } from '@/lib/bracketPlacements'
 
-function placementLabel(placement: number | null): string {
-  if (!placement) return '-'
-  if (placement === 1) return '1. Platz'
-  if (placement === 2) return '2. Platz'
-  if (placement <= 4) return 'Halbfinale'
-  return `Platz ${placement}`
-}
 
 function RankMedal({ position }: { position: number }) {
   if (position === 1) return <Trophy size={20} className="text-primary shadow-[var(--glow-primary)]" />
@@ -125,7 +119,7 @@ export default function Leaderboard() {
                       {entry.matches_won}
                     </td>
                     <td className="px-6 py-4 text-right text-muted hidden lg:table-cell text-[10px] uppercase font-bold tracking-wider">
-                      {placementLabel(entry.best_placement)}
+                      {placementLabel(entry.best_placement, '-')}
                     </td>
                     <td className="px-6 py-4 text-right">
                       <Link to={`/spieler/${encodeURIComponent(entry.discord_name)}`}>
@@ -152,8 +146,8 @@ export default function Leaderboard() {
             <p className="text-sm text-foreground font-medium">6 Punkte für Platz 2</p>
           </div>
           <div className="space-y-1">
-            <p className="text-[10px] uppercase font-bold text-primary tracking-widest">Halbfinale</p>
-            <p className="text-sm text-foreground font-medium">3 Punkte für Platz 3–4</p>
+            <p className="text-[10px] uppercase font-bold text-primary tracking-widest">3. und 4. Platz</p>
+            <p className="text-sm text-foreground font-medium">3 Punkte für Platz 3 und 4</p>
           </div>
           <div className="space-y-1">
             <p className="text-[10px] uppercase font-bold text-primary tracking-widest">Boni</p>

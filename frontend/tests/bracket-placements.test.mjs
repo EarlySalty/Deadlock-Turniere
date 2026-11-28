@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { bracketPlacements } from '../src/lib/bracketPlacements.ts'
+import { bracketPlacements, placementLabel } from '../src/lib/bracketPlacements.ts'
 
 const match = (bracket_type, round, team1_id, team2_id, winner_id, status = 'completed') => ({
   bracket_type,
@@ -75,4 +75,13 @@ test('Double Elimination: offener Reset vergibt noch keinen Titel', () => {
     [2, 3, '3. Platz'],
     [4, 4, '4. Platz'],
   ])
+})
+
+test('Ranglisten-Platzierung: Platz 3 und 4 tragen eigene Bezeichnungen', () => {
+  assert.equal(placementLabel(1, '-'), '1. Platz')
+  assert.equal(placementLabel(3, '-'), '3. Platz')
+  assert.equal(placementLabel(4, '-'), '4. Platz')
+  assert.equal(placementLabel(null, '-'), '-')
+  assert.equal(placementLabel(undefined, 'Keine Platzierung'), 'Keine Platzierung')
+  assert.equal(placementLabel(0, '-'), '-')
 })

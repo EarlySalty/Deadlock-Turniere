@@ -61,6 +61,11 @@ function rangeLabel(start: number, size: number): string {
   return size <= 1 ? `${start}. Platz` : `${start}.–${start + size - 1}. Platz`
 }
 
+export function placementLabel(placement: number | null | undefined, fallback: string): string {
+  if (placement === null || placement === undefined || !Number.isInteger(placement) || placement < 1) return fallback
+  return rangeLabel(placement, 1)
+}
+
 function doubleEliminationPlacements(matches: PlacementMatch[]): BracketPlacement[] {
   const entries: BracketPlacement[] = []
   const grandFinal = matches
