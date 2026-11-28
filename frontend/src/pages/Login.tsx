@@ -40,11 +40,11 @@ export default function Login() {
             </div>
 
             <div className="pt-6 border-t border-white/5 space-y-2">
-              <div className="flex items-center justify-center gap-2 text-[10px] text-muted font-bold uppercase tracking-[0.2em]">
+              <div className="flex items-center justify-center gap-2 text-xs text-muted font-bold uppercase tracking-[0.2em]">
                 <Shield size={12} className="text-primary/50" />
                 Sichere Verbindung
               </div>
-              <p className="text-[10px] text-muted/50 italic">
+              <p className="text-xs text-muted/50 italic">
                 Wir erfassen nur dein Profil und deine Rollen.
               </p>
             </div>

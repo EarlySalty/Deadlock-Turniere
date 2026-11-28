@@ -73,7 +73,7 @@ export default function TeamRosterTooltip({
         >
           <div className="flex items-center justify-between gap-2 border-b border-border/60 pb-2">
             <span className="truncate font-semibold text-foreground">{teamName}</span>
-            <span className="text-[10px] text-muted">Ø {avg}</span>
+            <span className="text-xs text-muted">Ø {avg}</span>
           </div>
 
           <ul className="mt-2 space-y-1">
@@ -84,7 +84,7 @@ export default function TeamRosterTooltip({
                   {playerName(captain.discord_name)}
                 </span>
                 {captain.rank && (
-                  <span className="ml-auto text-[10px] uppercase tracking-wide text-muted">
+                  <span className="ml-auto text-xs uppercase tracking-wide text-muted">
                     {captain.rank}
                   </span>
                 )}
@@ -101,7 +101,7 @@ export default function TeamRosterTooltip({
                   {playerName(member.discord_name)}
                 </span>
                 {member.rank && (
-                  <span className="ml-auto text-[10px] uppercase tracking-wide text-muted">
+                  <span className="ml-auto text-xs uppercase tracking-wide text-muted">
                     {member.rank}
                   </span>
                 )}

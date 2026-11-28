@@ -35,3 +35,10 @@ test('Abgeschlossene Turniere landen unter den früheren Turnieren', () => {
   assert.equal(open.length, 0)
   assert.deepEqual(past.map((t) => t.id), [1, 2])
 })
+
+test('Ein heute startendes Turnier steht vor einem seit Wochen laufenden', () => {
+  const running = tournament(16, { status: 'bracket', registration_end: '2026-11-14T17:00:00Z' })
+  const today = tournament(17, { status: 'registration', bracket_start: '2026-11-28T15:00:00Z' })
+  const { open } = groupHomeTournaments([running, today], Date.parse('2026-11-28T12:00:00Z'))
+  assert.deepEqual(open.map((t) => t.id), [17, 16])
+})

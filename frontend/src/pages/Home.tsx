@@ -9,6 +9,7 @@ import LoadingSpinner from '@/components/ui/LoadingSpinner'
 import { Trophy, Users, Archive, Swords, Shield, ScrollText, CalendarClock } from 'lucide-react'
 import { bracketFormatLabel, effectiveBracketFormat } from '@/lib/bracketFormat'
 import type { Tournament } from '@/types/tournament'
+import { whenLabel } from '@/lib/whenLabel'
 
 const container = {
   hidden: { opacity: 0 },
@@ -23,16 +24,6 @@ const container = {
 const item = {
   hidden: { opacity: 0, y: 20 },
   show: { opacity: 1, y: 0 }
-}
-
-function formatStart(value: string): string {
-  return new Date(value).toLocaleString('de-DE', {
-    weekday: 'short',
-    day: '2-digit',
-    month: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit'
-  })
 }
 
 export default function Home() {
@@ -62,22 +53,22 @@ export default function Home() {
       variants={container}
       initial="hidden"
       animate="show"
-      className="space-y-12 pb-20"
+      className="space-y-6 pb-20 md:space-y-12"
     >
-      <section className="relative overflow-hidden rounded-2xl border border-border bg-card/55 px-6 py-16 text-center shadow-[var(--shadow-card-soft)] md:py-20">
+      <section className="relative overflow-hidden rounded-2xl border border-border bg-card/55 px-6 py-8 text-center shadow-[var(--shadow-card-soft)] md:py-20">
         <div className="absolute inset-0 bg-gradient-to-b from-primary/8 via-transparent to-transparent" />
         <div className="relative z-10 mx-auto max-w-3xl">
           <motion.div
             variants={item}
-            className="inline-flex items-center gap-2 rounded-full border border-border bg-background/70 px-4 py-1.5 text-sm font-medium text-accent"
+            className="inline-flex items-center gap-2 rounded-full border border-border bg-background/70 px-4 py-1.5 text-sm font-medium text-primary"
           >
             <Swords size={15} />
             Turniere der Deutschen Deadlock Community
           </motion.div>
-          <motion.h1 variants={item} className="mt-6 text-5xl font-bold tracking-tight text-foreground md:text-7xl font-display">
+          <motion.h1 variants={item} className="mt-4 text-4xl font-bold tracking-tight text-foreground md:mt-6 md:text-7xl font-display">
             Deadlock <span className="bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent">Turniere</span>
           </motion.h1>
-          <motion.p variants={item} className="mx-auto mt-6 max-w-2xl text-lg leading-relaxed text-muted md:text-xl">
+          <motion.p variants={item} className="mx-auto mt-4 max-w-2xl text-base leading-relaxed text-muted md:mt-6 md:text-xl">
             Anmeldung, Draft, Spielplan und Rangliste an einem Ort, für Community-Turniere ohne unnötigen Orga-Overhead.
           </motion.p>
         </div>
@@ -115,14 +106,14 @@ export default function Home() {
                 <Card hoverable className="p-4 border-white/5 bg-white/[0.02] hover:z-10 relative">
                   <div className="flex items-center justify-between gap-4">
                     <div className="min-w-0">
-                      <h3 className="font-bold text-foreground truncate uppercase text-sm tracking-wide group-hover:text-primary transition-colors">
+                      <h3 className="line-clamp-2 break-words text-sm font-bold text-foreground transition-colors group-hover:text-primary">
                         {t.name}
                       </h3>
-                      <span className="text-[10px] text-muted uppercase tracking-tighter">
+                      <span className="text-xs text-muted">
                         {new Date(t.created_at).toLocaleDateString('de-DE')}
                       </span>
                     </div>
-                    <Badge status={t.status} mode={t.tournament_mode} className="scale-75 origin-right" />
+                    <Badge status={t.status} mode={t.tournament_mode} className="shrink-0" />
                   </div>
                 </Card>
               </Link>
@@ -140,15 +131,15 @@ function OpenTournamentCard({ tournament: t }: { tournament: Tournament }) {
   const start = plannedTournamentStart(t)
   return (
     <Link to={`/${t.id}`}>
-      <Card hoverable className="p-8 border-primary/20 bg-primary/5 group relative overflow-hidden">
+      <Card hoverable className="p-5 sm:p-8 border-primary/20 bg-primary/5 group relative overflow-hidden">
         <div className="flex flex-col gap-6">
           <div className="flex flex-col md:flex-row md:items-start justify-between gap-4">
             <div className="space-y-2 flex-1">
-              <h3 className="text-3xl font-bold text-foreground group-hover:text-primary transition-colors leading-tight">
+              <h3 className="text-2xl sm:text-3xl font-bold text-foreground group-hover:text-primary transition-colors leading-tight">
                 {t.name}
               </h3>
               {t.description && (
-                <p className="text-muted text-lg line-clamp-2 max-w-xl italic">
+                <p className="text-muted text-base sm:text-lg line-clamp-2 max-w-xl">
                   {t.description}
                 </p>
               )}
@@ -158,11 +149,11 @@ function OpenTournamentCard({ tournament: t }: { tournament: Tournament }) {
             </div>
           </div>
 
-          <div className="flex flex-wrap items-center gap-6 text-sm text-muted uppercase tracking-widest font-bold">
+          <div className="flex flex-wrap items-center gap-x-6 gap-y-3 text-sm text-muted font-semibold">
             {start && (
               <span className="flex items-center gap-2">
                 <CalendarClock size={16} className="text-primary" />
-                {formatStart(start)}
+                {whenLabel(start)}
               </span>
             )}
             <span className="flex items-center gap-2">
@@ -176,8 +167,8 @@ function OpenTournamentCard({ tournament: t }: { tournament: Tournament }) {
                 : bracketFormatLabel(effectiveBracketFormat(t))}
             </span>
             {t.rules && (
-              <span className="flex items-center gap-2 text-amber-500/80">
-                <ScrollText size={16} />
+              <span className="flex items-center gap-2">
+                <ScrollText size={16} className="text-primary" />
                 Regelwerk bereit
               </span>
             )}

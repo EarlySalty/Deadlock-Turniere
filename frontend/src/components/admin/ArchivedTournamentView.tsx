@@ -155,6 +155,7 @@ export default function ArchivedTournamentView({ tournament, onUseAsTemplate }: 
             matches={tournament.bracket_matches}
             teams={tournament.teams}
             format={effectiveBracketFormat(tournament)}
+            miniGroups={tournament.mini_groups}
           />
         </div>
       )}
