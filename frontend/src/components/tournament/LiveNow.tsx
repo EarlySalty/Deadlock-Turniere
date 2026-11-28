@@ -1,5 +1,6 @@
 import { CalendarClock, Radio, Swords } from 'lucide-react'
 import { nowState, type NowMatch, type NowPhase } from '@/lib/liveNow'
+import { isLeague } from '@/lib/league'
 import { teamNameById } from '@/lib/teamName'
 import { whenLabel } from '@/lib/whenLabel'
 import type { MatchStatus, TeamPublic, TournamentDetailPublic } from '@/types/tournament'
@@ -14,6 +15,10 @@ interface LiveNowProps {
 const OPEN_LABEL: Record<NowPhase, string> = {
   gruppen: 'Zu den Gruppen',
   bracket: 'Zum Bracket',
+}
+
+function openLabel(phase: NowPhase, league: boolean): string {
+  return league && phase === 'gruppen' ? 'Zur Tabelle' : OPEN_LABEL[phase]
 }
 
 const STATUS_LABEL: Partial<Record<MatchStatus, string>> = {
@@ -71,7 +76,7 @@ export default function LiveNow({ tournament, start, canOpen, onOpen }: LiveNowP
         </h2>
         {canOpen(target) && (
           <button type="button" onClick={() => onOpen(target)} className="text-sm font-semibold text-primary underline-offset-4 hover:underline">
-            {OPEN_LABEL[target]}
+            {openLabel(target, isLeague(tournament.tournament_mode))}
           </button>
         )}
       </div>
