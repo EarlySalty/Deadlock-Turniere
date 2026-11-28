@@ -77,9 +77,9 @@ test('Double Elimination: offener Reset vergibt noch keinen Titel', () => {
   ])
 })
 
-test('Ranglisten-Platzierung: Platz 3 und 4 tragen eigene Bezeichnungen', () => {
+test('Ranglisten-Platzierung: Platz 3 gilt auch für geteilte Halbfinal-Verlierer', () => {
   assert.equal(placementLabel(1, '-'), '1. Platz')
-  assert.equal(placementLabel(3, '-'), '3. Platz')
+  assert.equal(placementLabel(3, '-'), '3./4. Platz')
   assert.equal(placementLabel(4, '-'), '4. Platz')
   assert.equal(placementLabel(null, '-'), '-')
   assert.equal(placementLabel(undefined, 'Keine Platzierung'), 'Keine Platzierung')

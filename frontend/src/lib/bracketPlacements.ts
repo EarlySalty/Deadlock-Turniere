@@ -63,6 +63,7 @@ function rangeLabel(start: number, size: number): string {
 
 export function placementLabel(placement: number | null | undefined, fallback: string): string {
   if (placement === null || placement === undefined || !Number.isInteger(placement) || placement < 1) return fallback
+  if (placement === 3) return '3./4. Platz'
   return rangeLabel(placement, 1)
 }
 
