@@ -223,28 +223,23 @@ async fn player_aggregates(
     Ok(aggregates)
 }
 
-pub async fn shared_best_placement_players(
+pub async fn player_standings(
     pool: &Pool<Postgres>,
-) -> TournamentResult<std::collections::HashSet<i64>> {
+) -> TournamentResult<HashMap<i64, PlayerAggregate>> {
     let mut tx = pool.begin().await?;
     let aggregates = player_aggregates(&mut tx).await?;
     tx.rollback().await?;
-    Ok(aggregates
-        .into_iter()
-        .filter(|(_, agg)| agg.best_placement_shared)
-        .map(|(discord_id, _)| discord_id)
-        .collect())
+    Ok(aggregates)
 }
 
-/// Aggregierter Stand eines Spielers über alle gewerteten Turniere.
 #[derive(Default)]
-struct PlayerAggregate {
-    total_points: i64,
-    tournaments_played: i64,
-    matches_played: i64,
-    matches_won: i64,
-    best_placement: Option<i64>,
-    best_placement_shared: bool,
+pub struct PlayerAggregate {
+    pub total_points: i64,
+    pub tournaments_played: i64,
+    pub matches_played: i64,
+    pub matches_won: i64,
+    pub best_placement: Option<i64>,
+    pub best_placement_shared: bool,
 }
 
 impl PlayerAggregate {

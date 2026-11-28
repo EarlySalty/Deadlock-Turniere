@@ -37,7 +37,7 @@ pub use league::{
 };
 pub use mini_group_complete::complete_mini_group_round_robin;
 pub use points::{
-    recalculate_player_points, recalculate_player_points_in_tx, shared_best_placement_players,
+    player_standings, recalculate_player_points, recalculate_player_points_in_tx, PlayerAggregate,
 };
 pub use rows::{
     insert_signup, insert_team, insert_team_member, lock_tournament_row, NewSignup, NewTeamMember,

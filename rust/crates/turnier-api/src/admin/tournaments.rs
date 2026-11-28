@@ -607,6 +607,11 @@ async fn update_tournament(
         shift_league_plan_to_stored_start(&mut tx, tournament_id).await?;
     }
     turnier_scheduler::ensure_start_gap(&mut tx, tournament_id).await?;
+    if current_status == TournamentStatus::Completed
+        || body.status == Some(TournamentStatus::Completed)
+    {
+        turnier_engine::recalculate_player_points_in_tx(&mut tx, tournament_id).await?;
+    }
 
     audit(
         &mut *tx,

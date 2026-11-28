@@ -56,11 +56,11 @@ pub use persist::{
     advance_bracket_winner, assign_random_teams, build_checkin_snapshot_token,
     complete_mini_group_round_robin, finalize_checkin, generate_bracket, generate_bracket_in_tx,
     generate_group_matches, generate_group_matches_in_tx, generate_groups, generate_groups_in_tx,
-    generate_league_plan_in_tx, league_slot_minutes_in_tx, recalculate_player_points,
-    recalculate_player_points_in_tx, reschedule_league_plan_in_tx, shared_best_placement_players,
+    generate_league_plan_in_tx, league_slot_minutes_in_tx, player_standings,
+    recalculate_player_points, recalculate_player_points_in_tx, reschedule_league_plan_in_tx,
     AddedPlayer, CreatedTeam, FinalizeCheckinParams, FinalizeCheckinResult, LeaguePlanSummary,
-    NoShuffle, RemovedPlayer, RngShuffler, RosterChange, RosterEntry, SoloOutcome, SoloPlan,
-    SoloPlayer, SoloShuffler, TeamOutcome, TeamPlan, TeamWarning,
+    NoShuffle, PlayerAggregate, RemovedPlayer, RngShuffler, RosterChange, RosterEntry, SoloOutcome,
+    SoloPlan, SoloPlayer, SoloShuffler, TeamOutcome, TeamPlan, TeamWarning,
 };
 #[cfg(feature = "persist")]
 pub use persist::{
