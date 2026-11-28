@@ -24,7 +24,7 @@ interface CheckinManagerProps {
   teams: Team[]
   signups: TournamentSignup[]
   league?: boolean
-  onStarted?: (message: string) => void
+  onStatusChanged?: (message: string) => void
 }
 
 interface ParticipantRow {
@@ -41,7 +41,7 @@ export default function CheckinManager({
   teams,
   signups,
   league = false,
-  onStarted,
+  onStatusChanged,
 }: CheckinManagerProps) {
   const { data: adminCheckins, error: checkinsError } = useAdminCheckins(tournamentId)
   const deleteSignup = useDeleteAdminSignup()
@@ -207,7 +207,7 @@ export default function CheckinManager({
               ? 'Check-in abgeschlossen. Das Turnier läuft, die Matches stehen im Bracket.'
               : 'Check-in abgeschlossen. Das Turnier läuft in der Gruppenphase.'
           setFeedback(message)
-          onStarted?.(message)
+          onStatusChanged?.(message)
           closePreview()
         },
       }
@@ -222,7 +222,9 @@ export default function CheckinManager({
       onSuccess: () => {
         setPreview(null)
         setAllowedTeams({})
-        setFeedback('Check-in wurde zurückgesetzt. Das Turnier ist wieder in der Anmeldung.')
+        const message = 'Check-in wurde zurückgesetzt. Das Turnier ist wieder in der Anmeldung.'
+        setFeedback(message)
+        onStatusChanged?.(message)
       },
     })
   }

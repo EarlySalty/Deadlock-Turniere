@@ -54,6 +54,15 @@ function calcStandings(
   })
 }
 
+function isGroupCompleted(group: BracketMiniGroup, matches: BracketMatch[]): boolean {
+  if (group.match_ids.length === 0) return false
+  const matchById = new Map(matches.map((match) => [match.id, match]))
+  return group.match_ids.every((id) => {
+    const match = matchById.get(id)
+    return match !== undefined && match.winner_id !== null
+  })
+}
+
 export default function MiniGroupPanel({ miniGroups, matches, teams }: MiniGroupPanelProps) {
   if (miniGroups.length === 0) return null
 
@@ -79,7 +88,7 @@ export default function MiniGroupPanel({ miniGroups, matches, teams }: MiniGroup
             if (b.wins !== a.wins) return b.wins - a.wins
             return a.losses - b.losses
           })
-          const completed = group.team_ids.length > 0 && standings.every((entry) => entry.played === group.team_ids.length - 1)
+          const completed = isGroupCompleted(group, matches)
 
           return (
             <motion.div

@@ -429,13 +429,18 @@ export default function Admin() {
                             teams={liveDetail.teams}
                           />
                         )}
+                        {isPugTournament(liveDetail) && liveDetail.team_size > 1 && !user?.is_admin && (
+                          <p className="rounded-lg border border-border bg-card px-4 py-3 text-sm text-muted">
+                            „Teams ausgleichen“ darf nur ein Admin. Bitte einen Admin, die Teams zu bilden, bevor du das Turnier startest.
+                          </p>
+                        )}
                         <CheckinManager
                           tournamentId={liveDetail.id}
                           teamSize={liveDetail.team_size}
                           teams={liveDetail.teams}
                           signups={liveDetail.signups}
                           league={liveLeague}
-                          onStarted={(text) => {
+                          onStatusChanged={(text) => {
                             setManagerNotice(null)
                             setLiveNotice({ tournamentId: liveDetail.id, text })
                           }}

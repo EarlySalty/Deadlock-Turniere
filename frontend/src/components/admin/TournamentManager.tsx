@@ -307,7 +307,7 @@ export default function TournamentManager({
         {tournament.status === 'registration' && (
           <p className="text-xs text-muted">
             {tournament.invite_mode === 'solo_only'
-              ? 'Nach dem Öffnen checken die Spieler ein. Die Teams bildest du danach unter „Check-in“ mit „Teams ausgleichen“.'
+              ? 'Nach dem Öffnen checken die Spieler ein. Die Teams bildet danach ein Admin unter „Check-in“ mit „Teams ausgleichen“.'
               : teamCount === 0
                 ? 'Noch gibt es kein Team. Der Check-in lässt sich erst öffnen, wenn mindestens ein Team angelegt ist.'
                 : 'Vor dem Öffnen des Check-ins alle Teams vervollständigen und Captains kontrollieren.'}
