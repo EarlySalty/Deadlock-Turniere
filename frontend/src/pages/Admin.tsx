@@ -348,7 +348,7 @@ export default function Admin() {
                         <TeamBuilderPanel
                           key={liveDetail.id}
                           tournamentId={liveDetail.id}
-                          teamSize={liveDetail.team_size}
+                          teamSize={liveDetail.team_size + (liveDetail.bench_slots ?? 0)}
                           teams={liveDetail.teams}
                           signups={liveDetail.signups}
                           canAddPlayers={liveDetail.registration_open}
@@ -366,6 +366,7 @@ export default function Admin() {
                             tournamentId={liveDetail.id}
                             replacementsOpen={liveDetail.replacements_open}
                             teamSize={liveDetail.team_size}
+                            benchSlots={liveDetail.bench_slots ?? 0}
                             teams={liveDetail.teams}
                             signups={liveDetail.signups}
                             soloOnly={liveDetail.invite_mode === 'solo_only'}
@@ -379,6 +380,7 @@ export default function Admin() {
                         tournamentId={liveDetail.id}
                         replacementsOpen={liveDetail.replacements_open}
                         teamSize={liveDetail.team_size}
+                        benchSlots={liveDetail.bench_slots ?? 0}
                         teams={liveDetail.teams}
                         signups={liveDetail.signups}
                         soloOnly={liveDetail.invite_mode === 'solo_only'}

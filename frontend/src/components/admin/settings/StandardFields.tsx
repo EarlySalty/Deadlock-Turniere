@@ -14,6 +14,7 @@ export interface BasicsValue {
 
 export interface MatchFormatValue {
   teamSize: number
+  benchSlots: number
   bracketFormat: BracketFormat
   seriesFormat: SeriesFormat
   finalSeriesFormat: SeriesFormat | null
@@ -94,6 +95,17 @@ export function MatchFormatFields({ idPrefix, value, onChange, league }: FieldGr
           min={1}
           value={value.teamSize}
           onChange={(event) => onChange({ teamSize: Number(event.target.value) })}
+          className={INPUT_CLASS}
+        />
+      </Field>
+      <Field id={`${idPrefix}-bench-slots`} label="Ersatzspieler pro Team" hint="Zusätzlich zur Teamgröße. 0 heißt aus.">
+        <input
+          id={`${idPrefix}-bench-slots`}
+          type="number"
+          min={0}
+          max={5}
+          value={value.benchSlots}
+          onChange={(event) => onChange({ benchSlots: Number(event.target.value) })}
           className={INPUT_CLASS}
         />
       </Field>

@@ -220,6 +220,7 @@ async fn finalize_checkin_route(
                 "discord_id": m.discord_id,
                 "discord_name": m.discord_name,
                 "checked_in": m.checked_in,
+                "is_bench": m.is_bench,
                 "change": m.change.as_str(),
             })).collect::<Vec<_>>(),
         })).collect::<Vec<_>>(),

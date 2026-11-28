@@ -23,6 +23,7 @@ pub struct TeamMember {
     pub rank: Option<String>,
     pub rank_score: i64,
     pub role: TeamRole,
+    pub is_bench: bool,
     pub joined_at: String,
 }
 
@@ -36,6 +37,7 @@ pub struct TeamMemberPublic {
     pub rank: Option<String>,
     pub rank_score: i64,
     pub role: TeamRole,
+    pub is_bench: bool,
     pub joined_at: String,
 }
 
@@ -72,6 +74,7 @@ pub struct TeamApplication {
     pub team_id: i64,
     pub discord_name: String,
     pub status: ApplicationStatus,
+    pub as_bench: bool,
     pub created_at: String,
 }
 

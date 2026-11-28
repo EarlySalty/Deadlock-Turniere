@@ -5,7 +5,7 @@ import {
   createTournament, updateTournament, deleteTournament,
   advanceTournament, assignRandomTeams, openCheckin, revertCheckin, finalizeCheckin,
   previewSoloBalance, applySoloBalance, fetchSoloBalanceWaitlist, fetchSoloBalanceAvailability,
-  createTeam, joinTeam, signupSolo, checkinPlayer, getCheckinStatus,
+  createTeam, joinTeam, setMemberLineup, setAdminMemberLineup, signupSolo, checkinPlayer, getCheckinStatus,
   withdrawSolo, kickMember, inviteBySignup, leaveTeam,
   generateGroups, generateBracket, rescheduleLeaguePlan,
   triggerAutoLobby, fetchMiniGroups,
@@ -231,8 +231,8 @@ export function useCreateTeam() {
 export function useJoinTeam() {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: ({ tournamentId, teamId }: { tournamentId: number; teamId: number }) =>
-      joinTeam(tournamentId, teamId),
+    mutationFn: ({ tournamentId, teamId, asBench = false }: { tournamentId: number; teamId: number; asBench?: boolean }) =>
+      joinTeam(tournamentId, teamId, asBench),
     onSuccess: (_data, vars) => invalidateTournamentCaches(qc, vars.tournamentId),
   })
 }
@@ -710,6 +710,24 @@ export function useRemoveAdminTeamMember() {
   })
 }
 
+export function useSetMemberLineup(tournamentId: number) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ teamId, memberId, isBench }: { teamId: number; memberId: number; isBench: boolean }) =>
+      setMemberLineup(tournamentId, teamId, memberId, isBench),
+    onSuccess: () => invalidateTournamentCaches(qc, tournamentId),
+  })
+}
+
+export function useSetAdminMemberLineup() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ tournamentId, teamId, discordId, isBench }: { tournamentId: number; teamId: number; discordId: string; isBench: boolean }) =>
+      setAdminMemberLineup(tournamentId, teamId, discordId, isBench),
+    onSuccess: (_data, vars) => invalidateTournamentCaches(qc, vars.tournamentId),
+  })
+}
+
 export function useMoveAdminTeamMember() {
   const qc = useQueryClient()
   return useMutation({
@@ -875,7 +893,7 @@ export function useRejectInvitation(tournamentId: number) {
 export function useApplyToTeam(tournamentId: number) {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: (teamId: number) => applyToTeam(tournamentId, teamId),
+    mutationFn: ({ teamId, asBench = false }: { teamId: number; asBench?: boolean }) => applyToTeam(tournamentId, teamId, asBench),
     onSuccess: () => {
       invalidateTournamentCaches(qc, tournamentId)
     },

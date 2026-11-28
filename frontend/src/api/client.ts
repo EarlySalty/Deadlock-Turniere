@@ -118,8 +118,15 @@ export const createTeam = (tournamentId: number, name: string) =>
   request<Team>(`/tournaments/${tournamentId}/teams`, {
     method: 'POST', body: JSON.stringify({ name }),
   })
-export const joinTeam = (tournamentId: number, teamId: number) =>
-  request<void>(`/tournaments/${tournamentId}/teams/${teamId}/join`, { method: 'POST' })
+export const joinTeam = (tournamentId: number, teamId: number, asBench = false) =>
+  request<void>(`/tournaments/${tournamentId}/teams/${teamId}/join`, {
+    method: 'POST', body: JSON.stringify({ as_bench: asBench }),
+  })
+
+export const setMemberLineup = (tournamentId: number, teamId: number, memberId: number, isBench: boolean) =>
+  request<void>(`/tournaments/${tournamentId}/teams/${teamId}/lineup`, {
+    method: 'PATCH', body: JSON.stringify({ member_id: memberId, is_bench: isBench }),
+  })
 
 // Admin
 export const createTournament = (data: TournamentCreate) =>
@@ -435,6 +442,12 @@ export const removeAdminTeamMember = (tournamentId: number, teamId: number, disc
     method: 'DELETE',
   })
 
+export const setAdminMemberLineup = (tournamentId: number, teamId: number, discordId: string, isBench: boolean) =>
+  request<Team>(`/admin/tournaments/${tournamentId}/teams/${teamId}/members/${discordId}/lineup`, {
+    method: 'PATCH',
+    body: JSON.stringify({ is_bench: isBench }),
+  })
+
 export const moveAdminTeamMember = (tournamentId: number, targetTeamId: number, data: TeamMoveRequest) =>
   request<Team>(`/admin/tournaments/${tournamentId}/teams/${targetTeamId}/members/move`, {
     method: 'POST',
@@ -547,8 +560,10 @@ export const rejectInvitation = (tournamentId: number, inviteId: number) =>
   request<void>(`/tournaments/${tournamentId}/invitations/${inviteId}/reject`, { method: 'POST' })
 
 // Applications
-export const applyToTeam = (tournamentId: number, teamId: number) =>
-  request<void>(`/tournaments/${tournamentId}/teams/${teamId}/apply`, { method: 'POST' })
+export const applyToTeam = (tournamentId: number, teamId: number, asBench = false) =>
+  request<void>(`/tournaments/${tournamentId}/teams/${teamId}/apply`, {
+    method: 'POST', body: JSON.stringify({ as_bench: asBench }),
+  })
 
 export const fetchTeamApplications = (tournamentId: number, teamId: number) =>
   request<TeamApplication[]>(`/tournaments/${tournamentId}/teams/${teamId}/applications`)

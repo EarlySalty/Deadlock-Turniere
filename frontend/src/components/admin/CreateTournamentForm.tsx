@@ -101,6 +101,7 @@ export default function CreateTournamentForm({ template }: CreateTournamentFormP
         name: values.name.trim(),
         description: values.description.trim() || undefined,
         team_size: values.teamSize,
+        bench_slots: values.benchSlots,
         bracket_format: values.bracketFormat,
         force_tournament_mode: values.tournamentFormat === 'auto' ? undefined : values.tournamentFormat,
         group_phase_start: league ? localInputToIso(dates.leagueStart) : undefined,

@@ -166,6 +166,30 @@ async fn run_auto_lobby(
     Ok(Json(run))
 }
 
+async fn ensure_bench_fits(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    tournament_id: i64,
+    bench_slots: i64,
+) -> WebResult<()> {
+    let largest: Option<i64> = sqlx::query_scalar(
+        r#"SELECT MAX(bench) FROM (
+             SELECT COUNT(*) AS bench FROM turnier."team_members" tm
+             JOIN turnier."teams" t ON t.id = tm.team_id
+             WHERE t.tournament_id = $1 AND tm.is_bench
+             GROUP BY tm.team_id
+         ) counts"#,
+    )
+    .bind(tournament_id)
+    .fetch_one(&mut **tx)
+    .await?;
+    if largest.unwrap_or(0) > bench_slots {
+        return Err(WebError::conflict(
+            "Ein Team hat mehr Ersatzspieler als das neue Limit. Verschiebe oder entferne sie zuerst.",
+        ));
+    }
+    Ok(())
+}
+
 async fn create_tournament(
     State(state): State<AppState>,
     ModUser(user): ModUser,
@@ -192,11 +216,11 @@ async fn create_tournament(
           invite_mode, invite_window_start, invite_window_end, tournament_mode, tournament_game_mode,
           auto_lobby_enabled, exclude_from_leaderboard, is_test, reminder_offsets, rules,
           series_format, final_series_format, match_objective, no_show_grace_minutes,
-          start_reminder_offsets, lobby_settings, source, tournament_mode_auto)
+          start_reminder_offsets, lobby_settings, source, tournament_mode_auto, bench_slots)
          VALUES ($1, 'draft', $2, $3, $4, $5::timestamptz, $6::timestamptz, $7::timestamptz,
                  $8::timestamptz, $9::timestamptz, $10, now(), now(), $11,
                  $12::timestamptz, $13::timestamptz, $14, $15, $16, $17, $18,
-                 $19, $20, $21, $22, $23, $24, $25, $26, 'manual', $27)
+                 $19, $20, $21, $22, $23, $24, $25, $26, 'manual', $27, $28)
          RETURNING id"#,
     )
     .bind(&body.name)
@@ -226,6 +250,7 @@ async fn create_tournament(
     .bind(start_reminder_offsets)
     .bind(lobby_settings)
     .bind(tournament_mode_auto)
+    .bind(body.bench_slots)
     .fetch_one(&mut *tx)
     .await?;
     turnier_scheduler::ensure_start_gap(&mut tx, tournament_id).await?;
@@ -356,6 +381,10 @@ async fn update_tournament(
     }
     if let Some(v) = body.team_size {
         push_typed!("team_size", json!(v), PatchBind::I64(Some(v)));
+    }
+    if let Some(v) = body.bench_slots {
+        ensure_bench_fits(&mut tx, tournament_id, v).await?;
+        push_typed!("bench_slots", json!(v), PatchBind::I64(Some(v)));
     }
     if let Some(v) = body.bracket_format {
         let value = serde_value_str(&v);

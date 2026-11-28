@@ -4,6 +4,7 @@
 //! Pydantic-Modellen) und kleine Grenzkonventions-Helfer. Keine Geschäftslogik,
 //! keine Persistenz. Jede andere Crate baut auf diesen Verträgen auf.
 
+pub mod bench;
 pub mod bracket;
 pub mod enums;
 pub mod group;

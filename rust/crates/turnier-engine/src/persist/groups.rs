@@ -51,11 +51,12 @@ pub async fn generate_groups_in_tx(
     // Reihenfolge bleibt die DB-Reihenfolge, danach STABILE Sortierung).
     let mut team_scores: Vec<(i64, f64)> = Vec::with_capacity(teams.len());
     for (team_id,) in &teams {
-        let members: Vec<(i64,)> =
-            sqlx::query_as("SELECT rank_score FROM turnier.team_members WHERE team_id = $1")
-                .bind(team_id)
-                .fetch_all(&mut **tx)
-                .await?;
+        let members: Vec<(i64,)> = sqlx::query_as(
+            "SELECT rank_score FROM turnier.team_members WHERE team_id = $1 AND NOT is_bench",
+        )
+        .bind(team_id)
+        .fetch_all(&mut **tx)
+        .await?;
         let sum: i64 = members.iter().map(|(s,)| *s).sum();
         let avg = sum as f64 / (members.len().max(1) as f64);
         team_scores.push((*team_id, avg));

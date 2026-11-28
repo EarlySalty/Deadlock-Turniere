@@ -11,6 +11,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use sqlx::{Postgres, Row, Transaction};
 
+use turnier_core::bench::SeatRequest;
 use turnier_core::{
     ApplicationStatus, RecruitmentStatus, Team, TeamApplication, TeamRole, TournamentSignup,
     TournamentStatus,
@@ -22,8 +23,8 @@ use crate::extract::{AdminUser, ModUser};
 use crate::state::AppState;
 
 use super::helpers::{
-    audit, count_team_members, ensure_participant_management_allowed, ensure_team_has_capacity,
-    ensure_team_not_locked, load_team_application_or_404, load_team_or_404, load_tournament_or_404,
+    audit, count_team_members, ensure_participant_management_allowed, ensure_team_not_locked,
+    load_team_application_or_404, load_team_or_404, load_tournament_or_404,
     reassign_or_clear_captain, upsert_signup_for_team, upsert_signup_from_member, MemberSnapshot,
 };
 use super::loaders::load_team_detail;
@@ -64,6 +65,10 @@ pub fn router() -> Router<AppState> {
             delete(remove_member),
         )
         .route(
+            "/api/admin/tournaments/{tournament_id}/teams/{team_id}/members/{discord_id}/lineup",
+            patch(update_member_lineup),
+        )
+        .route(
             "/api/admin/tournaments/{tournament_id}/teams/{team_id}/members/move",
             post(move_member),
         )
@@ -99,8 +104,8 @@ fn validate_team_name(raw: Option<&str>) -> WebResult<String> {
 
 /// Bestimmt die Rolle eines neuen Mitglieds (`captain`, wenn Team leer oder ohne
 /// Captain). Portiert die 4× duplizierte Heuristik.
-fn member_role(member_count: i64, captain_discord_id: i64) -> TeamRole {
-    if member_count == 0 || captain_discord_id == 0 {
+fn member_role(member_count: i64, captain_discord_id: i64, is_bench: bool) -> TeamRole {
+    if !is_bench && (member_count == 0 || captain_discord_id == 0) {
         TeamRole::Captain
     } else {
         TeamRole::Member
@@ -264,10 +269,11 @@ async fn list_applications(
         team_id: i64,
         discord_name: String,
         status: String,
+        as_bench: bool,
         created_at: DateTime<Utc>,
     }
     let rows: Vec<AppRow> = sqlx::query_as(
-        r#"SELECT id, team_id, discord_name, status, created_at FROM turnier."team_applications"
+        r#"SELECT id, team_id, discord_name, status, as_bench, created_at FROM turnier."team_applications"
          WHERE team_id = $1 ORDER BY created_at DESC, id DESC"#,
     )
     .bind(team_id)
@@ -282,6 +288,7 @@ async fn list_applications(
             team_id: r.team_id,
             discord_name: r.discord_name,
             status,
+            as_bench: r.as_bench,
             created_at: db::ts_to_string(r.created_at),
         });
     }
@@ -311,8 +318,20 @@ async fn accept_application(
     let app_discord_id_i64: i64 = application.get("discord_id");
     let app_discord_id = db::discord_id_to_string(app_discord_id_i64);
     let app_discord_name: Option<String> = application.get("discord_name");
-
-    ensure_team_has_capacity(&mut *tx, team_id, team_size).await?;
+    let app_as_bench: bool = application.get("as_bench");
+    let bench_slots: i64 = tournament.get("bench_slots");
+    let is_bench = crate::public::helpers::reserve_seat(
+        &mut *tx,
+        team_id,
+        team_size,
+        bench_slots,
+        if app_as_bench {
+            SeatRequest::Bench
+        } else {
+            SeatRequest::Auto
+        },
+    )
+    .await?;
 
     // Bereits in einem Team dieses Turniers?
     let already: Option<i64> = sqlx::query_scalar(
@@ -363,7 +382,7 @@ async fn accept_application(
     }
 
     let count = count_team_members(&mut *tx, team_id).await?;
-    let role = member_role(count, captain);
+    let role = member_role(count, captain, is_bench);
 
     insert_member(
         &mut tx,
@@ -374,6 +393,7 @@ async fn accept_application(
         rank.as_deref(),
         rank_score,
         role,
+        is_bench,
     )
     .await?;
     upsert_signup_for_team(
@@ -553,15 +573,21 @@ async fn change_captain(
     ensure_participant_management_allowed(tournament.try_get("status")?)?;
     load_team_or_404(&mut *tx, tournament_id, team_id).await?;
 
-    let is_member: Option<i64> = sqlx::query_scalar(
-        r#"SELECT 1::BIGINT FROM turnier."team_members" WHERE team_id = $1 AND discord_id = $2"#,
+    let is_member: Option<bool> = sqlx::query_scalar(
+        r#"SELECT is_bench FROM turnier."team_members" WHERE team_id = $1 AND discord_id = $2"#,
     )
     .bind(team_id)
     .bind(discord_id_i64)
     .fetch_optional(&mut *tx)
     .await?;
-    if is_member.is_none() {
-        return Err(WebError::not_found("Mitglied nicht im Team gefunden"));
+    match is_member {
+        None => return Err(WebError::not_found("Mitglied nicht im Team gefunden")),
+        Some(true) => {
+            return Err(WebError::bad_request(
+                "Der neue Captain muss Stammspieler sein",
+            ))
+        }
+        Some(false) => {}
     }
 
     sqlx::query(r#"UPDATE turnier."team_members" SET role = 'member' WHERE team_id = $1"#)
@@ -637,6 +663,50 @@ async fn remove_member(
     Ok(Json(load_team_detail(&state, team_id).await?))
 }
 
+#[derive(Debug, Deserialize)]
+struct LineupBody {
+    is_bench: bool,
+}
+
+async fn update_member_lineup(
+    State(state): State<AppState>,
+    ModUser(user): ModUser,
+    Path((tournament_id, team_id, discord_id)): Path<(i64, i64, String)>,
+    Json(body): Json<LineupBody>,
+) -> WebResult<Json<Team>> {
+    let discord_id_i64 = db::parse_participant_id(&discord_id)?;
+    let mut tx = state.pool.begin().await?;
+    let tournament = crate::public::helpers::lock_tournament_row(&mut tx, tournament_id).await?;
+    ensure_participant_management_allowed(tournament.try_get("status")?)?;
+    let team_size: i64 = tournament.try_get("team_size")?;
+    let bench_slots: i64 = tournament.try_get("bench_slots")?;
+    load_team_or_404(&mut *tx, tournament_id, team_id).await?;
+    crate::public::helpers::set_member_lineup(
+        &mut tx,
+        team_id,
+        discord_id_i64,
+        team_size,
+        bench_slots,
+        body.is_bench,
+    )
+    .await?;
+    audit(
+        &mut *tx,
+        "team_member_lineup_admin",
+        &user.discord_id,
+        json!({
+            "tournament_id": tournament_id,
+            "team_id": team_id,
+            "discord_id": db::discord_id_to_string(discord_id_i64),
+            "is_bench": body.is_bench,
+        }),
+    )
+    .await?;
+    tx.commit().await?;
+
+    Ok(Json(load_team_detail(&state, team_id).await?))
+}
+
 /// Body von `members/move` (`from_team_id` + `discord_id`).
 #[derive(Debug, Deserialize)]
 struct MoveBody {
@@ -675,9 +745,17 @@ async fn move_member(
     let tournament = crate::public::helpers::lock_tournament_row(&mut tx, tournament_id).await?;
     ensure_participant_management_allowed(tournament.try_get("status")?)?;
     let team_size: i64 = tournament.get("team_size");
+    let bench_slots: i64 = tournament.get("bench_slots");
     let source_team = load_team_or_404(&mut *tx, tournament_id, from_team_id).await?;
     let target_team = load_team_or_404(&mut *tx, tournament_id, team_id).await?;
-    ensure_team_has_capacity(&mut *tx, team_id, team_size).await?;
+    let is_bench = crate::public::helpers::reserve_seat(
+        &mut *tx,
+        team_id,
+        team_size,
+        bench_slots,
+        SeatRequest::Auto,
+    )
+    .await?;
 
     let in_source: Option<i64> = sqlx::query_scalar(
         r#"SELECT 1::BIGINT FROM turnier."team_members" WHERE team_id = $1 AND discord_id = $2"#,
@@ -703,11 +781,12 @@ async fn move_member(
 
     let count = count_team_members(&mut *tx, team_id).await?;
     let target_captain: i64 = target_team.get("captain_discord_id");
-    let new_role = member_role(count, target_captain);
+    let new_role = member_role(count, target_captain, is_bench);
 
-    sqlx::query(r#"UPDATE turnier."team_members" SET team_id = $1, role = $2 WHERE team_id = $3 AND discord_id = $4"#)
+    sqlx::query(r#"UPDATE turnier."team_members" SET team_id = $1, role = $2, is_bench = $3 WHERE team_id = $4 AND discord_id = $5"#)
         .bind(team_id)
         .bind(new_role)
+        .bind(is_bench)
         .bind(from_team_id)
         .bind(discord_id_i64)
         .execute(&mut *tx)
@@ -766,9 +845,17 @@ async fn assign_signup(
     let tournament = crate::public::helpers::lock_tournament_row(&mut tx, tournament_id).await?;
     ensure_participant_management_allowed(tournament.try_get("status")?)?;
     let team_size: i64 = tournament.get("team_size");
+    let bench_slots: i64 = tournament.get("bench_slots");
     let target_team = load_team_or_404(&mut *tx, tournament_id, team_id).await?;
     let captain: i64 = target_team.get("captain_discord_id");
-    ensure_team_has_capacity(&mut *tx, team_id, team_size).await?;
+    let is_bench = crate::public::helpers::reserve_seat(
+        &mut *tx,
+        team_id,
+        team_size,
+        bench_slots,
+        SeatRequest::Auto,
+    )
+    .await?;
 
     let signup = sqlx::query(
         r#"SELECT * FROM turnier."tournament_signups" WHERE id = $1 AND tournament_id = $2"#,
@@ -802,7 +889,7 @@ async fn assign_signup(
     }
 
     let count = count_team_members(&mut *tx, team_id).await?;
-    let role = member_role(count, captain);
+    let role = member_role(count, captain, is_bench);
     let s_name: Option<String> = signup.get("discord_name");
     let s_steam: Option<String> = signup.get("steam_id");
     let s_rank: Option<String> = signup.get("rank");
@@ -817,6 +904,7 @@ async fn assign_signup(
         s_rank.as_deref(),
         s_score,
         role,
+        is_bench,
     )
     .await?;
     sqlx::query(r#"UPDATE turnier."tournament_signups" SET team_id = $1 WHERE id = $2"#)
@@ -883,9 +971,17 @@ async fn add_member(
         ));
     }
     let team_size: i64 = tournament.get("team_size");
+    let bench_slots: i64 = tournament.get("bench_slots");
     let target_team = load_team_or_404(&mut *tx, tournament_id, team_id).await?;
     let captain: i64 = target_team.get("captain_discord_id");
-    ensure_team_has_capacity(&mut *tx, team_id, team_size).await?;
+    let is_bench = crate::public::helpers::reserve_seat(
+        &mut *tx,
+        team_id,
+        team_size,
+        bench_slots,
+        SeatRequest::Auto,
+    )
+    .await?;
 
     let already: Option<i64> = sqlx::query_scalar(
         r#"SELECT 1::BIGINT FROM turnier."team_members" tm JOIN turnier."teams" t ON tm.team_id = t.id
@@ -936,7 +1032,7 @@ async fn add_member(
     };
 
     let count = count_team_members(&mut *tx, team_id).await?;
-    let role = member_role(count, captain);
+    let role = member_role(count, captain, is_bench);
 
     insert_member(
         &mut tx,
@@ -947,6 +1043,7 @@ async fn add_member(
         rank.as_deref(),
         rank_score,
         role,
+        is_bench,
     )
     .await?;
     upsert_signup_for_team(
@@ -1125,6 +1222,7 @@ pub(super) async fn insert_member(
     rank: Option<&str>,
     rank_score: i64,
     role: TeamRole,
+    is_bench: bool,
 ) -> WebResult<()> {
     let rank = crate::public::helpers::RankInput {
         steam_id: steam_id.map(str::to_string),
@@ -1138,6 +1236,7 @@ pub(super) async fn insert_member(
         discord_name,
         &rank,
         role,
+        is_bench,
     )
     .await?;
     Ok(())

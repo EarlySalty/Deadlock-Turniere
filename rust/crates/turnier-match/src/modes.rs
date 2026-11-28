@@ -338,7 +338,7 @@ async fn load_match_mode_context(
              WHERE tm.team_id IN ",
         );
         push_i64_bind_list(&mut query, team_ids);
-        query.push(" ORDER BY tm.team_id, tm.joined_at, tm.id");
+        query.push(" ORDER BY tm.team_id, tm.is_bench, tm.joined_at, tm.id");
         let rows: Vec<ModeParticipantRow> = query.build_query_as().fetch_all(pool).await?;
         rows.into_iter()
             .map(|r| ModeParticipant {

@@ -106,7 +106,6 @@ pub fn ensure_participant_management_allowed(tournament_status: TournamentStatus
     Ok(())
 }
 
-/// Zählt die Mitglieder eines Teams.
 pub async fn count_team_members<'e, E>(executor: E, team_id: i64) -> WebResult<i64>
 where
     E: Executor<'e, Database = Postgres>,
@@ -117,21 +116,6 @@ where
             .fetch_one(executor)
             .await?;
     Ok(count)
-}
-
-/// Liefert 400, wenn das Team bereits voll ist (`>= team_size`).
-pub async fn ensure_team_has_capacity<'e, E>(
-    executor: E,
-    team_id: i64,
-    team_size: i64,
-) -> WebResult<()>
-where
-    E: Executor<'e, Database = Postgres>,
-{
-    if count_team_members(executor, team_id).await? >= team_size {
-        return Err(WebError::bad_request("Team ist bereits voll"));
-    }
-    Ok(())
 }
 
 pub async fn ensure_team_not_locked(
@@ -169,7 +153,7 @@ pub async fn reassign_or_clear_captain(
     team_id: i64,
 ) -> WebResult<()> {
     let next_captain: Option<i64> = sqlx::query_scalar(
-        r#"SELECT discord_id FROM turnier."team_members" WHERE team_id = $1 ORDER BY joined_at LIMIT 1"#,
+        r#"SELECT discord_id FROM turnier."team_members" WHERE team_id = $1 ORDER BY is_bench, joined_at LIMIT 1"#,
     )
     .bind(team_id)
     .fetch_optional(&mut **tx)
@@ -181,7 +165,7 @@ pub async fn reassign_or_clear_captain(
         .execute(&mut **tx)
         .await?;
     if next_captain != 0 {
-        sqlx::query(r#"UPDATE turnier."team_members" SET role = 'captain' WHERE team_id = $1 AND discord_id = $2"#)
+        sqlx::query(r#"UPDATE turnier."team_members" SET role = 'captain', is_bench = false WHERE team_id = $1 AND discord_id = $2"#)
             .bind(team_id)
             .bind(next_captain)
             .execute(&mut **tx)

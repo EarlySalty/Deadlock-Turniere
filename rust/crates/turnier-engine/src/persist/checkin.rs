@@ -302,6 +302,7 @@ pub async fn assign_random_teams(
                     rank: rank.as_deref(),
                     rank_score: score,
                     role,
+                    is_bench: false,
                 },
             )
             .await?;
@@ -414,6 +415,7 @@ struct SnapshotMember {
     discord_id: i64,
     joined_at: Option<DateTime<Utc>>,
     role: String,
+    is_bench: bool,
     name: String,
     created_at: Option<DateTime<Utc>>,
 }
@@ -439,7 +441,7 @@ async fn snapshot_token_in_tx(
     .await?;
 
     let members: Vec<SnapshotMember> = sqlx::query_as(
-        "SELECT tm.team_id, tm.discord_id, tm.joined_at, tm.role, t.name, t.created_at \
+        "SELECT tm.team_id, tm.discord_id, tm.joined_at, tm.role, tm.is_bench, t.name, t.created_at \
          FROM turnier.team_members tm JOIN turnier.teams t ON t.id = tm.team_id \
          WHERE t.tournament_id = $1 ORDER BY t.created_at, t.id, tm.joined_at, tm.id",
     )
@@ -473,7 +475,7 @@ async fn snapshot_token_in_tx(
         })).collect::<Vec<_>>(),
         "members": members.iter().map(|m| serde_json::json!({
             "team_id": m.team_id, "discord_id": m.discord_id, "joined_at": m.joined_at,
-            "role": m.role, "name": m.name, "created_at": m.created_at,
+            "role": m.role, "is_bench": m.is_bench, "name": m.name, "created_at": m.created_at,
         })).collect::<Vec<_>>(),
         "signups": signups.iter().map(|s| serde_json::json!({
             "id": s.id, "discord_id": s.discord_id, "team_id": s.team_id, "signed_up_at": s.signed_up_at,
@@ -573,6 +575,7 @@ pub struct RosterEntry {
     pub discord_id: String,
     pub discord_name: Option<String>,
     pub checked_in: bool,
+    pub is_bench: bool,
     pub change: RosterChange,
 }
 
@@ -683,6 +686,7 @@ fn team_roster(
             discord_id: discord_id_to_string(m.discord_id),
             discord_name: m.discord_name.clone(),
             checked_in: checked_in_ids.contains(&m.discord_id),
+            is_bench: m.is_bench,
             change,
         })
         .collect()
@@ -730,14 +734,15 @@ struct TournamentRow {
     invite_mode: InviteMode,
 }
 
-/// Mitglieds-Sicht im Check-in-Algorithmus. Es werden nur `discord_id` (für die
-/// Check-in-Prüfung) und `discord_name` (für Report-Felder) ausgewertet; die
-/// übrigen Spalten der Solo-Pool-Einfügung kommen aus `signups_by_discord`, exakt
-/// wie im Original.
 #[derive(Clone)]
 struct MemberData {
     discord_id: i64,
     discord_name: Option<String>,
+    is_bench: bool,
+}
+
+fn starter_count(members: &[MemberData]) -> i64 {
+    members.iter().filter(|m| !m.is_bench).count() as i64
 }
 
 #[derive(Clone)]
@@ -757,6 +762,7 @@ struct MemberRow {
     team_id: i64,
     discord_id: i64,
     discord_name: Option<String>,
+    is_bench: bool,
 }
 
 #[derive(sqlx::FromRow)]
@@ -868,10 +874,8 @@ pub async fn finalize_checkin(
         .map(|(id, name)| (*id, name.clone()))
         .collect();
 
-    // Mitglieder je Team (stabile Reihenfolge). Es werden nur discord_id/
-    // discord_name ausgewertet (siehe MemberData-Doku).
     let member_rows: Vec<MemberRow> = sqlx::query_as::<_, MemberRow>(
-        "SELECT tm.team_id, tm.discord_id, tm.discord_name \
+        "SELECT tm.team_id, tm.discord_id, tm.discord_name, tm.is_bench \
          FROM turnier.team_members tm JOIN turnier.teams t ON t.id = tm.team_id \
          WHERE t.tournament_id = $1 ORDER BY t.created_at, t.id, tm.joined_at, tm.id",
     )
@@ -886,6 +890,7 @@ pub async fn finalize_checkin(
             .push(MemberData {
                 discord_id: row.discord_id,
                 discord_name: row.discord_name.clone(),
+                is_bench: row.is_bench,
             });
     }
 
@@ -931,7 +936,7 @@ pub async fn finalize_checkin(
         let members = team_states.get(team_id).cloned().unwrap_or_default();
         let mut kept: Vec<MemberData> = Vec::new();
         for member in members {
-            if keep_rosters || checked_in_ids.contains(&member.discord_id) {
+            if keep_rosters || member.is_bench || checked_in_ids.contains(&member.discord_id) {
                 kept.push(member);
             } else {
                 removed_members.push(RemovedPlayer {
@@ -987,13 +992,14 @@ pub async fn finalize_checkin(
     // Unvollständige bestehende Teams aus dem Pool auffüllen.
     for team_id in &team_order {
         let mut members = team_states.get(team_id).cloned().unwrap_or_default();
-        while auto_team_formation && (members.len() as i64) < team_size {
+        while auto_team_formation && starter_count(&members) < team_size {
             let Some(signup) = pool.pop_front() else {
                 break;
             };
             members.push(MemberData {
                 discord_id: signup.discord_id,
                 discord_name: signup.discord_name.clone(),
+                is_bench: false,
             });
             affected_team_ids.insert(*team_id);
             added_players.push(AddedPlayer {
@@ -1047,15 +1053,11 @@ pub async fn finalize_checkin(
         let kept = team_states.get(team_id).map(Vec::as_slice).unwrap_or(&[]);
         let checked_in = kept
             .iter()
-            .filter(|m| checked_in_ids.contains(&m.discord_id))
+            .filter(|m| !m.is_bench && checked_in_ids.contains(&m.discord_id))
             .count() as i64;
-        let member_count = kept.len() as i64;
-        let ready = if keep_rosters {
-            checked_in
-        } else {
-            member_count
-        };
-        let outcome = if !keep_rosters && member_count == 0 {
+        let starters = starter_count(kept);
+        let ready = if keep_rosters { checked_in } else { starters };
+        let outcome = if !keep_rosters && starters == 0 {
             deleted_team_ids.push(*team_id);
             TeamOutcome::Deleted
         } else if ready < team_size {
@@ -1182,6 +1184,7 @@ pub async fn finalize_checkin(
                     rank: signup.rank.as_deref(),
                     rank_score: signup.rank_score,
                     role: TeamRole::Member,
+                    is_bench: false,
                 },
             )
             .await?;
@@ -1220,6 +1223,7 @@ pub async fn finalize_checkin(
                         rank: signup.rank.as_deref(),
                         rank_score: signup.rank_score,
                         role,
+                        is_bench: false,
                     },
                 )
                 .await?;
@@ -1414,14 +1418,13 @@ pub async fn finalize_checkin(
     Ok(result)
 }
 
-/// Setzt den Captain eines Teams auf das (nach joined_at, id) erste Mitglied.
-/// Portiert `_sync_team_captain`.
 async fn sync_team_captain(
     tx: &mut Transaction<'_, Postgres>,
     team_id: i64,
 ) -> TournamentResult<()> {
     let members: Vec<(i64,)> = sqlx::query_as(
-        "SELECT discord_id FROM turnier.team_members WHERE team_id = $1 ORDER BY joined_at, id",
+        "SELECT discord_id FROM turnier.team_members WHERE team_id = $1 \
+         ORDER BY is_bench, joined_at, id",
     )
     .bind(team_id)
     .fetch_all(&mut **tx)

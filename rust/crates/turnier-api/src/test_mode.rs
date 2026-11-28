@@ -1029,6 +1029,7 @@ async fn create_test_tournament(
                 Some(&display_name),
                 &rank,
                 role,
+                false,
             )
             .await?;
             helpers::insert_signup(

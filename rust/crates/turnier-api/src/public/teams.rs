@@ -1,6 +1,7 @@
 //! Team-Lifecycle: Erstellen, Beitreten (mit Auto-Austritt), Verlassen, Kicken,
 //! Recruiting-Status setzen.
 
+use axum::body::Bytes;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::routing::{delete, patch, post};
@@ -38,6 +39,10 @@ pub fn router() -> Router<AppState> {
         .route(
             "/api/tournaments/{tournament_id}/teams/{team_id}/members/{discord_id}",
             delete(kick_team_member),
+        )
+        .route(
+            "/api/tournaments/{tournament_id}/teams/{team_id}/lineup",
+            patch(update_member_lineup),
         )
 }
 
@@ -122,6 +127,7 @@ async fn create_team(
         user.discord_name.as_deref(),
         &rank,
         TeamRole::Captain,
+        false,
     )
     .await?;
 
@@ -147,7 +153,9 @@ async fn join_team(
     State(state): State<AppState>,
     AuthUser(user): AuthUser,
     Path((tournament_id, team_id)): Path<(i64, i64)>,
+    body: Bytes,
 ) -> WebResult<Json<TeamMember>> {
+    let as_bench = helpers::bench_wish(&body)?;
     let pool = &state.pool;
     helpers::ensure_consent(pool, &user.discord_id).await?;
     let user_discord_id = db::parse_participant_id(&user.discord_id)?;
@@ -185,7 +193,14 @@ async fn join_team(
         return Err(WebError::conflict("Du bist bereits in diesem Team"));
     }
 
-    helpers::ensure_team_has_capacity(&mut *tx, team_id, t.team_size).await?;
+    let is_bench = helpers::reserve_seat(
+        &mut *tx,
+        team_id,
+        t.team_size,
+        t.bench_slots,
+        helpers::seat_request(as_bench),
+    )
+    .await?;
 
     if let Some((_, old_team_id, captain_discord_id)) = existing {
         let is_captain = user_discord_id == captain_discord_id;
@@ -270,6 +285,7 @@ async fn join_team(
         user.discord_name.as_deref(),
         &rank,
         TeamRole::Member,
+        is_bench,
     )
     .await?;
 
@@ -385,6 +401,46 @@ async fn kick_team_member(
         "discord_id": discord_id,
         "team_id": team_id,
     })))
+}
+
+#[derive(Debug, Deserialize)]
+struct LineupBody {
+    member_id: i64,
+    is_bench: bool,
+}
+
+async fn update_member_lineup(
+    State(state): State<AppState>,
+    AuthUser(user): AuthUser,
+    Path((tournament_id, team_id)): Path<(i64, i64)>,
+    Json(body): Json<LineupBody>,
+) -> WebResult<Json<Team>> {
+    let mut tx = state.pool.begin().await?;
+    let t = helpers::lock_tournament_or_404(&mut tx, tournament_id).await?;
+    let team = helpers::load_team_or_404(&mut *tx, tournament_id, team_id).await?;
+    helpers::ensure_captain_or_mod(&user, &team.captain_discord_id)?;
+    helpers::ensure_player_teams_allowed(&t)?;
+    helpers::ensure_team_roster_open(t.status)?;
+    let target_discord_id: i64 = sqlx::query_scalar(
+        "SELECT discord_id FROM turnier.team_members WHERE id = $1 AND team_id = $2",
+    )
+    .bind(body.member_id)
+    .bind(team_id)
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or_else(|| WebError::not_found("Mitglied nicht gefunden"))?;
+    helpers::set_member_lineup(
+        &mut tx,
+        team_id,
+        target_discord_id,
+        t.team_size,
+        t.bench_slots,
+        body.is_bench,
+    )
+    .await?;
+    tx.commit().await?;
+
+    Ok(Json(helpers::load_team_response(&state, team_id).await?))
 }
 
 /// `DELETE /api/tournaments/{tournament_id}/teams/{team_id}/leave`: Team verlassen.
@@ -535,10 +591,11 @@ async fn load_team_member_by_id(
         rank: Option<String>,
         rank_score: Option<i64>,
         role: turnier_core::TeamRole,
+        is_bench: bool,
         joined_at: DateTime<Utc>,
     }
     let row: Row = sqlx::query_as(
-        r#"SELECT id, team_id, discord_id, discord_name, steam_id, rank, rank_score, role, joined_at
+        r#"SELECT id, team_id, discord_id, discord_name, steam_id, rank, rank_score, role, is_bench, joined_at
          FROM turnier."team_members" WHERE id = $1"#,
     )
     .bind(member_id)
@@ -553,6 +610,7 @@ async fn load_team_member_by_id(
         rank: row.rank,
         rank_score: row.rank_score.unwrap_or(0),
         role: row.role,
+        is_bench: row.is_bench,
         joined_at: db::ts_to_string(row.joined_at),
     })
 }

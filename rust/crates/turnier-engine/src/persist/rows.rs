@@ -13,6 +13,7 @@ pub struct NewTeamMember<'a> {
     pub rank: Option<&'a str>,
     pub rank_score: i64,
     pub role: TeamRole,
+    pub is_bench: bool,
 }
 
 pub struct NewSignup<'a> {
@@ -62,8 +63,8 @@ pub async fn insert_team_member(
 ) -> sqlx::Result<i64> {
     sqlx::query_scalar(
         r#"INSERT INTO turnier."team_members"
-         (team_id, discord_id, discord_name, steam_id, rank, rank_score, role, joined_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, now()) RETURNING id"#,
+         (team_id, discord_id, discord_name, steam_id, rank, rank_score, role, is_bench, joined_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, now()) RETURNING id"#,
     )
     .bind(member.team_id)
     .bind(member.discord_id)
@@ -72,6 +73,7 @@ pub async fn insert_team_member(
     .bind(member.rank)
     .bind(member.rank_score)
     .bind(member.role)
+    .bind(member.is_bench)
     .fetch_one(conn)
     .await
 }

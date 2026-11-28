@@ -96,6 +96,8 @@ pub struct TournamentCreate {
     pub description: Option<String>,
     #[serde(default = "default_team_size")]
     pub team_size: i64,
+    #[serde(default)]
+    pub bench_slots: i64,
     #[serde(default = "d_bracket_format")]
     pub bracket_format: BracketFormat,
     #[serde(default = "default_series_format")]
@@ -151,6 +153,7 @@ impl TournamentCreate {
     /// nicht in `{1, 3, 5}` liegt.
     pub fn validated(mut self) -> Result<Self, String> {
         check_team_size(self.team_size)?;
+        crate::bench::check_bench_slots(self.bench_slots)?;
         check_series_format(self.series_format)?;
         if let Some(f) = self.final_series_format {
             check_final_series_format(f)?;
@@ -175,6 +178,8 @@ pub struct TournamentUpdate {
     pub status: Option<TournamentStatus>,
     #[serde(default)]
     pub team_size: Option<i64>,
+    #[serde(default)]
+    pub bench_slots: Option<i64>,
     #[serde(default)]
     pub bracket_format: Option<BracketFormat>,
     #[serde(default)]
@@ -229,6 +234,9 @@ impl TournamentUpdate {
         if let Some(v) = self.team_size {
             check_team_size(v)?;
         }
+        if let Some(v) = self.bench_slots {
+            crate::bench::check_bench_slots(v)?;
+        }
         if let Some(v) = self.series_format {
             check_series_format(v)?;
         }
@@ -256,6 +264,7 @@ pub struct Tournament {
     pub replacements_open: bool,
     pub description: Option<String>,
     pub team_size: i64,
+    pub bench_slots: i64,
     pub series_format: i64,
     pub final_series_format: Option<i64>,
     pub registration_start: Option<String>,
@@ -345,6 +354,7 @@ pub struct TournamentDetailPublic {
     pub replacements_open: bool,
     pub description: Option<String>,
     pub team_size: i64,
+    pub bench_slots: i64,
     pub series_format: i64,
     pub final_series_format: Option<i64>,
     pub registration_start: Option<String>,

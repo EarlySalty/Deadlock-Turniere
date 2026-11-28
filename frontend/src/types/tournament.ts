@@ -45,6 +45,7 @@ export interface Tournament {
   replacements_open: boolean
   description: string | null
   team_size: number
+  bench_slots: number
   series_format: 1 | 3 | 5
   final_series_format: 1 | 3 | 5 | null
   registration_start: string | null
@@ -92,6 +93,7 @@ export interface TeamMember {
   rank: string | null
   rank_score: number
   role: 'captain' | 'member'
+  is_bench: boolean
   joined_at: string
 }
 
@@ -150,6 +152,7 @@ export interface TeamMemberPublic {
   rank: string | null
   rank_score: number
   role: 'captain' | 'member'
+  is_bench: boolean
   joined_at: string
 }
 
@@ -218,6 +221,7 @@ export interface FinalizeCheckinRosterEntry {
   discord_id: string
   discord_name: string | null
   checked_in: boolean
+  is_bench: boolean
   change: 'stays' | 'removed' | 'added'
 }
 
@@ -359,6 +363,7 @@ export interface TournamentCreate {
   name: string
   description?: string
   team_size: number
+  bench_slots?: number
   bracket_format: BracketFormat
   force_tournament_mode?: TournamentMode
   group_phase_start?: string
@@ -388,6 +393,7 @@ export interface TournamentUpdate {
   description?: string
   status?: TournamentStatus
   team_size?: number
+  bench_slots?: number
   bracket_format?: BracketFormat
   force_tournament_mode?: TournamentMode | null
   tournament_game_mode?: TournamentGameMode
@@ -786,6 +792,7 @@ export interface TeamApplication {
   team_id: number
   discord_name: string
   status: ApplicationStatus
+  as_bench: boolean
   created_at: string
 }
 

@@ -10,9 +10,11 @@
 use std::collections::HashMap;
 
 use chrono::{DateTime, Utc};
+use serde::Deserialize;
 use serde_json::Value;
 use sqlx::{Postgres, Row};
 
+use turnier_core::bench::{self, Lineup, SeatRequest};
 use turnier_core::{
     BracketMatch, BracketMiniGroup, Group, GroupMatch, GroupTeam, InviteMode, RankProfile,
     RecruitmentStatus, Team, TeamMember, TeamMemberPublic, TeamPublic, TeamRole, Tournament,
@@ -209,13 +211,13 @@ fn apply_profile(fields: &mut RankFields, profile: Option<&RankProfile>) {
 const MEMBER_SELECT: &str = "SELECT tm.id, tm.team_id, tm.discord_id, \
     tm.discord_name AS team_member_discord_name, \
     s.discord_name AS session_discord_name, p.display_name AS profile_display_name, \
-    tm.steam_id, tm.rank, tm.rank_score, tm.role, tm.joined_at \
+    tm.steam_id, tm.rank, tm.rank_score, tm.role, tm.is_bench, tm.joined_at \
     FROM turnier.\"team_members\" tm \
     LEFT JOIN (SELECT discord_id, MAX(discord_name) AS discord_name FROM turnier.\"sessions\" \
         WHERE discord_name IS NOT NULL AND discord_name != '' GROUP BY discord_id) s \
         ON s.discord_id = tm.discord_id \
     LEFT JOIN turnier.\"user_profiles\" p ON p.discord_id = tm.discord_id \
-    WHERE tm.team_id = $1 ORDER BY tm.joined_at";
+    WHERE tm.team_id = $1 ORDER BY tm.is_bench, tm.joined_at";
 
 /// Eine angereicherte Member-Zeile (Namens-Kandidaten + Rangfelder).
 struct MemberRow {
@@ -229,6 +231,7 @@ struct MemberRow {
     rank: Option<String>,
     rank_score: i64,
     role: turnier_core::TeamRole,
+    is_bench: bool,
     joined_at: DateTime<Utc>,
 }
 
@@ -264,6 +267,7 @@ async fn load_member_rows(pool: &Pool, team_id: i64) -> WebResult<Vec<MemberRow>
             rank: row.try_get("rank")?,
             rank_score: row.try_get::<Option<i64>, _>("rank_score")?.unwrap_or(0),
             role: row.try_get("role")?,
+            is_bench: row.try_get("is_bench")?,
             joined_at: row.try_get("joined_at")?,
         });
     }
@@ -305,6 +309,7 @@ fn member_from_row(row: MemberRow, ranks: &HashMap<String, RankProfile>) -> Team
         rank: fields.rank,
         rank_score: fields.rank_score,
         role: row.role,
+        is_bench: row.is_bench,
         joined_at: db::ts_to_string(row.joined_at),
     }
 }
@@ -376,6 +381,7 @@ pub async fn load_teams_public(pool: &Pool, tournament_id: i64) -> WebResult<Vec
                     rank: m.rank,
                     rank_score: m.rank_score,
                     role: m.role,
+                    is_bench: m.is_bench,
                     joined_at: db::ts_to_string(m.joined_at),
                 }
             })
@@ -808,6 +814,7 @@ pub fn tournament_from_row(row: &sqlx::postgres::PgRow) -> WebResult<Tournament>
         replacements_open: status.is_match_phase(),
         description: row.try_get("description")?,
         team_size: row.try_get("team_size")?,
+        bench_slots: row.try_get("bench_slots")?,
         series_format: row.try_get("series_format")?,
         final_series_format: row.try_get("final_series_format")?,
         registration_start: db::opt_ts_to_string(row.try_get("registration_start")?),
@@ -874,6 +881,7 @@ pub fn build_detail_public(
         replacements_open: t.replacements_open,
         description: t.description,
         team_size: t.team_size,
+        bench_slots: t.bench_slots,
         series_format: t.series_format,
         final_series_format: t.final_series_format,
         registration_start: t.registration_start,
@@ -915,6 +923,7 @@ pub struct TournamentGuard {
     pub name: String,
     pub status: turnier_core::TournamentStatus,
     pub team_size: i64,
+    pub bench_slots: i64,
     pub invite_mode: Option<InviteMode>,
     pub invite_window_start: Option<String>,
     pub invite_window_end: Option<String>,
@@ -947,7 +956,7 @@ pub async fn lock_tournament_or_404(
     tournament_guard_from_row(Some(lock_tournament_row(tx, tournament_id).await?))
 }
 
-const TOURNAMENT_GUARD_SELECT: &str = r#"SELECT id, name, status, team_size, invite_mode,
+const TOURNAMENT_GUARD_SELECT: &str = r#"SELECT id, name, status, team_size, bench_slots, invite_mode,
     invite_window_start, invite_window_end, is_test FROM turnier."tournaments""#;
 
 fn tournament_guard_from_row(row: Option<sqlx::postgres::PgRow>) -> WebResult<TournamentGuard> {
@@ -959,6 +968,7 @@ fn tournament_guard_from_row(row: Option<sqlx::postgres::PgRow>) -> WebResult<To
         name: row.try_get("name")?,
         status: row.try_get("status")?,
         team_size: row.try_get("team_size")?,
+        bench_slots: row.try_get("bench_slots")?,
         invite_mode: row.try_get("invite_mode")?,
         invite_window_start: db::opt_ts_to_string(row.try_get("invite_window_start")?),
         invite_window_end: db::opt_ts_to_string(row.try_get("invite_window_end")?),
@@ -1292,20 +1302,99 @@ where
     Ok(count)
 }
 
-/// Stellt sicher, dass das Team noch Kapazität hat (400 sonst).
-/// Entspricht `_ensure_team_has_capacity` (routes.py:501).
-pub async fn ensure_team_has_capacity<'e, E>(
-    executor: E,
-    team_id: i64,
-    team_size: i64,
-) -> WebResult<()>
+pub async fn team_lineup<'e, E>(executor: E, team_id: i64) -> WebResult<Lineup>
 where
     E: sqlx::Executor<'e, Database = Postgres>,
 {
-    if count_team_members(executor, team_id).await? >= team_size {
-        return Err(WebError::bad_request("Team ist bereits voll"));
+    let (starters, bench): (i64, i64) = sqlx::query_as(
+        r#"SELECT COUNT(*) FILTER (WHERE NOT is_bench), COUNT(*) FILTER (WHERE is_bench)
+         FROM turnier."team_members" WHERE team_id = $1"#,
+    )
+    .bind(team_id)
+    .fetch_one(executor)
+    .await?;
+    Ok(Lineup { starters, bench })
+}
+
+pub async fn reserve_seat<'e, E>(
+    executor: E,
+    team_id: i64,
+    team_size: i64,
+    bench_slots: i64,
+    request: SeatRequest,
+) -> WebResult<bool>
+where
+    E: sqlx::Executor<'e, Database = Postgres>,
+{
+    let lineup = team_lineup(executor, team_id).await?;
+    bench::place(lineup, team_size, bench_slots, request)
+        .map_err(|err| WebError::bad_request(err.message()))
+}
+
+pub async fn set_member_lineup(
+    tx: &mut sqlx::Transaction<'_, Postgres>,
+    team_id: i64,
+    discord_id: i64,
+    team_size: i64,
+    bench_slots: i64,
+    to_bench: bool,
+) -> WebResult<()> {
+    let member: Option<(bool, i64)> = sqlx::query_as(
+        r#"SELECT tm.is_bench, t.captain_discord_id FROM turnier."team_members" tm
+         JOIN turnier."teams" t ON t.id = tm.team_id
+         WHERE tm.team_id = $1 AND tm.discord_id = $2 FOR UPDATE OF tm"#,
+    )
+    .bind(team_id)
+    .bind(discord_id)
+    .fetch_optional(&mut **tx)
+    .await?;
+    let Some((is_bench, captain_discord_id)) = member else {
+        return Err(WebError::not_found("Mitglied nicht gefunden"));
+    };
+    if is_bench == to_bench {
+        return Ok(());
     }
+    let lineup = team_lineup(&mut **tx, team_id).await?;
+    bench::move_seat(
+        lineup,
+        team_size,
+        bench_slots,
+        captain_discord_id == discord_id,
+        to_bench,
+    )
+    .map_err(|err| WebError::bad_request(err.message()))?;
+    sqlx::query(
+        r#"UPDATE turnier."team_members" SET is_bench = $1 WHERE team_id = $2 AND discord_id = $3"#,
+    )
+    .bind(to_bench)
+    .bind(team_id)
+    .bind(discord_id)
+    .execute(&mut **tx)
+    .await?;
     Ok(())
+}
+
+#[derive(Default, Deserialize)]
+struct BenchWish {
+    #[serde(default)]
+    as_bench: bool,
+}
+
+pub fn bench_wish(body: &[u8]) -> WebResult<bool> {
+    if body.iter().all(u8::is_ascii_whitespace) {
+        return Ok(false);
+    }
+    serde_json::from_slice::<BenchWish>(body)
+        .map(|wish| wish.as_bench)
+        .map_err(|_| WebError::bad_request("Ungültige Anfrage"))
+}
+
+pub fn seat_request(as_bench: bool) -> SeatRequest {
+    if as_bench {
+        SeatRequest::Bench
+    } else {
+        SeatRequest::Starter
+    }
 }
 
 /// Stellt sicher, dass der Spieler in keinem Team des Turniers ist (409 sonst).
@@ -1545,6 +1634,7 @@ pub async fn add_user_to_team(
     discord_id: &str,
     discord_name: Option<&str>,
     rank: &RankInput,
+    is_bench: bool,
 ) -> WebResult<()> {
     let discord_id_i64 = db::parse_participant_id(discord_id)?;
     let resolved_name = resolve_discord_name_in(tx, discord_id, discord_name).await?;
@@ -1556,6 +1646,7 @@ pub async fn add_user_to_team(
         Some(&resolved_name),
         rank,
         TeamRole::Member,
+        is_bench,
     )
     .await?;
     upsert_signup(
@@ -1601,6 +1692,7 @@ pub async fn insert_team_member(
     discord_name: Option<&str>,
     rank: &RankInput,
     role: TeamRole,
+    is_bench: bool,
 ) -> WebResult<i64> {
     turnier_engine::insert_team_member(
         tx,
@@ -1612,6 +1704,7 @@ pub async fn insert_team_member(
             rank: rank.rank.as_deref(),
             rank_score: rank.rank_score,
             role,
+            is_bench,
         },
     )
     .await

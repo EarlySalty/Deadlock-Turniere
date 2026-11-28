@@ -47,7 +47,10 @@ function TeamPlanCard({ plan, keepRosters }: { plan: FinalizeCheckinTeamPlan; ke
       <ul className="mt-2 space-y-0.5 text-sm">
         {plan.roster.map((entry) => (
           <li key={entry.discord_id} className="flex flex-wrap justify-between gap-x-3">
-            <span className="text-foreground">{playerName(entry.discord_name)}</span>
+            <span className="text-foreground">
+              {playerName(entry.discord_name)}
+              {entry.is_bench && <span className="ml-2 text-[10px] font-bold uppercase text-muted">Ersatz</span>}
+            </span>
             <span className={`text-xs ${rosterNoteClass(entry)}`}>{rosterNote(entry)}</span>
           </li>
         ))}

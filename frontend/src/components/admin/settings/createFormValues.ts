@@ -11,6 +11,7 @@ export interface CreateFormValues {
   description: string
   rules: string
   teamSize: number
+  benchSlots: number
   tournamentFormat: TournamentFormat
   bracketFormat: BracketFormat
   seriesFormat: SeriesFormat
@@ -32,6 +33,7 @@ export function defaultCreateValues(): CreateFormValues {
     description: '',
     rules: '',
     teamSize: 6,
+    benchSlots: 0,
     tournamentFormat: 'auto',
     bracketFormat: 'single_elimination',
     seriesFormat: 1,
@@ -63,6 +65,7 @@ export function templateFromTournament(tournament: TournamentDetail): CreateTemp
       description: tournament.description ?? '',
       rules: tournament.rules ?? '',
       teamSize: tournament.team_size,
+      benchSlots: tournament.bench_slots ?? 0,
       tournamentFormat: tournament.tournament_mode_auto && tournament.tournament_mode !== 'league' ? 'auto' : tournament.tournament_mode,
       bracketFormat: tournament.bracket_format,
       seriesFormat: seriesOf(tournament.series_format) ?? 1,

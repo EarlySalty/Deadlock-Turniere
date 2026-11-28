@@ -9,8 +9,9 @@ import {
   useTournament, useMyTournamentStatus, useCreateTeam, useJoinTeam, useSignupSolo,
   useWithdrawSolo, useLeaveTeam, useCheckin, useCheckinStatus,
   useMyInvitations, useAcceptInvitation, useRejectInvitation, useApplyToTeam,
-  useConsent,
+  useConsent, useSetMemberLineup,
 } from '@/hooks/useTournament'
+import { benchFreeLabel, lineupOf, teamFormatLabel } from '@/lib/lineup'
 import { useAuth } from '@/hooks/useAuth'
 import { latestActionError } from '@/lib/latestError'
 import Card from '@/components/ui/Card'
@@ -205,6 +206,7 @@ export default function Tournament() {
   const [pendingAction, setPendingAction] = useState<(() => void) | null>(null)
   const [showConsentModal, setShowConsentModal] = useState(false)
   const [pendingJoinTeam, setPendingJoinTeam] = useState<TeamPublic | null>(null)
+  const [pendingJoinBench, setPendingJoinBench] = useState(false)
 
   const { data: myStatus } = useMyTournamentStatus(tournamentId, isLoggedIn)
   const { data: myInvitations } = useMyInvitations(tournamentId, isLoggedIn && !myStatus?.team_id)
@@ -219,6 +221,7 @@ export default function Tournament() {
   const acceptInviteMutation = useAcceptInvitation(tournamentId)
   const rejectInviteMutation = useRejectInvitation(tournamentId)
   const applyMutation = useApplyToTeam(tournamentId)
+  const lineupMutation = useSetMemberLineup(tournamentId)
 
   useEffect(() => {
     if (!successMsg) return
@@ -281,6 +284,7 @@ export default function Tournament() {
   const userSignupId = myStatus?.signup_id ?? null
   const userHasSoloSignup = userSignupId !== null && !myStatus?.team_id
   const isUserCaptain = myStatus?.is_captain ?? false
+  const benchSlots = tournament.bench_slots ?? 0
   const isUserRegistered = Boolean(userTeam || userHasSoloSignup)
   const hasCheckedIn = myStatus?.is_checked_in ?? false
 
@@ -300,7 +304,8 @@ export default function Tournament() {
     checkinMutation.isPending ||
     acceptInviteMutation.isPending ||
     rejectInviteMutation.isPending ||
-    applyMutation.isPending
+    applyMutation.isPending ||
+    lineupMutation.isPending
 
   const latestError = latestActionError([
     createTeamMutation,
@@ -312,6 +317,7 @@ export default function Tournament() {
     acceptInviteMutation,
     rejectInviteMutation,
     applyMutation,
+    lineupMutation,
   ])
   const actionErrors =
     latestError instanceof Error && latestError.message !== 'CONSENT_REQUIRED' ? [latestError.message] : []
@@ -347,12 +353,13 @@ export default function Tournament() {
     })
   }
 
-  const handleJoinTeam = (team: TeamPublic) => {
+  const handleJoinTeam = (team: TeamPublic, asBench = false) => {
     withConsent(() => {
       if (userTeam) {
+        setPendingJoinBench(asBench)
         setPendingJoinTeam(team)
       } else {
-        joinTeamMutation.mutate({ tournamentId, teamId: team.id }, { onError: handleConsentError })
+        joinTeamMutation.mutate({ tournamentId, teamId: team.id, asBench }, { onError: handleConsentError })
       }
     })
   }
@@ -381,9 +388,9 @@ export default function Tournament() {
     })
   }
 
-  const handleApply = (teamId: number) => {
+  const handleApply = (teamId: number, asBench = false) => {
     withConsent(() => {
-      applyMutation.mutate(teamId, {
+      applyMutation.mutate({ teamId, asBench }, {
         onSuccess: () => setSuccessMsg('Bewerbung wurde gesendet.'),
         onError: handleConsentError,
       })
@@ -434,7 +441,7 @@ export default function Tournament() {
           <div className="flex flex-wrap items-center gap-x-8 gap-y-3 pt-2 sm:pt-4">
             <div className="space-y-1">
               <p className="text-xs uppercase font-bold text-muted tracking-widest">Team-Format</p>
-              <p className="text-sm font-bold text-foreground uppercase">{tournament.team_size} gegen {tournament.team_size}</p>
+              <p className="text-sm font-bold text-foreground uppercase">{teamFormatLabel(tournament.team_size, tournament.bench_slots ?? 0)}</p>
             </div>
             <div className="space-y-1">
               <p className="text-xs uppercase font-bold text-muted tracking-widest">Anmeldungen</p>
@@ -837,9 +844,22 @@ export default function Tournament() {
 
                       <div className="space-y-3">
                         {userTeam.members.map((m, i) => (
-                          <div key={i} className="flex items-center justify-between text-xs border-b border-white/5 pb-2 last:border-0">
+                          <div key={m.id ?? i} className="flex items-center justify-between gap-2 text-xs border-b border-white/5 pb-2 last:border-0">
                             <span className="font-bold text-foreground uppercase tracking-wide">{playerName(m.discord_name)}</span>
-                            {m.role === 'captain' && <span className="text-[10px] text-primary font-bold uppercase">Captain</span>}
+                            <span className="flex shrink-0 items-center gap-2">
+                              {m.role === 'captain' && <span className="text-[10px] text-primary font-bold uppercase">Captain</span>}
+                              {m.is_bench && <span className="text-[10px] text-muted font-bold uppercase">Ersatz</span>}
+                              {isUserCaptain && isRegistration && benchSlots > 0 && m.role !== 'captain' && m.id != null && (
+                                <button
+                                  type="button"
+                                  className="rounded border border-white/10 px-2 py-0.5 text-[10px] font-bold uppercase text-muted hover:text-foreground disabled:opacity-50"
+                                  disabled={isMutating}
+                                  onClick={() => lineupMutation.mutate({ teamId: userTeam.id, memberId: m.id as number, isBench: !m.is_bench })}
+                                >
+                                  {m.is_bench ? 'In die Startaufstellung' : 'Auf die Ersatzbank'}
+                                </button>
+                              )}
+                            </span>
                           </div>
                         ))}
                       </div>
@@ -872,8 +892,10 @@ export default function Tournament() {
 
                 <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
                   {tournament.teams.map((team) => {
-                    const teamFull = tournament.team_size > 0 && team.members.length >= tournament.team_size
-                    const recruiting = recruitingLabel(team.recruitment_status, teamFull)
+                    const lineup = lineupOf(team.members, tournament.team_size, benchSlots)
+                    const teamFull = tournament.team_size > 0 && lineup.starterFree === 0
+                    const benchOpen = benchSlots > 0 && lineup.benchFree > 0
+                    const recruiting = recruitingLabel(team.recruitment_status, teamFull && !benchOpen)
                     const isMyTeam = userTeam?.id === team.id
                     return (
                       <Card key={team.id} className={`p-5 transition-all group ${isMyTeam ? 'border-primary/50' : 'hover:border-white/20'}`}>
@@ -882,7 +904,7 @@ export default function Tournament() {
                             <div>
                               <h4 className="font-bold text-foreground uppercase tracking-wide group-hover:text-primary transition-colors">{team.name}</h4>
                               <p className="text-[10px] text-muted font-bold uppercase mt-1">
-                                {team.members.length} / {tournament.team_size} Mitglieder
+                                {lineup.starters} / {tournament.team_size} {benchSlots > 0 ? 'Stammspieler' : 'Mitglieder'}
                               </p>
                             </div>
                             {!soloOnly && (
@@ -907,25 +929,49 @@ export default function Tournament() {
                                 {m.role === 'captain' && (
                                   <span className="shrink-0 text-[10px] font-bold uppercase text-primary">Captain</span>
                                 )}
+                                {m.is_bench && (
+                                  <span className="shrink-0 text-[10px] font-bold uppercase text-muted">Ersatz</span>
+                                )}
                               </li>
                             ))}
-                            {team.members.length < tournament.team_size && (
+                            {lineup.starterFree > 0 && (
                               <li className="px-3 pt-1 text-xs text-muted">
-                                {pluralize(tournament.team_size - team.members.length, 'Platz', 'Plätze')} frei
+                                {pluralize(lineup.starterFree, 'Platz', 'Plätze')} frei
                               </li>
+                            )}
+                            {benchOpen && (
+                              <li className="px-3 pt-1 text-xs text-muted">{benchFreeLabel(lineup.benchFree)}</li>
                             )}
                           </ul>
 
-                          {!isMyTeam && isSignupOpen && !soloOnly && !teamFull && (
-                            <div className="pt-2">
+                          {!isMyTeam && isSignupOpen && !soloOnly && (!teamFull || benchOpen) && (
+                            <div className="flex flex-col gap-2 pt-2 sm:flex-row">
                                {team.recruitment_status === 'open' ? (
-                                 <Button variant="secondary" size="sm" className="w-full" disabled={isMutating} onClick={() => handleJoinTeam(team)}>
-                                   Beitreten
-                                 </Button>
+                                 <>
+                                   {!teamFull && (
+                                     <Button variant="secondary" size="sm" className="w-full" disabled={isMutating} onClick={() => handleJoinTeam(team)}>
+                                       Beitreten
+                                     </Button>
+                                   )}
+                                   {benchOpen && (
+                                     <Button variant="ghost" size="sm" className="w-full border border-white/10" disabled={isMutating} onClick={() => handleJoinTeam(team, true)}>
+                                       Als Ersatz beitreten
+                                     </Button>
+                                   )}
+                                 </>
                                ) : team.recruitment_status === 'application' ? (
-                                 <Button variant="outline" size="sm" className="w-full border-amber-500/30 text-amber-500 hover:bg-amber-500/10" disabled={isMutating} onClick={() => handleApply(team.id)}>
-                                   Bewerben
-                                 </Button>
+                                 <>
+                                   {!teamFull && (
+                                     <Button variant="outline" size="sm" className="w-full border-amber-500/30 text-amber-500 hover:bg-amber-500/10" disabled={isMutating} onClick={() => handleApply(team.id)}>
+                                       Bewerben
+                                     </Button>
+                                   )}
+                                   {benchOpen && (
+                                     <Button variant="ghost" size="sm" className="w-full border border-amber-500/20 text-amber-500" disabled={isMutating} onClick={() => handleApply(team.id, true)}>
+                                       Als Ersatz bewerben
+                                     </Button>
+                                   )}
+                                 </>
                                ) : null}
                             </div>
                           )}
@@ -1068,7 +1114,7 @@ export default function Tournament() {
             <div className="flex gap-4">
               <Button variant="ghost" className="flex-1" onClick={() => setPendingJoinTeam(null)} disabled={joinTeamMutation.isPending}>Bleiben</Button>
               <Button variant="primary" className="flex-1" disabled={joinTeamMutation.isPending}
-                onClick={() => joinTeamMutation.mutate({ tournamentId, teamId: pendingJoinTeam.id }, { onSettled: () => setPendingJoinTeam(null) })}>
+                onClick={() => joinTeamMutation.mutate({ tournamentId, teamId: pendingJoinTeam.id, asBench: pendingJoinBench }, { onSettled: () => setPendingJoinTeam(null) })}>
                 Wechseln
               </Button>
             </div>

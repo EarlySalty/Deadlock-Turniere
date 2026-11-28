@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import SoloBalancePanel from '@/components/admin/SoloBalancePanel'
 import { latestActionError } from '@/lib/latestError'
+import { starterCount } from '@/lib/lineup'
 import Card from '@/components/ui/Card'
 import Button from '@/components/ui/Button'
 import { useAuth } from '@/hooks/useAuth'
@@ -13,6 +14,7 @@ import {
   useDeleteAdminTeam,
   useMoveAdminTeamMember,
   useRemoveAdminTeamMember,
+  useSetAdminMemberLineup,
   useRenameAdminTeam,
   useSetAdminRecruitingStatus,
 } from '@/hooks/useTournament'
@@ -45,6 +47,7 @@ interface ParticipantManagerProps {
   tournamentId: number
   replacementsOpen: boolean
   teamSize: number
+  benchSlots: number
   teams: Team[]
   signups: TournamentSignup[]
   soloOnly: boolean
@@ -59,6 +62,7 @@ export default function ParticipantManager({
   tournamentId,
   replacementsOpen,
   teamSize,
+  benchSlots,
   teams,
   signups,
   soloOnly,
@@ -70,6 +74,8 @@ export default function ParticipantManager({
   const deleteTeamMutation = useDeleteAdminTeam()
   const changeCaptainMutation = useChangeAdminCaptain()
   const removeMemberMutation = useRemoveAdminTeamMember()
+  const lineupMutation = useSetAdminMemberLineup()
+  const capacity = teamSize + benchSlots
   const moveMemberMutation = useMoveAdminTeamMember()
   const assignSignupMutation = useAssignSignupToAdminTeam()
   const deleteSignupMutation = useDeleteAdminSignup()
@@ -98,6 +104,7 @@ export default function ParticipantManager({
     deleteTeamMutation,
     changeCaptainMutation,
     removeMemberMutation,
+    lineupMutation,
     moveMemberMutation,
     assignSignupMutation,
     deleteSignupMutation,
@@ -111,6 +118,7 @@ export default function ParticipantManager({
     deleteTeamMutation.isPending ||
     changeCaptainMutation.isPending ||
     removeMemberMutation.isPending ||
+    lineupMutation.isPending ||
     moveMemberMutation.isPending ||
     assignSignupMutation.isPending ||
     deleteSignupMutation.isPending ||
@@ -158,6 +166,13 @@ export default function ParticipantManager({
     removeMemberMutation.mutate(
       { tournamentId, teamId, discordId: member.discord_id },
       { onSuccess: () => setFeedback('Spieler wurde aus dem Team entfernt.') }
+    )
+  }
+
+  const handleLineup = (teamId: number, member: TeamMember) => {
+    lineupMutation.mutate(
+      { tournamentId, teamId, discordId: member.discord_id, isBench: !member.is_bench },
+      { onSuccess: () => setFeedback(member.is_bench ? 'Spieler steht jetzt in der Startaufstellung.' : 'Spieler sitzt jetzt auf der Ersatzbank.') }
     )
   }
 
@@ -305,10 +320,10 @@ export default function ParticipantManager({
                     >
                       <option value="">Team wählen...</option>
                       {teams
-                        .filter((team) => team.members.length < teamSize)
+                        .filter((team) => team.members.length < capacity)
                         .map((team) => (
                           <option key={team.id} value={team.id}>
-                            {team.name} ({team.members.length}/{teamSize})
+                            {team.name} ({starterCount(team.members)}/{teamSize})
                           </option>
                         ))}
                     </select>
@@ -371,7 +386,8 @@ export default function ParticipantManager({
               </div>
 
               <div className="flex flex-wrap items-center gap-3 text-sm text-muted">
-                <span>{team.members.length}/{teamSize} Mitglieder</span>
+                <span>{starterCount(team.members)}/{teamSize} {benchSlots > 0 ? 'Stammspieler' : 'Mitglieder'}</span>
+                {benchSlots > 0 && <span>{team.members.length - starterCount(team.members)}/{benchSlots} Ersatz</span>}
                 <span>Captain: {captainLabel(team)}</span>
                 {!soloOnly && (
                   <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${recruitingBadgeClass(team.recruitment_status as RecruitmentStatus)}`}>
@@ -408,7 +424,7 @@ export default function ParticipantManager({
                   <Button
                     variant="secondary"
                     size="sm"
-                    disabled={isBusy || team.members.length >= teamSize}
+                    disabled={isBusy || team.members.length >= capacity}
                     onClick={() => {
                       addMemberMutation.reset()
                       setReplacementTeam(team)
@@ -448,7 +464,7 @@ export default function ParticipantManager({
                 {team.members.map((member) => {
                   const moveKey = `${team.id}:${member.discord_id}`
                   const availableTargets = teams.filter(
-                    (candidate) => candidate.id !== team.id && candidate.members.length < teamSize
+                    (candidate) => candidate.id !== team.id && candidate.members.length < capacity
                   )
 
                   return (
@@ -460,6 +476,7 @@ export default function ParticipantManager({
                             {showDiscordIds && <div className="text-xs text-muted">{member.discord_id}</div>}
                             <div className="text-xs text-muted">
                               {member.role === 'captain' ? 'Captain' : 'Mitglied'}
+                              {member.is_bench ? ' · Ersatz' : ''}
                               {member.rank ? ` · ${member.rank}` : ''}
                               {member.rank_score ? ` · Score ${member.rank_score}` : ''}
                             </div>
@@ -476,6 +493,18 @@ export default function ParticipantManager({
                           </Button>
                         </div>
 
+                        {benchSlots > 0 && member.role !== 'captain' && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="self-start"
+                            disabled={isBusy}
+                            onClick={() => handleLineup(team.id, member)}
+                          >
+                            {member.is_bench ? 'In die Startaufstellung' : 'Auf die Ersatzbank'}
+                          </Button>
+                        )}
+
                         {availableTargets.length > 0 && (
                           <div className="flex flex-col gap-2 sm:flex-row">
                             <select
@@ -488,7 +517,7 @@ export default function ParticipantManager({
                               <option value="">In anderes Team verschieben...</option>
                               {availableTargets.map((candidate) => (
                                 <option key={candidate.id} value={candidate.id}>
-                                  {candidate.name} ({candidate.members.length}/{teamSize})
+                                  {candidate.name} ({starterCount(candidate.members)}/{teamSize})
                                 </option>
                               ))}
                             </select>

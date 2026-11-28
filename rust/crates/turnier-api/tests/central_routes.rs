@@ -862,6 +862,7 @@ async fn public_helpers_unique_violations_return_conflict() {
             INVITED_ID,
             Some("Helper"),
             &rank,
+            false,
         )
         .await
     });

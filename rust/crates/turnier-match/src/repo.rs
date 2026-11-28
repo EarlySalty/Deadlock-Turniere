@@ -344,7 +344,7 @@ pub async fn is_test_tournament(pool: &Pool, tournament_id: i64) -> MatchResult<
 }
 
 /// Lädt die Teilnehmer beider Teams in stabiler Reihenfolge
-/// (`ORDER BY t.id, tm.joined_at, tm.id`). Kein Team gesetzt → leere Liste.
+/// (`ORDER BY t.id, tm.is_bench, tm.joined_at, tm.id`). Kein Team gesetzt → leere Liste.
 /// Entspricht `_load_match_participants`.
 pub async fn load_participants(pool: &Pool, m: &MatchRow) -> MatchResult<Vec<Participant>> {
     let team_ids: Vec<i64> = [m.team1_id, m.team2_id].into_iter().flatten().collect();
@@ -358,7 +358,7 @@ pub async fn load_participants(pool: &Pool, m: &MatchRow) -> MatchResult<Vec<Par
          WHERE t.id IN ",
     );
     push_i64_bind_list(&mut query, team_ids);
-    query.push(" ORDER BY t.id, tm.joined_at, tm.id");
+    query.push(" ORDER BY t.id, tm.is_bench, tm.joined_at, tm.id");
     let rows: Vec<ParticipantRow> = query.build_query_as().fetch_all(pool).await?;
     Ok(rows
         .into_iter()

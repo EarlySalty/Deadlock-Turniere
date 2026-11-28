@@ -1,12 +1,14 @@
 //! Einladungs- und Bewerbungs-Flow: Captain lädt per signup_id ein, User
 //! akzeptiert/lehnt ab; Bewerbung (apply/list/accept/reject).
 
+use axum::body::Bytes;
 use axum::extract::{Path, State};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use chrono::{DateTime, Utc};
 use serde_json::{json, Value};
 
+use turnier_core::bench::{SeatError, SeatRequest};
 use turnier_core::{TeamApplication, TeamInvitation};
 use turnier_discord::NotificationEvent;
 
@@ -79,7 +81,14 @@ async fn invite_to_team_by_signup(
     helpers::ensure_captain(&user, &team.captain_discord_id)?;
     helpers::ensure_player_teams_allowed(&t)?;
     helpers::ensure_registration_open(t.status)?;
-    helpers::ensure_team_has_capacity(&mut *tx, team_id, t.team_size).await?;
+    let is_bench = helpers::reserve_seat(
+        &mut *tx,
+        team_id,
+        t.team_size,
+        t.bench_slots,
+        SeatRequest::Auto,
+    )
+    .await?;
 
     let signup: Option<SignupRow> = sqlx::query_as(
         r#"SELECT discord_id, discord_name, steam_id, rank, rank_score, team_id
@@ -178,6 +187,7 @@ async fn invite_to_team_by_signup(
             &signup_discord_id,
             signup.discord_name.as_deref(),
             &rank,
+            is_bench,
         )
         .await?;
         sqlx::query(r#"UPDATE turnier."team_invitations" SET status = 'accepted' WHERE id = $1"#)
@@ -360,7 +370,14 @@ async fn accept_team_invitation(
     helpers::ensure_player_teams_allowed(&t)?;
     helpers::ensure_registration_open(t.status)?;
     helpers::load_team_or_404(&mut *tx, tournament_id, invitation.team_id).await?;
-    helpers::ensure_team_has_capacity(&mut *tx, invitation.team_id, t.team_size).await?;
+    let is_bench = helpers::reserve_seat(
+        &mut *tx,
+        invitation.team_id,
+        t.team_size,
+        t.bench_slots,
+        SeatRequest::Auto,
+    )
+    .await?;
     helpers::ensure_user_not_in_tournament_team(&mut *tx, tournament_id, &user.discord_id).await?;
 
     helpers::add_user_to_team(
@@ -370,6 +387,7 @@ async fn accept_team_invitation(
         &user.discord_id,
         discord_name.as_deref(),
         &rank,
+        is_bench,
     )
     .await?;
     sqlx::query(r#"UPDATE turnier."team_invitations" SET status = 'accepted' WHERE id = $1"#)
@@ -433,7 +451,9 @@ async fn apply_to_team(
     State(state): State<AppState>,
     AuthUser(user): AuthUser,
     Path((tournament_id, team_id)): Path<(i64, i64)>,
+    body: Bytes,
 ) -> WebResult<Json<Value>> {
+    let as_bench = helpers::bench_wish(&body)?;
     let pool = &state.pool;
     helpers::ensure_consent(pool, &user.discord_id).await?;
     let user_discord_id = db::parse_participant_id(&user.discord_id)?;
@@ -450,6 +470,9 @@ async fn apply_to_team(
         return Err(WebError::forbidden(
             "Dieses Team nimmt aktuell keine Bewerbungen an",
         ));
+    }
+    if as_bench && t.bench_slots <= 0 {
+        return Err(WebError::bad_request(SeatError::BenchOff.message()));
     }
 
     helpers::ensure_user_not_in_tournament_team(&mut *tx, tournament_id, &user.discord_id).await?;
@@ -473,20 +496,24 @@ async fn apply_to_team(
     if let Some((id, _)) = existing {
         sqlx::query(
             r#"UPDATE turnier."team_applications"
-             SET discord_name = $1, status = 'pending', created_at = now() WHERE id = $2"#,
+             SET discord_name = $1, status = 'pending', as_bench = $2, created_at = now()
+             WHERE id = $3"#,
         )
         .bind(&discord_name)
+        .bind(as_bench)
         .bind(id)
         .execute(&mut *tx)
         .await?;
     } else {
         sqlx::query(
-            r#"INSERT INTO turnier."team_applications" (team_id, discord_id, discord_name, status, created_at)
-             VALUES ($1, $2, $3, 'pending', now())"#,
+            r#"INSERT INTO turnier."team_applications"
+             (team_id, discord_id, discord_name, status, as_bench, created_at)
+             VALUES ($1, $2, $3, 'pending', $4, now())"#,
         )
         .bind(team_id)
         .bind(user_discord_id)
         .bind(&discord_name)
+        .bind(as_bench)
         .execute(&mut *tx)
         .await
         .map_err(|err| {
@@ -515,11 +542,12 @@ async fn get_team_applications(
         team_id: i64,
         discord_name: String,
         status: turnier_core::ApplicationStatus,
+        as_bench: bool,
         created_at: DateTime<Utc>,
     }
 
     let rows: Vec<Row> = sqlx::query_as(
-        r#"SELECT id, team_id, discord_name, status, created_at
+        r#"SELECT id, team_id, discord_name, status, as_bench, created_at
          FROM turnier."team_applications" WHERE team_id = $1 ORDER BY created_at DESC"#,
     )
     .bind(team_id)
@@ -533,6 +561,7 @@ async fn get_team_applications(
             team_id: r.team_id,
             discord_name: r.discord_name,
             status: r.status,
+            as_bench: r.as_bench,
             created_at: db::ts_to_string(r.created_at),
         })
         .collect();
@@ -607,23 +636,30 @@ async fn accept_team_application(
     helpers::ensure_captain_or_mod(&user, &team.captain_discord_id)?;
     helpers::ensure_player_teams_allowed(&t)?;
     helpers::ensure_registration_open(t.status)?;
-    let locked: Option<(i64, String)> = sqlx::query_as(
-        r#"SELECT discord_id, status FROM turnier."team_applications"
+    let locked: Option<(i64, String, bool)> = sqlx::query_as(
+        r#"SELECT discord_id, status, as_bench FROM turnier."team_applications"
          WHERE id = $1 AND team_id = $2 FOR UPDATE"#,
     )
     .bind(app_id)
     .bind(team_id)
     .fetch_optional(&mut *tx)
     .await?;
-    match locked {
-        Some((discord_id, status)) if discord_id == application.discord_id => {
+    let as_bench = match locked {
+        Some((discord_id, status, as_bench)) if discord_id == application.discord_id => {
             if status != "pending" {
                 return Err(WebError::bad_request("Bewerbung ist nicht mehr offen"));
             }
+            as_bench
         }
         _ => return Err(WebError::not_found("Bewerbung nicht gefunden")),
-    }
-    helpers::ensure_team_has_capacity(&mut *tx, team_id, t.team_size).await?;
+    };
+    let request = if as_bench {
+        SeatRequest::Bench
+    } else {
+        SeatRequest::Auto
+    };
+    let is_bench =
+        helpers::reserve_seat(&mut *tx, team_id, t.team_size, t.bench_slots, request).await?;
     helpers::ensure_user_not_in_tournament_team(&mut *tx, tournament_id, &application_discord_id)
         .await?;
 
@@ -634,6 +670,7 @@ async fn accept_team_application(
         &application_discord_id,
         Some(&discord_name),
         &rank,
+        is_bench,
     )
     .await?;
     sqlx::query(r#"UPDATE turnier."team_applications" SET status = 'accepted' WHERE id = $1"#)

@@ -80,19 +80,20 @@ struct MemberRow {
     rank: Option<String>,
     rank_score: i64,
     role: String,
+    is_bench: bool,
     joined_at: DateTime<Utc>,
 }
 
 const MEMBER_SELECT: &str =
     "SELECT tm.id, tm.team_id, tm.discord_id, tm.discord_name AS team_member_discord_name, \
             s.discord_name AS session_discord_name, p.display_name AS profile_display_name, \
-            tm.steam_id, tm.rank, tm.rank_score, tm.role, tm.joined_at \
+            tm.steam_id, tm.rank, tm.rank_score, tm.role, tm.is_bench, tm.joined_at \
      FROM turnier.\"team_members\" tm \
      LEFT JOIN (SELECT discord_id, MAX(discord_name) AS discord_name FROM turnier.\"sessions\" \
                 WHERE discord_name IS NOT NULL AND discord_name != '' GROUP BY discord_id) s \
        ON s.discord_id = tm.discord_id \
      LEFT JOIN turnier.\"user_profiles\" p ON p.discord_id = tm.discord_id \
-     WHERE tm.team_id = $1 ORDER BY tm.joined_at";
+     WHERE tm.team_id = $1 ORDER BY tm.is_bench, tm.joined_at";
 
 /// Wandelt eine Mitglieds-Rohzeile in das DTO und reichert den Rang an.
 async fn member_from_row(state: &AppState, row: MemberRow) -> WebResult<TeamMember> {
@@ -129,6 +130,7 @@ async fn member_from_row(state: &AppState, row: MemberRow) -> WebResult<TeamMemb
         rank,
         rank_score,
         role: parse_enum(&row.role)?,
+        is_bench: row.is_bench,
         joined_at: db::ts_to_string(row.joined_at),
     })
 }

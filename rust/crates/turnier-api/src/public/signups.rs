@@ -120,6 +120,7 @@ async fn solo_signup(
             Some(&resolved_name),
             &rank,
             turnier_core::TeamRole::Captain,
+            false,
         )
         .await?;
 

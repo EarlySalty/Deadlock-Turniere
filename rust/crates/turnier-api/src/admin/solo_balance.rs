@@ -425,6 +425,7 @@ async fn create_balanced_team(
             player.rank.as_deref(),
             player.rank_score,
             role,
+            false,
         )
         .await?;
         upsert_signup_for_team(

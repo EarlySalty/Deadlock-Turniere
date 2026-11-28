@@ -1,6 +1,7 @@
 import type { Tournament, TournamentDetail } from '@/types/tournament'
 import type { AdminPhase } from '@/components/admin/adminPhase'
 import { isLeague } from './league.ts'
+import { isTeamComplete } from './lineup.ts'
 
 export type WorkflowStage = 0 | 1 | 2 | 3 | 4
 
@@ -118,6 +119,6 @@ export function teamOverview(t: TournamentDetail) {
     teams: t.teams.length,
     playersInTeams: assigned.size,
     solos: t.signups.filter((signup) => signup.team_id === null && !assigned.has(signup.discord_id)).length,
-    incompleteTeams: t.teams.filter((team) => team.members.length < t.team_size).length,
+    incompleteTeams: t.teams.filter((team) => !isTeamComplete(team.members, t.team_size)).length,
   }
 }
