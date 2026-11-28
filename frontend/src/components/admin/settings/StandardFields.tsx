@@ -78,6 +78,12 @@ export function BasicsFields({ idPrefix, value, onChange, required = false }: Fi
   )
 }
 
+function finalFormatHint(bracketFormat: BracketFormat): string {
+  return bracketFormat === 'double_elimination'
+    ? 'Nur für Grand Final und Reset. Das Winner-Finale nutzt das Serienformat.'
+    : 'Nur für das Finale.'
+}
+
 export function MatchFormatFields({ idPrefix, value, onChange, league }: FieldGroupProps<MatchFormatValue> & { league: boolean }) {
   return (
     <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
@@ -117,7 +123,7 @@ export function MatchFormatFields({ idPrefix, value, onChange, league }: FieldGr
               ))}
             </select>
           </Field>
-          <Field id={`${idPrefix}-final-series-format`} label="Finale-Format" hint="Nur für das Finale.">
+          <Field id={`${idPrefix}-final-series-format`} label="Finale-Format" hint={finalFormatHint(value.bracketFormat)}>
             <select
               id={`${idPrefix}-final-series-format`}
               value={value.finalSeriesFormat ?? 'same'}
