@@ -9,14 +9,14 @@
 use chrono::{DateTime, Utc};
 use sqlx::{Postgres, Row, Transaction};
 
-use turnier_core::{now_utc, parse_discord_id, TournamentMode, TournamentStatus};
+use turnier_core::{now_utc, parse_discord_id, InviteMode, TournamentMode, TournamentStatus};
 use turnier_db::Pool;
 use turnier_discord::DiscordNotifier;
 use turnier_engine::league::DEFAULT_SLOT_MINUTES;
 use turnier_engine::{
     generate_bracket_in_tx, generate_group_matches_in_tx, generate_groups_in_tx,
-    generate_league_plan_in_tx, is_valid_transition_for_mode, recalculate_player_points_in_tx,
-    valid_next_statuses_for_mode,
+    generate_league_plan_in_tx, is_valid_transition_for_mode, prepare_checkin_in_tx,
+    recalculate_player_points_in_tx, valid_next_statuses_for_mode,
 };
 use turnier_match::league::open_league_match_count;
 use turnier_match::MatchManager;
@@ -132,6 +132,18 @@ pub async fn advance_tournament_status(
         )));
     }
 
+    if next_status == TournamentStatus::Checkin {
+        let invite_mode: Option<InviteMode> = locked.try_get("invite_mode")?;
+        let team_size: i64 = locked.try_get("team_size")?;
+        prepare_checkin_in_tx(&mut tx, tournament_id, invite_mode, team_size)
+            .await
+            .map_err(|err| match err {
+                turnier_engine::TournamentError::Validation(msg) => {
+                    SchedulerError::InvalidTransition(msg)
+                }
+                other => other.into(),
+            })?;
+    }
     if mode == TournamentMode::League && next_status == TournamentStatus::Completed {
         ensure_league_is_finished(&mut tx, tournament_id).await?;
     }

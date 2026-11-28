@@ -11,8 +11,8 @@ use std::sync::Arc;
 
 use chrono::{DateTime, Duration, Utc};
 use common::{
-    audit_count, fake_match_manager, fake_notifier, finalize_checkin_and_advance, insert_team,
-    insert_team_member, insert_tournament, temp_db, test_config, tournament_status,
+    audit_count, fake_match_manager, fake_notifier, finalize_checkin_and_advance, insert_signup,
+    insert_team, insert_team_member, insert_tournament, temp_db, test_config, tournament_status,
 };
 use serde_json::Value;
 use tokio::sync::Barrier;
@@ -144,6 +144,7 @@ async fn scheduler_quelle_advanciert_und_auditet_auto_advance() {
     let notifier = fake_notifier(pool.clone(), &config);
     let matchmgr = fake_match_manager(pool.clone(), &config);
     let id = insert_tournament(&pool, "T", "registration", false).await;
+    insert_team(&pool, id, "Team A", TEST_CAPTAIN_A).await;
 
     let meta = advance_tournament_status(
         &pool,
@@ -176,6 +177,7 @@ async fn admin_quelle_auditet_tournament_advance_mit_actor() {
     let notifier = fake_notifier(pool.clone(), &config);
     let matchmgr = fake_match_manager(pool.clone(), &config);
     let id = insert_tournament(&pool, "T", "registration", false).await;
+    insert_team(&pool, id, "Team A", TEST_CAPTAIN_A).await;
 
     advance_tournament_status(
         &pool,
@@ -208,6 +210,7 @@ async fn ungueltiger_uebergang_wirft_und_aendert_nichts() {
     let notifier = fake_notifier(pool.clone(), &config);
     let matchmgr = fake_match_manager(pool.clone(), &config);
     let id = insert_tournament(&pool, "T", "registration", false).await;
+    insert_team(&pool, id, "Team A", TEST_CAPTAIN_A).await;
 
     // registration → bracket ist nicht erlaubt (nur registration → checkin).
     let err = advance_tournament_status(
@@ -600,4 +603,82 @@ async fn completed_transition_rollt_status_und_audit_bei_recompute_fehler_zuruec
     .await
     .expect("sentinel points still exist after rollback");
     assert_eq!(sentinel, (1, 1, 1, 1));
+}
+
+async fn solo_duel(pool: &turnier_db::Pool, players: i64) -> i64 {
+    let id = insert_tournament(pool, "Duell", "registration", false).await;
+    sqlx::query(
+        "UPDATE turnier.tournaments SET invite_mode = 'solo_only', team_size = 1 WHERE id = $1",
+    )
+    .bind(id)
+    .execute(pool)
+    .await
+    .expect("solo duel");
+    for player in 0..players {
+        insert_signup(pool, id, 123_456_789_012_346_000 + player).await;
+    }
+    id
+}
+
+#[tokio::test]
+async fn scheduler_weist_1v1_solo_anmeldungen_vor_dem_checkin_zu() {
+    let db = temp_db().await;
+    let pool = db.pool().clone();
+    let config = test_config();
+    let notifier = fake_notifier(pool.clone(), &config);
+    let matchmgr = fake_match_manager(pool.clone(), &config);
+    let id = solo_duel(&pool, 3).await;
+
+    advance_tournament_status(
+        &pool,
+        &matchmgr,
+        &notifier,
+        id,
+        TournamentStatus::Registration,
+        TournamentStatus::Checkin,
+        "scheduler",
+        None,
+    )
+    .await
+    .expect("advance ok");
+
+    assert_eq!(tournament_status(&pool, id).await, "checkin");
+    let (teams, unassigned): (i64, i64) = sqlx::query_as(
+        "SELECT (SELECT COUNT(*) FROM turnier.teams WHERE tournament_id = $1), \
+                (SELECT COUNT(*) FROM turnier.tournament_signups \
+                 WHERE tournament_id = $1 AND team_id IS NULL)",
+    )
+    .bind(id)
+    .fetch_one(&pool)
+    .await
+    .expect("counts");
+    assert_eq!((teams, unassigned), (3, 0));
+}
+
+#[tokio::test]
+async fn scheduler_haelt_checkin_ohne_teilnehmer_an() {
+    let db = temp_db().await;
+    let pool = db.pool().clone();
+    let config = test_config();
+    let notifier = fake_notifier(pool.clone(), &config);
+    let matchmgr = fake_match_manager(pool.clone(), &config);
+    let duel = solo_duel(&pool, 0).await;
+    let team_cup = insert_tournament(&pool, "Teamcup", "registration", false).await;
+
+    for id in [duel, team_cup] {
+        let err = advance_tournament_status(
+            &pool,
+            &matchmgr,
+            &notifier,
+            id,
+            TournamentStatus::Registration,
+            TournamentStatus::Checkin,
+            "scheduler",
+            None,
+        )
+        .await
+        .expect_err("Check-in ohne Teilnehmer bleibt zu");
+        assert!(matches!(err, SchedulerError::InvalidTransition(_)), "{err}");
+        assert_eq!(tournament_status(&pool, id).await, "registration");
+    }
 }

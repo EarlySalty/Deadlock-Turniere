@@ -17,9 +17,9 @@ use turnier_core::{
 };
 use turnier_engine::league::DEFAULT_SLOT_MINUTES;
 use turnier_engine::{
-    generate_bracket_in_tx, initial_tournament_mode, league_slot_minutes_in_tx,
-    reschedule_league_plan_in_tx, valid_next_statuses, valid_next_statuses_for_mode,
-    PROVISIONAL_AUTO_MODE,
+    assign_random_teams, generate_bracket_in_tx, initial_tournament_mode,
+    league_slot_minutes_in_tx, reschedule_league_plan_in_tx, valid_next_statuses,
+    valid_next_statuses_for_mode, NoShuffle, PROVISIONAL_AUTO_MODE,
 };
 
 use crate::db;
@@ -751,28 +751,14 @@ async fn open_checkin(
         let solo_only =
             existing.try_get::<Option<InviteMode>, _>("invite_mode")? == Some(InviteMode::SoloOnly);
         let team_size: i64 = existing.try_get("team_size")?;
-        let (participants, message) = if solo_only && team_size > 1 {
-            (
-                r#"SELECT COUNT(*) FROM turnier."tournament_signups" WHERE tournament_id = $1"#,
-                "Check-in kann erst geöffnet werden, wenn mindestens eine Anmeldung existiert",
+        if solo_only && team_size == 1 {
+            assign_random_teams(
+                &state.pool,
+                state.rank_resolver.as_ref(),
+                tournament_id,
+                &mut NoShuffle,
             )
-        } else if solo_only {
-            (
-                r#"SELECT COUNT(*) FROM turnier."teams" WHERE tournament_id = $1"#,
-                "Bei 1v1 braucht jeder Spieler vor dem Check-in ein eigenes Team. Nutze „Solo-Spieler automatisch zuweisen“.",
-            )
-        } else {
-            (
-                r#"SELECT COUNT(*) FROM turnier."teams" WHERE tournament_id = $1"#,
-                "Check-in kann erst geöffnet werden, wenn mindestens ein Team existiert",
-            )
-        };
-        let count: i64 = sqlx::query_scalar(participants)
-            .bind(tournament_id)
-            .fetch_one(&state.pool)
             .await?;
-        if count == 0 {
-            return Err(WebError::bad_request(message));
         }
     }
 

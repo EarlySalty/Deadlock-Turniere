@@ -202,9 +202,6 @@ impl SoloShuffler for NoShuffle {
     }
 }
 
-/// Verteilt Solo-Anmeldungen (ohne `team_id`) zufällig auf neue Teams. Liefert
-/// die Anzahl erstellter Teams. Der Shuffler ist injizierbar (Determinismus in
-/// Tests).
 pub async fn assign_random_teams(
     pool: &sqlx::Pool<Postgres>,
     resolver: &dyn RankResolver,
@@ -223,7 +220,76 @@ pub async fn assign_random_teams(
             "Team-Zuweisung nur während der Anmeldung möglich".into(),
         ));
     }
+    let teams_created =
+        assign_solo_signups_in_tx(&mut tx, tournament_id, team_size, &profiles, shuffler).await?;
+    tx.commit().await?;
+    Ok(teams_created)
+}
 
+pub async fn prepare_checkin_in_tx(
+    tx: &mut Transaction<'_, Postgres>,
+    tournament_id: i64,
+    invite_mode: Option<InviteMode>,
+    team_size: i64,
+) -> TournamentResult<()> {
+    let solo_only = invite_mode == Some(InviteMode::SoloOnly);
+    if solo_only && team_size == 1 {
+        assign_solo_signups_in_tx(
+            tx,
+            tournament_id,
+            team_size,
+            &HashMap::new(),
+            &mut NoShuffle,
+        )
+        .await?;
+    }
+    let (sql, message) = if solo_only && team_size > 1 {
+        (
+            r#"SELECT COUNT(*) FROM turnier."tournament_signups" WHERE tournament_id = $1"#,
+            "Check-in kann erst geöffnet werden, wenn mindestens eine Anmeldung existiert",
+        )
+    } else if solo_only {
+        (
+            r#"SELECT COUNT(*) FROM turnier."teams" WHERE tournament_id = $1"#,
+            "Check-in kann erst geöffnet werden, wenn mindestens eine Anmeldung existiert",
+        )
+    } else {
+        (
+            r#"SELECT COUNT(*) FROM turnier."teams" WHERE tournament_id = $1"#,
+            "Check-in kann erst geöffnet werden, wenn mindestens ein Team existiert",
+        )
+    };
+    let count: i64 = sqlx::query_scalar(sql)
+        .bind(tournament_id)
+        .fetch_one(&mut **tx)
+        .await?;
+    if count == 0 {
+        return Err(TournamentError::Validation(message.into()));
+    }
+    if solo_only && team_size == 1 {
+        let unassigned: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM turnier.tournament_signups \
+             WHERE tournament_id = $1 AND team_id IS NULL",
+        )
+        .bind(tournament_id)
+        .fetch_one(&mut **tx)
+        .await?;
+        if unassigned > 0 {
+            return Err(TournamentError::Validation(
+                "Bei 1v1 braucht jeder Spieler vor dem Check-in ein eigenes Team".into(),
+            ));
+        }
+    }
+    Ok(())
+}
+
+async fn assign_solo_signups_in_tx(
+    tx: &mut Transaction<'_, Postgres>,
+    tournament_id: i64,
+    team_size: i64,
+    profiles: &HashMap<String, turnier_core::RankProfile>,
+    shuffler: &mut dyn SoloShuffler,
+) -> TournamentResult<i64> {
     let signups: Vec<SoloSignup> = sqlx::query_as::<_, SoloSignup>(
         "SELECT id, discord_id, discord_name, steam_id, rank, rank_score \
          FROM turnier.tournament_signups \
@@ -233,11 +299,10 @@ pub async fn assign_random_teams(
          ORDER BY signed_up_at, id",
     )
     .bind(tournament_id)
-    .fetch_all(&mut *tx)
+    .fetch_all(&mut **tx)
     .await?;
 
     if signups.is_empty() {
-        tx.commit().await?;
         return Ok(0);
     }
 
@@ -252,7 +317,7 @@ pub async fn assign_random_teams(
     let existing_keys: Vec<(String,)> =
         sqlx::query_as("SELECT name_key FROM turnier.teams WHERE tournament_id = $1")
             .bind(tournament_id)
-            .fetch_all(&mut *tx)
+            .fetch_all(&mut **tx)
             .await?;
     let mut pool_names = TeamNamePool::new(existing_keys.into_iter().map(|(k,)| k));
 
@@ -260,10 +325,10 @@ pub async fn assign_random_teams(
     let size = formation_team_size(team_size)?;
     for chunk in signups.chunks(size) {
         let captain_discord_id = chunk[0].discord_id;
-        let captain_name = captain_team_name(&mut tx, tournament_id, captain_discord_id).await?;
+        let captain_name = captain_team_name(tx, tournament_id, captain_discord_id).await?;
         let team_name = pool_names.from_captain(captain_name.as_deref());
         let team_id = super::insert_team(
-            &mut tx,
+            tx,
             tournament_id,
             &team_name,
             captain_discord_id,
@@ -293,7 +358,7 @@ pub async fn assign_random_teams(
             };
 
             super::insert_team_member(
-                &mut tx,
+                tx,
                 &NewTeamMember {
                     team_id,
                     discord_id: signup.discord_id,
@@ -309,7 +374,7 @@ pub async fn assign_random_teams(
             sqlx::query("UPDATE turnier.tournament_signups SET team_id = $1 WHERE id = $2")
                 .bind(team_id)
                 .bind(signup.id)
-                .execute(&mut *tx)
+                .execute(&mut **tx)
                 .await?;
         }
 
@@ -322,9 +387,7 @@ pub async fn assign_random_teams(
         "signups_assigned": signups_assigned,
     })
     .to_string();
-    audit(&mut tx, "assign_random_teams", None, &details).await?;
-
-    tx.commit().await?;
+    audit(tx, "assign_random_teams", None, &details).await?;
     Ok(teams_created)
 }
 

@@ -65,3 +65,16 @@ test('Nach dem letzten Bracket-Ergebnis zeigt der Ablauf den Turnierabschluss', 
   assert.equal(bracketHasResults(tournament('bracket', { bracket_matches: [open] })), false)
   assert.equal(bracketHasResults(tournament('bracket', { bracket_matches: [open, played] })), true)
 })
+
+test('1v1-PUG erklärt die automatische Teamzuweisung beim Öffnen des Check-ins', () => {
+  const duel = (status) => tournament(status, { team_size: 1, teams: [], signups: [signup('x'), signup('y')] })
+  const registration = workflowAction(duel('registration'), NONE)
+  assert.equal(registration.phase, 'setup')
+  assert.match(registration.description, /automatisch/)
+  assert.match(registration.description, /eigenes Team/)
+  assert.doesNotMatch(registration.description, /Teams ausgleichen|Solo-Spieler automatisch zuweisen/)
+  const checkin = workflowAction(duel('checkin'), NONE)
+  assert.equal(checkin.phase, 'checkin')
+  assert.match(checkin.description, /1v1/)
+  assert.doesNotMatch(checkin.description, /Team-Builder|Teams ausgleichen/)
+})

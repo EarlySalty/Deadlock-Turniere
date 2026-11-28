@@ -58,9 +58,9 @@ export function workflowAction(t: TournamentDetail, { hasGroups, hasBracket }: P
         stage: 1,
         title: 'Anmeldungen prüfen und Teams bilden',
         description: isPugTournament(t) && t.team_size <= 1
-          ? 'Die Spieler melden sich solo an. Bei 1v1 spielt jeder für sich. Gib vor dem Öffnen des Check-ins jedem Spieler mit „Solo-Spieler automatisch zuweisen“ im Setup unter „Weitere Verwaltungsaktionen“ ein eigenes Team.'
+          ? 'Die Spieler melden sich solo an. Bei 1v1 spielt jeder für sich. Zur geplanten Check-in-Zeit öffnet sich der Check-in automatisch, vorher kannst du ihn im Setup öffnen. Dabei bekommt jeder angemeldete Spieler sein eigenes Team.'
           : isPugTournament(t)
-          ? 'Die Spieler melden sich solo an. Öffne im Setup den Check-in. Sobald die Spieler eingecheckt sind, baut ihr die Teams im Team-Builder unter „Teilnehmer“. Admins können sie unter „Check-in“ auch mit „Teams ausgleichen“ automatisch bilden.'
+          ? 'Die Spieler melden sich solo an. Zur geplanten Check-in-Zeit öffnet sich der Check-in automatisch, vorher kannst du ihn im Setup öffnen. Sobald die Spieler eingecheckt sind, baut ihr die Teams im Team-Builder unter „Teilnehmer“. Admins können sie unter „Check-in“ auch mit „Teams ausgleichen“ automatisch bilden.'
           : 'Prüfe die Solo-Anmeldungen, vervollständige die Teams und lege Captains fest. Anschließend geht es zum Check-in.',
         button: isPugTournament(t) ? 'Check-in im Setup öffnen' : 'Spieler und Teams verwalten',
         phase: isPugTournament(t) ? 'setup' : 'participants',

@@ -2161,16 +2161,39 @@ async fn open_checkin_needs_teams_except_for_solo_only_signups() {
         .await
         .expect("solo only");
     seed_balance_signups(&ctx.pool, duel).await;
-    let (refused, body) = open(duel).await;
-    assert_eq!(refused, StatusCode::BAD_REQUEST, "{body}");
-    assert!(
-        body.to_string()
-            .contains("Solo-Spieler automatisch zuweisen"),
-        "{body}"
-    );
-    seed_team(&ctx.pool, duel, "Einzelkämpfer", CAPTAIN_ID).await;
     let (opened, body) = open(duel).await;
     assert_eq!(opened, StatusCode::OK, "{body}");
+    let unassigned: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM turnier.tournament_signups WHERE tournament_id = $1 AND team_id IS NULL",
+    )
+    .bind(duel)
+    .fetch_one(&ctx.pool)
+    .await
+    .expect("unassigned");
+    assert_eq!(unassigned, 0);
+    let teams: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM turnier.teams WHERE tournament_id = $1")
+            .bind(duel)
+            .fetch_one(&ctx.pool)
+            .await
+            .expect("teams");
+    let signups: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM turnier.tournament_signups WHERE tournament_id = $1",
+    )
+    .bind(duel)
+    .fetch_one(&ctx.pool)
+    .await
+    .expect("signups");
+    assert!(signups > 0);
+    assert_eq!(teams, signups);
+
+    let empty_duel = seed_tournament(&ctx.pool, "1v1 ohne Anmeldung", "registration", 1).await;
+    sqlx::query("UPDATE turnier.tournaments SET invite_mode = 'solo_only' WHERE id = $1")
+        .bind(empty_duel)
+        .execute(&ctx.pool)
+        .await
+        .expect("solo only");
+    assert_eq!(open(empty_duel).await.0, StatusCode::BAD_REQUEST);
 }
 
 #[tokio::test]

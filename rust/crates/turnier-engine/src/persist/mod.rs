@@ -23,10 +23,10 @@ mod start_gap;
 pub use advance::advance_bracket_winner;
 pub use bracket::{generate_bracket, generate_bracket_in_tx};
 pub use checkin::{
-    assign_random_teams, build_checkin_snapshot_token, finalize_checkin, AddedPlayer, CreatedTeam,
-    FinalizeCheckinParams, FinalizeCheckinResult, NoShuffle, RemovedPlayer, RngShuffler,
-    RosterChange, RosterEntry, SoloOutcome, SoloPlan, SoloPlayer, SoloShuffler, TeamOutcome,
-    TeamPlan, TeamWarning,
+    assign_random_teams, build_checkin_snapshot_token, finalize_checkin, prepare_checkin_in_tx,
+    AddedPlayer, CreatedTeam, FinalizeCheckinParams, FinalizeCheckinResult, NoShuffle,
+    RemovedPlayer, RngShuffler, RosterChange, RosterEntry, SoloOutcome, SoloPlan, SoloPlayer,
+    SoloShuffler, TeamOutcome, TeamPlan, TeamWarning,
 };
 pub use groups::{
     generate_group_matches, generate_group_matches_in_tx, generate_groups, generate_groups_in_tx,

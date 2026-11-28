@@ -345,7 +345,7 @@ export default function TournamentManager({
         {tournament.status === 'registration' && (
           <p className="text-xs text-muted">
             {tournament.invite_mode === 'solo_only' && tournament.team_size <= 1
-              ? 'Bei 1v1 spielt jeder für sich. Gib vor dem Öffnen des Check-ins jedem Spieler mit „Solo-Spieler automatisch zuweisen“ unter „Weitere Verwaltungsaktionen“ ein eigenes Team.'
+              ? 'Bei 1v1 spielt jeder für sich. Beim Öffnen des Check-ins, auch automatisch zur geplanten Zeit, bekommt jeder angemeldete Spieler sein eigenes Team.'
               : tournament.invite_mode === 'solo_only'
               ? 'Nach dem Öffnen checken die Spieler ein. Danach baut ihr die Teams im Team-Builder unter „Teilnehmer“, oder ein Admin bildet sie unter „Check-in“ mit „Teams ausgleichen“.'
               : teamCount === 0
