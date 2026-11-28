@@ -884,14 +884,14 @@ export default function Tournament() {
                       <Card key={team.id} className={`dl-roster__team min-w-0 p-5 transition-all group ${isMyTeam ? 'border-primary/50' : ''}`}>
                         <div className="space-y-4">
                           <div className="flex items-start justify-between gap-3">
-                            <div>
-                              <h4 className="dl-roster__team-name group-hover:text-primary transition-colors">{team.name}</h4>
+                            <div className="min-w-0">
+                              <h4 className="dl-roster__team-name break-words group-hover:text-primary transition-colors">{team.name}</h4>
                               <p className="text-[10px] text-muted font-bold uppercase mt-1">
                                 {team.members.length} / {tournament.team_size} Mitglieder
                               </p>
                             </div>
                             {!soloOnly && (
-                              <span className={`text-[10px] px-2 py-0.5 rounded-lg border font-bold uppercase tracking-widest ${recruiting.color}`}>
+                              <span className={`shrink-0 text-[10px] px-2 py-0.5 rounded-lg border font-bold uppercase tracking-widest ${recruiting.color}`}>
                                 {recruiting.text}
                               </span>
                             )}

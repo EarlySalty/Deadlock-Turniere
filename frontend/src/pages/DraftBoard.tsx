@@ -130,7 +130,7 @@ function Warteraum({
           initial={{ y: 20, opacity: 0 }}
           animate={{ y: 0, opacity: 1 }}
           transition={{ duration: 0.4, ease: 'easeOut' }}
-          className="text-center font-display text-4xl font-black uppercase tracking-tight md:text-6xl"
+          className="break-words text-center font-display text-4xl font-black uppercase tracking-tight md:text-6xl"
         >
           <span style={{ color: GOLD }}>{zustand.team1.name}</span>{' '}
           <span className="align-middle text-sm font-bold text-white/30">vs</span>{' '}
@@ -263,10 +263,10 @@ function DraftTisch({
         </span>
       </div>
 
-      <span className="absolute left-5 top-5 z-20 text-[11px] font-black uppercase tracking-[0.25em]" style={{ color: GOLD }}>
+      <span className="absolute left-5 top-5 z-20 max-w-[calc(50%-2.5rem)] truncate text-[11px] font-black uppercase tracking-[0.25em]" style={{ color: GOLD }}>
         {zustand.team1.name}
       </span>
-      <span className="absolute right-5 top-5 z-20 text-[11px] font-black uppercase tracking-[0.25em]" style={{ color: BLAU }}>
+      <span className="absolute right-5 top-5 z-20 max-w-[calc(50%-2.5rem)] truncate text-[11px] font-black uppercase tracking-[0.25em]" style={{ color: BLAU }}>
         {zustand.team2.name}
       </span>
 
@@ -411,7 +411,7 @@ function Endbild({
           Draft abgeschlossen
         </motion.div>
 
-        <h1 className="text-center font-display text-4xl font-black uppercase tracking-tight md:text-5xl">
+        <h1 className="break-words text-center font-display text-4xl font-black uppercase tracking-tight md:text-5xl">
           <motion.span
             initial={{ x: -30, opacity: 0 }}
             animate={{ x: 0, opacity: 1 }}

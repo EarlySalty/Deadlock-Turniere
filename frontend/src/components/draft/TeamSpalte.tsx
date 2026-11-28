@@ -21,7 +21,7 @@ export default function TeamSpalte({
   return (
     <div className="draft-team-column flex w-full min-w-0 flex-col gap-2">
       <div
-        className="border-b pb-2 font-display text-sm font-black uppercase tracking-[0.15em] md:text-base"
+        className="break-words border-b pb-2 font-display text-sm font-black uppercase tracking-[0.15em] md:text-base"
         style={{ color: farbe, borderColor: `${farbe}66` }}
       >
         {name}

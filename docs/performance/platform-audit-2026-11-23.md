@@ -1,4 +1,4 @@
-# DDC Plattform – systemweites Performance-Audit (23.11.2026)
+# DDC Plattform: systemweites Performance-Audit (23.11.2026)
 
 **Geltungsbereich:** `Deadlock-Turniere` mit Rust/Axum/Tokio, SQLx/PostgreSQL, React/TypeScript/Vite und Caddy. Ergänzt den [kontrollierten Baseline-Lasttest](loadtest-2026-11-23.md).
 
@@ -28,15 +28,22 @@ Es gibt daher **keine Grundlage**, Rangliste und Turnierliste pauschal mit zusä
 
 - Die bestehenden Team-Roster-Optimierungen laden öffentliche Mitglieder/Bewerbungen gebündelt.
 - **Spielerprofil:** Identität, Avatar, User-Profil und Rank-Cache kommen aus einer parametrisierten SQL-Abfrage. Die Punkte stammen aus `player_standings`, der einzigen Ranglisten-Aggregation, die alle Spieler berechnet und dann den einen Eintrag liefert. Die Turnierhistorie folgt in einer eigenen Abfrage. Pro Profil laufen damit drei Abfragen plus die volle Ranglisten-Aggregation, ohne Änderung an JSON-Struktur, anonymen Zugriffen oder gespeicherten Rangdaten.
-- Der Profil-Integrationstest prüft weiterhin Rank, Punkte und Historie und wurde um einen Nutzer ohne Profil/Punkte sowie um 404-Semantik ergänzt. Der Test ist **mit zentralen Migrationen auf einer isolierten, temporären PostgreSQL-16-Datenbank erfolgreich ausgeführt (1/1)**. Für die Migrationen war eine fehlende, nur in dieser Wegwerf-Instanz angelegte NOLOGIN-Rolle `deadlock` nötig.
+- Der Profil-Integrationstest prüft weiterhin Rank, Punkte und Historie und wurde um einen Nutzer ohne Profil/Punkte sowie um 404-Semantik ergänzt. Der Test lief am 23.11.2026 auf einer isolierten, temporären PostgreSQL-16-Datenbank mit zentralen Migrationen erfolgreich (1/1); dafür musste in dieser Wegwerf-Instanz die NOLOGIN-Rolle `deadlock` angelegt werden. Am 28.11.2026 lief er erneut als Teil der kompletten `central_routes`-Datei über `test-db-run` auf ionos, wo der Runner diese Rolle selbst anlegt, und bestand.
 
-### Weitere Integrationssuite: offener Befund
+### Weitere Integrationssuite
 
-Die komplette `central_routes`-Testdatei wurde mit derselben Wegwerf-DB ausgeführt: **13 von 15 Tests bestanden, 2 fehlgeschlagen**. Diese beiden Fehler müssen vor einem Merge untersucht werden:
-- `solo_balance_preview_apply_rollback_and_next_tournament_priority`: HTTP 500. Temporäres Test-Logging identifizierte den konkreten PostgreSQL-Fehler `42P01: relation "turnier.solo_balance_runs" does not exist`. Der Solo-Balance-Read nutzt die Tabelle, die in der zugrunde liegenden zentralen Testmigration nicht existiert. **Wahrscheinlich Migrationslücke oder getrennte Schemaquelle**, vor einem neuen Migrationsskript mit zentralem DB-Verantwortlichen abgleichen.
-- `test_mode_seed_simulate_and_wipe_only_touch_test_data`: HTTP 500 beim Erstellen des Testturniers. Die Ursache ist noch nicht hinreichend isoliert; **nicht** als durch die Profiloptimierung verursacht ausgeben.
+Erster Lauf am 23.11.2026 mit derselben Wegwerf-DB: **13 von 15 Tests bestanden, 2 fehlgeschlagen** (`solo_balance_preview_apply_rollback_and_next_tournament_priority` mit `42P01: relation "turnier.solo_balance_runs" does not exist`, `test_mode_seed_simulate_and_wipe_only_touch_test_data` mit HTTP 500 beim Erstellen des Testturniers). Das Debug-Logging dieser Fehlersuche wurde vollständig zurückgenommen; Produktionsschema und Produktionsdienste blieben unverändert.
 
-Das Debug-Logging wurde nach der Fehlersuche **vollständig zurückgenommen**. Weder Produktionsschema noch Produktionsdienste wurden verändert. **Kein Merge** bei weiterhin roten Integrationstests.
+Nachprüfung am 28.11.2026 über `test-db-run` auf ionos, je eine frische Wegwerf-Datenbank, Befehl `cargo test -p turnier-api --features testing --test central_routes`:
+
+| Stand Turniere | Migrationsquelle `Deadlock-Bots` | Ergebnis |
+|---|---|---|
+| `origin/main` 032ae8f | `origin/main` 53402f6b | **19/19 bestanden** |
+| Branch mit `origin/main` 032ae8f zusammengeführt | `origin/main` 53402f6b | **19/19 bestanden** |
+| derselbe Branch | veralteter Nachbar-Checkout e65d3805 | 13/19 bestanden, 6 mit HTTP 500 oder `ColumnNotFound("tournament_mode_auto")` |
+
+Ursache des roten Laufs vom 28.11.2026: Die Tests wenden die Migrationen aus dem Nachbar-Checkout `../../Deadlock-Bots` an. Dem veralteten Stand e65d3805 fehlt `20261127120000_turnier_tournament_mode_auto.sql`, also fehlt die Spalte und die Routen antworten mit 500. Der Lauf vom 23.11.2026 lässt sich nicht mehr nachstellen; sein `42P01` passt zum selben Muster (Migrationsquelle ohne `20261011120000_turnier_solo_balance.sql`), ist dafür aber nicht belegt. Belegt ist: Mit aktuellem `Deadlock-Bots` `origin/main` bestehen beide damals roten Tests, auf `origin/main` wie auf dem Branch. Die Fehler sind also weder Basislinie von `main` noch durch diesen Branch verursacht. Ein Merge-Hindernis aus dieser Suite besteht nicht mehr.
+
 - Der globale `Server-Timing`-Layer loggt statt konkreter URL-Segmente das Axum-Routenmuster (`MatchedPath`). Für Requests über 100 ms werden bei aktiviertem Debug-Logging die SQLx-Poolgröße und die Zahl freier Verbindungen erfasst; über 300 ms mit Warnstufe. Die öffentliche Antwort erhält weiterhin nur `rust;dur=…`, **keine Pool-internen Informationen**.
 
 ### Live-Verhalten
@@ -44,7 +51,7 @@ Das Debug-Logging wurde nach der Fehlersuche **vollständig zurückgenommen**. W
 - **Draft:** Der nötige 1-Sekunden-Takt bleibt für sichtbare aktive Räume, wird jedoch in Hintergrund-Tabs gestoppt. Rückkehr in den Tab löst weiterhin einen aktuellen Fetch aus.
 - **Observer:** Sessions werden bei aktiven Sessions alle 2 s, sonst alle 10 s abgefragt; Bot-Lease bei Reservierung alle 3 s, sonst alle 15 s; Sitzungsdetails nur bei echten Live-Sessions alle 1 s, bei wartenden alle 5 s und bei abgeschlossenen nicht mehr. Hintergrund-Tabs pausieren.
 - **Schriftladen:** Google-Fonts-Aufruf nur in `index.html` mit `preconnect`, der doppelte CSS-`@import` entfällt.
-- **Route-Splitting:** Auch Home und Draft-Lobby werden bei Bedarf geladen; die gemeinsame Header-Leiste bleibt beim Lazy-Load über ein Suspense innerhalb des Layouts sichtbar. Der Vite-Hauptchunk sank dabei von ca. **76 KB gzip auf 24 KB gzip**. Teilweise wanderte Code in einen separaten Shared-Chunk (ca. 41 KB gzip), sodass dies **nicht** einer garantierten Reduktion der gesamten Seitenlast um 52 KB entspricht.
+- **Route-Splitting:** Auch Home und Draft-Lobby werden bei Bedarf geladen; die gemeinsame Header-Leiste bleibt beim Lazy-Load über ein Suspense innerhalb des Layouts sichtbar. Der Vite-Hauptchunk sank dabei von ca. **76 KB gzip auf 24 KB gzip** (Build vom 28.11.2026: 23,9 KB gzip). Teilweise wanderte Code in einen separaten Shared-Chunk (ca. 41 KB gzip), sodass dies **nicht** einer garantierten Reduktion der gesamten Seitenlast um 52 KB entspricht.
 - Vorherige Optimierungen: React Query Stale-Times und Lazy-Loads für Admin, Turnier, Rangliste und Draft-Board.
 
 ### Reproduzierbarer Performance-Test
@@ -60,7 +67,7 @@ Der Test verwendet ausschließlich fest definierte GET-Routen, max. acht paralle
 
 ## 3. Größter offener Frontend-/Caddy-Fund
 
-**Tatsächlich gemessen:** Die öffentlich ausgelieferte Preview-`index.html` und die gehashten JS-Dateien (`/turnier/_preview/assets/index-…js`) antworten **ohne Cache-Control**, obwohl ETags vorhanden sind. ETags sparen unter Umständen Bytes, aber nicht einen erneuten Conditional-Request. Die gehashten Vite-Dateien können langfristig unveränderlich gecacht werden.
+**Gemessen am 23.11.2026:** Die öffentlich ausgelieferte Preview-`index.html` und die gehashten JS-Dateien (`/turnier/_preview/assets/index-…js`) antworten **ohne Cache-Control**, obwohl ETags vorhanden sind. ETags sparen unter Umständen Bytes, aber nicht einen erneuten Conditional-Request. Die gehashten Vite-Dateien können langfristig unveränderlich gecacht werden.
 
 Empfohlene Änderung **im separaten Repository `EarlySalty/caddy-config`**, gezielt auf `/turnier` und nur bei gesichert gehashten JS-/CSS-/Woff2-Dateinamen:
 
@@ -73,7 +80,7 @@ header @turnier_immutable Cache-Control "public, max-age=31536000, immutable"
 
 Zusätzlich nur für die **HTML-Fallback-Antwort** `Cache-Control: no-cache, must-revalidate` setzen, nicht für die gehashten Assets. Die dynamischen `/turnier/api/`-/Auth-Routen **niemals pauschal öffentlich cachen**.
 
-**Separater Draft-PR erstellt:** [EarlySalty/caddy-config#10](https://github.com/EarlySalty/caddy-config/pull/10) enthält genau diesen Matcher sowie No-Cache für das SPA-HTML. Das ursprüngliche, bereits veränderte Arbeitsverzeichnis blieb unangetastet. `caddy adapt` war erfolgreich und zwei Matcher-Tests sind grün; `caddy validate` benötigt Berechtigung für eine vorhandene Caddy-Zugriffslogdatei. **Nicht live geändert und nicht gemergt.**
+**Umgesetzt:** [EarlySalty/caddy-config#10](https://github.com/EarlySalty/caddy-config/pull/10) enthält genau diesen Matcher sowie No-Cache für das SPA-HTML und wurde am 27.11.2026 gemergt. Live geprüft am 28.11.2026: `/turnier/assets/index-…js` antwortet mit `Cache-Control: public, max-age=31536000, immutable`, `/turnier/` und `/turnier/_preview/` mit `private, no-cache, must-revalidate`.
 
 ## 4. Weitere Skalierungs-Funde (vor Schema-/Architekturänderungen messen)
 
@@ -81,7 +88,7 @@ Zusätzlich nur für die **HTML-Fallback-Antwort** `Cache-Control: no-cache, mus
 2. **Auth:** Jeder authentifizierte API-Request überprüft das Session-Token in PostgreSQL. Kein transparenter Session-L1-Cache ohne verbindliche Logout-/Rollen-/Revocation-Semantik; die sichere Korrektheit geht vor ein paar Millisekunden.
 3. **Steam-/Discord-Rangauflösung:** Im Admin-Read-Model können bei Cache-Misses externe Aufrufe im kritischen Pfad entstehen. Nach Messung der `Server-Timing`- und Pool-Werte ist das nächste große Architekturprojekt ein strikt cachebasierter Read-Pfad mit kontrollierter asynchroner Aktualisierung. Damit dürfen aktuelle Rangwerte aber nicht stillschweigend verschwinden; hierfür separates Integrationsdesign.
 4. **Database Pool:** Der Code-Default ist `max_connections=8`, `acquire_timeout=10s`. Nicht erhöhen, bevor Pool-Wartezeiten, DB-CPU, aktive Queries und Konflikte gemessen wurden.
-5. **Browser-Nutzbarkeit:** Die derzeitige Preview-Startseite liefert ein Hauptbundle von ca. **76 KB gzip**, React ca. **66 KB gzip** und globale CSS ca. **22 KB gzip**, dazu routeabhängige Chunks. Daher können 50 ms als Ziel für einen vollständigen Kaltstart auf mobilen Netzen nicht garantiert werden. **LCP, INP, JS-Ausführungszeit, Font-Paint und Navigationszeit** separat per Browser-RUM messen.
+5. **Browser-Nutzbarkeit:** Die Preview-Startseite lieferte am 23.11.2026 vor dem Route-Splitting ein Hauptbundle von ca. **76 KB gzip**, React ca. **66 KB gzip** und globale CSS ca. **22 KB gzip**, dazu routeabhängige Chunks. Daher können 50 ms als Ziel für einen vollständigen Kaltstart auf mobilen Netzen nicht garantiert werden. **LCP, INP, JS-Ausführungszeit, Font-Paint und Navigationszeit** separat per Browser-RUM messen.
 6. **Cache/Datenschutz:** Öffentliche statische Assets dürfen lang gecacht werden. Live-Drafts, Admin- und User-Daten dürfen niemals über denselben Shared-Cache-Pfad laufen.
 
 ## 5. Definition einer belastbaren Freigabe
