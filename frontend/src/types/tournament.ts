@@ -563,6 +563,18 @@ export interface LobbyCreateResult {
   party_id: string
   party_code: string | null
   join_code: string | null
+  discord_channel_id: string | null
+}
+
+export interface ManualLobbyResult {
+  success: boolean
+  party_code: string
+  discord_channel_id: string | null
+}
+
+export interface LobbyDeliveryResult {
+  success: boolean
+  discord_channel_id: string | null
 }
 
 export interface MatchStartResult {

@@ -407,6 +407,63 @@ impl MatchManager {
         Ok(Value::Object(out))
     }
 
+    pub async fn deliver_lobby_code(
+        &self,
+        kind: MatchKind,
+        tournament_id: i64,
+        match_id: i64,
+    ) -> SteamTaskResult<Option<String>> {
+        let m = repo::get_match(&self.pool, kind, tournament_id, match_id).await?;
+        require_match_has_lobby_code(&m)?;
+        let Some(party_code) = m.party_code.clone() else {
+            return Ok(None);
+        };
+        if repo::is_test_tournament(&self.pool, tournament_id).await? {
+            return Ok(None);
+        }
+        let participants = repo::load_participants(&self.pool, &m).await?;
+        let participant_discord_ids = non_empty_discord_ids(&participants);
+        if let Some(channel_id) = m.discord_channel_id.clone() {
+            return Ok(self
+                .post_lobby_code(match_id, &channel_id, &party_code, &participant_discord_ids)
+                .await);
+        }
+        let party_id = m.steam_party_id.clone().unwrap_or_default();
+        Ok(self
+            .setup_discord_for_lobby(
+                kind,
+                tournament_id,
+                match_id,
+                &m,
+                &party_id,
+                &party_code,
+                &participants,
+                &participant_discord_ids,
+                Vec::new(),
+            )
+            .await)
+    }
+
+    async fn post_lobby_code(
+        &self,
+        match_id: i64,
+        channel_id: &str,
+        party_code: &str,
+        participant_discord_ids: &[String],
+    ) -> Option<String> {
+        let notifier = self.notifier.as_ref()?;
+        match notifier
+            .send_match_lobby_info(channel_id, party_code, participant_discord_ids)
+            .await
+        {
+            Ok(_) => Some(channel_id.to_string()),
+            Err(err) => {
+                tracing::error!(match_id, error = %err, "send_match_lobby_info fehlgeschlagen");
+                None
+            }
+        }
+    }
+
     async fn discard_unwanted_lobby(&self, tournament_id: i64, match_id: i64, party_id: &str) {
         tracing::warn!(
             tournament_id,
@@ -904,6 +961,20 @@ fn require_match_ready_for_lobby(m: &MatchRow) -> SteamTaskResult<()> {
         ));
     }
     Ok(())
+}
+
+fn require_match_has_lobby_code(m: &MatchRow) -> SteamTaskResult<()> {
+    let open = VALID_LEAVE_STATUSES.contains(&m.status.as_str());
+    let has_code = m
+        .party_code
+        .as_deref()
+        .is_some_and(|code| !code.trim().is_empty());
+    if open && has_code {
+        return Ok(());
+    }
+    Err(SteamTaskError::state(
+        "Das Match hat keine offene Lobby mit Code",
+    ))
 }
 
 fn require_match_ready_for_start(m: &MatchRow) -> SteamTaskResult<()> {

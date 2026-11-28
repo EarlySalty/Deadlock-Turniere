@@ -59,6 +59,8 @@ import type {
   DraftHero,
   CreateLobbyBody,
   LobbyCredentials,
+  LobbyDeliveryResult,
+  ManualLobbyResult,
   LobbyState,
   ObserverBot2Lease,
   ObserverMode,
@@ -220,7 +222,7 @@ export const setManualMatchLobby = (
   matchId: number,
   data: { party_code: string; steam_party_id?: string },
 ) =>
-  request<{ success: boolean; party_code: string }>(`/admin/tournaments/${tournamentId}/matches/${matchId}/manual-lobby`, {
+  request<ManualLobbyResult>(`/admin/tournaments/${tournamentId}/matches/${matchId}/manual-lobby`, {
     method: 'POST',
     body: JSON.stringify(data),
   })
@@ -255,7 +257,7 @@ export const setManualGroupMatchLobby = (
   matchId: number,
   data: { party_code: string; steam_party_id?: string },
 ) =>
-  request<{ success: boolean; party_code: string }>(`/admin/tournaments/${tournamentId}/group-matches/${matchId}/manual-lobby`, {
+  request<ManualLobbyResult>(`/admin/tournaments/${tournamentId}/group-matches/${matchId}/manual-lobby`, {
     method: 'POST',
     body: JSON.stringify(data),
   })
@@ -770,4 +772,14 @@ export const setObserverBot2Lease = (reserved: boolean) =>
   request<ObserverBot2Lease>('/observer/bot2/lease', {
     method: 'POST',
     body: JSON.stringify({ reserved }),
+  })
+
+export const deliverMatchLobbyCode = (tournamentId: number, matchId: number) =>
+  request<LobbyDeliveryResult>(`/admin/tournaments/${tournamentId}/matches/${matchId}/deliver-lobby-code`, {
+    method: 'POST',
+  })
+
+export const deliverGroupMatchLobbyCode = (tournamentId: number, matchId: number) =>
+  request<LobbyDeliveryResult>(`/admin/tournaments/${tournamentId}/group-matches/${matchId}/deliver-lobby-code`, {
+    method: 'POST',
   })

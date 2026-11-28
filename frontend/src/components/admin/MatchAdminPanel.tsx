@@ -9,6 +9,7 @@ import {
   useLeaveLobby,
   useResetMatch,
   useSetManualMatchLobby,
+  useDeliverMatchLobbyCode,
   useSetMatchStreamFlag,
   useStartMatch,
 } from '@/hooks/useTournament'
@@ -22,9 +23,11 @@ import {
   Play,
   Radio,
   RefreshCcw,
+  Send,
   Swords,
 } from 'lucide-react'
 import { teamNameById } from '@/lib/teamName'
+import { LOBBY_CODE_NOT_DELIVERED, lobbyDeliveryMessage, lobbyResendMessage } from '@/lib/lobbyDelivery'
 
 interface MatchAdminPanelProps {
   tournamentId: number
@@ -100,6 +103,7 @@ export default function MatchAdminPanel({
   const leaveLobbyMutation = useLeaveLobby()
   const resetMatchMutation = useResetMatch()
   const setManualLobbyMutation = useSetManualMatchLobby()
+  const deliverCodeMutation = useDeliverMatchLobbyCode()
   const streamFlagMutation = useSetMatchStreamFlag(tournamentId)
 
   const [activeAction, setActiveAction] = useState<ActiveAction | null>(null)
@@ -160,8 +164,9 @@ export default function MatchAdminPanel({
     setActiveAction({ matchId, action: 'create' })
     clearMessage(matchId)
     try {
-      await createLobbyMutation.mutateAsync({ tournamentId, matchId })
-      setMessage(matchId, 'success', 'Lobby erstellt und Party-Code gespeichert.')
+      const result = await createLobbyMutation.mutateAsync({ tournamentId, matchId })
+      const note = lobbyDeliveryMessage('Lobby erstellt und Party-Code gespeichert.', result.discord_channel_id)
+      setMessage(matchId, note.kind, note.text)
       handleRefresh()
     } catch (err) {
       setMessage(
@@ -261,11 +266,27 @@ export default function MatchAdminPanel({
     setActiveAction({ matchId, action: 'create' })
     clearMessage(matchId)
     try {
-      await setManualLobbyMutation.mutateAsync({ tournamentId, matchId, partyCode })
-      setMessage(matchId, 'success', 'Party-Code wurde manuell gespeichert.')
+      const result = await setManualLobbyMutation.mutateAsync({ tournamentId, matchId, partyCode })
+      const note = lobbyDeliveryMessage('Party-Code wurde manuell gespeichert.', result.discord_channel_id)
+      setMessage(matchId, note.kind, note.text)
       handleRefresh()
     } catch (err) {
       setMessage(matchId, 'error', err instanceof Error ? err.message : 'Party-Code konnte nicht gespeichert werden')
+    } finally {
+      setActiveAction(null)
+    }
+  }
+
+  const handleDeliverCode = async (matchId: number) => {
+    if (isLocked) return
+    setActiveAction({ matchId, action: 'create' })
+    clearMessage(matchId)
+    try {
+      const result = await deliverCodeMutation.mutateAsync({ tournamentId, matchId })
+      const note = lobbyResendMessage(result.discord_channel_id)
+      setMessage(matchId, note.kind, note.text)
+    } catch (err) {
+      setMessage(matchId, 'error', err instanceof Error ? err.message : LOBBY_CODE_NOT_DELIVERED)
     } finally {
       setActiveAction(null)
     }
@@ -358,6 +379,18 @@ export default function MatchAdminPanel({
                     <Copy size={14} />
                     {copyFeedback[match.id] ? 'Kopiert' : 'Code kopieren'}
                   </Button>
+                  {['lobby_created', 'in_progress'].includes(match.status) && (
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      className="mt-2 w-full"
+                      disabled={isBusy}
+                      onClick={() => void handleDeliverCode(match.id)}
+                    >
+                      <Send size={14} />
+                      Code an Teams senden
+                    </Button>
+                  )}
                 </div>
               )}
             </div>
