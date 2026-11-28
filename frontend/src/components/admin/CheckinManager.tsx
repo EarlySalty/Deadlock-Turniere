@@ -6,6 +6,7 @@ import Button from '@/components/ui/Button'
 import { useAdminCheckin, useAdminCheckins, useDeleteAdminSignup, useDeleteAdminTeam, useFinalizeCheckin, useRevertCheckin } from '@/hooks/useTournament'
 import { usePendingDraftChanges } from '@/components/admin/teamBuilderDrafts'
 import { latestActionError } from '@/lib/latestError'
+import { keepsRosters } from '@/lib/checkinMode'
 import { bracketFormatLabel } from '@/lib/bracketFormat'
 import { pluralWord, pluralize } from '@/lib/countLabel'
 import type {
@@ -49,7 +50,6 @@ export default function CheckinManager({
 
   const [preview, setPreview] = useState<FinalizeCheckinResult | null>(null)
   const [allowedTeams, setAllowedTeams] = useState<Record<number, boolean>>({})
-  const [fillFromSolos, setFillFromSolos] = useState(false)
   const [feedback, setFeedback] = useState('')
   const [modalFeedback, setModalFeedback] = useState('')
   const [pendingCheckins, setPendingCheckins] = useState<ReadonlySet<string>>(new Set())
@@ -136,16 +136,20 @@ export default function CheckinManager({
     }
   }
 
-  const runPreview = (fill: boolean = fillFromSolos) => {
+  const runPreview = (fill: boolean = preview?.auto_team_formation ?? false) => {
+    const previousMode = preview?.auto_team_formation
     setFeedback('')
     setModalFeedback('')
     finalizeMutation.mutate(
       { confirm: false, allowedTeamIds: [], fillFromSolos: fill },
       {
         onSuccess: (result) => {
+          const modeChanged = previousMode !== undefined && previousMode !== result.auto_team_formation
           setPreview(result)
           setAllowedTeams((current) =>
-            Object.fromEntries(result.warnings.map((warning) => [warning.team_id, current[warning.team_id] ?? false]))
+            Object.fromEntries(
+              result.warnings.map((warning) => [warning.team_id, modeChanged ? false : (current[warning.team_id] ?? false)])
+            )
           )
         },
       }
@@ -168,12 +172,6 @@ export default function CheckinManager({
   const closePreview = () => {
     setPreview(null)
     setModalFeedback('')
-    setFillFromSolos(false)
-  }
-
-  const toggleFillFromSolos = (next: boolean) => {
-    setFillFromSolos(next)
-    runPreview(next)
   }
 
   const confirmStart = () => {
@@ -417,9 +415,9 @@ export default function CheckinManager({
               <label className="mt-5 flex items-start gap-3 rounded-xl border border-border bg-background/60 p-4">
                 <input
                   type="checkbox"
-                  checked={fillFromSolos}
+                  checked={preview.auto_team_formation}
                   disabled={modalBusy}
-                  onChange={(event) => toggleFillFromSolos(event.target.checked)}
+                  onChange={(event) => runPreview(event.target.checked)}
                   className="mt-1"
                 />
                 <span className="text-sm text-foreground">
@@ -464,9 +462,9 @@ export default function CheckinManager({
               <div className="mt-5 space-y-3">
                 <h4 className="text-base font-semibold text-foreground">Unvollständige Teams</h4>
                 <p className="text-sm text-muted">
-                  {preview.auto_team_formation || !preview.can_fill_from_solos
-                    ? 'Hakst du ein Team an, startet es mit den eingecheckten Spielern in Unterzahl.'
-                    : 'Hakst du ein Team an, startet es mit seinem Kader, obwohl nicht alle eingecheckt sind.'}{' '}
+                  {keepsRosters(preview)
+                    ? 'Hakst du ein Team an, startet es mit seinem Kader, obwohl nicht alle eingecheckt sind.'
+                    : 'Hakst du ein Team an, startet es mit den eingecheckten Spielern in Unterzahl.'}{' '}
                   Ohne Haken lässt sich das Turnier nicht starten, bis du das Team anhakst oder entfernst.
                 </p>
                 {preview.warnings.map((warning) => (
@@ -487,9 +485,9 @@ export default function CheckinManager({
                         className="mt-1"
                       />
                       <span className="text-sm text-foreground">
-                        {preview.auto_team_formation || !preview.can_fill_from_solos
-                          ? `${warning.team_name} in Unterzahl starten lassen (${warning.current} von ${warning.required} Spielern)`
-                          : `${warning.team_name} trotzdem starten lassen (${warning.current} von ${warning.required} eingecheckt)`}
+                        {keepsRosters(preview)
+                          ? `${warning.team_name} trotzdem starten lassen (${warning.current} von ${warning.required} eingecheckt)`
+                          : `${warning.team_name} in Unterzahl starten lassen (${warning.current} von ${warning.required} Spielern)`}
                       </span>
                     </label>
                     <Button

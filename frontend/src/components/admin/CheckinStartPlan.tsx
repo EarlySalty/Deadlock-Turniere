@@ -1,12 +1,13 @@
 import type { FinalizeCheckinResult, FinalizeCheckinRosterEntry, FinalizeCheckinSoloPlan, FinalizeCheckinTeamPlan } from '@/types/tournament'
 import { playerName } from '@/lib/playerName'
+import { keepsRosters } from '@/lib/checkinMode'
 
-function teamOutcomeText(plan: FinalizeCheckinTeamPlan, fillFromSolos: boolean): string {
+function teamOutcomeText(plan: FinalizeCheckinTeamPlan, keepRosters: boolean): string {
   if (plan.outcome === 'deleted') return 'Wird gelöscht, niemand hat eingecheckt.'
-  if (plan.outcome === 'complete') return fillFromSolos ? 'Startet vollständig.' : 'Startet unverändert mit diesem Kader.'
-  return fillFromSolos
-    ? 'Bleibt unvollständig. Startet nur mit Haken in Unterzahl.'
-    : 'Kader bleibt unverändert. Startet nur mit Haken, obwohl nicht alle eingecheckt sind.'
+  if (plan.outcome === 'complete') return keepRosters ? 'Startet unverändert mit diesem Kader.' : 'Startet vollständig.'
+  return keepRosters
+    ? 'Kader bleibt unverändert. Startet nur mit Haken, obwohl nicht alle eingecheckt sind.'
+    : 'Bleibt unvollständig. Startet nur mit Haken in Unterzahl.'
 }
 
 function teamOutcomeClass(plan: FinalizeCheckinTeamPlan): string {
@@ -33,7 +34,7 @@ function soloOutcomeText(plan: FinalizeCheckinSoloPlan): string {
   return plan.checked_in ? 'bleibt ohne Team, spielt nicht mit' : 'nicht eingecheckt, bleibt ohne Team'
 }
 
-function TeamPlanCard({ plan, fillFromSolos }: { plan: FinalizeCheckinTeamPlan; fillFromSolos: boolean }) {
+function TeamPlanCard({ plan, keepRosters }: { plan: FinalizeCheckinTeamPlan; keepRosters: boolean }) {
   return (
     <li className={`rounded-xl border p-3 ${teamOutcomeClass(plan)}`}>
       <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
@@ -42,7 +43,7 @@ function TeamPlanCard({ plan, fillFromSolos }: { plan: FinalizeCheckinTeamPlan; 
           {plan.checked_in} von {plan.required} eingecheckt, {plan.roster.length} im Kader
         </span>
       </div>
-      <p className="mt-1 text-sm text-foreground">{teamOutcomeText(plan, fillFromSolos)}</p>
+      <p className="mt-1 text-sm text-foreground">{teamOutcomeText(plan, keepRosters)}</p>
       <ul className="mt-2 space-y-0.5 text-sm">
         {plan.roster.map((entry) => (
           <li key={entry.discord_id} className="flex flex-wrap justify-between gap-x-3">
@@ -56,7 +57,7 @@ function TeamPlanCard({ plan, fillFromSolos }: { plan: FinalizeCheckinTeamPlan; 
 }
 
 export default function CheckinStartPlan({ preview }: { preview: FinalizeCheckinResult }) {
-  const fillFromSolos = preview.auto_team_formation
+  const keepRosters = keepsRosters(preview)
   return (
     <>
       {preview.team_plans.length > 0 && (
@@ -64,7 +65,7 @@ export default function CheckinStartPlan({ preview }: { preview: FinalizeCheckin
           <h4 className="text-base font-semibold text-foreground">Das passiert mit jedem Team</h4>
           <ul className="space-y-2">
             {preview.team_plans.map((plan) => (
-              <TeamPlanCard key={plan.team_id} plan={plan} fillFromSolos={fillFromSolos} />
+              <TeamPlanCard key={plan.team_id} plan={plan} keepRosters={keepRosters} />
             ))}
           </ul>
         </div>
@@ -73,7 +74,7 @@ export default function CheckinStartPlan({ preview }: { preview: FinalizeCheckin
       {preview.solo_plans.length > 0 && (
         <div className="mt-5 space-y-2">
           <h4 className="text-base font-semibold text-foreground">Das passiert mit jedem Solo-Spieler</h4>
-          {!fillFromSolos && (
+          {!preview.auto_team_formation && (
             <p className="text-sm text-muted">
               {preview.can_fill_from_solos
                 ? 'Auffüllen aus der Solo-Liste ist aus. Solo-Spieler kommen in kein Team.'
