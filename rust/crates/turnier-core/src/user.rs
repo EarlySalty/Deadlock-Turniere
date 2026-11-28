@@ -105,7 +105,6 @@ pub struct PlayerProfile {
     pub matches_played: i64,
     pub matches_won: i64,
     pub best_placement: Option<i64>,
-    pub best_placement_shared: bool,
     pub total_points: i64,
     pub tournament_history: Vec<TournamentHistoryEntry>,
 }

@@ -170,9 +170,6 @@ async fn get_player_profile(
         matches_played: points.matches_played,
         matches_won: points.matches_won,
         best_placement: points.best_placement,
-        best_placement_shared: shared_best_placement_players(pool)
-            .await?
-            .contains(&discord_id),
         total_points: points.total_points,
         tournament_history,
     }))

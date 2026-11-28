@@ -835,7 +835,6 @@ export interface PlayerProfile {
   matches_played: number
   matches_won: number
   best_placement: number | null
-  best_placement_shared: boolean
   total_points: number
   tournament_history: TournamentHistoryEntry[]
 }
