@@ -14,7 +14,8 @@ import {
   useRevertCheckin,
   useUpdateTournament,
 } from '@/hooks/useTournament'
-import { LEAGUE_LABEL, isLeague, leagueFinishConfirm } from '@/lib/league'
+import { LEAGUE_LABEL, isLeague, leagueFinishConfirm, localInputToIso } from '@/lib/league'
+import { registrationWindowError } from '@/lib/registrationWindow'
 import type { Tournament } from '@/types/tournament'
 import ChoiceCards from './settings/ChoiceCards'
 import GameRulesFields from './settings/GameRulesFields'
@@ -43,7 +44,9 @@ interface TournamentManagerProps {
   matchCount: number
   canChangeTournamentMode: boolean
   bracketHasResults?: boolean
+  openBracketMatches?: number
   onFinished?: () => void
+  onArchived?: (tournament: Tournament) => void
   successMessage?: string
   onSuccessMessage?: (text: string) => void
 }
@@ -86,7 +89,9 @@ export default function TournamentManager({
   matchCount,
   canChangeTournamentMode,
   bracketHasResults = false,
+  openBracketMatches = 0,
   onFinished,
+  onArchived,
   successMessage = '',
   onSuccessMessage,
 }: TournamentManagerProps) {
@@ -105,13 +110,16 @@ export default function TournamentManager({
   const [special, setSpecial] = useState(initial.special)
   const [gameRules, setGameRules] = useState(initial.gameRules)
   const [customJsonError, setCustomJsonError] = useState('')
+  const [dateError, setDateError] = useState('')
   const [setupTab, setSetupTab] = useState<SetupTab>(() => lastSetupTab.get(tournament.id) ?? 'settings')
   const [settingsOpen, setSettingsOpen] = useState(false)
   const setSuccessMessage = (text: string) => onSuccessMessage?.(text)
   const [deleteConfirmationId, setDeleteConfirmationId] = useState<number | null>(null)
+  const [archiveConfirmOpen, setArchiveConfirmOpen] = useState(false)
   const deleteConfirmed = deleteConfirmationId === tournament.id
 
   const league = isLeague(form.tournamentMode)
+  const finishBlocked = tournament.status === 'bracket' && openBracketMatches > 0
   const leagueRunning = tournament.status === 'group_phase'
   const modeLocked = !canChangeTournamentMode || (leagueRunning && storedLeague)
   const action =
@@ -147,6 +155,12 @@ export default function TournamentManager({
   }
 
   const handleSave = () => {
+    const windowError = registrationWindowError(localInputToIso(form.registrationStart), localInputToIso(form.registrationEnd))
+    setDateError(windowError)
+    if (windowError) {
+      selectTab('settings')
+      return
+    }
     const result = buildUpdatePayload({ form, special, gameRules }, initial, tournament, canChangeTournamentMode)
     if (!result.ok) {
       setCustomJsonError(result.error)
@@ -163,8 +177,21 @@ export default function TournamentManager({
     )
   }
 
+  const handleArchive = () => {
+    advanceMutation.mutate(tournament.id, {
+      onSuccess: () => {
+        setArchiveConfirmOpen(false)
+        onArchived?.(tournament)
+      },
+    })
+  }
+
   const handleAdvance = () => {
-    if (!action) return
+    if (!action || finishBlocked) return
+    if (tournament.status === 'completed') {
+      setArchiveConfirmOpen(true)
+      return
+    }
     if (window.confirm(action.confirmMsg)) {
       const finishes = tournament.status === 'bracket' || (storedLeague && leagueRunning)
       advanceMutation.mutate(tournament.id, {
@@ -295,7 +322,13 @@ export default function TournamentManager({
             </p>
           )}
           {action && tournament.status !== 'archived' && (
-            <Button variant="primary" size="sm" disabled={isLoading} onClick={handleAdvance}>
+            <Button
+              variant="primary"
+              size="sm"
+              disabled={isLoading || finishBlocked}
+              aria-describedby={finishBlocked ? 'finish-blocked-reason' : undefined}
+              onClick={handleAdvance}
+            >
               <ArrowRight size={14} />
               {advanceMutation.isPending ? 'Verarbeitet...' : action.label}
             </Button>
@@ -304,9 +337,16 @@ export default function TournamentManager({
             <p className="text-sm text-muted">Dieses Turnier ist archiviert.</p>
           )}
         </div>
+        {finishBlocked && (
+          <p id="finish-blocked-reason" className="text-xs text-muted">
+            Abschließen geht erst, wenn alle Bracket-Spiele gewertet sind. Noch {openBracketMatches === 1 ? 'ist 1 Spiel' : `sind ${openBracketMatches} Spiele`} offen.
+          </p>
+        )}
         {tournament.status === 'registration' && (
           <p className="text-xs text-muted">
-            {tournament.invite_mode === 'solo_only'
+            {tournament.invite_mode === 'solo_only' && tournament.team_size <= 1
+              ? 'Bei 1v1 spielt jeder für sich. Gib vor dem Öffnen des Check-ins jedem Spieler mit „Solo-Spieler automatisch zuweisen“ unter „Weitere Verwaltungsaktionen“ ein eigenes Team.'
+              : tournament.invite_mode === 'solo_only'
               ? 'Nach dem Öffnen checken die Spieler ein. Danach baut ihr die Teams im Team-Builder unter „Teilnehmer“, oder ein Admin bildet sie unter „Check-in“ mit „Teams ausgleichen“.'
               : teamCount === 0
                 ? 'Noch gibt es kein Team. Der Check-in lässt sich erst öffnen, wenn mindestens ein Team angelegt ist.'
@@ -416,6 +456,12 @@ export default function TournamentManager({
       )}
 
 
+            {dateError && (
+              <div role="alert" className="flex items-start gap-2 rounded-lg border border-red-500/20 bg-red-500/10 p-3 text-sm text-red-400">
+                <AlertCircle size={16} className="mt-0.5 shrink-0" />
+                <span className="min-w-0 break-words">{dateError}</span>
+              </div>
+            )}
             <ActionError actions={[detailsUpdateMutation]} />
             <Button
               variant="primary"
@@ -490,6 +536,30 @@ export default function TournamentManager({
           Zuletzt geändert: {new Date(tournament.updated_at).toLocaleString('de-DE')}
         </span>
       </div>
+      {archiveConfirmOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4">
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="archive-confirm-title"
+            className="w-full max-w-md space-y-4 rounded-xl border border-border bg-card p-4 shadow-xl sm:p-6"
+          >
+            <h3 id="archive-confirm-title" className="text-lg font-semibold text-foreground">Turnier archivieren?</h3>
+            <p className="text-sm text-muted">
+              „{tournament.name}“ verschwindet aus der Live-Liste und liegt danach {tournament.is_test ? 'im Test-Modus' : 'im Archiv'}. Ergebnisse und Platzierungen bleiben erhalten.
+            </p>
+            <ActionError actions={[advanceMutation]} />
+            <div className="flex flex-wrap justify-end gap-2">
+              <Button variant="secondary" size="sm" disabled={advanceMutation.isPending} onClick={() => setArchiveConfirmOpen(false)}>
+                Abbrechen
+              </Button>
+              <Button variant="primary" size="sm" disabled={advanceMutation.isPending} onClick={handleArchive}>
+                {advanceMutation.isPending ? 'Archiviert...' : 'Archivieren'}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </Card>
   )
 }

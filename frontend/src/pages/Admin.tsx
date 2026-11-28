@@ -108,6 +108,7 @@ export default function Admin() {
   const [liveNotice, setLiveNotice] = useState<AdminNotice | null>(null)
   const { user } = useAuth()
   const [managerNotice, setManagerNotice] = useState<AdminNotice | null>(null)
+  const [archiveNotice, setArchiveNotice] = useState('')
   const deleteMutation = useDeleteTournament()
 
   const liveTournaments = useMemo(
@@ -228,10 +229,11 @@ export default function Admin() {
     ? ['bracket', 'completed', 'archived'].includes(liveDetail.status)
     : false
   const allowResultReset = liveDetail?.status === 'bracket'
-  const currentBracketMatchId =
-    liveDetail?.bracket_matches.find(
+  const openBracketMatches =
+    liveDetail?.bracket_matches.filter(
       (m) => !['completed', 'forfeit', 'cancelled'].includes(m.status),
-    )?.id ?? null
+    ) ?? []
+  const currentBracketMatchId = openBracketMatches[0]?.id ?? null
 
   const handleDeleteArchived = (id: number, name: string) => {
     if (!window.confirm(`Turnier "${name}" endgültig löschen?`)) return
@@ -244,11 +246,13 @@ export default function Admin() {
     setCreateFormKey((key) => key + 1)
     setShowCreateForm(true)
     setAdminMode('live')
+    setArchiveNotice('')
   }
 
   const handleSelectLive = (id: number) => {
     setSelectedLiveId(id)
     setShowCreateForm(false)
+    setArchiveNotice('')
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
 
@@ -279,7 +283,10 @@ export default function Admin() {
               key={tab.key}
               role="tab"
               aria-selected={isActive}
-              onClick={() => setAdminMode(tab.key)}
+              onClick={() => {
+                setAdminMode(tab.key)
+                setArchiveNotice('')
+              }}
               className={`flex items-center gap-2 border-b-2 px-4 py-2.5 text-sm font-medium transition-colors ${
                 isActive
                   ? 'border-primary text-primary'
@@ -313,6 +320,15 @@ export default function Admin() {
           </aside>
 
           <main className="min-w-0 space-y-6">
+            {archiveNotice && !showCreateForm && (
+              <div
+                role="status"
+                className="flex items-center gap-2 rounded-lg border border-green-500/20 bg-green-500/10 p-3 text-sm text-green-400"
+              >
+                <Archive size={16} className="shrink-0" />
+                <span>{archiveNotice}</span>
+              </div>
+            )}
             {showCreateForm ? (
               <section className="space-y-3">
                 <div className="flex items-center justify-between">
@@ -389,10 +405,19 @@ export default function Admin() {
                         matchCount={matchCount}
                         canChangeTournamentMode={canChangeTournamentMode}
                         bracketHasResults={bracketHasResults(liveDetail)}
+                        openBracketMatches={openBracketMatches.length}
                         onFinished={() => {
                           setFinishedLiveId(liveDetail.id)
                           setLiveNotice(
                             newNotice(liveDetail.id, 'Turnier abgeschlossen. Ergebnisse und Platzierungen sind gespeichert.'),
+                          )
+                        }}
+                        onArchived={(archived) => {
+                          setLiveNotice(null)
+                          setManagerNotice(null)
+                          setFinishedLiveId(null)
+                          setArchiveNotice(
+                            `Turnier „${archived.name}“ ist archiviert. Du findest es jetzt unter „${archived.is_test ? 'Test-Modus' : 'Archiv'}“.`,
                           )
                         }}
                         successMessage={liveManagerNotice}

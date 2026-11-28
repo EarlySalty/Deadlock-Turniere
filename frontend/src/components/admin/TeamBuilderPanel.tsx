@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type DragEvent } from 'react'
+import { rankLabel } from '@/lib/rankLabel'
 import { useQueryClient } from '@tanstack/react-query'
 import { AlertCircle, Pencil, Plus, Save, Star, Trash2, Undo2, UserMinus, UserPlus, Users, X } from 'lucide-react'
 import Card from '@/components/ui/Card'
@@ -141,13 +142,10 @@ function PlayerChip({ player, selected, onSelect, compact = false }: PlayerChipP
           <ParticipantMarks discordId={player.discordId} />
         </span>
         <span className="block break-words text-xs text-muted">
-          {player.rank ?? 'Ohne Rang'}
+          {rankLabel(player.rankScore, player.rank)}
           {compact ? '' : ` · ${formatSignupTime(player.signedUpAt)}`}
         </span>
       </span>
-      {!compact && player.rankScore > 0 && (
-        <span className="shrink-0 tabular-nums text-xs text-muted">{player.rankScore}</span>
-      )}
     </button>
   )
 }

@@ -51,6 +51,6 @@ pub use time::{
     REMINDER_WINDOW_MINUTES,
 };
 pub use transition::{
-    advance_tournament_status, ensure_not_leaving_checkin, get_due_next_status,
-    schedule_lobbies_best_effort, DueStatusRow, CHECKIN_EXIT_MESSAGE,
+    advance_tournament_status, ensure_bracket_is_finished, ensure_not_leaving_checkin,
+    get_due_next_status, schedule_lobbies_best_effort, DueStatusRow, CHECKIN_EXIT_MESSAGE,
 };

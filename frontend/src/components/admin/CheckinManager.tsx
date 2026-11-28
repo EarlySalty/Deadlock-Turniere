@@ -277,7 +277,19 @@ export default function CheckinManager({
           <Button variant="primary" size="sm" disabled={isBusy} onClick={() => runPreview(false)}>
             {finalizeMutation.isPending ? 'Prüft...' : 'Check-in abschließen & Teams bereinigen'}
           </Button>
-          <Button variant="danger" size="sm" disabled={isBusy} onClick={handleRevert}>
+        </div>
+
+        <div className="flex flex-col gap-3 border-t border-border pt-4 sm:flex-row sm:items-center sm:justify-between">
+          <p className="text-xs text-muted">
+            Zurück zur Anmeldung: Alle bisherigen Check-ins werden gelöscht.
+          </p>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="shrink-0 border border-red-500/40 text-red-400 hover:bg-red-500/10"
+            disabled={isBusy}
+            onClick={handleRevert}
+          >
             {revertMutation.isPending ? 'Setzt zurück...' : 'Check-in zurücksetzen'}
           </Button>
         </div>

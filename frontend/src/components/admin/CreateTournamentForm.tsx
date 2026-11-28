@@ -4,7 +4,8 @@ import Card from '@/components/ui/Card'
 import Button from '@/components/ui/Button'
 import { useCreateTournament } from '@/hooks/useTournament'
 import { localInputToIso } from '@/lib/league'
-import { AlertCircle, CheckCircle, Copy, Trophy } from 'lucide-react'
+import { registrationWindowError } from '@/lib/registrationWindow'
+import { AlertCircle, Copy, Trophy } from 'lucide-react'
 import ChoiceCards from './settings/ChoiceCards'
 import GameRulesFields from './settings/GameRulesFields'
 import SpecialSettingsFields from './settings/SpecialSettingsFields'
@@ -78,7 +79,7 @@ export default function CreateTournamentForm({ template, onCreated }: CreateTour
   const [dates, setDates] = useState<CreateFormDates>(EMPTY_DATES)
   const [rulesOpen, setRulesOpen] = useState(false)
   const [customJsonError, setCustomJsonError] = useState('')
-  const [successMsg, setSuccessMsg] = useState('')
+  const [dateError, setDateError] = useState('')
   const [templateSource, setTemplateSource] = useState(template?.sourceName ?? null)
   const createMutation = useCreateTournament()
   const league = values.tournamentFormat === 'league'
@@ -88,7 +89,9 @@ export default function CreateTournamentForm({ template, onCreated }: CreateTour
 
   const handleSubmit = (event: FormEvent) => {
     event.preventDefault()
-    setSuccessMsg('')
+    const windowError = registrationWindowError(localInputToIso(dates.regStart), localInputToIso(dates.regEnd))
+    setDateError(windowError)
+    if (windowError) return
     const lobby = resolveLobbyPayload(values.gameRules)
     if (!lobby.ok) {
       setCustomJsonError(lobby.error)
@@ -126,7 +129,6 @@ export default function CreateTournamentForm({ template, onCreated }: CreateTour
       },
       {
         onSuccess: (tournament) => {
-          setSuccessMsg(`Turnier „${tournament.name}“ angelegt.`)
           setValues(defaultCreateValues())
           setDates(EMPTY_DATES)
           setTemplateSource(null)
@@ -220,10 +222,10 @@ export default function CreateTournamentForm({ template, onCreated }: CreateTour
           </div>
         )}
 
-        {successMsg && (
-          <div role="status" className="flex items-center gap-2 rounded-lg border border-green-500/20 bg-green-500/10 p-3 text-sm text-green-400">
-            <CheckCircle size={16} />
-            <span>{successMsg}</span>
+        {dateError && (
+          <div role="alert" className="flex items-center gap-2 rounded-lg border border-red-500/20 bg-red-500/10 p-3 text-sm text-red-400">
+            <AlertCircle size={16} />
+            <span>{dateError}</span>
           </div>
         )}
 

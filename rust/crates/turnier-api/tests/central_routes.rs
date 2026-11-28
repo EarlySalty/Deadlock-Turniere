@@ -2154,3 +2154,105 @@ async fn open_checkin_needs_teams_except_for_solo_only_signups() {
         .expect("status");
     assert_eq!(status, "checkin");
 }
+
+#[tokio::test]
+async fn finish_waits_for_open_bracket_matches() {
+    let ctx = setup().await;
+    let token = session(&ctx.pool, ADMIN_ID, "Admin", &["admin-role", "mod-role"]).await;
+    let tournament_id = seed_tournament(&ctx.pool, "Offenes Bracket", "bracket", 1).await;
+    let left = seed_team(&ctx.pool, tournament_id, "Links", CAPTAIN_ID).await;
+    let right = seed_team(&ctx.pool, tournament_id, "Rechts", PLAYER_ID).await;
+    let match_id = seed_bracket_match(&ctx.pool, tournament_id, left, right).await;
+    let uri = format!("/api/admin/tournaments/{tournament_id}");
+
+    let (advance, body) = send_json(
+        &ctx.app,
+        Some(&token),
+        Method::POST,
+        &format!("{uri}/advance"),
+        None,
+    )
+    .await;
+    assert_eq!(advance, StatusCode::BAD_REQUEST, "{body}");
+    assert!(body.to_string().contains("Offen: 1"), "{body}");
+    let (patched, body) = send_json(
+        &ctx.app,
+        Some(&token),
+        Method::PUT,
+        &uri,
+        Some(json!({ "status": "completed" })),
+    )
+    .await;
+    assert_eq!(patched, StatusCode::BAD_REQUEST, "{body}");
+    assert!(body.to_string().contains("Offen: 1"), "{body}");
+
+    sqlx::query(
+        "UPDATE turnier.bracket_matches SET status = 'completed', winner_id = $2 WHERE id = $1",
+    )
+    .bind(match_id)
+    .bind(left)
+    .execute(&ctx.pool)
+    .await
+    .expect("finish match");
+    sqlx::query("UPDATE turnier.tournaments SET exclude_from_leaderboard = true WHERE id = $1")
+        .bind(tournament_id)
+        .execute(&ctx.pool)
+        .await
+        .expect("skip leaderboard");
+    let (advance, body) = send_json(
+        &ctx.app,
+        Some(&token),
+        Method::POST,
+        &format!("{uri}/advance"),
+        None,
+    )
+    .await;
+    assert_eq!(advance, StatusCode::OK, "{body}");
+}
+
+#[tokio::test]
+async fn registration_end_before_start_is_rejected() {
+    let ctx = setup().await;
+    let token = session(&ctx.pool, ADMIN_ID, "Admin", &["admin-role", "mod-role"]).await;
+    let tournament_id = seed_tournament(&ctx.pool, "Zeitfenster", "draft", 6).await;
+    let uri = format!("/api/admin/tournaments/{tournament_id}");
+
+    let (inverted, body) = send_json(
+        &ctx.app,
+        Some(&token),
+        Method::PUT,
+        &uri,
+        Some(json!({ "registration_end": "2000-01-01T00:00:00Z" })),
+    )
+    .await;
+    assert_eq!(inverted, StatusCode::BAD_REQUEST, "{body}");
+    assert!(body.to_string().contains("Anmeldestart"), "{body}");
+
+    let (valid, body) = send_json(
+        &ctx.app,
+        Some(&token),
+        Method::PUT,
+        &uri,
+        Some(json!({
+            "registration_start": "2030-01-01T10:00:00Z",
+            "registration_end": "2030-01-02T10:00:00Z"
+        })),
+    )
+    .await;
+    assert_eq!(valid, StatusCode::OK, "{body}");
+
+    let (created, body) = send_json(
+        &ctx.app,
+        Some(&token),
+        Method::POST,
+        "/api/admin/tournaments",
+        Some(json!({
+            "name": "Verdrehtes Fenster",
+            "registration_start": "2030-01-02T10:00:00Z",
+            "registration_end": "2030-01-01T10:00:00Z"
+        })),
+    )
+    .await;
+    assert_eq!(created, StatusCode::BAD_REQUEST, "{body}");
+    assert!(body.to_string().contains("Anmeldestart"), "{body}");
+}

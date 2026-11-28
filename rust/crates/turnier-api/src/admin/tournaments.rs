@@ -228,6 +228,7 @@ async fn create_tournament(
     .bind(tournament_mode_auto)
     .fetch_one(&mut *tx)
     .await?;
+    ensure_registration_window(&mut tx, tournament_id).await?;
     turnier_scheduler::ensure_start_gap(&mut tx, tournament_id).await?;
 
     audit(
@@ -322,6 +323,12 @@ async fn update_tournament(
                 return Err(WebError::bad_request(
                     "Bitte über Turnier abschließen beenden, damit die Tabelle gewertet wird",
                 ));
+            }
+            if existing_mode != TournamentMode::League && new_status == TournamentStatus::Completed
+            {
+                turnier_scheduler::ensure_bracket_is_finished(&mut tx, tournament_id)
+                    .await
+                    .map_err(scheduler_error)?;
             }
         }
     }
@@ -588,6 +595,11 @@ async fn update_tournament(
     builder.push("updated_at = now() WHERE id = ");
     builder.push_bind(tournament_id);
     builder.build().execute(&mut *tx).await?;
+    if !matches!(body.registration_start, Patch::Missing)
+        || !matches!(body.registration_end, Patch::Missing)
+    {
+        ensure_registration_window(&mut tx, tournament_id).await?;
+    }
 
     let rebuild_bracket_only =
         current_status == TournamentStatus::GroupPhase && mode_changed_to_bracket_only;
@@ -623,6 +635,26 @@ async fn update_tournament(
     tx.commit().await?;
 
     Ok(Json(load_tournament_dto(&state.pool, tournament_id).await?))
+}
+
+const REGISTRATION_WINDOW_ERROR: &str =
+    "Der Turnier-Start (Anmeldeschluss) darf nicht vor dem Anmeldestart liegen.";
+
+async fn ensure_registration_window(
+    conn: &mut sqlx::PgConnection,
+    tournament_id: i64,
+) -> WebResult<()> {
+    let inverted: bool = sqlx::query_scalar(
+        r#"SELECT COALESCE(registration_end < registration_start, false)
+           FROM turnier."tournaments" WHERE id = $1"#,
+    )
+    .bind(tournament_id)
+    .fetch_one(&mut *conn)
+    .await?;
+    if inverted {
+        return Err(WebError::bad_request(REGISTRATION_WINDOW_ERROR));
+    }
+    Ok(())
 }
 
 fn jsonb(value: String) -> WebResult<Value> {

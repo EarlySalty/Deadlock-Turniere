@@ -135,6 +135,9 @@ pub async fn advance_tournament_status(
     if mode == TournamentMode::League && next_status == TournamentStatus::Completed {
         ensure_league_is_finished(&mut tx, tournament_id).await?;
     }
+    if mode != TournamentMode::League && next_status == TournamentStatus::Completed {
+        ensure_bracket_is_finished(&mut tx, tournament_id).await?;
+    }
 
     // --- Metadata-Basis ---
     let mut metadata = serde_json::json!({
@@ -223,6 +226,25 @@ async fn ensure_league_is_finished(
     if open > 0 {
         return Err(SchedulerError::InvalidTransition(format!(
             "Das Turnier kann erst abgeschlossen werden, wenn alle Spiele gewertet sind. Offen: {open}"
+        )));
+    }
+    Ok(())
+}
+
+pub async fn ensure_bracket_is_finished(
+    conn: &mut sqlx::PgConnection,
+    tournament_id: i64,
+) -> SchedulerResult<()> {
+    let open: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM turnier.bracket_matches \
+         WHERE tournament_id = $1 AND status NOT IN ('completed', 'forfeit', 'cancelled')",
+    )
+    .bind(tournament_id)
+    .fetch_one(&mut *conn)
+    .await?;
+    if open > 0 {
+        return Err(SchedulerError::InvalidTransition(format!(
+            "Das Turnier kann erst abgeschlossen werden, wenn alle Bracket-Spiele gewertet sind. Offen: {open}"
         )));
     }
     Ok(())

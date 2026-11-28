@@ -57,7 +57,9 @@ export function workflowAction(t: TournamentDetail, { hasGroups, hasBracket }: P
       return {
         stage: 1,
         title: 'Anmeldungen prüfen und Teams bilden',
-        description: isPugTournament(t)
+        description: isPugTournament(t) && t.team_size <= 1
+          ? 'Die Spieler melden sich solo an. Bei 1v1 spielt jeder für sich. Gib vor dem Öffnen des Check-ins jedem Spieler mit „Solo-Spieler automatisch zuweisen“ im Setup unter „Weitere Verwaltungsaktionen“ ein eigenes Team.'
+          : isPugTournament(t)
           ? 'Die Spieler melden sich solo an. Öffne im Setup den Check-in. Sobald die Spieler eingecheckt sind, baut ihr die Teams im Team-Builder unter „Teilnehmer“. Admins können sie unter „Check-in“ auch mit „Teams ausgleichen“ automatisch bilden.'
           : 'Prüfe die Solo-Anmeldungen, vervollständige die Teams und lege Captains fest. Anschließend geht es zum Check-in.',
         button: isPugTournament(t) ? 'Check-in im Setup öffnen' : 'Spieler und Teams verwalten',
@@ -67,7 +69,9 @@ export function workflowAction(t: TournamentDetail, { hasGroups, hasBracket }: P
       return {
         stage: 2,
         title: 'Check-in kontrollieren und abschließen',
-        description: isPugTournament(t)
+        description: isPugTournament(t) && t.team_size <= 1
+          ? 'Warte, bis die Spieler eingecheckt sind. Bei 1v1 spielt jeder für sich. Über die Vorschau im Check-in startest du das Turnier.'
+          : isPugTournament(t)
           ? 'Warte, bis die Spieler eingecheckt sind. Dann baut ihr die Teams im Team-Builder unter „Teilnehmer“, oder ein Admin bildet sie mit „Teams ausgleichen“. Über die Vorschau im Check-in startest du das Turnier.'
           : 'Prüfe fehlende Spieler und unvollständige Teams. Über die Vorschau im Check-in kannst du das Turnier starten.',
         button: 'Zum Check-in',
