@@ -31,8 +31,22 @@ export interface BuilderView {
 }
 
 export interface ServerSnapshot {
-  teams: { key: string; id: number; name: string; captainId: string | null; members: string[]; bench: string[] }[]
+  teams: {
+    key: string
+    id: number
+    name: string
+    captainId: string | null
+    members: string[]
+    bench: string[]
+    joinOrder: string[]
+  }[]
   pool: { discordId: string; signupId: number }[]
+  checkedIn: string[]
+}
+
+export interface BuilderContext {
+  teamSize?: number
+  checkedIn?: string[]
 }
 
 export type SaveStep =
@@ -75,7 +89,13 @@ function playersFromServer(teams: Team[], signups: TournamentSignup[]): Map<stri
   return players
 }
 
-export function snapshotOf(teams: Team[], signups: TournamentSignup[]): ServerSnapshot {
+function joinOrderOf(team: Team): string[] {
+  return [...team.members]
+    .sort((a, b) => a.joined_at.localeCompare(b.joined_at) || (a.id ?? 0) - (b.id ?? 0))
+    .map((m) => m.discord_id)
+}
+
+export function snapshotOf(teams: Team[], signups: TournamentSignup[], checkedIn: string[] = []): ServerSnapshot {
   const members = new Set(teams.flatMap((team) => team.members.map((m) => m.discord_id)))
   return {
     teams: teams.map((team) => ({
@@ -87,11 +107,27 @@ export function snapshotOf(teams: Team[], signups: TournamentSignup[]): ServerSn
         : null,
       members: team.members.map((m) => m.discord_id),
       bench: team.members.filter((m) => m.is_bench).map((m) => m.discord_id),
+      joinOrder: joinOrderOf(team),
     })),
     pool: signups
       .filter((signup) => signup.team_id === null && !members.has(signup.discord_id))
       .map((signup) => ({ discordId: signup.discord_id, signupId: signup.id })),
+    checkedIn,
   }
+}
+
+interface CaptainCandidate {
+  discordId: string
+  bench: boolean
+  joinRank: number
+}
+
+function pickCaptain(candidates: CaptainCandidate[], checkedIn: Set<string>): string | null {
+  const absent = (c: CaptainCandidate) => (checkedIn.has(c.discordId) ? 0 : 1)
+  const ranked = [...candidates].sort(
+    (a, b) => absent(a) - absent(b) || Number(a.bench) - Number(b.bench) || a.joinRank - b.joinRank,
+  )
+  return ranked[0]?.discordId ?? null
 }
 
 function baseLocations(snapshot: ServerSnapshot): Map<string, string | null> {
@@ -123,17 +159,42 @@ function orderedIds(snapshot: ServerSnapshot, edits: BuilderEdits): string[] {
   return [...base.filter((id) => !moved.includes(id)), ...moved]
 }
 
-function resolveCaptain(key: string, memberIds: string[], snapshot: ServerSnapshot, edits: BuilderEdits): string | null {
+function viewCandidates(key: string, memberIds: string[], snapshot: ServerSnapshot, teamSize: number): CaptainCandidate[] {
+  const server = snapshot.teams.find((team) => team.key === key)
+  const stays = (id: string) => server?.members.includes(id) ?? false
+  const stayingBench = new Set((server?.bench ?? []).filter((id) => memberIds.includes(id)))
+  let starters = memberIds.filter((id) => stays(id) && !stayingBench.has(id)).length
+  return memberIds.map((id, joinRank) => {
+    if (stays(id)) return { discordId: id, bench: stayingBench.has(id), joinRank }
+    const bench = starters >= teamSize
+    if (!bench) starters += 1
+    return { discordId: id, bench, joinRank }
+  })
+}
+
+function resolveCaptain(
+  key: string,
+  memberIds: string[],
+  snapshot: ServerSnapshot,
+  edits: BuilderEdits,
+  teamSize: number,
+): string | null {
   const wanted = edits.captains[key]
   if (wanted && memberIds.includes(wanted)) return wanted
   const current = snapshot.teams.find((team) => team.key === key)?.captainId ?? null
   if (current && memberIds.includes(current)) return current
-  return memberIds[0] ?? null
+  return pickCaptain(viewCandidates(key, memberIds, snapshot, teamSize), new Set(snapshot.checkedIn))
 }
 
-export function buildView(teams: Team[], signups: TournamentSignup[], edits: BuilderEdits): BuilderView {
+export function buildView(
+  teams: Team[],
+  signups: TournamentSignup[],
+  edits: BuilderEdits,
+  context: BuilderContext = {},
+): BuilderView {
+  const teamSize = context.teamSize ?? Number.MAX_SAFE_INTEGER
   const players = playersFromServer(teams, signups)
-  const snapshot = snapshotOf(teams, signups)
+  const snapshot = snapshotOf(teams, signups, context.checkedIn)
   const locations = finalLocations(snapshot, edits)
   const ids = orderedIds(snapshot, edits)
   const membersOf = (key: string | null) =>
@@ -151,7 +212,7 @@ export function buildView(teams: Team[], signups: TournamentSignup[], edits: Bui
         serverId: team.serverId,
         name: edits.names[team.key] ?? team.name,
         members,
-        captainId: resolveCaptain(team.key, memberIds, snapshot, edits),
+        captainId: resolveCaptain(team.key, memberIds, snapshot, edits, teamSize),
       }
     }),
     pool: membersOf(null),
@@ -364,38 +425,63 @@ export function planSave(
 }
 
 interface SimulatedTeam {
-  members: string[]
+  members: CaptainCandidate[]
   captain: string | null
 }
 
-function leaveTeam(team: SimulatedTeam | undefined, discordId: string) {
-  if (!team) return
-  team.members = team.members.filter((id) => id !== discordId)
-  if (team.captain === discordId) team.captain = team.members[0] ?? null
+interface Simulation {
+  teams: Map<string, SimulatedTeam>
+  checkedIn: Set<string>
+  teamSize: number
+  joins: number
 }
 
-function joinTeam(team: SimulatedTeam | undefined, discordId: string) {
-  if (!team) return
-  if (team.members.length === 0 || team.captain === null) team.captain = discordId
-  team.members.push(discordId)
+function starterCount(team: SimulatedTeam): number {
+  return team.members.filter((m) => !m.bench).length
 }
 
-function simulateStep(teams: Map<string, SimulatedTeam>, step: SaveStep) {
-  if (step.kind === 'remove') leaveTeam(teams.get(step.teamKey), step.discordId)
-  if (step.kind === 'move') leaveTeam(teams.get(step.fromKey), step.discordId)
-  if (step.kind === 'move' || step.kind === 'assign') joinTeam(teams.get(step.teamKey), step.discordId)
+function leaveTeam(sim: Simulation, team: SimulatedTeam | undefined, discordId: string) {
+  if (!team) return
+  team.members = team.members.filter((m) => m.discordId !== discordId)
+  if (team.captain !== discordId) return
+  team.captain = pickCaptain(team.members, sim.checkedIn)
+  const captain = team.members.find((m) => m.discordId === team.captain)
+  if (captain) captain.bench = false
+}
+
+function joinTeam(sim: Simulation, team: SimulatedTeam | undefined, discordId: string) {
+  if (!team) return
+  const bench = starterCount(team) >= sim.teamSize
+  if (!bench && (team.members.length === 0 || team.captain === null)) team.captain = discordId
+  sim.joins += 1
+  team.members.push({ discordId, bench, joinRank: sim.joins })
+}
+
+function simulateStep(sim: Simulation, step: SaveStep) {
+  if (step.kind === 'remove') leaveTeam(sim, sim.teams.get(step.teamKey), step.discordId)
+  if (step.kind === 'move') leaveTeam(sim, sim.teams.get(step.fromKey), step.discordId)
+  if (step.kind === 'move' || step.kind === 'assign') joinTeam(sim, sim.teams.get(step.teamKey), step.discordId)
+}
+
+function simulatedTeam(team: ServerSnapshot['teams'][number]): SimulatedTeam {
+  const bench = new Set(team.bench)
+  const rank = (id: string) => team.joinOrder.indexOf(id) - team.joinOrder.length
+  return {
+    members: team.members.map((id) => ({ discordId: id, bench: bench.has(id), joinRank: rank(id) })),
+    captain: team.captainId,
+  }
 }
 
 export function captainsAfterSteps(
   snapshot: ServerSnapshot,
   edits: BuilderEdits,
   steps: SaveStep[],
+  teamSize: number,
 ): Map<string, string | null> {
-  const teams = new Map<string, SimulatedTeam>(
-    snapshot.teams.map((team) => [team.key, { members: [...team.members], captain: team.captainId }]),
-  )
+  const teams = new Map<string, SimulatedTeam>(snapshot.teams.map((team) => [team.key, simulatedTeam(team)]))
   for (const team of edits.newTeams) teams.set(team.key, { members: [], captain: null })
-  for (const step of steps) simulateStep(teams, step)
+  const sim: Simulation = { teams, checkedIn: new Set(snapshot.checkedIn), teamSize, joins: 0 }
+  for (const step of steps) simulateStep(sim, step)
   return new Map([...teams].map(([key, team]) => [key, team.captain]))
 }
 
@@ -413,8 +499,9 @@ export function captainChanges(
   snapshot: ServerSnapshot,
   edits: BuilderEdits,
   steps: SaveStep[],
+  teamSize: number,
 ): CaptainWish[] {
-  const after = captainsAfterSteps(snapshot, edits, steps)
+  const after = captainsAfterSteps(snapshot, edits, steps, teamSize)
   return displayedCaptains(view).filter((wish) => after.get(wish.teamKey) !== wish.discordId)
 }
 

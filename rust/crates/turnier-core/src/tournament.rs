@@ -342,6 +342,7 @@ pub struct TournamentDetail {
     pub signups: Vec<TournamentSignup>,
     pub guest_ids: Vec<String>,
     pub duplicate_name_ids: Vec<String>,
+    pub checked_in_ids: Vec<String>,
 }
 
 /// Öffentliche Detail-Sicht (Teams/Anmeldungen anonymisiert).

@@ -4,6 +4,7 @@ import {
   EMPTY_EDITS,
   buildView,
   captainChanges,
+  captainsAfterSteps,
   planSave,
   rebaseEdits,
   restoreTemporaryNames,
@@ -132,7 +133,7 @@ test('Der zuerst eingesetzte Spieler bleibt Captain, auch nach dem Speichern', (
   const view = buildView([], signups, edits)
   assert.equal(view.teams[0].captainId, 'b')
   const steps = planSave(snapshot, edits, 6)
-  assert.deepEqual(captainChanges(view, snapshot, edits, steps), [{ teamKey: 'n1', discordId: 'b' }])
+  assert.deepEqual(captainChanges(view, snapshot, edits, steps, 6), [{ teamKey: 'n1', discordId: 'b' }])
 })
 
 test('Nach einem Teilfehler wird ein schon angelegtes Team nicht erneut angelegt', () => {
@@ -154,7 +155,7 @@ test('Nach einem Teilfehler wird ein schon angelegtes Team nicht erneut angelegt
   const view = buildView(teams, signups, rebased)
   assert.equal(view.teams.length, 1)
   assert.equal(view.teams[0].captainId, 'b')
-  assert.deepEqual(captainChanges(view, snapshot, rebased, steps), [{ teamKey: 's5', discordId: 'b' }])
+  assert.deepEqual(captainChanges(view, snapshot, rebased, steps, 6), [{ teamKey: 's5', discordId: 'b' }])
 })
 
 test('Wird das Zielteam gelöscht, landet der Spieler wieder in der Liste', () => {
@@ -175,4 +176,38 @@ test('Verwerfen nach Teilfehler lässt keinen Zwischennamen stehen', () => {
   assert.deepEqual(restoreTemporaryNames(stuck, renames).names, { s1: 'Alpha' })
   const swapped = snapshotOf([named(1, 'Umbenennung 1'), named(2, 'Alpha')], [])
   assert.deepEqual(restoreTemporaryNames(swapped, renames).names, { s1: 'Beta' })
+})
+
+const joined = (id, at, isBench = false) => ({ ...member(id), joined_at: at, is_bench: isBench })
+
+test('Verlässt der Captain im Check-in das Team, übernimmt der eingecheckte spätere Spieler', () => {
+  const roster = {
+    ...team(1, []),
+    captain_discord_id: 'c',
+    members: [
+      { ...joined('c', '2026-11-01T10:00:00Z'), role: 'captain' },
+      joined('a', '2026-11-01T10:01:00Z'),
+      joined('p', '2026-11-01T10:02:00Z'),
+    ],
+  }
+  const signups = [signup(11, 'c', 1), signup(12, 'a', 1), signup(13, 'p', 1)]
+  const edits = { ...EMPTY_EDITS, placements: { c: null } }
+  const snapshot = snapshotOf([roster], signups, ['p'])
+  const steps = planSave(snapshot, edits, 3)
+  assert.equal(captainsAfterSteps(snapshot, edits, steps, 3).get('s1'), 'p')
+  const view = buildView([roster], signups, edits, { teamSize: 3, checkedIn: ['p'] })
+  assert.equal(view.teams[0].captainId, 'p')
+  assert.deepEqual(captainChanges(view, snapshot, edits, steps, 3), [])
+})
+
+test('Ein Ersatzspieler wird in einem Team ohne Captain nicht zum Captain', () => {
+  const roster = {
+    ...team(1, []),
+    captain_discord_id: '0',
+    members: [joined('a', '2026-11-01T10:00:00Z'), joined('b', '2026-11-01T10:01:00Z')],
+  }
+  const snapshot = snapshotOf([roster], [signup(20, 'x')])
+  const steps = planSave(snapshot, { ...EMPTY_EDITS, placements: { x: 's1' } }, 2, 1)
+  assert.deepEqual(steps.map((s) => `${s.kind}:${s.discordId}`), ['assign:x'])
+  assert.equal(captainsAfterSteps(snapshot, EMPTY_EDITS, steps, 2).get('s1'), null)
 })

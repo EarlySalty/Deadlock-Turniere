@@ -76,11 +76,11 @@ separate flag, so "enabled with limit 0" cannot exist.
 
 | File | Counts | Decision |
 |---|---|---|
-| admin/helpers.rs `count_team_members` | all | stays all (leave/dissolve logic); new `team_lineup` gives starters and bench |
+| admin/helpers.rs `count_team_members` | all | stays all (leave/dissolve logic); new `team_lineup` in public/helpers.rs gives starters and bench |
 | admin/helpers.rs `ensure_team_has_capacity` | all vs team_size | replaced by seat placement |
 | public/teams.rs join/leave/kick | all | join uses placement; leave/kick unchanged |
 | public/invitations.rs invite/accept/apply/accept application | all vs team_size | placement (Auto, or Bench for bench applications) |
-| admin/teams.rs accept/add/assign/move/captain | all vs team_size | placement Auto; captain change rejects bench |
+| admin/teams.rs accept/add/assign/move/captain | all vs team_size | placement Auto (Bench for bench applications); captain change to a bench member promotes them or swaps them with a starter; a bench joiner never becomes captain, a leaving captain hands over to checked-in members first, then starters, then join time and id, and the new captain becomes a starter |
 | engine/persist/checkin.rs | all | starters only (see above) |
 | engine/persist/groups.rs seeding | all | starters only |
 | match/modes.rs, match/repo.rs participants | all | all, starters first |
@@ -116,7 +116,7 @@ separate flag, so "enabled with limit 0" cannot exist.
 | `bench_slots` | SQL: `TOURNAMENT_GUARD_SELECT`, admin tournament row, public detail | always selected, never null |
 | `bench_slots` | TS `types/tournament.ts` (required number), `editForm.ts`/`createFormValues.ts` (`?? 0` for old cached payloads) | 0 hides every bench control and the "bis zu M Ersatz" suffix |
 | `bench_slots` | TS `lib/lineup.ts` `lineupOf`, `teamFormatLabel` | 0 gives `benchFree = 0`, label "N gegen N"; negative bench count clamps to 0 |
-| `bench_slots` | TS `ParticipantManager` capacity `team_size + bench_slots`, `TeamBuilderPanel` drop limit; `planSave` orders moves against starter seats (`team_size`) and uses a bench seat only when no pending move frees a starter seat in that team | capacity is the total roster for drops; save order matches the builder seat preview because the backend `SeatRequest::Auto` fills starters first and never promotes bench members later |
+| `bench_slots` | TS `ParticipantManager` capacity `team_size + bench_slots`, `TeamBuilderPanel` drop limit; `planSave` orders moves against starter seats (`team_size`) and uses a bench seat only when no pending move frees a starter seat in that team | capacity is the total roster for drops; save order matches the builder seat preview because the backend `SeatRequest::Auto` fills starters first; the builder predicts captains with the backend rule (bench joiners never become captain, a leaving captain hands over to checked-in members from `checked_in_ids`, then starters, then join order, and the new captain moves to a starter seat) and sends an explicit captain change where the prediction differs from the shown captain |
 | `is_bench` | SQL: `team_lineup` `COUNT(*) FILTER (WHERE NOT is_bench)`, check-in finalize, group seeding, member loaders `ORDER BY is_bench` | `NOT NULL DEFAULT false`, old rows are starters |
 | `is_bench` | TS `TeamMember`/`TeamMemberPublic`/start plan entries (required boolean), `lib/lineup.ts` `starterCount` | absent (old payload) counts as starter |
 | `is_bench` | TS public team card: starters first, then an "Ersatzbank" section; captain toggle only during registration with `bench_slots > 0` and not for the captain | |

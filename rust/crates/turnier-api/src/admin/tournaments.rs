@@ -92,6 +92,7 @@ async fn get_tournament(
     let signups = load_signups_for_tournament(&state, tournament_id).await?;
     let names = crate::public::helpers::participant_names(&state.pool, tournament_id).await?;
     let guest_ids = guest_participant_ids(&teams, &signups);
+    let checked_in_ids = load_checked_in_ids(&state.pool, tournament_id).await?;
     Ok(Json(TournamentDetail {
         tournament,
         teams,
@@ -101,7 +102,18 @@ async fn get_tournament(
         signups,
         guest_ids,
         duplicate_name_ids: crate::public::helpers::duplicate_name_ids(&names),
+        checked_in_ids,
     }))
+}
+
+async fn load_checked_in_ids(pool: &sqlx::PgPool, tournament_id: i64) -> WebResult<Vec<String>> {
+    let ids: Vec<i64> = sqlx::query_scalar(
+        r#"SELECT discord_id FROM turnier."tournament_checkins" WHERE tournament_id = $1 ORDER BY discord_id"#,
+    )
+    .bind(tournament_id)
+    .fetch_all(pool)
+    .await?;
+    Ok(ids.into_iter().map(db::discord_id_to_string).collect())
 }
 
 fn guest_participant_ids(

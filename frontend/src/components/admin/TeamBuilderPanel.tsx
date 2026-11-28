@@ -36,6 +36,7 @@ interface TeamBuilderPanelProps {
   benchSlots: number
   teams: Team[]
   signups: TournamentSignup[]
+  checkedInIds: string[]
   canAddPlayers: boolean
 }
 
@@ -506,7 +507,15 @@ function useUnloadWarning(active: boolean) {
   }, [active])
 }
 
-export default function TeamBuilderPanel({ tournamentId, teamSize, benchSlots, teams, signups, canAddPlayers }: TeamBuilderPanelProps) {
+export default function TeamBuilderPanel({
+  tournamentId,
+  teamSize,
+  benchSlots,
+  teams,
+  signups,
+  checkedInIds,
+  canAddPlayers,
+}: TeamBuilderPanelProps) {
   const capacity = teamSize + benchSlots
   const serverBench = useMemo(
     () => new Set(teams.flatMap((t) => t.members.filter((m) => m.is_bench).map((m) => `${serverTeamKey(t.id)}|${m.discord_id}`))),
@@ -519,10 +528,13 @@ export default function TeamBuilderPanel({ tournamentId, teamSize, benchSlots, t
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null)
   const [notice, setNotice] = useState<{ tone: 'ok' | 'error'; text: string } | null>(null)
 
-  const snapshot = useMemo(() => snapshotOf(teams, signups), [teams, signups])
-  const view = useMemo(() => buildView(teams, signups, edits), [teams, signups, edits])
+  const snapshot = useMemo(() => snapshotOf(teams, signups, checkedInIds), [teams, signups, checkedInIds])
+  const view = useMemo(
+    () => buildView(teams, signups, edits, { teamSize, checkedIn: checkedInIds }),
+    [teams, signups, edits, teamSize, checkedInIds],
+  )
   const steps = useMemo(() => planSave(snapshot, edits, teamSize, benchSlots), [snapshot, edits, teamSize, benchSlots])
-  const captains = useMemo(() => captainChanges(view, snapshot, edits, steps), [view, snapshot, edits, steps])
+  const captains = useMemo(() => captainChanges(view, snapshot, edits, steps, teamSize), [view, snapshot, edits, steps, teamSize])
   const changeCount = steps.length + captains.length
   const saving = progress !== null
 

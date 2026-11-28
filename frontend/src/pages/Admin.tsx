@@ -352,6 +352,7 @@ export default function Admin() {
                           benchSlots={liveDetail.bench_slots ?? 0}
                           teams={liveDetail.teams}
                           signups={liveDetail.signups}
+                          checkedInIds={liveDetail.checked_in_ids}
                           canAddPlayers={liveDetail.registration_open}
                         />
                       </ParticipantMarksContext.Provider>
