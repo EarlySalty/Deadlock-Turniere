@@ -408,6 +408,26 @@ async fn finish_needs_all_results_uses_the_table_and_locks_results() {
         (member(0), 0, 3),
         "{points:?}"
     );
+    let (status, board) = app.call(Method::GET, "/api/leaderboard", None).await;
+    assert_eq!(status, StatusCode::OK);
+    let live: Vec<(String, i64, i64, bool)> = board
+        .as_array()
+        .expect("leaderboard array")
+        .iter()
+        .map(|row| {
+            (
+                row["discord_name"].as_str().expect("name").to_string(),
+                row["total_points"].as_i64().expect("points"),
+                row["best_placement"].as_i64().expect("placement"),
+                row["best_placement_shared"].as_bool().expect("flag"),
+            )
+        })
+        .collect();
+    let stored: Vec<(String, i64, i64, bool)> = points
+        .iter()
+        .map(|(id, total, _, placement)| (id.to_string(), *total, *placement, false))
+        .collect();
+    assert_eq!(live, stored);
     assert_eq!(points[2].1, 3 + 1);
 
     assert_eq!(app.submit(&liga, ab, a).await, StatusCode::BAD_REQUEST);

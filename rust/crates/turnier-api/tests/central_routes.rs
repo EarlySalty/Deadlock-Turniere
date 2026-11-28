@@ -1065,22 +1065,22 @@ async fn leaderboard_profile_reads_points_rank_and_history() {
     .execute(&ctx.pool)
     .await
     .expect("rank cache");
-    sqlx::query(
-        r#"INSERT INTO turnier."player_points"
-         (discord_id, total_points, tournaments_played, matches_played, matches_won,
-          best_placement, updated_at)
-         VALUES ($1, 42, 2, 5, 4, 1, now())"#,
-    )
-    .bind(id(LEADER_ID))
-    .execute(&ctx.pool)
-    .await
-    .expect("player points");
-
     let (status, profile) =
         send_json(&ctx.app, None, Method::GET, "/api/players/LeaderName", None).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(profile["rank"], "Oracle");
-    assert_eq!(profile["total_points"], 42);
+    let (status, board) = send_json(&ctx.app, None, Method::GET, "/api/leaderboard", None).await;
+    assert_eq!(status, StatusCode::OK);
+    let row = board
+        .as_array()
+        .expect("leaderboard array")
+        .iter()
+        .find(|row| row["discord_name"] == "LeaderName")
+        .expect("leader row");
+    assert_eq!(row["rank"], "Oracle");
+    assert_eq!(profile["tournaments_played"], 1);
+    assert_eq!(profile["total_points"], row["total_points"]);
+    assert_eq!(profile["best_placement"], row["best_placement"]);
     assert_eq!(
         profile["tournament_history"][0]["tournament_name"],
         "Leaderboard Cup"

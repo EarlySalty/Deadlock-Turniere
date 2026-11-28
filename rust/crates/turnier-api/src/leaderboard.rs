@@ -90,16 +90,6 @@ fn placement_order(a: Option<i64>, b: Option<i64>) -> Ordering {
     }
 }
 
-/// Punkte-Zeile eines Spielers.
-#[derive(sqlx::FromRow, Default)]
-struct PointsRow {
-    total_points: i64,
-    tournaments_played: i64,
-    matches_played: i64,
-    matches_won: i64,
-    best_placement: Option<i64>,
-}
-
 /// Ein Eintrag der Turnier-Historie.
 #[derive(sqlx::FromRow)]
 struct HistoryRow {
@@ -143,14 +133,10 @@ async fn get_player_profile(
             .await?;
     let rank = rank.and_then(|r| r.0);
 
-    let points: Option<PointsRow> = sqlx::query_as(
-        r#"SELECT total_points, tournaments_played, matches_played, matches_won, best_placement
-         FROM turnier."player_points" WHERE discord_id = $1"#,
-    )
-    .bind(discord_id)
-    .fetch_optional(pool)
-    .await?;
-    let points = points.unwrap_or_default();
+    let points = player_standings(pool)
+        .await?
+        .remove(&discord_id)
+        .unwrap_or_default();
 
     let history: Vec<HistoryRow> = sqlx::query_as(
         r#"SELECT t.name AS tournament_name, teams.name AS team_name

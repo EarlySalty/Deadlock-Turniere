@@ -130,7 +130,7 @@ impl App {
     }
 }
 
-async fn completed_tournament(pool: &Pool, name: &str, excluded: bool) -> i64 {
+async fn completed_tournament(pool: &Pool, name: &str, format: &str, excluded: bool) -> i64 {
     let now = Utc::now();
     sqlx::query_scalar(
         "INSERT INTO turnier.tournaments \
@@ -138,7 +138,7 @@ async fn completed_tournament(pool: &Pool, name: &str, excluded: bool) -> i64 {
               invite_mode, tournament_mode, series_format, exclude_from_leaderboard, \
               tournament_game_mode, auto_lobby_enabled, is_test, match_objective, \
               no_show_grace_minutes, source) \
-         VALUES ($1, 'completed', 1, 'single_elimination', $2, $3, $3, 'always', 'bracket_only', \
+         VALUES ($1, 'completed', 1, $5, $2, $3, $3, 'always', 'bracket_only', \
                  1, $4, 'standard', false, false, 'auto', 10, 'test') \
          RETURNING id",
     )
@@ -146,6 +146,7 @@ async fn completed_tournament(pool: &Pool, name: &str, excluded: bool) -> i64 {
     .bind(910_000_000_000_030_001_i64)
     .bind(now)
     .bind(excluded)
+    .bind(format)
     .fetch_one(pool)
     .await
     .expect("tournament")
@@ -199,7 +200,7 @@ async fn completed_match(
 }
 
 async fn four_team_bracket(pool: &Pool) -> i64 {
-    let id = completed_tournament(pool, "Vierer", false).await;
+    let id = completed_tournament(pool, "Vierer", "double_elimination", false).await;
     let first = solo_team(pool, id, 910_000_000_000_030_101).await;
     let second = solo_team(pool, id, 910_000_000_000_030_102).await;
     let third = solo_team(pool, id, SHARED_THIRD).await;
@@ -211,7 +212,7 @@ async fn four_team_bracket(pool: &Pool) -> i64 {
 }
 
 async fn two_team_final(pool: &Pool) -> i64 {
-    let id = completed_tournament(pool, "Zweier", true).await;
+    let id = completed_tournament(pool, "Zweier", "single_elimination", true).await;
     let winner = solo_team(pool, id, 910_000_000_000_030_201).await;
     let runner_up = solo_team(pool, id, SHARED_THIRD).await;
     completed_match(pool, id, 1, 0, (winner, runner_up)).await;
@@ -250,4 +251,56 @@ async fn exclude_toggle_keeps_leaderboard_placement_and_shared_flag_consistent()
         .await;
     app.assert_consistent(SEMI_ONLY, Some((Some(3), true)))
         .await;
+}
+
+#[tokio::test]
+async fn leaderboard_orders_ties_by_placement_then_id_and_profile_matches_row() {
+    let app = app().await;
+    four_team_bracket(&app.pool).await;
+    turnier_auth::create_session(&app.pool, &SHARED_THIRD.to_string(), "Dritter", "", &[])
+        .await
+        .expect("session");
+    sqlx::query(
+        "INSERT INTO turnier.rank_cache \
+             (discord_id, source, steam_id, rank, rank_tier, subrank, rank_score, cached_at) \
+         VALUES ($1, 'test', 'steam-dritter', 'Oracle', 5, 1, 501, now())",
+    )
+    .bind(SHARED_THIRD)
+    .execute(&app.pool)
+    .await
+    .expect("rank cache");
+
+    let (status, board) = app.call(Method::GET, "/api/leaderboard", None).await;
+    assert_eq!(status, StatusCode::OK);
+    let rows = board.as_array().expect("leaderboard array");
+    let names: Vec<&str> = rows
+        .iter()
+        .map(|row| row["discord_name"].as_str().expect("name"))
+        .collect();
+    let semi_only = SEMI_ONLY.to_string();
+    assert_eq!(
+        names,
+        vec![
+            "910000000000030101",
+            "910000000000030102",
+            "Dritter",
+            semi_only.as_str()
+        ]
+    );
+    let positions: Vec<i64> = rows
+        .iter()
+        .map(|row| row["rank_position"].as_i64().expect("position"))
+        .collect();
+    assert_eq!(positions, vec![1, 2, 3, 4]);
+    assert_eq!(rows[2]["total_points"], rows[3]["total_points"]);
+    assert_eq!(rows[2]["rank"], "Oracle");
+    assert_eq!(rows[2]["best_placement"], 3);
+    assert_eq!(rows[2]["best_placement_shared"], true);
+    assert_eq!(rows[3]["rank"], Value::Null);
+
+    let (status, profile) = app.call(Method::GET, "/api/players/Dritter", None).await;
+    assert_eq!(status, StatusCode::OK, "{profile}");
+    assert_eq!(profile["total_points"], rows[2]["total_points"]);
+    assert_eq!(profile["best_placement"], rows[2]["best_placement"]);
+    assert_eq!(profile["tournaments_played"], 1);
 }
