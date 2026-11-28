@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { Fragment, useState, useEffect } from 'react'
 import { pluralize, registrationSummary } from '@/lib/countLabel'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { loginGuest } from '@/api/client'
@@ -918,8 +918,12 @@ export default function Tournament() {
                             {team.members.length === 0 && (
                               <li className="text-xs text-muted">Noch keine Spieler im Team.</li>
                             )}
-                            {team.members.map((m, i) => (
-                              <li key={m.id ?? `${team.id}-${i}`} className="flex min-w-0 items-center justify-between gap-3 rounded-md bg-white/5 px-3 py-2">
+                            {[...team.members.filter((m) => !m.is_bench), ...team.members.filter((m) => m.is_bench)].map((m, i, seats) => (
+                              <Fragment key={m.id ?? `${team.id}-${i}`}>
+                              {m.is_bench && !seats[i - 1]?.is_bench && (
+                                <li className="px-3 pt-2 text-[10px] font-bold uppercase tracking-widest text-muted">Ersatzbank</li>
+                              )}
+                              <li className="flex min-w-0 items-center justify-between gap-3 rounded-md bg-white/5 px-3 py-2">
                                 <span className="flex min-w-0 items-center gap-2">
                                   <User size={14} className="shrink-0 text-muted" />
                                   <span className="min-w-0 break-words text-sm font-medium text-foreground">
@@ -933,6 +937,7 @@ export default function Tournament() {
                                   <span className="shrink-0 text-[10px] font-bold uppercase text-muted">Ersatz</span>
                                 )}
                               </li>
+                              </Fragment>
                             ))}
                             {lineup.starterFree > 0 && (
                               <li className="px-3 pt-1 text-xs text-muted">

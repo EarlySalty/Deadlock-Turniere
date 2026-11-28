@@ -104,3 +104,18 @@ separate flag, so "enabled with limit 0" cannot exist.
 - Team card: "4 / 6 Stammspieler", bench members with label "Ersatz", "1 Ersatzplatz frei" / "2 Ersatzplätze frei".
 - Buttons: "Als Ersatz beitreten", "Als Ersatz bewerben", "Auf die Ersatzbank", "In die Startaufstellung".
 - Admin form: "Ersatzspieler pro Team" (0 = aus).
+
+## Readers in SQL and TypeScript (edge values)
+
+| Field | Reader | null / 0 / over-limit behaviour |
+|---|---|---|
+| `bench_slots` | SQL: CHECK `tournaments_bench_slots_range` (0..=5), `NOT NULL DEFAULT 0` | null impossible; out of range rejected by the DB after the Rust 400 |
+| `bench_slots` | SQL: `TOURNAMENT_GUARD_SELECT`, admin tournament row, public detail | always selected, never null |
+| `bench_slots` | TS `types/tournament.ts` (required number), `editForm.ts`/`createFormValues.ts` (`?? 0` for old cached payloads) | 0 hides every bench control and the "bis zu M Ersatz" suffix |
+| `bench_slots` | TS `lib/lineup.ts` `lineupOf`, `teamFormatLabel` | 0 gives `benchFree = 0`, label "N gegen N"; negative bench count clamps to 0 |
+| `bench_slots` | TS `ParticipantManager` capacity `team_size + bench_slots`, `TeamBuilderPanel` size | capacity is the total roster; the backend still places starters first and rejects over-limit |
+| `is_bench` | SQL: `team_lineup` `COUNT(*) FILTER (WHERE NOT is_bench)`, check-in finalize, group seeding, member loaders `ORDER BY is_bench` | `NOT NULL DEFAULT false`, old rows are starters |
+| `is_bench` | TS `TeamMember`/`TeamMemberPublic`/start plan entries (required boolean), `lib/lineup.ts` `starterCount` | absent (old payload) counts as starter |
+| `is_bench` | TS public team card: starters first, then an "Ersatzbank" section; captain toggle only during registration with `bench_slots > 0` and not for the captain | |
+| `as_bench` | SQL: application insert/select, accept reads it for `SeatRequest::Bench` | `NOT NULL DEFAULT false` |
+| `as_bench` | TS application DTO, join/apply request body | omitted body means `false` |
